@@ -58,6 +58,17 @@ describe("ACPAdapter base", () => {
     expect(fsRejected).toBe(false);
   });
 
+  it("stores and returns the MCP server supplied at createSession", () => {
+    const adapter = new TestAcpAdapter();
+    const mcpServer = { callTool: () => ({ ok: true, data: { taskId: "task_1" } }) };
+
+    const session = Effect.runSync(adapter.createSession({ runId: "run-mcp", roomId: "room", agentId: "agent", mcpServer }));
+
+    expect(session.mcpServer).toBe(mcpServer);
+    expect(adapter.debugSession(session.id)?.mcpServer).toBe(mcpServer);
+    expect((session.mcpServer as typeof mcpServer).callTool()).toEqual({ ok: true, data: { taskId: "task_1" } });
+  });
+
   it("dispose rejects all pending requests and marks session disposed", () => {
     const adapter = new TestAcpAdapter();
     const session = Effect.runSync(adapter.createSession({ runId: "run-3", roomId: "room", agentId: "agent" }));
