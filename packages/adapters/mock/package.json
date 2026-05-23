@@ -1,0 +1,19 @@
+{
+  "name": "@agenthub/adapter-mock",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node scripts/run-tests.mjs"
+  },
+  "dependencies": {
+    "@agenthub/artifacts": "workspace:*",
+    "@agenthub/bus": "workspace:*",
+    "@agenthub/db": "workspace:*",
+    "@agenthub/orchestrator": "workspace:*",
+    "@agenthub/protocol": "workspace:*"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "@agenthub/adapter-a2a",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node scripts/run-tests.mjs"
+  },
+  "dependencies": {
+    "@agenthub/adapter-acp-base": "workspace:*",
+    "@agenthub/protocol": "workspace:*",
+    "effect": "^3.19.6"
+  }
+}

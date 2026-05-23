@@ -1,0 +1,21 @@
+{
+  "name": "@agenthub/adapter-acp-base",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node scripts/run-tests.mjs"
+  },
+  "dependencies": {
+    "@agenthub/bus": "workspace:*",
+    "@agenthub/db": "workspace:*",
+    "@agenthub/orchestrator": "workspace:*",
+    "@agenthub/permissions": "workspace:*",
+    "@agenthub/protocol": "workspace:*",
+    "@agenthub/security": "workspace:*",
+    "effect": "^3.19.6"
+  }
+}
