@@ -130,6 +130,8 @@ After merge: delete the task branch, update task status in this plan (via the Or
 
 ### P0-1: PendingTurn backend real queue/cancel/edit/consume chain
 
+**Status**: COMPLETE — implemented on `task/r-p0-1-pending-turn-backend`, independently reviewed APPROVE in `ses_1aca32fc2ffetjbRlik32BPTjN`, explicitly approved by Atlas/Orchestrator, and merged into `task/remediation-implementation-plan`.
+
 **Scope**: Implement the full server-side PendingTurn lifecycle as specified in tasks.md §19.6.6-19.6.9 and §20.1.3-20.1.5. This includes the `pending_turns` table, the HTTP endpoints, the ConsumePendingTurn command handler, and the Orchestrator terminal hook that sequences run_next_turns before PendingTurn consumption.
 
 Does NOT include: UI changes beyond what is already in place, or any changes to the RunLifecycleService state machine beyond what is needed to wire ConsumePendingTurn.
