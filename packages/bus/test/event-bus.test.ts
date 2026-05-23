@@ -360,6 +360,33 @@ describe("CommandBus", () => {
     expect(commandRecordStatuses()).toEqual([]);
   });
 
+  test("rejects non-async promise-returning idempotent handlers after invocation and suppresses unhandled rejection", async () => {
+    currentDatabase().sqlite.exec("CREATE TABLE command_side_effects (id TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    const commandBus = new CommandBus({
+      database: currentDatabase(),
+      handlers: {
+        // Non-async function that returns a Promise — bypasses isAsyncFunction pre-check.
+        CreateRoom: (command) => Promise.resolve().then(() => {
+          currentDatabase().sqlite.prepare("INSERT INTO command_side_effects (id, value) VALUES (?, ?)").run(command.roomId, "deferred-side-effect");
+          return { ok: true as const, data: { roomId: command.roomId }, emittedEvents: [] };
+        })
+      }
+    });
+    const meta = { actor: { type: "user" as const, id: "user_1" }, traceId: "trace_promise", idempotencyKey: "idem_promise", origin: "http" as const };
+
+    const result = commandBus.dispatch({ type: "CreateRoom", roomId: "room_promise" }, meta) as CommandResult;
+
+    // Handler is invoked but Promise is detected after invocation; command record is deleted.
+    expect(result).toMatchObject({ ok: false, error: { code: "internal_error" } });
+    expect(commandRecordStatuses()).toEqual([]);
+    // Flush microtasks to let the deferred side effect run (if any).
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // Side effect may have run (known limitation: post-invocation async continuations cannot be
+    // prevented by savepoint rollback). The important invariant is that the command record is
+    // cleaned up and the caller receives internal_error, not a false success.
+    expect(commandRecordStatuses()).toEqual([]);
+  });
+
   test("rejects forbidden, unknown, and internal-only HTTP commands before handlers", () => {
     const commandBus = new CommandBus({ database: currentDatabase() });
     const meta = { actor: { type: "user" as const, id: "user_1" }, traceId: "trace_1", origin: "http" as const };

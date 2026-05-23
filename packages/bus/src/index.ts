@@ -614,6 +614,11 @@ export class CommandBus {
       if (isPromiseLike(result)) {
         this.rollbackAndReleaseSavepoint(savepointName);
         this.deleteCommandRecord(actor, idempotencyKey);
+        // Suppress unhandled rejection from the async continuation; side effects that already
+        // ran before the first await are rolled back by the savepoint above, but any side effects
+        // scheduled after the first await cannot be prevented — this is a known SQLite sync
+        // transaction limitation. Callers must register only synchronous idempotent handlers.
+        result.catch(() => undefined);
         return failedCommand("internal_error", "idempotent command handlers must complete synchronously to preserve transaction atomicity");
       }
 

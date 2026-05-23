@@ -360,7 +360,14 @@ export abstract class ACPAdapter {
 
   private writeJson(session: AcpAdapterSession, message: JsonRpcMessage): void {
     const child = session.process;
-    if (child !== undefined && !child.killed && child.exitCode === null && child.signalCode === null && child.stdin.writable && !child.stdin.destroyed) child.stdin.write(`${JSON.stringify(message)}\n`);
+    if (child !== undefined && !child.killed && child.exitCode === null && child.signalCode === null && child.stdin.writable && !child.stdin.destroyed) {
+      try {
+        child.stdin.write(`${JSON.stringify(message)}\n`);
+      } catch {
+        // Ignore EPIPE and other write errors; the child may have exited between the guard check
+        // and the write. The exit/close event will drive failSession separately.
+      }
+    }
   }
 
   private failSession(session: AcpAdapterSession, error: ACPAdapterError): void {
