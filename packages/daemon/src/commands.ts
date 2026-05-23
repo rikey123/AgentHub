@@ -236,7 +236,7 @@ function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
 }
 
 function primaryBusy(database: AgentHubDatabase, roomId: string, agentId: string): boolean {
-  return database.sqlite.prepare("SELECT id FROM runs WHERE room_id = ? AND agent_id = ? AND status IN ('queued', 'claimed', 'starting', 'running', 'waiting_permission', 'cancelling') LIMIT 1").get(roomId, agentId) !== undefined;
+  return database.sqlite.prepare("SELECT id FROM runs WHERE room_id = ? AND agent_id = ? AND status IN ('queued', 'waiting', 'claimed', 'starting', 'running', 'waiting_permission', 'cancelling') LIMIT 1").get(roomId, agentId) !== undefined;
 }
 
 function queuedPendingCount(database: AgentHubDatabase, roomId: string): number {

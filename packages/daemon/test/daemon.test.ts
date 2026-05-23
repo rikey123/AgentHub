@@ -127,6 +127,19 @@ describe("daemon M1.4 composition", () => {
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM runs WHERE wake_reason = 'primary_turn'").get()).toMatchObject({ count: 2 });
   });
 
+  it("queues pending turns while primary run is waiting", async () => {
+    const client = new AgentHubClient({ baseUrl });
+    const room = await client.createRoom({ title: "Waiting Pending", mode: "solo", primaryAgentId: "mock-builder" }) as { readonly data: { readonly roomId: string } };
+    seedBusyRun(room.data.roomId, "mock-builder", "run_waiting", "waiting");
+
+    const queued = await client.sendMessage(room.data.roomId, { text: "queued while waiting", idempotencyKey: "queued-waiting-1" }) as { readonly ok: boolean; readonly data: { readonly messageId: string } };
+
+    expect(queued.ok).toBe(true);
+    expect(daemon.database.sqlite.prepare("SELECT turn_dispatch_mode, pending_turn_id FROM messages WHERE id = ?").get(queued.data.messageId)).toMatchObject({ turn_dispatch_mode: "pending", pending_turn_id: queued.data.messageId });
+    expect(daemon.database.sqlite.prepare("SELECT status, user_message_id FROM pending_turns WHERE id = ?").get(queued.data.messageId)).toMatchObject({ status: "queued", user_message_id: queued.data.messageId });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM runs WHERE room_id = ? AND agent_id = 'mock-builder' AND wake_reason = 'primary_turn'").get(room.data.roomId)).toMatchObject({ count: 1 });
+  });
+
   it("caps queued pending turns at 20 and returns 429 for the 21st", async () => {
     const client = new AgentHubClient({ baseUrl });
     const room = await client.createRoom({ title: "Cap", mode: "solo", primaryAgentId: "mock-builder" }) as { readonly data: { readonly roomId: string } };
@@ -235,15 +248,15 @@ function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function seedBusyRun(roomId: string, agentId: string, runId: string): void {
+function seedBusyRun(roomId: string, agentId: string, runId: string, status = "running"): void {
   activeDaemon().database.sqlite.prepare(
     `INSERT INTO runs (
       id, workspace_id, task_id, room_id, agent_id, adapter_id, adapter_session_id, provider_conversation_id,
       parent_run_id, status, wake_reason, waiting_reason, workspace_path, work_dir, workspace_mode, context_version,
       target_files, mailbox_claim_count, pid_at_start, claimed_at, started_at, ended_at, input_tokens, output_tokens,
       cached_tokens, cost_usd, model_id, failure_class, error, created_at, updated_at
-    ) VALUES (?, 'default-workspace', NULL, ?, ?, NULL, NULL, NULL, NULL, 'running', 'primary_turn', NULL, NULL, NULL, NULL, NULL, '[]', 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)`
-  ).run(runId, roomId, agentId, Date.now(), Date.now());
+    ) VALUES (?, 'default-workspace', NULL, ?, ?, NULL, NULL, NULL, NULL, ?, 'primary_turn', NULL, NULL, NULL, NULL, NULL, '[]', 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)`
+  ).run(runId, roomId, agentId, status, Date.now(), Date.now());
 }
 
 function seedPendingMessage(roomId: string, agentId: string, messageId: string, text: string): void {
