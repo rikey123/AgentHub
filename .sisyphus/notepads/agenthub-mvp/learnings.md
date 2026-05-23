@@ -183,3 +183,10 @@ ot_implemented result rather than a thrown HTTP route branch, preserving the thi
 - ACP base already persists `CreateSessionInput.mcpServer`, but real provider coverage must assert the managed adapter path too; `ClaudeCodeACPAdapter.runManaged()` is the startup path that must forward the room MCP server into `createSession()`.
 - Claude adapter tests can exercise managed startup without spawning an external provider by constructing `ClaudeCodeACPAdapter({ command: "" })`, matching the existing ArtifactFS managed-run test pattern.
 
+
+## 2026-05-23 P0-3 Claude adapter runtime bridge
+
+- Daemon adapter selection now lives in packages/daemon/src/adapters/registry.ts and resolves runtime adapters from runs.adapter_id first, then agent_profiles.adapter_id; mock remains the default fallback and claude-code uses ClaudeCodeACPAdapter.runManaged().
+- ACP stdout provider events should be bridged from ACPAdapter.handleLine via an overridable onProviderEvent hook so subclasses cannot forget to route parsed events; Claude maps that hook through AdapterBridge, preserving RunLifecycleService as the only terminal run-state writer.
+- ACP process supervision needs persistent stdout/stderr line splitters plus an async child error handler; spawn ENOENT is emitted after spawn() returns on Windows/Node and must be converted into failed session state/stderr tail rather than an unhandled exception.
+- The requested plural pnpm filters (@agenthub/adapters-*) do not match workspace package names; actual verified packages remain @agenthub/adapter-acp-base and @agenthub/adapter-claude-code.
