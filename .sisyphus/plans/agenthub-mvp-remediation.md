@@ -183,6 +183,8 @@ openspec.cmd validate add-agenthub-mvp --strict
 
 ### P0-2: Task API / MCP minimum chain
 
+**Status**: COMPLETE — implemented on `task/r-p0-2-task-api-mcp-minimum-chain`, independently reviewed APPROVE in `ses_1ac87152bffeSZTZsxhXxGvEM5`, explicitly approved by Atlas/Orchestrator, and merged into `task/remediation-implementation-plan`.
+
 **Scope**: Implement the Task data model, HTTP CRUD routes, and the three MCP tools that agents need to create and track tasks during a run: `room.create_task`, `room.update_task`, and `room.list_tasks`. Wire the MCP server skeleton into `createSession` so adapters receive it at session start. This is the minimum chain the strict review found missing; the remaining 12 Room MCP tools are follow-up work outside this remediation scope.
 
 Does NOT include: `room.read_mailbox` (that is part of the Mailbox/run_next_turns chain already covered by P0-1 and the broader §19.12 work), any of the other 12 Room MCP tools, or any UI changes.
