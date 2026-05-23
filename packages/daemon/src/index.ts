@@ -8,7 +8,7 @@ import { ContextLedger, createContextCommandHandlers } from "@agenthub/context";
 import { createDatabase, type AgentHubDatabase } from "@agenthub/db";
 import { MockAdapterManager } from "@agenthub/adapter-mock";
 import { createInterventionCommandHandlers, InterventionEngine } from "@agenthub/interventions";
-import { ActiveWakesRegistry, createCancelRunHandler, createConsumePendingTurnHandler, createWakeAgentHandler, MailboxService, PendingTurnService, RunLifecycleService, RunQueue } from "@agenthub/orchestrator";
+import { ActiveWakesRegistry, createCancelRunHandler, createCompleteTaskHandler, createConsumePendingTurnHandler, createCreateTaskHandler, createUpdateTaskHandler, createWakeAgentHandler, MailboxService, PendingTurnService, RoomMcpServer, RunLifecycleService, RunQueue, TaskService } from "@agenthub/orchestrator";
 import { createPermissionCommandHandlers, PermissionEngine, seedBuiltInPermissionProfiles } from "@agenthub/permissions";
 import type { EventEnvelope } from "@agenthub/protocol/events";
 import { authenticateBrowserRequest, issueBrowserSession, redactAndTruncate } from "@agenthub/security";
@@ -17,7 +17,7 @@ import { createDaemonCommandHandlers, seedDefaultData } from "./commands.ts";
 import { openApiDocument } from "./openapi.ts";
 
 export type DaemonOptions = { readonly databasePath: string; readonly host?: string; readonly port?: number; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly now?: () => number };
-export type DaemonApp = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly mockAdapter: MockAdapterManager; readonly handle: (req: IncomingMessage, res: ServerResponse) => void; start(): Promise<Server>; close(): Promise<void> };
+export type DaemonApp = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly roomMcpServer: RoomMcpServer; readonly mockAdapter: MockAdapterManager; readonly handle: (req: IncomingMessage, res: ServerResponse) => void; start(): Promise<Server>; close(): Promise<void> };
 
 export function createDaemon(options: DaemonOptions): DaemonApp {
   const database = createDatabase({ path: options.databasePath, applyMigrations: true });
@@ -28,6 +28,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
   const permissionEngine = new PermissionEngine({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
   const interventionEngine = new InterventionEngine({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
   const artifactService = new ArtifactService({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
+  const taskService = new TaskService({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
   const artifactFs = new ArtifactFSRunRegistry({ database, service: artifactService, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
   const activeWakes = new ActiveWakesRegistry();
   const mailbox = new MailboxService(database, options.now);
@@ -51,19 +52,23 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
       ...createArtifactCommandHandlers(artifactService),
       ...createPermissionCommandHandlers(permissionEngine, database, eventBus, options.now),
       ...createInterventionCommandHandlers(interventionEngine),
+      CreateTask: createCreateTaskHandler(taskService),
+      UpdateTask: createUpdateTaskHandler(taskService),
+      CompleteTask: createCompleteTaskHandler(taskService),
       WakeAgent: createWakeAgentHandler({ database, activeWakes, mailbox, lifecycle }) as CommandHandler,
       ConsumePendingTurn: createConsumePendingTurnHandler(pendingTurns) as CommandHandler,
       CancelRun: createCancelRunHandler({ lifecycle, adapterManager: mockAdapter })
     }
   });
   commandBusRef.current = commandBus;
+  const roomMcpServer = new RoomMcpServer({ commandBus, taskService });
 
-  const handle = (req: IncomingMessage, res: ServerResponse) => { void route({ req, res, database, eventBus, commandBus, artifactService, outbox, ...(options.token !== undefined ? { token: options.token } : {}), ...(options.allowedOrigins !== undefined ? { allowedOrigins: options.allowedOrigins } : {}), host: `${options.host ?? "127.0.0.1"}:${options.port ?? 6677}`, ...(options.now !== undefined ? { now: options.now } : {}) }); };
+  const handle = (req: IncomingMessage, res: ServerResponse) => { void route({ req, res, database, eventBus, commandBus, artifactService, taskService, outbox, ...(options.token !== undefined ? { token: options.token } : {}), ...(options.allowedOrigins !== undefined ? { allowedOrigins: options.allowedOrigins } : {}), host: `${options.host ?? "127.0.0.1"}:${options.port ?? 6677}`, ...(options.now !== undefined ? { now: options.now } : {}) }); };
   let server: Server | undefined;
-  return { database, eventBus, commandBus, mockAdapter, handle, start: () => new Promise((resolve) => { server = createServer(handle).listen(options.port ?? 6677, options.host ?? "127.0.0.1", () => resolve(server as Server)); }), close: () => new Promise((resolve, reject) => { eventBus.close(); database.sqlite.close(); if (!server) resolve(); else server.close((err) => err ? reject(err) : resolve()); }) };
+  return { database, eventBus, commandBus, roomMcpServer, mockAdapter, handle, start: () => new Promise((resolve) => { server = createServer(handle).listen(options.port ?? 6677, options.host ?? "127.0.0.1", () => resolve(server as Server)); }), close: () => new Promise((resolve, reject) => { eventBus.close(); database.sqlite.close(); if (!server) resolve(); else server.close((err) => err ? reject(err) : resolve()); }) };
 }
 
-type RouteContext = { readonly req: IncomingMessage; readonly res: ServerResponse; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly artifactService: ArtifactService; readonly outbox: { drainPending(): Promise<void> }; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly host: string; readonly now?: () => number };
+type RouteContext = { readonly req: IncomingMessage; readonly res: ServerResponse; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly artifactService: ArtifactService; readonly taskService: TaskService; readonly outbox: { drainPending(): Promise<void> }; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly host: string; readonly now?: () => number };
 
 async function route(ctx: RouteContext): Promise<void> {
   const url = new URL(ctx.req.url ?? "/", "http://127.0.0.1");
@@ -78,6 +83,9 @@ async function route(ctx: RouteContext): Promise<void> {
   const parts = url.pathname.split("/").filter(Boolean);
   if (ctx.req.method === "GET" && parts[0] === "rooms" && parts.length === 1) return json(ctx.res, 200, { rooms: all(ctx.database, "SELECT * FROM rooms ORDER BY created_at ASC") });
   if (ctx.req.method === "GET" && parts[0] === "rooms" && parts.length === 2) return json(ctx.res, 200, { room: get(ctx.database, "SELECT * FROM rooms WHERE id = ?", parts[1]) });
+  if (ctx.req.method === "GET" && parts[0] === "rooms" && parts[2] === "tasks") return tasks(ctx, parts[1] as string, url);
+  if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "tasks") return dispatchCreated(ctx, { ...(await body(ctx)), roomId: parts[1] }, "CreateTask");
+  if (ctx.req.method === "POST" && parts[0] === "tasks" && parts[2] === "complete") return dispatch(ctx, { taskId: parts[1] }, "CompleteTask");
   if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "archive") return dispatch(ctx, { roomId: parts[1] }, "ArchiveRoom");
   if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "unarchive") return dispatch(ctx, { roomId: parts[1] }, "UnarchiveRoom");
   if (ctx.req.method === "GET" && parts[0] === "rooms" && parts[2] === "messages") return json(ctx.res, 200, { messages: all(ctx.database, "SELECT * FROM messages WHERE room_id = ? ORDER BY created_at ASC", parts[1]) });
@@ -138,6 +146,11 @@ function artifacts(ctx: RouteContext, url: URL): void {
   const statusParam = url.searchParams.get("status");
   const status = statusParam === null ? undefined : statusParam.split(",").filter(Boolean) as NonNullable<Parameters<ArtifactService["list"]>[0]>["status"];
   json(ctx.res, 200, { artifacts: ctx.artifactService.list({ ...(roomId !== undefined ? { roomId } : {}), ...(taskId !== undefined ? { taskId } : {}), ...(status !== undefined ? { status } : {}) }) });
+}
+
+function tasks(ctx: RouteContext, roomId: string, url: URL): void {
+  const runId = url.searchParams.get("runId") ?? undefined;
+  json(ctx.res, 200, { tasks: ctx.taskService.list({ roomId, ...(runId !== undefined ? { runId } : {}) }) });
 }
 
 function interventions(ctx: RouteContext, url: URL): void {
@@ -225,6 +238,12 @@ async function dispatch(ctx: RouteContext, data: Record<string, unknown>, type: 
   const result = await ctx.commandBus.dispatch({ ...data, type, idempotencyKey: typeof data.idempotencyKey === "string" ? data.idempotencyKey : randomUUID() }, { actor: { type: "user", id: "local" }, traceId: randomUUID(), origin: "http" });
   await ctx.outbox.drainPending();
   json(ctx.res, result.ok ? 200 : statusForError(result.error.code), result);
+}
+
+async function dispatchCreated(ctx: RouteContext, data: Record<string, unknown>, type: CommandType): Promise<void> {
+  const result = await ctx.commandBus.dispatch({ ...data, type, idempotencyKey: typeof data.idempotencyKey === "string" ? data.idempotencyKey : randomUUID() }, { actor: { type: "user", id: "local" }, traceId: randomUUID(), origin: "http" });
+  await ctx.outbox.drainPending();
+  json(ctx.res, result.ok ? 201 : statusForError(result.error.code), result);
 }
 
 function statusForError(code: string): number { return code === "rate_limited" ? 429 : code === "conflict" ? 409 : code === "not_found" ? 404 : code === "permission_denied" ? 403 : 400; }
