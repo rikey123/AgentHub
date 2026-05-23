@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { URL } from "node:url";
 
-import { createCommandBus, createDurableHandlerRegistry, createEventBus, createOutboxDispatcher, type CommandBus, type CommandHandler, type CommandType, type EventBus, type ReplayView } from "@agenthub/bus";
+import { createCommandBus, createDurableHandlerRegistry, createEventBus, createOutboxDispatcher, type CommandBus, type CommandHandler, type CommandType, type DurableHandlerRegistry, type EventBus, type OutboxDispatcher, type ReplayView } from "@agenthub/bus";
 import { ArtifactFSRunRegistry, ArtifactService, createArtifactCommandHandlers } from "@agenthub/artifacts";
 import { ContextLedger, createContextCommandHandlers } from "@agenthub/context";
 import { createDatabase, type AgentHubDatabase } from "@agenthub/db";
@@ -17,57 +17,205 @@ import { AdapterRegistry } from "./adapters/registry.ts";
 import { createDaemonCommandHandlers, seedDefaultData } from "./commands.ts";
 import { openApiDocument } from "./openapi.ts";
 
-export type DaemonOptions = { readonly databasePath: string; readonly host?: string; readonly port?: number; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly now?: () => number };
+export type DaemonStartupPhase =
+  | "SQLite open + pragma + migrate"
+  | "EventStore readiness check"
+  | "EventBus (PubSub + per-type)"
+  | "Outbox Dispatcher start"
+  | "Durable Handler Registry (register all, catch-up, realtime)"
+  | "RunQueue Worker start"
+  | "AdapterManager detect + register"
+  | "CommandBus open"
+  | "HTTP server bind + SSE accept";
+export type DaemonOptions = { readonly databasePath: string; readonly host?: string; readonly port?: number; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly now?: () => number; readonly onLifecyclePhase?: (event: { readonly direction: "startup" | "shutdown"; readonly phase: DaemonStartupPhase }) => void };
 export type DaemonApp = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly roomMcpServer: RoomMcpServer; readonly adapterRegistry: AdapterRegistry; readonly mockAdapter: MockAdapterManager; readonly handle: (req: IncomingMessage, res: ServerResponse) => void; start(): Promise<Server>; close(): Promise<void> };
 
-export function createDaemon(options: DaemonOptions): DaemonApp {
-  const database = createDatabase({ path: options.databasePath, applyMigrations: true });
-  seedDefaultData(database, options.now?.() ?? Date.now());
-  seedBuiltInPermissionProfiles(database, options.now?.() ?? Date.now());
-  const eventBus = createEventBus({ database });
-  const contextLedger = new ContextLedger({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
-  const permissionEngine = new PermissionEngine({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
-  const interventionEngine = new InterventionEngine({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
-  const artifactService = new ArtifactService({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
-  const taskService = new TaskService({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
-  const artifactFs = new ArtifactFSRunRegistry({ database, service: artifactService, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
-  const activeWakes = new ActiveWakesRegistry();
-  const mailbox = new MailboxService(database, options.now);
-  const commandBusRef: { current?: CommandBus } = {};
-  const pendingTurns = new PendingTurnService({ database, eventBus, getCommandBus: () => currentCommandBus(commandBusRef), ...(options.now !== undefined ? { now: options.now } : {}) });
-  const lifecycleOptions = {
-    ...(options.now !== undefined ? { now: options.now } : {}),
-    sideEffects: { onTerminal: (runId: string) => { activeWakes.releaseRun(runId); runQueue.releaseLocks(runId); pendingTurns.handleTerminal(runId); }, finalizeNextTurns: (tx: AgentHubDatabase["sqlite"], runId: string, failureClass: Parameters<MailboxService["finalizeForRun"]>[2], now: number) => mailbox.finalizeForRun(tx, runId, failureClass, now) }
-  };
-  const lifecycle = new RunLifecycleService(database, eventBus, lifecycleOptions);
-  const adapterRegistry = new AdapterRegistry({ database, eventBus, lifecycle, permissionEngine, artifactFs, getRoomMcpServer: () => roomMcpServer, ...(options.now !== undefined ? { now: options.now } : {}) });
-  const mockAdapter = adapterRegistry.mockAdapter;
-  const runQueue = new RunQueue({ database, lifecycle, adapterManager: adapterRegistry, ...(options.now !== undefined ? { now: options.now } : {}) });
-  const handlers = createDurableHandlerRegistry({ database, retryDelaysMs: [0] });
-  handlers.register({ name: "run-queue", subscribes: ["agent.run.queued", "agent.run.completed", "agent.run.failed", "agent.run.cancelled"], handle: (event) => runQueue.handleEvent(event) });
-  const outbox = createOutboxDispatcher({ database, eventBus, handlers });
-  const commandBus = createCommandBus({
-    database,
-    handlers: {
-      ...createDaemonCommandHandlers({ database, eventBus, getCommandBus: () => commandBus, pendingTurns, ...(options.now !== undefined ? { now: options.now } : {}) }),
-      ...createContextCommandHandlers(contextLedger, options.now),
-      ...createArtifactCommandHandlers(artifactService),
-      ...createPermissionCommandHandlers(permissionEngine, database, eventBus, options.now),
-      ...createInterventionCommandHandlers(interventionEngine),
-      CreateTask: createCreateTaskHandler(taskService),
-      UpdateTask: createUpdateTaskHandler(taskService),
-      CompleteTask: createCompleteTaskHandler(taskService),
-      WakeAgent: createWakeAgentHandler({ database, activeWakes, mailbox, lifecycle }) as CommandHandler,
-      ConsumePendingTurn: createConsumePendingTurnHandler(pendingTurns) as CommandHandler,
-      CancelRun: createCancelRunHandler({ lifecycle, adapterManager: adapterRegistry })
-    }
-  });
-  commandBusRef.current = commandBus;
-  const roomMcpServer = new RoomMcpServer({ commandBus, taskService });
+const DAEMON_STARTUP_PHASES: readonly DaemonStartupPhase[] = [
+  "SQLite open + pragma + migrate",
+  "EventStore readiness check",
+  "EventBus (PubSub + per-type)",
+  "Outbox Dispatcher start",
+  "Durable Handler Registry (register all, catch-up, realtime)",
+  "RunQueue Worker start",
+  "AdapterManager detect + register",
+  "CommandBus open",
+  "HTTP server bind + SSE accept"
+];
+const PHASE_SQLITE: DaemonStartupPhase = "SQLite open + pragma + migrate";
+const PHASE_EVENT_STORE: DaemonStartupPhase = "EventStore readiness check";
+const PHASE_EVENT_BUS: DaemonStartupPhase = "EventBus (PubSub + per-type)";
+const PHASE_OUTBOX: DaemonStartupPhase = "Outbox Dispatcher start";
+const PHASE_HANDLERS: DaemonStartupPhase = "Durable Handler Registry (register all, catch-up, realtime)";
+const PHASE_RUN_QUEUE: DaemonStartupPhase = "RunQueue Worker start";
+const PHASE_ADAPTERS: DaemonStartupPhase = "AdapterManager detect + register";
+const PHASE_COMMAND_BUS: DaemonStartupPhase = "CommandBus open";
+const PHASE_HTTP: DaemonStartupPhase = "HTTP server bind + SSE accept";
+const DAEMON_SHUTDOWN_PHASES: readonly DaemonStartupPhase[] = [
+  PHASE_HTTP,
+  PHASE_COMMAND_BUS,
+  PHASE_RUN_QUEUE,
+  PHASE_ADAPTERS,
+  PHASE_OUTBOX,
+  PHASE_HANDLERS,
+  PHASE_EVENT_BUS,
+  PHASE_EVENT_STORE,
+  PHASE_SQLITE
+];
 
-  const handle = (req: IncomingMessage, res: ServerResponse) => { void route({ req, res, database, eventBus, commandBus, artifactService, taskService, outbox, ...(options.token !== undefined ? { token: options.token } : {}), ...(options.allowedOrigins !== undefined ? { allowedOrigins: options.allowedOrigins } : {}), host: `${options.host ?? "127.0.0.1"}:${options.port ?? 6677}`, ...(options.now !== undefined ? { now: options.now } : {}) }); };
+type DaemonRuntime = {
+  database: AgentHubDatabase;
+  eventBus: EventBus;
+  commandBus: CommandBus;
+  roomMcpServer: RoomMcpServer;
+  adapterRegistry: AdapterRegistry;
+  mockAdapter: MockAdapterManager;
+  artifactService: ArtifactService;
+  taskService: TaskService;
+  outbox: OutboxDispatcher;
+  handlers: DurableHandlerRegistry;
+  runQueue: RunQueue;
+};
+
+export function createDaemon(options: DaemonOptions): DaemonApp {
+  let runtime: DaemonRuntime | undefined;
   let server: Server | undefined;
-  return { database, eventBus, commandBus, roomMcpServer, adapterRegistry, mockAdapter, handle, start: () => new Promise((resolve) => { server = createServer(handle).listen(options.port ?? 6677, options.host ?? "127.0.0.1", () => resolve(server as Server)); }), close: () => new Promise((resolve, reject) => { eventBus.close(); database.sqlite.close(); if (!server) resolve(); else server.close((err) => err ? reject(err) : resolve()); }) };
+  let ready = false;
+  let starting: Promise<Server> | undefined;
+  let closed = false;
+
+  const emitPhase = (direction: "startup" | "shutdown", phase: DaemonStartupPhase): void => {
+    options.onLifecyclePhase?.({ direction, phase });
+  };
+
+  const requireRuntime = (): DaemonRuntime => {
+    if (runtime === undefined) throw new Error("Daemon has not completed startup");
+    return runtime;
+  };
+
+  const handle = (req: IncomingMessage, res: ServerResponse) => {
+    const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    if (req.method === "GET" && url.pathname === "/healthz") return json(res, 200, { ok: true });
+    if (!ready) return json(res, 503, { error: "service_starting", retryAfterMs: 500 });
+    const app = requireRuntime();
+    void route({ req, res, database: app.database, eventBus: app.eventBus, commandBus: app.commandBus, artifactService: app.artifactService, taskService: app.taskService, outbox: app.outbox, ...(options.token !== undefined ? { token: options.token } : {}), ...(options.allowedOrigins !== undefined ? { allowedOrigins: options.allowedOrigins } : {}), host: `${options.host ?? "127.0.0.1"}:${options.port ?? 6677}`, ...(options.now !== undefined ? { now: options.now } : {}) });
+  };
+
+  const start = async (): Promise<Server> => {
+    if (starting !== undefined) return starting;
+    starting = startDaemon();
+    return starting;
+  };
+
+  const startDaemon = async (): Promise<Server> => {
+    closed = false;
+    ready = false;
+    emitPhase("startup", PHASE_SQLITE);
+    const database = createDatabase({ path: options.databasePath, applyMigrations: true });
+    seedDefaultData(database, options.now?.() ?? Date.now());
+    seedBuiltInPermissionProfiles(database, options.now?.() ?? Date.now());
+
+    emitPhase("startup", PHASE_EVENT_STORE);
+    database.sqlite.prepare("SELECT COALESCE(MAX(seq), 0) AS maxSeq FROM events").get();
+
+    emitPhase("startup", PHASE_EVENT_BUS);
+    const eventBus = createEventBus({ database });
+    const contextLedger = new ContextLedger({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
+    const permissionEngine = new PermissionEngine({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
+    const interventionEngine = new InterventionEngine({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
+    const artifactService = new ArtifactService({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
+    const taskService = new TaskService({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
+    const artifactFs = new ArtifactFSRunRegistry({ database, service: artifactService, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
+    const activeWakes = new ActiveWakesRegistry();
+    const mailbox = new MailboxService(database, options.now);
+    const commandBusRef: { current?: CommandBus } = {};
+    const pendingTurns = new PendingTurnService({ database, eventBus, getCommandBus: () => currentCommandBus(commandBusRef), ...(options.now !== undefined ? { now: options.now } : {}) });
+    const runQueueRef: { current?: RunQueue } = {};
+    const lifecycleOptions = {
+      ...(options.now !== undefined ? { now: options.now } : {}),
+      sideEffects: { onTerminal: (runId: string) => { activeWakes.releaseRun(runId); runQueueRef.current?.releaseLocks(runId); pendingTurns.handleTerminal(runId); }, finalizeNextTurns: (tx: AgentHubDatabase["sqlite"], runId: string, failureClass: Parameters<MailboxService["finalizeForRun"]>[2], now: number) => mailbox.finalizeForRun(tx, runId, failureClass, now) }
+    };
+    const lifecycle = new RunLifecycleService(database, eventBus, lifecycleOptions);
+    const roomMcpServerRef: { current?: RoomMcpServer } = {};
+    const adapterRegistry = new AdapterRegistry({ database, eventBus, lifecycle, permissionEngine, artifactFs, getRoomMcpServer: () => currentRoomMcpServer(roomMcpServerRef), ...(options.now !== undefined ? { now: options.now } : {}) });
+
+    emitPhase("startup", PHASE_OUTBOX);
+    const handlers = createDurableHandlerRegistry({ database, retryDelaysMs: [0] });
+    const outbox = createOutboxDispatcher({ database, eventBus, handlers });
+    await outbox.drainPending();
+
+    emitPhase("startup", PHASE_HANDLERS);
+    const runQueue = new RunQueue({ database, lifecycle, adapterManager: adapterRegistry, ...(options.now !== undefined ? { now: options.now } : {}) });
+    runQueueRef.current = runQueue;
+    handlers.register({ name: "run-queue", subscribes: ["agent.run.queued", "agent.run.completed", "agent.run.failed", "agent.run.cancelled"], handle: (event) => runQueue.handleEvent(event) });
+    await handlers.catchUp();
+
+    emitPhase("startup", PHASE_RUN_QUEUE);
+    await runQueue.scheduleTick();
+
+    emitPhase("startup", PHASE_ADAPTERS);
+    const mockAdapter = adapterRegistry.mockAdapter;
+
+    emitPhase("startup", PHASE_COMMAND_BUS);
+    const commandBus = createCommandBus({
+      database,
+      handlers: {
+        ...createDaemonCommandHandlers({ database, eventBus, getCommandBus: () => commandBus, pendingTurns, ...(options.now !== undefined ? { now: options.now } : {}) }),
+        ...createContextCommandHandlers(contextLedger, options.now),
+        ...createArtifactCommandHandlers(artifactService),
+        ...createPermissionCommandHandlers(permissionEngine, database, eventBus, options.now),
+        ...createInterventionCommandHandlers(interventionEngine),
+        CreateTask: createCreateTaskHandler(taskService),
+        UpdateTask: createUpdateTaskHandler(taskService),
+        CompleteTask: createCompleteTaskHandler(taskService),
+        WakeAgent: createWakeAgentHandler({ database, activeWakes, mailbox, lifecycle }) as CommandHandler,
+        ConsumePendingTurn: createConsumePendingTurnHandler(pendingTurns) as CommandHandler,
+        CancelRun: createCancelRunHandler({ lifecycle, adapterManager: adapterRegistry })
+      }
+    });
+    commandBusRef.current = commandBus;
+    const roomMcpServer = new RoomMcpServer({ commandBus, taskService });
+    roomMcpServerRef.current = roomMcpServer;
+    runtime = { database, eventBus, commandBus, roomMcpServer, adapterRegistry, mockAdapter, artifactService, taskService, outbox, handlers, runQueue };
+
+    emitPhase("startup", PHASE_HTTP);
+    return await new Promise<Server>((resolve) => {
+      server = createServer(handle).listen(options.port ?? 6677, options.host ?? "127.0.0.1", () => {
+        ready = true;
+        resolve(server as Server);
+      });
+    });
+  };
+
+  const close = async (): Promise<void> => {
+    if (closed) return;
+    closed = true;
+    ready = false;
+    for (const phase of DAEMON_SHUTDOWN_PHASES) {
+      emitPhase("shutdown", phase);
+      if (phase === PHASE_HTTP && server !== undefined) {
+        await new Promise<void>((resolve, reject) => server?.close((err) => err ? reject(err) : resolve()));
+        server = undefined;
+      } else if (phase === PHASE_OUTBOX) {
+        await runtime?.outbox.drainPending();
+      } else if (phase === PHASE_EVENT_BUS) {
+        runtime?.eventBus.close();
+      } else if (phase === PHASE_SQLITE) {
+        runtime?.database.sqlite.close();
+      }
+    }
+  };
+
+  return {
+    get database() { return requireRuntime().database; },
+    get eventBus() { return requireRuntime().eventBus; },
+    get commandBus() { return requireRuntime().commandBus; },
+    get roomMcpServer() { return requireRuntime().roomMcpServer; },
+    get adapterRegistry() { return requireRuntime().adapterRegistry; },
+    get mockAdapter() { return requireRuntime().mockAdapter; },
+    handle,
+    start,
+    close
+  };
 }
 
 type RouteContext = { readonly req: IncomingMessage; readonly res: ServerResponse; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly artifactService: ArtifactService; readonly taskService: TaskService; readonly outbox: { drainPending(): Promise<void> }; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly host: string; readonly now?: () => number };
@@ -267,6 +415,7 @@ async function dispatchCreated(ctx: RouteContext, data: Record<string, unknown>,
 
 function statusForError(code: string): number { return code === "rate_limited" ? 429 : code === "conflict" ? 409 : code === "not_found" ? 404 : code === "permission_denied" ? 403 : 400; }
 function currentCommandBus(ref: { readonly current?: CommandBus }): CommandBus { if (!ref.current) throw new Error("CommandBus is not initialized"); return ref.current; }
+function currentRoomMcpServer(ref: { readonly current?: RoomMcpServer }): RoomMcpServer { if (!ref.current) throw new Error("RoomMcpServer is not initialized"); return ref.current; }
 
 function sse(ctx: RouteContext, url: URL, scopes: readonly string[]): void {
   const view = viewParam(url.searchParams.get("view"));

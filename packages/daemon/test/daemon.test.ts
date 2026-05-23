@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { AgentHubClient } from "@agenthub/sdk";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { createDaemon, type DaemonApp } from "../src/index.ts";
+import { createDaemon, type DaemonApp, type DaemonStartupPhase } from "../src/index.ts";
 
 let currentDaemon: DaemonApp | undefined;
 
@@ -42,6 +42,58 @@ describe("daemon M1.4 composition", () => {
     expect(runs.map((run) => run.status)).toEqual(["completed"]);
     const messages = await client.listMessages(room.data.roomId) as { readonly messages: readonly { readonly role: string; readonly status: string }[] };
     expect(messages.messages.some((message) => message.role === "assistant" && message.status === "completed")).toBe(true);
+  });
+
+  it("starts and shuts down daemon phases in spec order", async () => {
+    await daemon.close();
+    currentDaemon = undefined;
+    const phases: { readonly direction: "startup" | "shutdown"; readonly phase: DaemonStartupPhase }[] = [];
+    const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-phases-"));
+    const phasedDaemon = createDaemon({ databasePath: join(dir, "agenthub.sqlite"), port: 0, onLifecyclePhase: (event) => phases.push(event) });
+
+    await phasedDaemon.start();
+    await phasedDaemon.close();
+
+    const expectedStartup: readonly DaemonStartupPhase[] = [
+      "SQLite open + pragma + migrate",
+      "EventStore readiness check",
+      "EventBus (PubSub + per-type)",
+      "Outbox Dispatcher start",
+      "Durable Handler Registry (register all, catch-up, realtime)",
+      "RunQueue Worker start",
+      "AdapterManager detect + register",
+      "CommandBus open",
+      "HTTP server bind + SSE accept"
+    ];
+    const expectedShutdown: readonly DaemonStartupPhase[] = [
+      "HTTP server bind + SSE accept",
+      "CommandBus open",
+      "RunQueue Worker start",
+      "AdapterManager detect + register",
+      "Outbox Dispatcher start",
+      "Durable Handler Registry (register all, catch-up, realtime)",
+      "EventBus (PubSub + per-type)",
+      "EventStore readiness check",
+      "SQLite open + pragma + migrate"
+    ];
+    expect(phases.filter((event) => event.direction === "startup").map((event) => event.phase)).toEqual(expectedStartup);
+    expect(phases.filter((event) => event.direction === "shutdown").map((event) => event.phase)).toEqual(expectedShutdown);
+  });
+
+  it("returns healthz during startup and gates other routes with service_starting", async () => {
+    await daemon.close();
+    currentDaemon = undefined;
+    const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-starting-"));
+    const startingDaemon = createDaemon({ databasePath: join(dir, "agenthub.sqlite"), port: 0 });
+
+    const health = await invokeHandler(startingDaemon, "GET", "/healthz");
+    const rooms = await invokeHandler(startingDaemon, "GET", "/rooms");
+
+    expect(health.status).toBe(200);
+    expect(health.body).toEqual({ ok: true });
+    expect(rooms.status).toBe(503);
+    expect(rooms.body).toEqual({ error: "service_starting", retryAfterMs: 500 });
+    await startingDaemon.close();
   });
 
   it("selects ClaudeCodeAdapter when the primary profile requests claude-code", async () => {
@@ -353,4 +405,33 @@ async function readSseEvent(body: ReadableStream<Uint8Array> | null, eventName: 
     reader.releaseLock();
   }
   throw new Error(`Timed out waiting for SSE event ${eventName}: ${buffer}`);
+}
+
+async function invokeHandler(daemon: DaemonApp, method: string, url: string): Promise<{ readonly status: number; readonly body: unknown }> {
+  const { EventEmitter } = await import("node:events");
+  const req = new EventEmitter() as Parameters<DaemonApp["handle"]>[0];
+  req.method = method;
+  req.url = url;
+  req.headers = {};
+  const chunks: Buffer[] = [];
+  const res = new EventEmitter() as Parameters<DaemonApp["handle"]>[1] & { statusCode?: number; capturedHeaders?: unknown };
+  res.writeHead = ((status: number, statusMessageOrHeaders?: unknown, headers?: unknown) => {
+    res.statusCode = status;
+    res.capturedHeaders = headers ?? statusMessageOrHeaders;
+    return res;
+  }) as typeof res.writeHead;
+  res.write = (chunk: string | Buffer) => {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    return true;
+  };
+  const ended = new Promise<void>((resolve) => {
+    res.end = ((chunk?: unknown) => {
+      if (chunk !== undefined) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+      resolve();
+      return res;
+    }) as typeof res.end;
+  });
+  daemon.handle(req, res);
+  await ended;
+  return { status: res.statusCode ?? 200, body: JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown };
 }

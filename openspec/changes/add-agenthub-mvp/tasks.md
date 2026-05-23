@@ -62,7 +62,7 @@
 - [ ] 3.15 实现 SSE 反压：per-client 队列 maxQueuedDurable=1000 / maxQueuedEphemeral=500 / slowClientThresholdMs=30s / durableSendTimeoutMs=5s；durable 满 → 断开让客户端 catch-up；ephemeral 满 → FIFO drop — refs: bus-runtime/SSE 反压（buffer 上限 + 慢消费者策略） [PARTIAL]
 - [ ] 3.16 实现 Debug 流隔离：`/debug/event` 独立 endpoint + 独立反压（durable 10000 / ephemeral 5000）；生产模式默认 404 — refs: bus-runtime/Debug 流隔离 [PARTIAL]
 - [x] 3.17 写订阅图谱声明：每个模块在自己 package 下 `subscribes.ts` 列出订阅的 event type；`bun run subscriptions:check` 比对 `bus-runtime/订阅图谱` 矩阵，CI 失败时给出 diff — refs: bus-runtime/模块订阅图谱（单一真相）
-- [ ] 3.18 实现 daemon 启动 / 关闭顺序（startup hook 顺序 1–9，shutdown 反向）+ 启动期未追平时返回 503 `service_starting` — refs: bus-runtime/Bus 启动 / 关闭顺序 [MISSING]
+- [x] 3.18 实现 daemon 启动 / 关闭顺序（startup hook 顺序 1–9，shutdown 反向）+ 启动期未追平时返回 503 `service_starting` — refs: bus-runtime/Bus 启动 / 关闭顺序
 - [x] 3.19 集成测试：① 事务一致性（事务内 kill 后重启不漏事件）② handler 失败 5 次进 DLQ + Skip 后追上 ③ 同 Agent 多 Run 串行 / 文件锁字典序无死锁 ④ 慢客户端被断开后用 Last-Event-ID 追平 ⑤ Debug 流拥塞不影响主流
 
 ## 4. Daemon 主进程 (Week 2)
