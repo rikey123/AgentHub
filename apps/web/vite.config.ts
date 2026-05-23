@@ -1,0 +1,29 @@
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    port: 5173,
+    host: "127.0.0.1",
+    proxy: {
+      "/event": "http://127.0.0.1:6677",
+      "/rooms": "http://127.0.0.1:6677",
+      "/agents": "http://127.0.0.1:6677",
+      "/runs": "http://127.0.0.1:6677",
+      "/context": "http://127.0.0.1:6677",
+      "/permissions": "http://127.0.0.1:6677",
+      "/interventions": "http://127.0.0.1:6677",
+      "/artifacts": "http://127.0.0.1:6677",
+      "/debug": "http://127.0.0.1:6677",
+      "/healthz": "http://127.0.0.1:6677",
+      "/openapi.json": "http://127.0.0.1:6677",
+      "/pending-turns": "http://127.0.0.1:6677",
+      "/messages": "http://127.0.0.1:6677"
+    }
+  },
+  build: {
+    outDir: "dist",
+    sourcemap: true
+  }
+});
