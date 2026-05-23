@@ -2,9 +2,11 @@ import { Effect, Stream } from "effect";
 import { redactAndTruncate } from "@agenthub/security";
 import { describe, expect, it } from "vitest";
 
-import { ACPAdapter, ACPAdapterError, NdjsonLineSplitter, notImplementedEffect, notImplementedStream, serializePrompt, type JsonRpcMessage } from "../src/index.ts";
+import { ACPAdapter, ACPAdapterError, NdjsonLineSplitter, notImplementedEffect, notImplementedStream, serializePrompt, type AcpAdapterSession, type AcpProviderEvent, type JsonRpcMessage } from "../src/index.ts";
 
 class TestAcpAdapter extends ACPAdapter {
+  readonly providerEvents: AcpProviderEvent[] = [];
+
   constructor() {
     super("test-acp", "Test ACP", {
       id: "test-acp",
@@ -22,6 +24,16 @@ class TestAcpAdapter extends ACPAdapter {
   protected spawnArgs() { return { command: "", args: [] as const }; }
   protected mapProviderEvent(message: JsonRpcMessage) { return message.method ? { type: message.method, payload: message.params } : undefined; }
   protected mapProviderError(error: unknown) { return new ACPAdapterError("provider_error", JSON.stringify(error)); }
+
+  feedLine(sessionId: string, line: string) {
+    const session = this.debugSession(sessionId);
+    if (session === undefined) throw new Error("missing test session");
+    return this.handleLine(session, line);
+  }
+
+  protected override onProviderEvent(_session: AcpAdapterSession, event: AcpProviderEvent): void {
+    this.providerEvents.push(event);
+  }
 }
 
 describe("ACPAdapter base", () => {
@@ -67,6 +79,15 @@ describe("ACPAdapter base", () => {
     expect(session.mcpServer).toBe(mcpServer);
     expect(adapter.debugSession(session.id)?.mcpServer).toBe(mcpServer);
     expect((session.mcpServer as typeof mcpServer).callTool()).toEqual({ ok: true, data: { taskId: "task_1" } });
+  });
+
+  it("automatically dispatches parsed provider events to the adapter hook", () => {
+    const adapter = new TestAcpAdapter();
+    const session = Effect.runSync(adapter.createSession({ runId: "run-events", roomId: "room", agentId: "agent" }));
+
+    adapter.feedLine(session.id, JSON.stringify({ jsonrpc: "2.0", method: "tool/pre_use", params: { name: "Bash" } }));
+
+    expect(adapter.providerEvents).toEqual([{ type: "tool/pre_use", payload: { name: "Bash" } }]);
   });
 
   it("dispose rejects all pending requests and marks session disposed", () => {
