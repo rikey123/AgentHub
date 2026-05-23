@@ -232,7 +232,7 @@ openspec.cmd validate add-agenthub-mvp --strict
 
 ### P0-3: Claude adapter registry/selector + ACP process supervisor + automatic stdout/provider-event bridge to AdapterBridge/RunLifecycle
 
-**Status**: COMPLETE — implemented on `task/p0-3-claude-adapter-runtime`, independently reviewed APPROVE in `ses_1ac672217ffedwGaTB8rYgj4hw`, explicitly approved by Atlas/Orchestrator, and verified with the stabilized real child-exit regression.
+**Status**: COMPLETE — implemented on `task/p0-3-claude-adapter-runtime`, independently reviewed APPROVE (Oracle 4th pass, `ses_1ab0760ceffeH4d9iH1t80JkqN`), explicitly approved by Orchestrator 2026-05-23, and merged into `task/remediation-implementation-plan`. Branch deleted. Integration branch verified: 159 tests, typecheck, lint, check:all, openspec strict all pass.
 
 **Scope**: Wire the ClaudeCodeAdapter into AdapterManager so the daemon selects it at runtime. Implement the ACP process supervisor (spawn, NDJSON line-splitter, JSON-RPC pending table, stderr tail, liveness ping). Implement the automatic bridge from ACP stdout provider events to AdapterBridge, which in turn calls RunLifecycleService.
 
