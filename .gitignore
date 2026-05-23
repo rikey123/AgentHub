@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+.opencode/node_modules/
+
+# Build outputs
+dist/
+build/
+coverage/
+.turbo/
+.vite/
+playwright-report/
+test-results/
+
+# Local runtime state
+.agenthub/
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+*.log
+logs/
+tmp/
+temp/
+temp
+
+# Secrets and local machine config
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa
+id_ed25519
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Tool-local private settings
+.claude/settings.local.json

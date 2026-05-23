@@ -1,0 +1,94 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  verify:
+    name: ${{ matrix.runtime }} lint/typecheck/test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [node22, bun]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.12.1
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup Bun
+        if: matrix.runtime == 'bun'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Lint
+        if: matrix.runtime == 'node22'
+        run: pnpm lint
+
+      - name: Lint with Bun
+        if: matrix.runtime == 'bun'
+        run: bun run lint
+
+      - name: Typecheck
+        if: matrix.runtime == 'node22'
+        run: pnpm typecheck
+
+      - name: Typecheck with Bun
+        if: matrix.runtime == 'bun'
+        run: bun run typecheck
+
+      - name: Schema check
+        if: matrix.runtime == 'node22'
+        run: pnpm schema:check
+
+      - name: Schema check with Bun
+        if: matrix.runtime == 'bun'
+        run: bun run schema:check
+
+      - name: Dependency denylist
+        if: matrix.runtime == 'node22'
+        run: pnpm check:deps
+
+      - name: Dependency denylist with Bun
+        if: matrix.runtime == 'bun'
+        run: bun run check:deps
+
+      - name: Bun-only API guard
+        if: matrix.runtime == 'node22'
+        run: pnpm check:bun-api
+
+      - name: Bun-only API guard with Bun
+        if: matrix.runtime == 'bun'
+        run: bun run check:bun-api
+
+      - name: Custom CI checks
+        if: matrix.runtime == 'node22'
+        run: pnpm check:all
+
+      - name: Custom CI checks with Bun
+        if: matrix.runtime == 'bun'
+        run: bun run check:all
+
+      - name: Test
+        if: matrix.runtime == 'node22'
+        run: pnpm test
+
+      - name: Test with Bun
+        if: matrix.runtime == 'bun'
+        run: bun run test

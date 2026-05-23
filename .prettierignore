@@ -1,0 +1,9 @@
+node_modules/
+dist/
+build/
+coverage/
+.turbo/
+.vite/
+playwright-report/
+test-results/
+pnpm-lock.yaml

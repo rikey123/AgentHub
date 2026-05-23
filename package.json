@@ -1,0 +1,45 @@
+{
+  "name": "agenthub",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.12.1",
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=10.0.0",
+    "bun": ">=1.1.0"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "check:all": "node scripts/checks/check-all.mjs",
+    "check:bun-api": "node scripts/checks/bun-api-check.mjs",
+    "check:deps": "node scripts/checks/deps-check.mjs",
+    "command:check": "node scripts/checks/command-check.mjs",
+    "dev": "turbo run dev",
+    "events:check": "node scripts/checks/events-check.mjs",
+    "format": "prettier --check .",
+    "lint": "eslint . --max-warnings=0",
+    "run-state-machine:check": "node scripts/checks/run-state-machine-check.mjs",
+    "schema:check": "node packages/protocol/scripts/schema-check.mjs",
+    "subscriptions:check": "node scripts/checks/subscriptions-check.mjs",
+    "test": "vitest run --passWithNoTests",
+    "test:e2e": "playwright test --pass-with-no-tests",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "visibility:check": "node scripts/checks/visibility-check.mjs",
+    "clean": "turbo run clean"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@playwright/test": "^1.57.0",
+    "@types/node": "^22.19.1",
+    "eslint": "^9.39.1",
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.48.0",
+    "turbo": "^2.5.4",
+    "vitest": "^4.0.14"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["better-sqlite3"]
+  }
+}
