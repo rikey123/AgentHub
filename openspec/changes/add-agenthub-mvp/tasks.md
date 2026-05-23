@@ -221,7 +221,7 @@
 
 ## 16. Security 闭环 (Week 8-9)
 
-- [ ] 16.1 实现 OS keychain bridge（windows-credential-locker / macos-keychain / libsecret）— refs: security/API key / 密钥存 OS keychain [MISSING]
+- [x] 16.1 实现 OS keychain bridge（windows-credential-locker / macos-keychain / libsecret）— refs: security/API key / 密钥存 OS keychain
 - [ ] 16.2 实现 token issue / list / revoke CLI 与 API — refs: security/Token 协议 [MISSING]
 - [ ] 16.3 实现 token 中间件 + query token fallback — refs: security/Token 协议, v1-roadmap/V1.4 响应式 Web 占位（responsive-web） [PARTIAL]
 - [x] 16.4 实现工作区路径 canonicalize + symlink 检测 — refs: security/工作区路径校验

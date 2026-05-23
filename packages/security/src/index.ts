@@ -8,6 +8,8 @@ import type { EventBus } from "@agenthub/bus";
 import type { AgentHubDatabase } from "@agenthub/db";
 
 export { wrapExternalContent } from "./external-content.ts";
+export type { KeychainBridge } from "./keychain.ts";
+export { createKeychain, createKeychainAccount } from "./keychain.ts";
 
 export type AuthScope = "read" | "write" | "admin";
 export type WorkspacePathClassification = "internal" | "external" | "sensitive";
