@@ -1,0 +1,19 @@
+{
+  "name": "@agenthub/protocol",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./adapters": "./src/adapters.ts",
+    "./domains": "./src/domains.ts",
+    "./events": "./src/events/index.ts"
+  },
+  "scripts": {
+    "test": "node scripts/run-tests.mjs",
+    "schema:check": "node scripts/schema-check.mjs"
+  },
+  "dependencies": {
+    "effect": "^3.19.6"
+  }
+}
