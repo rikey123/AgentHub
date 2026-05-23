@@ -44,6 +44,20 @@ describe("daemon M1.4 composition", () => {
     expect(messages.messages.some((message) => message.role === "assistant" && message.status === "completed")).toBe(true);
   });
 
+  it("selects ClaudeCodeAdapter when the primary profile requests claude-code", async () => {
+    daemon.database.sqlite.prepare("INSERT INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES ('claude-agent', NULL, 'Claude Agent', 'claude-code', 'claude', 'Claude test profile', ?, NULL, 0, NULL, 1, 1)").run(JSON.stringify(["chat", "code.edit"]));
+    const client = new AgentHubClient({ baseUrl });
+    const room = await client.createRoom({ title: "Claude", mode: "solo", primaryAgentId: "claude-agent" }) as { readonly data: { readonly roomId: string } };
+
+    const sent = await client.sendMessage(room.data.roomId, { text: "use claude", idempotencyKey: "claude-select-1" }) as { readonly ok: boolean };
+
+    expect(sent.ok).toBe(true);
+    expect(daemon.mockAdapter.llmCallsFor("claude-agent")).toBe(0);
+    const run = daemon.database.sqlite.prepare("SELECT id, status, adapter_session_id FROM runs WHERE agent_id = 'claude-agent'").get() as { readonly id: string; readonly status: string; readonly adapter_session_id: string };
+    expect(run).toMatchObject({ status: "running", adapter_session_id: `acp-claude-code-${run.id}` });
+    expect(daemon.adapterRegistry.getClaudeAdapterForTest()?.debugSession(run.adapter_session_id)).toBeDefined();
+  });
+
   it("streams durable replay plus live events with main/detail visibility", async () => {
     const client = new AgentHubClient({ baseUrl });
     const room = await client.createRoom({ title: "SSE", mode: "solo", primaryAgentId: "mock-builder" }) as { readonly data: { readonly roomId: string } };

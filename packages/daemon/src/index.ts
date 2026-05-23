@@ -13,11 +13,12 @@ import { createPermissionCommandHandlers, PermissionEngine, seedBuiltInPermissio
 import type { EventEnvelope } from "@agenthub/protocol/events";
 import { authenticateBrowserRequest, issueBrowserSession, redactAndTruncate } from "@agenthub/security";
 
+import { AdapterRegistry } from "./adapters/registry.ts";
 import { createDaemonCommandHandlers, seedDefaultData } from "./commands.ts";
 import { openApiDocument } from "./openapi.ts";
 
 export type DaemonOptions = { readonly databasePath: string; readonly host?: string; readonly port?: number; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly now?: () => number };
-export type DaemonApp = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly roomMcpServer: RoomMcpServer; readonly mockAdapter: MockAdapterManager; readonly handle: (req: IncomingMessage, res: ServerResponse) => void; start(): Promise<Server>; close(): Promise<void> };
+export type DaemonApp = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly roomMcpServer: RoomMcpServer; readonly adapterRegistry: AdapterRegistry; readonly mockAdapter: MockAdapterManager; readonly handle: (req: IncomingMessage, res: ServerResponse) => void; start(): Promise<Server>; close(): Promise<void> };
 
 export function createDaemon(options: DaemonOptions): DaemonApp {
   const database = createDatabase({ path: options.databasePath, applyMigrations: true });
@@ -39,8 +40,9 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     sideEffects: { onTerminal: (runId: string) => { activeWakes.releaseRun(runId); runQueue.releaseLocks(runId); pendingTurns.handleTerminal(runId); }, finalizeNextTurns: (tx: AgentHubDatabase["sqlite"], runId: string, failureClass: Parameters<MailboxService["finalizeForRun"]>[2], now: number) => mailbox.finalizeForRun(tx, runId, failureClass, now) }
   };
   const lifecycle = new RunLifecycleService(database, eventBus, lifecycleOptions);
-  const mockAdapter = new MockAdapterManager({ database, eventBus, lifecycle, artifactFs, ...(options.now !== undefined ? { now: options.now } : {}) });
-  const runQueue = new RunQueue({ database, lifecycle, adapterManager: mockAdapter, ...(options.now !== undefined ? { now: options.now } : {}) });
+  const adapterRegistry = new AdapterRegistry({ database, eventBus, lifecycle, permissionEngine, artifactFs, getRoomMcpServer: () => roomMcpServer, ...(options.now !== undefined ? { now: options.now } : {}) });
+  const mockAdapter = adapterRegistry.mockAdapter;
+  const runQueue = new RunQueue({ database, lifecycle, adapterManager: adapterRegistry, ...(options.now !== undefined ? { now: options.now } : {}) });
   const handlers = createDurableHandlerRegistry({ database, retryDelaysMs: [0] });
   handlers.register({ name: "run-queue", subscribes: ["agent.run.queued", "agent.run.completed", "agent.run.failed", "agent.run.cancelled"], handle: (event) => runQueue.handleEvent(event) });
   const outbox = createOutboxDispatcher({ database, eventBus, handlers });
@@ -57,7 +59,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
       CompleteTask: createCompleteTaskHandler(taskService),
       WakeAgent: createWakeAgentHandler({ database, activeWakes, mailbox, lifecycle }) as CommandHandler,
       ConsumePendingTurn: createConsumePendingTurnHandler(pendingTurns) as CommandHandler,
-      CancelRun: createCancelRunHandler({ lifecycle, adapterManager: mockAdapter })
+      CancelRun: createCancelRunHandler({ lifecycle, adapterManager: adapterRegistry })
     }
   });
   commandBusRef.current = commandBus;
@@ -65,7 +67,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
 
   const handle = (req: IncomingMessage, res: ServerResponse) => { void route({ req, res, database, eventBus, commandBus, artifactService, taskService, outbox, ...(options.token !== undefined ? { token: options.token } : {}), ...(options.allowedOrigins !== undefined ? { allowedOrigins: options.allowedOrigins } : {}), host: `${options.host ?? "127.0.0.1"}:${options.port ?? 6677}`, ...(options.now !== undefined ? { now: options.now } : {}) }); };
   let server: Server | undefined;
-  return { database, eventBus, commandBus, roomMcpServer, mockAdapter, handle, start: () => new Promise((resolve) => { server = createServer(handle).listen(options.port ?? 6677, options.host ?? "127.0.0.1", () => resolve(server as Server)); }), close: () => new Promise((resolve, reject) => { eventBus.close(); database.sqlite.close(); if (!server) resolve(); else server.close((err) => err ? reject(err) : resolve()); }) };
+  return { database, eventBus, commandBus, roomMcpServer, adapterRegistry, mockAdapter, handle, start: () => new Promise((resolve) => { server = createServer(handle).listen(options.port ?? 6677, options.host ?? "127.0.0.1", () => resolve(server as Server)); }), close: () => new Promise((resolve, reject) => { eventBus.close(); database.sqlite.close(); if (!server) resolve(); else server.close((err) => err ? reject(err) : resolve()); }) };
 }
 
 type RouteContext = { readonly req: IncomingMessage; readonly res: ServerResponse; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly artifactService: ArtifactService; readonly taskService: TaskService; readonly outbox: { drainPending(): Promise<void> }; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly host: string; readonly now?: () => number };

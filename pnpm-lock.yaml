@@ -229,6 +229,9 @@ importers:
 
   packages/daemon:
     dependencies:
+      '@agenthub/adapter-claude-code':
+        specifier: workspace:*
+        version: link:../adapters/claude-code
       '@agenthub/adapter-mock':
         specifier: workspace:*
         version: link:../adapters/mock
