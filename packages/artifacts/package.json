@@ -1,0 +1,16 @@
+{
+  "name": "@agenthub/artifacts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node scripts/run-tests.mjs"
+  },
+  "dependencies": {
+    "@agenthub/bus": "workspace:*",
+    "@agenthub/db": "workspace:*"
+  }
+}
