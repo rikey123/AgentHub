@@ -93,7 +93,7 @@ describe("ClaudeCodeACPAdapter", () => {
     lifecycle.create(null, { runId: "run", workspaceId: "w", roomId: "r", agentId: "a", wakeReason: "primary_turn" });
     lifecycle.markClaimed(null, "run");
     lifecycle.markStarting(null, "run", 123);
-    const adapter = new ClaudeCodeACPAdapter({ command: process.execPath, args: ["-e", "process.exit(7)"], services: { database, eventBus }, lifecycle, workspaceId: "w" });
+    const adapter = new ClaudeCodeACPAdapter({ command: process.execPath, args: ["-e", "process.stdin.setEncoding('utf8');let buffer='';process.stdin.on('data',(chunk)=>{buffer+=chunk;for(;;){const index=buffer.indexOf('\\n');if(index<0)break;const line=buffer.slice(0,index);buffer=buffer.slice(index+1);if(line.includes('\\\"method\\\":\\\"session/prompt\\\"')) process.exit(7);}});"], services: { database, eventBus }, lifecycle, workspaceId: "w" });
 
     await adapter.runManaged(lifecycle.read("run"));
     await waitFor(() => database.sqlite.prepare("SELECT status FROM runs WHERE id = 'run'").get() as { readonly status: string }, (row) => row.status === "failed");
