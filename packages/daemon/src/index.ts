@@ -50,6 +50,17 @@ const PHASE_RUN_QUEUE: DaemonStartupPhase = "RunQueue Worker start";
 const PHASE_ADAPTERS: DaemonStartupPhase = "AdapterManager detect + register";
 const PHASE_COMMAND_BUS: DaemonStartupPhase = "CommandBus open";
 const PHASE_HTTP: DaemonStartupPhase = "HTTP server bind + SSE accept";
+const DAEMON_SHUTDOWN_PHASES: readonly DaemonStartupPhase[] = [
+  PHASE_HTTP,
+  PHASE_COMMAND_BUS,
+  PHASE_RUN_QUEUE,
+  PHASE_ADAPTERS,
+  PHASE_OUTBOX,
+  PHASE_HANDLERS,
+  PHASE_EVENT_BUS,
+  PHASE_EVENT_STORE,
+  PHASE_SQLITE
+];
 
 type DaemonRuntime = {
   database: AgentHubDatabase;
@@ -179,7 +190,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     if (closed) return;
     closed = true;
     ready = false;
-    for (const phase of [...DAEMON_STARTUP_PHASES].reverse()) {
+    for (const phase of DAEMON_SHUTDOWN_PHASES) {
       emitPhase("shutdown", phase);
       if (phase === PHASE_HTTP && server !== undefined) {
         await new Promise<void>((resolve, reject) => server?.close((err) => err ? reject(err) : resolve()));

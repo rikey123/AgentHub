@@ -65,8 +65,19 @@ describe("daemon M1.4 composition", () => {
       "CommandBus open",
       "HTTP server bind + SSE accept"
     ];
+    const expectedShutdown: readonly DaemonStartupPhase[] = [
+      "HTTP server bind + SSE accept",
+      "CommandBus open",
+      "RunQueue Worker start",
+      "AdapterManager detect + register",
+      "Outbox Dispatcher start",
+      "Durable Handler Registry (register all, catch-up, realtime)",
+      "EventBus (PubSub + per-type)",
+      "EventStore readiness check",
+      "SQLite open + pragma + migrate"
+    ];
     expect(phases.filter((event) => event.direction === "startup").map((event) => event.phase)).toEqual(expectedStartup);
-    expect(phases.filter((event) => event.direction === "shutdown").map((event) => event.phase)).toEqual([...expectedStartup].reverse());
+    expect(phases.filter((event) => event.direction === "shutdown").map((event) => event.phase)).toEqual(expectedShutdown);
   });
 
   it("returns healthz during startup and gates other routes with service_starting", async () => {
