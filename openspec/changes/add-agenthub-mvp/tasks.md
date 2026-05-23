@@ -151,7 +151,7 @@
 - [x] 10.5 实现去重（同 source + same target）— refs: interventions/去重
 - [x] 10.6 实现 source Agent presence 联动（knocking / active / observing）— refs: interventions/Reviewer 状态联动
 - [x] 10.7 实现 emergency / rollback 类型创建返回 501 — refs: interventions/不在 MVP 范围
-- [ ] 10.8 集成测试：完整闭环（敲门 → 卡片 → approve → 注入 → resolved） [MISSING]
+- [x] 10.8 集成测试：完整闭环（敲门 → 卡片 → approve → 注入 → resolved）
 
 ## 11. Artifacts (Week 5-6)
 
@@ -164,7 +164,7 @@
 - [x] 11.7 实现 type=preview iframe + 临时 token URL（30 分钟过期）— refs: artifacts/Preview Artifact（最小实现）, design D17
 - [x] 11.8 实现 type=deployment 创建返回 501 — refs: artifacts/Deployment 占位
 - [x] 11.9 实现 SafeWritePolicy（默认 [] 空白名单）— refs: artifacts/安全写白名单（仅 MVP 例外）
-- [ ] 11.10 集成测试：DiffCard 全流程 / revert / preview token 过期 / stale_base 拒绝 / 多文件 apply 中途磁盘满回滚 / Permission deny 时 status=failed 不写盘 / 回滚再失败时 recovery_required 路径 affectedFiles 字段正确 [MISSING]
+- [x] 11.10 集成测试：DiffCard 全流程 / revert / preview token 过期 / stale_base 拒绝 / 多文件 apply 中途磁盘满回滚 / Permission deny 时 status=failed 不写盘 / 回滚再失败时 recovery_required 路径 affectedFiles 字段正确
 
 ## 12. ClaudeCodeAdapter（首批真实 Adapter）(Week 6-7)
 
@@ -281,8 +281,8 @@
 - [ ] 19.2.5 把 MCP Write / MultiEdit tool 在 tool layer 拦截转 ArtifactFS — refs: artifacts/ArtifactFS Shadow Write 与 Run-Level Diff [UNCLEAR]
 - [x] 19.2.6 Run 终结（completed/failed/cancelled，凡有 shadow 写入）调 `buildRunArtifact()` 创建 `Artifact{type='diff', status='draft'}` — refs: artifacts/ArtifactFS Shadow Write 与 Run-Level Diff
 - [x] 19.2.7 敏感文件白名单仍立即拦截：ArtifactFS.write 命中 → 不写 shadow / 不写真实 workspace + 同事务 emit `permission.resolved decision=deny reason=sensitive_pattern_match requested=false`，即便在 ArtifactFS 内 — refs: artifacts/ArtifactFS Shadow Write 与 Run-Level Diff, security/敏感文件白名单 deny
-- [ ] 19.2.8 集成测试：单 Run 写 4 文件 + 跑测试 + 回滚 1 文件 + 重写 → 最终 DiffArtifact 含正确 4 文件 diff [MISSING]
-- [ ] 19.2.9 集成测试：失败 Run 仍生成 DiffArtifact（status=draft）供用户审查或丢弃 [MISSING]
+- [x] 19.2.8 集成测试：单 Run 写 4 文件 + 跑测试 + 回滚 1 文件 + 重写 → 最终 DiffArtifact 含正确 4 文件 diff
+- [x] 19.2.9 集成测试：失败 Run 仍生成 DiffArtifact（status=draft）供用户审查或丢弃
 
 ### 19.3 observe 被动语义 + WakeAgent 单一入口（D23）
 
@@ -335,7 +335,7 @@
 - [x] 19.7.1 在 `packages/bus` 实现 per-channel bounded PubSub：durable 4096 back-pressure / message.delta 1024 drop_oldest+coalesce / tool.update 512 drop_oldest / status_line 64 / adapter.raw 256 独立通道 / system.notice 128 — refs: bus-runtime/内部 PubSub Bounded + 优先级丢弃
 - [ ] 19.7.2 配置 `[bus.pubsub] capacity.<channel>` 启动校验：durable ≥ 1024、ephemeral ≥ 64，否则 refuse start — refs: bus-runtime/内部 PubSub Bounded + 优先级丢弃 [PARTIAL]
 - [ ] 19.7.3 drop 计数 + 高水位写入 `/debug/stats`（PubSubChannelStats[]）— refs: bus-runtime/内部 PubSub Bounded + 优先级丢弃 [PARTIAL]
-- [ ] 19.7.4 raw 通道暴涨不影响 message.delta 测试（infinite loop print + 验证 delta 通道 drop=0） [MISSING]
+- [x] 19.7.4 raw 通道暴涨不影响 message.delta 测试（infinite loop print + 验证 delta 通道 drop=0）
 
 ### 19.8 Adapter Liveness 与 SSE 心跳分离（D29）
 
