@@ -223,14 +223,38 @@ describe("CommandBus", () => {
     expect(second).toMatchObject({ ok: false, error: { code: "duplicate" } });
   });
 
-  test("caches deterministic failures but removes transient failures for retry", () => {
+  test("caches deterministic failures without committing handler side effects or re-running", () => {
+    currentDatabase().sqlite.exec("CREATE TABLE command_side_effects (id TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    let executions = 0;
+    const commandBus = new CommandBus({
+      database: currentDatabase(),
+      handlers: {
+        DeleteMessage: () => {
+          executions += 1;
+          currentDatabase().sqlite.prepare("INSERT INTO command_side_effects (id, value) VALUES (?, ?)").run(`effect_${executions}`, "rolled back");
+          return { ok: false, error: { code: "validation_failed", message: "missing id" } };
+        }
+      }
+    });
+    const meta = { actor: { type: "user" as const, id: "user_1" }, traceId: "trace_1", idempotencyKey: "idem_failed", origin: "http" as const };
+
+    expect(commandBus.dispatch({ type: "DeleteMessage" }, meta)).toMatchObject({ ok: false, error: { code: "validation_failed" } });
+    expect(commandBus.dispatch({ type: "DeleteMessage" }, meta)).toMatchObject({ ok: false, error: { code: "validation_failed" } });
+
+    expect(executions).toBe(1);
+    expect(commandRecordStatuses()).toEqual(["failed"]);
+    expect(tableRowCount("command_side_effects")).toBe(0);
+  });
+
+  test("removes transient failures and rolls back side effects so retry executes", () => {
+    currentDatabase().sqlite.exec("CREATE TABLE command_side_effects (id TEXT PRIMARY KEY, value TEXT NOT NULL)");
     let transientExecutions = 0;
     const commandBus = new CommandBus({
       database: currentDatabase(),
       handlers: {
-        DeleteMessage: () => ({ ok: false, error: { code: "validation_failed", message: "missing id" } }),
         PinMessage: () => {
           transientExecutions += 1;
+          currentDatabase().sqlite.prepare("INSERT INTO command_side_effects (id, value) VALUES (?, ?)").run(`effect_${transientExecutions}`, "maybe");
           return transientExecutions === 1
             ? { ok: false, error: { code: "internal_error", message: "temporary" } }
             : { ok: true, data: { pinned: true }, emittedEvents: [] };
@@ -238,14 +262,79 @@ describe("CommandBus", () => {
       }
     });
 
-    const failedMeta = { actor: { type: "user" as const, id: "user_1" }, traceId: "trace_1", idempotencyKey: "idem_failed", origin: "http" as const };
     const transientMeta = { actor: { type: "user" as const, id: "user_1" }, traceId: "trace_2", idempotencyKey: "idem_transient", origin: "http" as const };
 
-    expect(commandBus.dispatch({ type: "DeleteMessage" }, failedMeta)).toMatchObject({ ok: false, error: { code: "validation_failed" } });
-    expect(commandBus.dispatch({ type: "DeleteMessage" }, failedMeta)).toMatchObject({ ok: false, error: { code: "validation_failed" } });
     expect(commandBus.dispatch({ type: "PinMessage", messageId: "msg_1" }, transientMeta)).toMatchObject({ ok: false, error: { code: "internal_error" } });
+    expect(commandRecordStatuses()).toEqual([]);
+    expect(tableRowCount("command_side_effects")).toBe(0);
+
     expect(commandBus.dispatch({ type: "PinMessage", messageId: "msg_1" }, transientMeta)).toMatchObject({ ok: true });
+
     expect(transientExecutions).toBe(2);
+    expect(commandRecordStatuses()).toEqual(["succeeded"]);
+    expect(currentDatabase().sqlite.prepare("SELECT id, value FROM command_side_effects").all()).toEqual([{ id: "effect_2", value: "maybe" }]);
+  });
+
+  test("commits successful command record atomically with handler database mutation", () => {
+    currentDatabase().sqlite.exec("CREATE TABLE command_side_effects (id TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    const commandBus = new CommandBus({
+      database: currentDatabase(),
+      handlers: {
+        CreateRoom: (command) => {
+          currentDatabase().sqlite.prepare("INSERT INTO command_side_effects (id, value) VALUES (?, ?)").run(command.roomId, "created");
+          return { ok: true, data: { roomId: command.roomId }, emittedEvents: [] };
+        }
+      }
+    });
+    const meta = { actor: { type: "user" as const, id: "user_1" }, traceId: "trace_3", idempotencyKey: "idem_atomic", origin: "http" as const };
+
+    expect(commandBus.dispatch({ type: "CreateRoom", roomId: "room_atomic" }, meta)).toMatchObject({ ok: true, data: { roomId: "room_atomic" } });
+
+    expect(
+      currentDatabase().sqlite
+        .prepare(
+          `SELECT cr.status AS commandStatus, se.value AS sideEffectValue
+           FROM command_records cr
+           JOIN command_side_effects se ON se.id = ?
+           WHERE cr.actor_type = ? AND cr.actor_id = ? AND cr.idempotency_key = ?`
+        )
+        .get("room_atomic", "user", "user_1", "idem_atomic")
+    ).toEqual({ commandStatus: "succeeded", sideEffectValue: "created" });
+  });
+
+  test("reclaims stale in-flight command record without duplicate insert", () => {
+    let now = 100_000;
+    let executions = 0;
+    const commandBus = new CommandBus({
+      database: currentDatabase(),
+      now: () => now,
+      handlers: {
+        PinMessage: () => {
+          executions += 1;
+          return { ok: true, data: { pinned: true }, emittedEvents: [] };
+        }
+      }
+    });
+    const meta = { actor: { type: "user" as const, id: "user_1" }, traceId: "trace_reclaim", idempotencyKey: "idem_reclaim", origin: "http" as const };
+
+    currentDatabase().sqlite
+      .prepare(
+        `INSERT INTO command_records (
+          actor_type, actor_id, idempotency_key, command_type, command_hash, status, result_json, trace_id, created_at, expires_at
+        ) VALUES ('user', 'user_1', 'idem_reclaim', 'PinMessage', 'stale_hash', 'in_flight', NULL, 'trace_old', ?, ?)`
+      )
+      .run(now - 60_001, now + 1_000_000);
+
+    now += 1;
+    expect(commandBus.dispatch({ type: "PinMessage", messageId: "msg_1" }, meta)).toMatchObject({ ok: true, data: { pinned: true } });
+
+    expect(executions).toBe(1);
+    expect(commandRecordStatuses()).toEqual(["succeeded"]);
+    expect(
+      currentDatabase().sqlite
+        .prepare("SELECT command_hash, trace_id, result_json FROM command_records WHERE actor_type = 'user' AND actor_id = 'user_1' AND idempotency_key = 'idem_reclaim'")
+        .get()
+    ).toMatchObject({ trace_id: "trace_reclaim" });
   });
 
   test("rejects forbidden, unknown, and internal-only HTTP commands before handlers", () => {
@@ -397,6 +486,10 @@ function outboxStatuses(): string[] {
 
 function commandRecordStatuses(): string[] {
   return currentDatabase().sqlite.prepare("SELECT status FROM command_records ORDER BY created_at ASC").all().map((row) => (row as { status: string }).status);
+}
+
+function tableRowCount(tableName: string): number {
+  return (currentDatabase().sqlite.prepare(`SELECT COUNT(*) AS count FROM ${tableName}`).get() as { count: number }).count;
 }
 
 function handlerCursor(handlerName: string): number {

@@ -557,7 +557,7 @@ export class CommandBus {
     const commandHash = hashCommand(command);
     const now = this.now();
     const expiresAt = now + 24 * 60 * 60 * 1000;
-    const claim = this.options.database.sqlite.transaction(() => {
+    return this.options.database.sqlite.transaction(() => {
       const existing = this.options.database.sqlite
         .prepare(
           `SELECT command_hash, status, result_json, created_at
@@ -583,53 +583,74 @@ export class CommandBus {
              WHERE actor_type = ? AND actor_id = ? AND idempotency_key = ?`
           )
           .run(command.type, commandHash, meta.traceId, now, expiresAt, actor.type, actor.id, idempotencyKey);
-        return undefined;
       }
 
-      this.options.database.sqlite
-        .prepare(
-          `INSERT INTO command_records (
-            actor_type, actor_id, idempotency_key, command_type, command_hash, status, result_json, trace_id, created_at, expires_at
-          ) VALUES (?, ?, ?, ?, ?, 'in_flight', NULL, ?, ?, ?)`
-        )
-        .run(actor.type, actor.id, idempotencyKey, command.type, commandHash, meta.traceId, now, expiresAt);
-      return undefined;
+      if (!existing) {
+        this.options.database.sqlite
+          .prepare(
+            `INSERT INTO command_records (
+              actor_type, actor_id, idempotency_key, command_type, command_hash, status, result_json, trace_id, created_at, expires_at
+            ) VALUES (?, ?, ?, ?, ?, 'in_flight', NULL, ?, ?, ?)`
+          )
+          .run(actor.type, actor.id, idempotencyKey, command.type, commandHash, meta.traceId, now, expiresAt);
+      }
+
+      return this.executeAndFinalizeIdempotent(command, meta, actor, idempotencyKey);
     })();
+  }
 
-    if (claim !== undefined) {
-      return claim;
-    }
-
+  private executeAndFinalizeIdempotent<C extends Command>(command: C, meta: CommandMeta, actor: { type: string; id: string }, idempotencyKey: string): CommandResult {
+    const savepointName = `command_handler_${randomUUID().replace(/-/gu, "_")}`;
+    this.options.database.sqlite.exec(`SAVEPOINT ${savepointName}`);
     try {
       const result = this.execute(command, meta);
       if (isPromiseLike(result)) {
-        return result.then((resolved) => this.finalizeIdempotentResult(actor, idempotencyKey, resolved));
+        this.rollbackAndReleaseSavepoint(savepointName);
+        this.deleteCommandRecord(actor, idempotencyKey);
+        return failedCommand("internal_error", "idempotent command handlers must complete synchronously to preserve transaction atomicity");
       }
-      return this.finalizeIdempotentResult(actor, idempotencyKey, result);
+
+      if (result.ok) {
+        this.options.database.sqlite.exec(`RELEASE SAVEPOINT ${savepointName}`);
+        this.persistCommandRecordResult(actor, idempotencyKey, "succeeded", result);
+        return result;
+      }
+
+      if (shouldPersistFailedRecord(result.error.code)) {
+        this.rollbackAndReleaseSavepoint(savepointName);
+        this.persistCommandRecordResult(actor, idempotencyKey, "failed", result);
+        return result;
+      }
+
+      this.rollbackAndReleaseSavepoint(savepointName);
+      this.deleteCommandRecord(actor, idempotencyKey);
+      return result;
     } catch (error) {
-      this.options.database.sqlite
-        .prepare("DELETE FROM command_records WHERE actor_type = ? AND actor_id = ? AND idempotency_key = ?")
-        .run(actor.type, actor.id, idempotencyKey);
+      this.rollbackAndReleaseSavepoint(savepointName);
+      this.deleteCommandRecord(actor, idempotencyKey);
       throw error;
     }
   }
 
-  private finalizeIdempotentResult(actor: { type: string; id: string }, idempotencyKey: string, result: CommandResult): CommandResult {
-    if (result.ok || shouldPersistFailedRecord(result.error.code)) {
-      this.options.database.sqlite
-        .prepare(
-          `UPDATE command_records
-           SET status = ?, result_json = ?
-           WHERE actor_type = ? AND actor_id = ? AND idempotency_key = ?`
-        )
-        .run(result.ok ? "succeeded" : "failed", JSON.stringify(result), actor.type, actor.id, idempotencyKey);
-      return result;
-    }
+  private persistCommandRecordResult(actor: { type: string; id: string }, idempotencyKey: string, status: "succeeded" | "failed", result: CommandResult): void {
+    this.options.database.sqlite
+      .prepare(
+        `UPDATE command_records
+         SET status = ?, result_json = ?
+         WHERE actor_type = ? AND actor_id = ? AND idempotency_key = ?`
+      )
+      .run(status, JSON.stringify(result), actor.type, actor.id, idempotencyKey);
+  }
 
+  private deleteCommandRecord(actor: { type: string; id: string }, idempotencyKey: string): void {
     this.options.database.sqlite
       .prepare("DELETE FROM command_records WHERE actor_type = ? AND actor_id = ? AND idempotency_key = ?")
       .run(actor.type, actor.id, idempotencyKey);
-    return result;
+  }
+
+  private rollbackAndReleaseSavepoint(savepointName: string): void {
+    this.options.database.sqlite.exec(`ROLLBACK TO SAVEPOINT ${savepointName}`);
+    this.options.database.sqlite.exec(`RELEASE SAVEPOINT ${savepointName}`);
   }
 
   private execute<C extends Command>(command: C, meta: CommandMeta): CommandResult | Promise<CommandResult> {
