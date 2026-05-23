@@ -8,7 +8,7 @@ import { ContextLedger, createContextCommandHandlers } from "@agenthub/context";
 import { createDatabase, type AgentHubDatabase } from "@agenthub/db";
 import { MockAdapterManager } from "@agenthub/adapter-mock";
 import { createInterventionCommandHandlers, InterventionEngine } from "@agenthub/interventions";
-import { ActiveWakesRegistry, createCancelRunHandler, createWakeAgentHandler, MailboxService, RunLifecycleService, RunQueue } from "@agenthub/orchestrator";
+import { ActiveWakesRegistry, createCancelRunHandler, createConsumePendingTurnHandler, createWakeAgentHandler, MailboxService, PendingTurnService, RunLifecycleService, RunQueue } from "@agenthub/orchestrator";
 import { createPermissionCommandHandlers, PermissionEngine, seedBuiltInPermissionProfiles } from "@agenthub/permissions";
 import type { EventEnvelope } from "@agenthub/protocol/events";
 import { authenticateBrowserRequest, issueBrowserSession, redactAndTruncate } from "@agenthub/security";
@@ -31,9 +31,11 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
   const artifactFs = new ArtifactFSRunRegistry({ database, service: artifactService, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
   const activeWakes = new ActiveWakesRegistry();
   const mailbox = new MailboxService(database, options.now);
+  const commandBusRef: { current?: CommandBus } = {};
+  const pendingTurns = new PendingTurnService({ database, eventBus, getCommandBus: () => currentCommandBus(commandBusRef), ...(options.now !== undefined ? { now: options.now } : {}) });
   const lifecycleOptions = {
     ...(options.now !== undefined ? { now: options.now } : {}),
-    sideEffects: { onTerminal: (runId: string) => { activeWakes.releaseRun(runId); runQueue.releaseLocks(runId); }, finalizeNextTurns: (tx: AgentHubDatabase["sqlite"], runId: string, failureClass: Parameters<MailboxService["finalizeForRun"]>[2], now: number) => mailbox.finalizeForRun(tx, runId, failureClass, now) }
+    sideEffects: { onTerminal: (runId: string) => { activeWakes.releaseRun(runId); runQueue.releaseLocks(runId); pendingTurns.handleTerminal(runId); }, finalizeNextTurns: (tx: AgentHubDatabase["sqlite"], runId: string, failureClass: Parameters<MailboxService["finalizeForRun"]>[2], now: number) => mailbox.finalizeForRun(tx, runId, failureClass, now) }
   };
   const lifecycle = new RunLifecycleService(database, eventBus, lifecycleOptions);
   const mockAdapter = new MockAdapterManager({ database, eventBus, lifecycle, artifactFs, ...(options.now !== undefined ? { now: options.now } : {}) });
@@ -44,15 +46,17 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
   const commandBus = createCommandBus({
     database,
     handlers: {
-      ...createDaemonCommandHandlers({ database, eventBus, getCommandBus: () => commandBus, ...(options.now !== undefined ? { now: options.now } : {}) }),
+      ...createDaemonCommandHandlers({ database, eventBus, getCommandBus: () => commandBus, pendingTurns, ...(options.now !== undefined ? { now: options.now } : {}) }),
       ...createContextCommandHandlers(contextLedger, options.now),
       ...createArtifactCommandHandlers(artifactService),
       ...createPermissionCommandHandlers(permissionEngine, database, eventBus, options.now),
       ...createInterventionCommandHandlers(interventionEngine),
       WakeAgent: createWakeAgentHandler({ database, activeWakes, mailbox, lifecycle }) as CommandHandler,
+      ConsumePendingTurn: createConsumePendingTurnHandler(pendingTurns) as CommandHandler,
       CancelRun: createCancelRunHandler({ lifecycle, adapterManager: mockAdapter })
     }
   });
+  commandBusRef.current = commandBus;
 
   const handle = (req: IncomingMessage, res: ServerResponse) => { void route({ req, res, database, eventBus, commandBus, artifactService, outbox, ...(options.token !== undefined ? { token: options.token } : {}), ...(options.allowedOrigins !== undefined ? { allowedOrigins: options.allowedOrigins } : {}), host: `${options.host ?? "127.0.0.1"}:${options.port ?? 6677}`, ...(options.now !== undefined ? { now: options.now } : {}) }); };
   let server: Server | undefined;
@@ -78,6 +82,8 @@ async function route(ctx: RouteContext): Promise<void> {
   if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "unarchive") return dispatch(ctx, { roomId: parts[1] }, "UnarchiveRoom");
   if (ctx.req.method === "GET" && parts[0] === "rooms" && parts[2] === "messages") return json(ctx.res, 200, { messages: all(ctx.database, "SELECT * FROM messages WHERE room_id = ? ORDER BY created_at ASC", parts[1]) });
   if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "messages") return dispatch(ctx, { ...(await body(ctx)), roomId: parts[1] }, "SendMessage");
+  if (ctx.req.method === "DELETE" && parts[0] === "pending-turns" && parts[1]) return dispatch(ctx, { pendingTurnId: parts[1] }, "CancelPendingTurn");
+  if (ctx.req.method === "PATCH" && parts[0] === "messages" && parts[1]) return dispatch(ctx, { ...(await body(ctx)), messageId: parts[1] }, "EditMessage");
   if (ctx.req.method === "DELETE" && parts[0] === "messages" && parts[1]) return dispatch(ctx, { messageId: parts[1] }, "DeleteMessage");
   if (ctx.req.method === "GET" && url.pathname === "/agents") return json(ctx.res, 200, { agents: all(ctx.database, "SELECT * FROM agent_profiles ORDER BY name ASC") });
   if (ctx.req.method === "GET" && parts[0] === "agents" && parts[1]) return json(ctx.res, 200, { agent: get(ctx.database, "SELECT * FROM agent_profiles WHERE id = ?", parts[1]) });
@@ -218,8 +224,11 @@ function permissionRules(ctx: RouteContext, url: URL): void {
 async function dispatch(ctx: RouteContext, data: Record<string, unknown>, type: CommandType): Promise<void> {
   const result = await ctx.commandBus.dispatch({ ...data, type, idempotencyKey: typeof data.idempotencyKey === "string" ? data.idempotencyKey : randomUUID() }, { actor: { type: "user", id: "local" }, traceId: randomUUID(), origin: "http" });
   await ctx.outbox.drainPending();
-  json(ctx.res, result.ok ? 200 : 400, result);
+  json(ctx.res, result.ok ? 200 : statusForError(result.error.code), result);
 }
+
+function statusForError(code: string): number { return code === "rate_limited" ? 429 : code === "conflict" ? 409 : code === "not_found" ? 404 : code === "permission_denied" ? 403 : 400; }
+function currentCommandBus(ref: { readonly current?: CommandBus }): CommandBus { if (!ref.current) throw new Error("CommandBus is not initialized"); return ref.current; }
 
 function sse(ctx: RouteContext, url: URL, scopes: readonly string[]): void {
   const view = viewParam(url.searchParams.get("view"));

@@ -2,11 +2,13 @@ import { randomUUID } from "node:crypto";
 
 import type { Command, CommandBus, CommandErrorCode, CommandHandler, CommandMeta, CommandResult, EventBus, PublishInput } from "@agenthub/bus";
 import type { AgentHubDatabase } from "@agenthub/db";
+import type { PendingTurnService } from "@agenthub/orchestrator";
 
 export type DaemonCommandHandlersOptions = {
   readonly database: AgentHubDatabase;
   readonly eventBus: EventBus;
   readonly getCommandBus: () => CommandBus;
+  readonly pendingTurns: PendingTurnService;
   readonly now?: () => number;
 };
 
@@ -16,10 +18,11 @@ export function createDaemonCommandHandlers(options: DaemonCommandHandlersOption
     ArchiveRoom: (command) => setRoomArchived(options, command, true),
     UnarchiveRoom: (command) => setRoomArchived(options, command, false),
     SendMessage: (command, meta) => sendMessage(options, command, meta),
+    CancelPendingTurn: (command) => cancelPendingTurn(options, command),
     DeleteMessage: (command) => deleteMessage(options, command),
     PinMessage: () => notImplemented("PinMessage is reserved for the context-ledger slice"),
     RegenerateMessage: () => notImplemented("RegenerateMessage is reserved for a later messaging slice"),
-    EditMessage: () => notImplemented("EditMessage is reserved for pending-turn editing"),
+    EditMessage: (command, meta) => editMessage(options, command, meta),
     ReloadAgentProfile: () => notImplemented("Agent profile hot reload is not implemented in M1.4")
   };
 }
@@ -88,6 +91,12 @@ function sendMessage(options: DaemonCommandHandlersOptions, command: Command, me
   if (!room) return failed("not_found", `Room '${roomId}' not found`);
   const now = options.now?.() ?? Date.now();
   const messageId = randomUUID();
+  const busy = room.primary_agent_id !== null && primaryBusy(options.database, roomId, room.primary_agent_id);
+  const pendingTurnId = busy ? messageId : undefined;
+
+  if (busy && queuedPendingCount(options.database, roomId) >= 20) {
+    return failed("rate_limited", "pending_turn_quota_exceeded", { limit: 20 });
+  }
 
   options.database.sqlite.transaction(() => {
     options.database.sqlite
@@ -95,15 +104,19 @@ function sendMessage(options: DaemonCommandHandlersOptions, command: Command, me
         `INSERT INTO messages (
           id, workspace_id, room_id, sender_type, sender_id, run_id, role, status,
           quoted_message_id, turn_dispatch_mode, pending_turn_id, created_at, updated_at, deleted_at
-        ) VALUES (?, ?, ?, 'user', ?, NULL, 'user', 'completed', NULL, 'immediate', NULL, ?, ?, NULL)`
+        ) VALUES (?, ?, ?, 'user', ?, NULL, 'user', 'completed', NULL, ?, ?, ?, ?, NULL)`
       )
-      .run(messageId, room.workspace_id, roomId, actorId(meta), now, now);
+      .run(messageId, room.workspace_id, roomId, actorId(meta), busy ? "pending" : "immediate", pendingTurnId ?? null, now, now);
     options.database.sqlite.prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, 1, 'text', ?, ?)").run(messageId, JSON.stringify({ text }), now);
     options.eventBus.publish(messageEvent("message.created", room.workspace_id, roomId, messageId, { text }, now));
     options.eventBus.publish(messageEvent("message.completed", room.workspace_id, roomId, messageId, { text }, now));
+    if (pendingTurnId && room.primary_agent_id) {
+      options.database.sqlite.prepare("INSERT INTO pending_turns (id, room_id, user_message_id, primary_agent_id, status, enqueued_at, scheduled_at, cancelled_at, notes) VALUES (?, ?, ?, ?, 'queued', ?, NULL, NULL, NULL)").run(pendingTurnId, roomId, messageId, room.primary_agent_id, now);
+      options.eventBus.publish(pendingTurnEvent("pending_turn.created", room.workspace_id, roomId, room.primary_agent_id, pendingTurnId, messageId, "queued", now));
+    }
   })();
 
-  if (room.primary_agent_id) {
+  if (room.primary_agent_id && !busy) {
     const wake = options.getCommandBus().dispatch(
       {
         type: "WakeAgent",
@@ -124,6 +137,29 @@ function sendMessage(options: DaemonCommandHandlersOptions, command: Command, me
   }
 
   return successMessage(options, roomId, messageId);
+}
+
+function cancelPendingTurn(options: DaemonCommandHandlersOptions, command: Command): CommandResult {
+  const pendingTurnId = stringField(command, "pendingTurnId");
+  if (!pendingTurnId) return failed("validation_failed", "pendingTurnId is required");
+  return options.pendingTurns.cancel(pendingTurnId, typeof command.notes === "string" ? command.notes : undefined);
+}
+
+function editMessage(options: DaemonCommandHandlersOptions, command: Command, meta: CommandMeta): CommandResult | Promise<CommandResult> {
+  const messageId = stringField(command, "messageId");
+  const text = stringField(command, "text");
+  if (!messageId || !text) return failed("validation_failed", "messageId and text are required");
+  const row = options.database.sqlite.prepare("SELECT workspace_id, room_id, pending_turn_id FROM messages WHERE id = ? AND role = 'user'").get(messageId) as { readonly workspace_id: string; readonly room_id: string; readonly pending_turn_id: string | null } | undefined;
+  if (!row) return failed("not_found", `Message '${messageId}' not found`);
+  if (!row.pending_turn_id) return failed("conflict", "Only queued pending-turn messages can be edited");
+  const cancel = options.pendingTurns.cancel(row.pending_turn_id, "edited");
+  if (!cancel.ok) return cancel;
+  const now = options.now?.() ?? Date.now();
+  options.database.sqlite.transaction(() => {
+    options.database.sqlite.prepare("UPDATE messages SET status = 'cancelled', updated_at = ? WHERE id = ?").run(now, messageId);
+    options.eventBus.publish(messageEvent("message.updated", row.workspace_id, row.room_id, messageId, { text, replacement: true }, now));
+  })();
+  return sendMessage(options, { type: "SendMessage", roomId: row.room_id, text, idempotencyKey: `edit:${messageId}:${now}` }, meta);
 }
 
 function deleteMessage(options: DaemonCommandHandlersOptions, command: Command): CommandResult {
@@ -166,8 +202,12 @@ function roomEvent(type: "room.created" | "room.opened" | "room.closed", workspa
   return { id: randomUUID(), type, schemaVersion: 1, workspaceId, roomId, payload, createdAt };
 }
 
-function messageEvent(type: "message.created" | "message.completed" | "message.deleted", workspaceId: string, roomId: string, messageId: string, payload: Record<string, unknown>, createdAt: number): PublishInput {
+function messageEvent(type: "message.created" | "message.completed" | "message.deleted" | "message.updated", workspaceId: string, roomId: string, messageId: string, payload: Record<string, unknown>, createdAt: number): PublishInput {
   return { id: randomUUID(), type, schemaVersion: 1, workspaceId, roomId, payload: { messageId, roomId, ...payload }, createdAt };
+}
+
+function pendingTurnEvent(type: "pending_turn.created", workspaceId: string, roomId: string, agentId: string, pendingTurnId: string, messageId: string, status: string, createdAt: number): PublishInput {
+  return { id: randomUUID(), type, schemaVersion: 1, workspaceId, roomId, agentId, payload: { roomId, pendingTurnId, messageId, status }, createdAt };
 }
 
 function latestEvents(database: AgentHubDatabase, roomId: string): { readonly seq: number; readonly type: string }[] {
@@ -195,8 +235,16 @@ function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
   return typeof value === "object" && value !== null && "then" in value && typeof value.then === "function";
 }
 
-function failed(code: CommandErrorCode, message: string): CommandResult {
-  return { ok: false, error: { code, message } };
+function primaryBusy(database: AgentHubDatabase, roomId: string, agentId: string): boolean {
+  return database.sqlite.prepare("SELECT id FROM runs WHERE room_id = ? AND agent_id = ? AND status IN ('queued', 'claimed', 'starting', 'running', 'waiting_permission', 'cancelling') LIMIT 1").get(roomId, agentId) !== undefined;
+}
+
+function queuedPendingCount(database: AgentHubDatabase, roomId: string): number {
+  return (database.sqlite.prepare("SELECT COUNT(*) AS count FROM pending_turns WHERE room_id = ? AND status = 'queued'").get(roomId) as { readonly count: number }).count;
+}
+
+function failed(code: CommandErrorCode, message: string, details?: unknown): CommandResult {
+  return { ok: false, error: { code, message, ...(details !== undefined ? { details } : {}) } };
 }
 
 function notImplemented(message: string): CommandResult {
