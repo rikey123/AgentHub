@@ -100,6 +100,10 @@ describe("daemon M1.4 composition", () => {
     expect(browserRaw.status).toBe(403);
     expect(await browserRaw.json()).toMatchObject({ error: "requires_admin_scope" });
 
+    const noOriginRaw = await fetch(`${baseUrl}/event?view=raw`);
+    expect(noOriginRaw.status).toBe(403);
+    expect(await noOriginRaw.json()).toMatchObject({ error: "requires_admin_scope" });
+
     const adminRaw = await fetch(`${baseUrl}/event?view=raw&runId=run_raw`, { headers: { authorization: "Bearer raw-admin" } });
     expect(adminRaw.status).toBe(200);
     expect(daemon.eventBus.replayDurableSinceSeq(0, { view: "raw", runId: "run_raw" })).toEqual([]);
@@ -133,11 +137,13 @@ describe("daemon M1.4 composition", () => {
     expect(queued.ok).toBe(true);
     expect(daemon.database.sqlite.prepare("SELECT status, user_message_id FROM pending_turns WHERE id = ?").get(queued.data.messageId)).toMatchObject({ status: "queued", user_message_id: queued.data.messageId });
     expect(daemon.database.sqlite.prepare("SELECT turn_dispatch_mode, pending_turn_id FROM messages WHERE id = ?").get(queued.data.messageId)).toMatchObject({ turn_dispatch_mode: "pending", pending_turn_id: queued.data.messageId });
+    expect(messagePayload(daemon, queued.data.messageId, "message.created")).toMatchObject({ messageId: queued.data.messageId, pendingTurnId: queued.data.messageId, turnDispatchMode: "pending" });
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM runs WHERE wake_reason = 'primary_turn'").get()).toMatchObject({ count: 1 });
 
     daemon.database.sqlite.prepare("UPDATE runs SET status = 'completed', ended_at = ? WHERE id = 'run_busy'").run(Date.now());
-    const immediate = await client.sendMessage(room.data.roomId, { text: "immediate", idempotencyKey: "immediate-1" }) as { readonly ok: boolean };
+    const immediate = await client.sendMessage(room.data.roomId, { text: "immediate", idempotencyKey: "immediate-1" }) as { readonly ok: boolean; readonly data: { readonly messageId: string } };
     expect(immediate.ok).toBe(true);
+    expect(messagePayload(daemon, immediate.data.messageId, "message.created")).toMatchObject({ messageId: immediate.data.messageId, turnDispatchMode: "immediate" });
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM runs WHERE wake_reason = 'primary_turn'").get()).toMatchObject({ count: 2 });
   });
 
@@ -255,6 +261,18 @@ describe("daemon M1.4 composition", () => {
     expect(stats.pubsub.map((item) => item.channel)).toContain("adapter_raw");
     expect(stats.eventsLast5min).toBeGreaterThan(0);
     expect(stats.uptimeMs).toBeGreaterThanOrEqual(0);
+
+    // Browser session (Origin present, no admin scope) must be denied /debug/events per spec.
+    const bootstrap = await fetch(`${baseUrl}/auth/session`, { method: "POST", headers: { origin: baseUrl, "content-type": "application/json" } });
+    const cookie = bootstrap.headers.get("set-cookie")?.split(";")[0] ?? "";
+    const browserDebug = await fetch(`${baseUrl}/debug/events`, { headers: { origin: baseUrl, cookie } });
+    expect(browserDebug.status).toBe(403);
+    expect(await browserDebug.json()).toMatchObject({ error: "debug_disabled" });
+
+    // Admin bearer must be allowed /debug/events.
+    daemon.database.sqlite.prepare("INSERT INTO auth_tokens (id, fingerprint, hash, scopes, created_at) VALUES (?, ?, ?, ?, ?)").run("token_debug_admin", "debug-admin", sha256("debug-admin"), JSON.stringify(["admin"]), 1);
+    const adminDebug = await fetch(`${baseUrl}/debug/events`, { headers: { authorization: "Bearer debug-admin" } });
+    expect(adminDebug.status).toBe(200);
   });
 
   it("exposes task HTTP routes through CommandBus and returns conflicts for invalid completion", async () => {
@@ -305,6 +323,12 @@ function seedPendingMessage(roomId: string, agentId: string, messageId: string, 
 function activeDaemon(): DaemonApp {
   if (!currentDaemon) throw new Error("daemon is not initialized");
   return currentDaemon;
+}
+
+function messagePayload(daemon: DaemonApp, messageId: string, type: string): unknown {
+  const row = daemon.database.sqlite.prepare("SELECT payload FROM events WHERE type = ? AND json_extract(payload, '$.messageId') = ? ORDER BY seq DESC LIMIT 1").get(type, messageId) as { readonly payload: string } | undefined;
+  if (!row) throw new Error(`event ${type} for message ${messageId} not found`);
+  return JSON.parse(row.payload) as unknown;
 }
 
 async function readSseEvent(body: ReadableStream<Uint8Array> | null, eventName: string): Promise<string> {

@@ -180,6 +180,27 @@ describe("WakeAgent and CancelRun handlers", () => {
     expect(cancelRun).toHaveBeenCalledWith("run_cancel");
   });
 
+  test("CancelRun swallows adapter cancel rejection and run stays cancelling until adapter drives cancelFinalized", async () => {
+    createRun("run_cancel_reject");
+    currentLifecycle().markClaimed(null, "run_cancel_reject");
+    currentLifecycle().markStarting(null, "run_cancel_reject", 123);
+    currentLifecycle().markRunning(null, "run_cancel_reject", "s_1");
+    // Adapter cancel rejects — this must not propagate to the caller.
+    const cancelRun = vi.fn(async (): Promise<void> => { throw new Error("adapter cancel failed"); });
+    const commandBus = new CommandBus({ database: currentDatabase(), handlers: { CancelRun: createCancelRunHandler({ lifecycle: currentLifecycle(), adapterManager: { cancelRun } }) } });
+
+    const result = await commandBus.dispatch({ type: "CancelRun", runId: "run_cancel_reject" }, { actor: { type: "user", id: "u_1" }, traceId: "trace_reject", origin: "http" }) as CommandResult;
+
+    // Handler returns success synchronously; adapter cancel error is swallowed.
+    expect(result).toMatchObject({ ok: true, data: { status: "cancelling" } });
+    expect(statusOf("run_cancel_reject")).toBe("cancelling");
+
+    // Run stays in cancelling until the adapter bridge drives cancelFinalized via session.ended(cancelled).
+    const bridge = bridgeFor("run_cancel_reject");
+    bridge.handle({ type: "session.ended", sessionId: "s_1", reason: "cancelled", cost: zeroCost() });
+    expect(statusOf("run_cancel_reject")).toBe("cancelled");
+  });
+
   test("ConsumePendingTurn rejects origin http", () => {
     seedRoom("room_1", "agent_1");
     seedPendingTurn("pt_http", "msg_http");
@@ -256,9 +277,16 @@ describe("TaskService and RoomMcpServer", () => {
     const commandBus = new CommandBus({ database: currentDatabase(), handlers: { CreateTask: createCreateTaskHandler(service), UpdateTask: createUpdateTaskHandler(service), CompleteTask: createCompleteTaskHandler(service) } });
     const created = commandBus.dispatch({ type: "CreateTask", roomId: "room_1", title: "Complete me", assigneeAgentId: "agent_1" }, { actor: { type: "user", id: "local" }, traceId: "trace_create", origin: "http" }) as CommandResult<{ readonly taskId: string }>;
     if (!created.ok) throw new Error("expected task create success");
+    const rejectedEvents: unknown[] = [];
+    const unsubscribe = currentBus().subscribe("task.status.changed.rejected", (event) => {
+      rejectedEvents.push(event);
+    });
 
     const inactive = commandBus.dispatch({ type: "CompleteTask", taskId: created.data.taskId }, { actor: { type: "user", id: "local" }, traceId: "trace_complete_pending", origin: "http" }) as CommandResult;
     expect(inactive).toMatchObject({ ok: false, error: { code: "conflict" } });
+    expect(rejectedEvents).toHaveLength(1);
+    expect(currentDatabase().sqlite.prepare("SELECT type FROM events WHERE type = 'task.status.changed.rejected'").get()).toBeUndefined();
+    unsubscribe();
 
     expect(commandBus.dispatch({ type: "UpdateTask", taskId: created.data.taskId, status: "in_progress" }, { actor: { type: "user", id: "local" }, traceId: "trace_progress", origin: "http" })).toMatchObject({ ok: true });
     expect(commandBus.dispatch({ type: "CompleteTask", taskId: created.data.taskId }, { actor: { type: "user", id: "local" }, traceId: "trace_complete", origin: "http" })).toMatchObject({ ok: true });
@@ -272,10 +300,19 @@ describe("TaskService and RoomMcpServer", () => {
     const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
     const commandBus = new CommandBus({ database: currentDatabase(), handlers: { CreateTask: createCreateTaskHandler(service), UpdateTask: createUpdateTaskHandler(service) } });
     const mcp = new RoomMcpServer({ commandBus, taskService: service });
+    const rejectedEvents: unknown[] = [];
+    const unsubscribe = currentBus().subscribe("task.status.changed.rejected", (event) => {
+      rejectedEvents.push(event);
+    });
 
     const created = await mcp.callTool("room.create_task", { title: "MCP task", assigneeAgentId: "agent_1" }, { roomId: "room_1", runId: "run_1", agentId: "agent_1" });
     expect(created).toMatchObject({ ok: true });
     if (!created.ok || !isRecord(created.data) || typeof created.data.taskId !== "string") throw new Error("expected task id");
+    expect(await mcp.callTool("room.update_task", { taskId: created.data.taskId, status: "done" }, { roomId: "room_1", runId: "run_1", agentId: "agent_1" })).toMatchObject({ ok: false, error: { code: "conflict" } });
+    expect(currentDatabase().sqlite.prepare("SELECT status FROM tasks WHERE id = ?").get(created.data.taskId)).toMatchObject({ status: "pending" });
+    expect(rejectedEvents).toHaveLength(1);
+    expect(currentDatabase().sqlite.prepare("SELECT type FROM events WHERE type = 'task.status.changed.rejected'").get()).toBeUndefined();
+    expect(await mcp.callTool("room.update_task", { taskId: created.data.taskId, status: "in_progress" }, { roomId: "room_1", runId: "run_1", agentId: "agent_1" })).toMatchObject({ ok: true });
     expect(await mcp.callTool("room.update_task", { taskId: created.data.taskId, status: "done" }, { roomId: "room_1", runId: "run_1", agentId: "agent_1" })).toMatchObject({ ok: true });
     service.create({ roomId: "room_2", title: "Other room", createdBy: "user", assigneeAgentId: "agent_2" });
 
@@ -286,6 +323,7 @@ describe("TaskService and RoomMcpServer", () => {
     expect(listed.data.tasks[0]).toMatchObject({ title: "MCP task", status: "completed" });
     expect(await mcp.callTool("room.read_mailbox", {}, { roomId: "room_1", runId: "run_1", agentId: "agent_1" })).toMatchObject({ ok: false, error: { code: "tool_not_found" } });
     expect(await mcp.callTool("room.update_task", { taskId: created.data.taskId, status: "in_progress" }, { roomId: "room_1", runId: "run_1", agentId: "agent_1" })).toMatchObject({ ok: false, error: { code: "conflict" } });
+    unsubscribe();
   });
 });
 

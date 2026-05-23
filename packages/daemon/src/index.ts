@@ -11,7 +11,7 @@ import { createInterventionCommandHandlers, InterventionEngine } from "@agenthub
 import { ActiveWakesRegistry, createCancelRunHandler, createCompleteTaskHandler, createConsumePendingTurnHandler, createCreateTaskHandler, createUpdateTaskHandler, createWakeAgentHandler, MailboxService, PendingTurnService, RoomMcpServer, RunLifecycleService, RunQueue, TaskService } from "@agenthub/orchestrator";
 import { createPermissionCommandHandlers, PermissionEngine, seedBuiltInPermissionProfiles } from "@agenthub/permissions";
 import type { EventEnvelope } from "@agenthub/protocol/events";
-import { authenticateBrowserRequest, issueBrowserSession, redactAndTruncate } from "@agenthub/security";
+import { authenticateBrowserRequest, issueBrowserSession, redactAndTruncate, type BrowserAuthResult } from "@agenthub/security";
 
 import { AdapterRegistry } from "./adapters/registry.ts";
 import { createDaemonCommandHandlers, seedDefaultData } from "./commands.ts";
@@ -129,8 +129,8 @@ async function route(ctx: RouteContext): Promise<void> {
   if (ctx.req.method === "POST" && parts[0] === "artifacts" && parts[2] === "revert") return dispatch(ctx, { artifactId: parts[1] }, "RevertArtifact");
   if (ctx.req.method === "GET" && parts[0] === "artifacts" && parts[2] === "files" && parts.length === 3) return json(ctx.res, 200, { files: ctx.artifactService.files(parts[1] as string) });
   if (ctx.req.method === "GET" && parts[0] === "artifacts" && parts[2] === "files" && parts.length >= 4) return json(ctx.res, 200, { content: ctx.artifactService.fileContent(parts[1] as string, decodeURIComponent(parts.slice(3).join("/"))) ?? null });
-  if (ctx.req.method === "GET" && url.pathname === "/debug/events") return debugEvents(ctx, url);
-  if (ctx.req.method === "GET" && url.pathname === "/debug/stats") return debugStats(ctx);
+  if (ctx.req.method === "GET" && url.pathname === "/debug/events") return debugEvents(ctx, url, auth);
+  if (ctx.req.method === "GET" && url.pathname === "/debug/stats") return debugStats(ctx, auth);
   if (ctx.req.method === "GET" && parts[0] === "workspaces" && parts[2] === "cost-summary") return json(ctx.res, 501, { error: "cost-panel-local is V0.5", capability: "v1-roadmap" });
   if (ctx.req.method === "GET" && (url.pathname === "/board" || url.pathname === "/timeline")) return json(ctx.res, 404, { error: "not_found", capability: "v1-roadmap" });
   return json(ctx.res, 404, { error: "not_found" });
@@ -169,7 +169,12 @@ function interventions(ctx: RouteContext, url: URL): void {
   json(ctx.res, 200, { interventions: all(ctx.database, `SELECT * FROM interventions${where} ORDER BY created_at ASC`, ...params) });
 }
 
-function debugEvents(ctx: RouteContext, url: URL): void {
+function debugEvents(ctx: RouteContext, url: URL, auth: BrowserAuthResult & { readonly ok: true }): void {
+  // Spec: local loopback (authKind=local) or admin bearer may access /debug/events.
+  // Browser session or non-admin bearer → 403 debug_disabled.
+  if (auth.authKind !== "local" && !auth.scopes.includes("admin")) {
+    return json(ctx.res, 403, { error: "debug_disabled" });
+  }
   const clauses: string[] = [];
   const params: unknown[] = [];
   for (const [column, param] of [["trace_id", "traceId"], ["run_id", "runId"], ["room_id", "roomId"], ["type", "type"]] as const) {
@@ -188,8 +193,20 @@ function debugEvents(ctx: RouteContext, url: URL): void {
   json(ctx.res, 200, { events: all(ctx.database, `SELECT * FROM events${where} ORDER BY created_at ASC, seq ASC LIMIT ?`, ...params, limit) });
 }
 
-function debugStats(ctx: RouteContext): void {
+function debugStats(ctx: RouteContext, auth: BrowserAuthResult & { readonly ok: true }): void {
   const now = Date.now();
+  // Spec: local loopback or admin bearer → full stats; browser session → basic health only (no PII).
+  const isDebugAllowed = auth.authKind === "local" || auth.scopes.includes("admin");
+  if (!isDebugAllowed) {
+    return json(ctx.res, 200, {
+      uptimeMs: Math.floor(process.uptime() * 1000),
+      roomCount: scalar(ctx.database, "SELECT COUNT(*) AS count FROM rooms WHERE archived_at IS NULL"),
+      activeRunCount: scalar(ctx.database, "SELECT COUNT(*) AS count FROM runs WHERE status IN ('queued', 'running', 'waiting_permission')"),
+      pendingPermissionCount: scalar(ctx.database, "SELECT COUNT(*) AS count FROM permission_requests WHERE status = 'pending'"),
+      pendingInterventionCount: scalar(ctx.database, "SELECT COUNT(*) AS count FROM interventions WHERE status = 'pending_user_decision'"),
+      sseClientCount: 0
+    });
+  }
   json(ctx.res, 200, {
     uptimeMs: Math.floor(process.uptime() * 1000),
     roomCount: scalar(ctx.database, "SELECT COUNT(*) AS count FROM rooms WHERE archived_at IS NULL"),

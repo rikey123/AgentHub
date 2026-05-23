@@ -115,7 +115,7 @@ export class TaskService {
     if (nextStatus === undefined) return failed("validation_failed", "invalid task status");
     const existing = this.task(input.taskId);
     if (!existing) return failed("not_found", `Task '${input.taskId}' not found`);
-    if (!canTransition(existing.status, nextStatus)) return failed("conflict", "invalid_task_transition", { from: existing.status, to: nextStatus });
+    if (!canTransition(existing.status, nextStatus)) return this.rejectTransition(existing, nextStatus, input.reason);
     const now = this.options.now?.() ?? Date.now();
     this.options.database.sqlite.transaction(() => {
       this.options.database.sqlite.prepare("UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?").run(nextStatus, now, input.taskId);
@@ -129,7 +129,7 @@ export class TaskService {
   complete(taskId: string, reason = "user_marked"): CommandResult<{ readonly task: TaskView; readonly taskId: string }> {
     const existing = this.task(taskId);
     if (!existing) return failed("not_found", `Task '${taskId}' not found`);
-    if (existing.status !== "in_progress" && existing.status !== "review") return failed("conflict", "invalid_task_transition", { from: existing.status, to: "completed" });
+    if (existing.status !== "in_progress" && existing.status !== "review") return this.rejectTransition(existing, "completed", reason);
     return this.updateStatus({ taskId, status: "completed", reason });
   }
 
@@ -153,6 +153,12 @@ export class TaskService {
 
   private roomAgent(roomId: string, agentId: string): boolean {
     return this.options.database.sqlite.prepare("SELECT 1 FROM room_participants WHERE room_id = ? AND participant_id = ? AND participant_type = 'agent'").get(roomId, agentId) !== undefined;
+  }
+
+  private rejectTransition<T = { readonly task: TaskView; readonly taskId: string }>(existing: TaskRow, nextStatus: TaskStatus, reason?: string): CommandResult<T> {
+    const now = this.options.now?.() ?? Date.now();
+    this.options.eventBus.publish(taskEvent("task.status.changed.rejected", existing.workspace_id, existing.room_id ?? "", existing.id, { taskId: existing.id, prevStatus: existing.status, nextStatus, ...(reason !== undefined ? { reason } : {}) }, now));
+    return failed("conflict", "invalid_task_transition", { from: existing.status, to: nextStatus });
   }
 }
 
@@ -204,7 +210,7 @@ export function normalizeStatus(value: unknown): TaskStatus | undefined {
 function canTransition(from: TaskStatus, to: TaskStatus): boolean {
   if (from === to) return false;
   const allowed: Record<TaskStatus, readonly TaskStatus[]> = {
-    pending: ["in_progress", "blocked", "completed", "cancelled"],
+    pending: ["in_progress", "blocked", "cancelled"],
     in_progress: ["blocked", "review", "completed", "cancelled"],
     blocked: ["pending", "in_progress", "cancelled"],
     review: ["in_progress", "completed", "cancelled"],
@@ -235,7 +241,7 @@ function taskView(row: TaskRow): TaskView {
   };
 }
 
-function taskEvent(type: "task.created" | "task.assigned" | "task.status.changed", workspaceId: string, roomId: string, taskId: string, payload: Record<string, unknown>, createdAt: number): PublishInput {
+function taskEvent(type: "task.created" | "task.assigned" | "task.status.changed" | "task.status.changed.rejected", workspaceId: string, roomId: string, taskId: string, payload: Record<string, unknown>, createdAt: number): PublishInput {
   return { id: randomUUID(), type, schemaVersion: 1, workspaceId, roomId, taskId, payload: withoutUndefined(payload), createdAt };
 }
 

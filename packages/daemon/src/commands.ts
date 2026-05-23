@@ -108,7 +108,7 @@ function sendMessage(options: DaemonCommandHandlersOptions, command: Command, me
       )
       .run(messageId, room.workspace_id, roomId, actorId(meta), busy ? "pending" : "immediate", pendingTurnId ?? null, now, now);
     options.database.sqlite.prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, 1, 'text', ?, ?)").run(messageId, JSON.stringify({ text }), now);
-    options.eventBus.publish(messageEvent("message.created", room.workspace_id, roomId, messageId, { text }, now));
+    options.eventBus.publish(messageEvent("message.created", room.workspace_id, roomId, messageId, { text, senderId: actorId(meta), role: "user", turnDispatchMode: busy ? "pending" : "immediate", ...(pendingTurnId !== undefined ? { pendingTurnId } : {}) }, now));
     options.eventBus.publish(messageEvent("message.completed", room.workspace_id, roomId, messageId, { text }, now));
     if (pendingTurnId && room.primary_agent_id) {
       options.database.sqlite.prepare("INSERT INTO pending_turns (id, room_id, user_message_id, primary_agent_id, status, enqueued_at, scheduled_at, cancelled_at, notes) VALUES (?, ?, ?, ?, 'queued', ?, NULL, NULL, NULL)").run(pendingTurnId, roomId, messageId, room.primary_agent_id, now);
