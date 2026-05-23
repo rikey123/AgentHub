@@ -178,3 +178,8 @@ ot_implemented result rather than a thrown HTTP route branch, preserving the thi
 - Task HTTP mutating routes follow the thin daemon rule: `POST /rooms/:id/tasks` and `POST /tasks/:id/complete` dispatch `CreateTask` / `CompleteTask` through CommandBus; `TaskService` owns SQLite writes and canonical `task.*` event publication.
 - The requested package filter `@agenthub/adapters-acp-base` does not match a workspace project; the actual package is `@agenthub/adapter-acp-base`, whose filtered tests pass.
 
+## 2026-05-23 P0-2 MCP managed startup wiring
+
+- ACP base already persists `CreateSessionInput.mcpServer`, but real provider coverage must assert the managed adapter path too; `ClaudeCodeACPAdapter.runManaged()` is the startup path that must forward the room MCP server into `createSession()`.
+- Claude adapter tests can exercise managed startup without spawning an external provider by constructing `ClaudeCodeACPAdapter({ command: "" })`, matching the existing ArtifactFS managed-run test pattern.
+

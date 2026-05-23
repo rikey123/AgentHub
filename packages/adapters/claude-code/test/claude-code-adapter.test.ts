@@ -3,9 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { ArtifactFSRunRegistry, ArtifactService } from "@agenthub/artifacts";
-import { createEventBus } from "@agenthub/bus";
+import { CommandBus, createEventBus } from "@agenthub/bus";
 import { createDatabase } from "@agenthub/db";
-import { RunLifecycleService } from "@agenthub/orchestrator";
+import { RoomMcpServer, RunLifecycleService, TaskService } from "@agenthub/orchestrator";
 import { PermissionEngine, seedBuiltInPermissionProfiles } from "@agenthub/permissions";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
@@ -43,9 +43,12 @@ describe("ClaudeCodeACPAdapter", () => {
     lifecycle.create(null, { runId: "run", workspaceId: "w", roomId: "r", agentId: "a", wakeReason: "primary_turn", workspaceMode: "shadow_buffer", messageId: "m" });
     lifecycle.markClaimed(null, "run");
     lifecycle.markStarting(null, "run", 123);
-    const adapter = new ClaudeCodeACPAdapter({ command: "", services: { database, eventBus, permissionEngine: permissions, artifactFs }, lifecycle, workspaceId: "w", permissionEngine: permissions });
+    const taskService = new TaskService({ database, eventBus });
+    const mcpServer = new RoomMcpServer({ commandBus: new CommandBus({ database }), taskService });
+    const adapter = new ClaudeCodeACPAdapter({ command: "", services: { database, eventBus, permissionEngine: permissions, artifactFs }, lifecycle, workspaceId: "w", permissionEngine: permissions, mcpServer });
 
     await adapter.runManaged(lifecycle.read("run"));
+    expect(adapter.debugSession("acp-claude-code-run")?.mcpServer).toBe(mcpServer);
     adapter.mapToBridgeEvent("run", { type: "fs/write", payload: { path: "src/a.ts", content: "new" } });
     adapter.mapToBridgeEvent("run", { type: "session/end", payload: { sessionId: "acp-claude-code-run", reason: "completed" } });
 
