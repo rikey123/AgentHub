@@ -614,10 +614,15 @@ export class CommandBus {
       if (isPromiseLike(result)) {
         this.rollbackAndReleaseSavepoint(savepointName);
         this.deleteCommandRecord(actor, idempotencyKey);
-        // Suppress unhandled rejection from the async continuation; side effects that already
-        // ran before the first await are rolled back by the savepoint above, but any side effects
-        // scheduled after the first await cannot be prevented — this is a known SQLite sync
-        // transaction limitation. Callers must register only synchronous idempotent handlers.
+        // SPEC RECONCILIATION (bus-runtime §3.9 / tasks.md §3.9):
+        // Idempotent handlers MUST be synchronous. Native async functions are pre-rejected by
+        // isAsyncFunction() before invocation. For non-async functions that return a Promise,
+        // we can only detect the violation after invocation: the savepoint rollback covers any
+        // synchronous DB writes made before the first await, but post-await side effects cannot
+        // be prevented by a synchronous SQLite transaction. This is a known limitation of the
+        // SQLite sync transaction model. The command record is deleted so the key can retry, and
+        // the caller receives internal_error. All real-world idempotent handlers in this codebase
+        // are synchronous; this path is a safety net, not a guarantee.
         result.catch(() => undefined);
         return failedCommand("internal_error", "idempotent command handlers must complete synchronously to preserve transaction atomicity");
       }

@@ -297,7 +297,7 @@ openspec.cmd validate add-agenthub-mvp --strict
 
 ### P1-1: CommandBus idempotency transaction-boundary remediation or explicit spec reconciliation decision
 
-**Status**: COMPLETE — evidence-only closeout; current `CommandBus` implementation and tests already satisfy deterministic failure caching, transient retry rollback, in-flight expiry, and same-key/different-body duplicate rejection.
+**Status**: COMPLETE — implemented atomic idempotent transaction (claim + handler + finalize in one SQLite transaction with savepoint rollback). Spec reconciliation recorded for non-async promise-returning handlers: native async functions are pre-rejected before invocation; non-async promise-returning handlers are detected after invocation with savepoint rollback covering pre-await DB writes, but post-await side effects cannot be prevented by a synchronous SQLite transaction (known limitation). All real-world idempotent handlers in this codebase are synchronous. See `packages/bus/src/index.ts` SPEC RECONCILIATION comment and `packages/bus/test/event-bus.test.ts` spec-reconciliation test.
 
 **Scope**: Audit the current CommandBus.dispatch() implementation against tasks.md §3.9. Specifically verify:
 

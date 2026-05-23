@@ -360,7 +360,13 @@ describe("CommandBus", () => {
     expect(commandRecordStatuses()).toEqual([]);
   });
 
-  test("rejects non-async promise-returning idempotent handlers after invocation and suppresses unhandled rejection", async () => {
+  // SPEC RECONCILIATION: documents known limitation per bus-runtime §3.9 spec reconciliation.
+  // Idempotent handlers must be synchronous. Native async functions are pre-rejected before
+  // invocation. Non-async promise-returning handlers are detected after invocation; the savepoint
+  // rollback covers pre-await DB writes, but post-await side effects cannot be prevented by a
+  // synchronous SQLite transaction. The command record is deleted and internal_error is returned.
+  // All real-world idempotent handlers in this codebase are synchronous.
+  test("spec-reconciliation: non-async promise-returning handler is detected after invocation; record deleted, internal_error returned, post-await side effects are not guaranteed to be prevented", async () => {
     currentDatabase().sqlite.exec("CREATE TABLE command_side_effects (id TEXT PRIMARY KEY, value TEXT NOT NULL)");
     const commandBus = new CommandBus({
       database: currentDatabase(),
@@ -376,14 +382,12 @@ describe("CommandBus", () => {
 
     const result = commandBus.dispatch({ type: "CreateRoom", roomId: "room_promise" }, meta) as CommandResult;
 
-    // Handler is invoked but Promise is detected after invocation; command record is deleted.
+    // Invariants that ARE guaranteed: internal_error returned, command record deleted.
     expect(result).toMatchObject({ ok: false, error: { code: "internal_error" } });
     expect(commandRecordStatuses()).toEqual([]);
-    // Flush microtasks to let the deferred side effect run (if any).
+    // Flush microtasks. Post-await side effects may run (known limitation); the test documents
+    // this rather than asserting they are prevented.
     await new Promise((resolve) => setTimeout(resolve, 0));
-    // Side effect may have run (known limitation: post-invocation async continuations cannot be
-    // prevented by savepoint rollback). The important invariant is that the command record is
-    // cleaned up and the caller receives internal_error, not a false success.
     expect(commandRecordStatuses()).toEqual([]);
   });
 
