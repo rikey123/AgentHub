@@ -69,7 +69,7 @@
 
 - [x] 4.1 在 `packages/daemon` 装 Hono + 启动 server 绑 127.0.0.1:6677 — refs: local-daemon/Daemon 启动与端口绑定
 - [ ] 4.2 实现配置加载（config.toml / 环境变量 / CLI flag 优先级）— refs: local-daemon/Daemon 启动与端口绑定 [MISSING]
-- [ ] 4.3 实现 0.0.0.0 绑定校验（必须 token + 显式 enabled）— refs: security/默认 127.0.0.1 绑定 [MISSING]
+- [x] 4.3 实现 0.0.0.0 绑定校验（必须 token + 显式 enabled）— refs: security/默认 127.0.0.1 绑定
 - [x] 4.4 实现 `/healthz` + `/debug/stats` — refs: local-daemon/健康检查, observability/健康指标端点（最小）
 - [ ] 4.5 实现 SIGINT/SIGTERM 优雅停止（30s in-flight run 超时）— refs: local-daemon/优雅停止 [MISSING]
 - [x] 4.6 实现 `/event` SSE endpoint（首次连接 / cursor 重连 / heartbeat 10s / 反压策略）— refs: local-daemon/多客户端 SSE 连接, event-system/SSE 桥接与 cursor 重连, bus-runtime/SSE 反压（buffer 上限 + 慢消费者策略）

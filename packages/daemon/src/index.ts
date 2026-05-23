@@ -27,7 +27,7 @@ export type DaemonStartupPhase =
   | "AdapterManager detect + register"
   | "CommandBus open"
   | "HTTP server bind + SSE accept";
-export type DaemonOptions = { readonly databasePath: string; readonly host?: string; readonly port?: number; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly now?: () => number; readonly onLifecyclePhase?: (event: { readonly direction: "startup" | "shutdown"; readonly phase: DaemonStartupPhase }) => void };
+export type DaemonOptions = { readonly databasePath: string; readonly host?: string; readonly port?: number; readonly token?: string; readonly allowRemote?: boolean; readonly allowedOrigins?: readonly string[]; readonly now?: () => number; readonly onLifecyclePhase?: (event: { readonly direction: "startup" | "shutdown"; readonly phase: DaemonStartupPhase }) => void };
 export type DaemonApp = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly roomMcpServer: RoomMcpServer; readonly adapterRegistry: AdapterRegistry; readonly mockAdapter: MockAdapterManager; readonly handle: (req: IncomingMessage, res: ServerResponse) => void; start(): Promise<Server>; close(): Promise<void> };
 const PHASE_SQLITE: DaemonStartupPhase = "SQLite open + pragma + migrate";
 const PHASE_EVENT_STORE: DaemonStartupPhase = "EventStore readiness check";
@@ -97,6 +97,11 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
   const startDaemon = async (): Promise<Server> => {
     closed = false;
     ready = false;
+    const host = options.host ?? "127.0.0.1";
+    if (!isLoopbackHost(host) && (options.token === undefined || options.allowRemote !== true)) {
+      process.stderr.write(`Refusing remote bind to ${host} without token and allowRemote=true\n`);
+      throw new Error("Remote binding requires token and allowRemote=true");
+    }
     emitPhase("startup", PHASE_SQLITE);
     const database = createDatabase({ path: options.databasePath, applyMigrations: true });
     seedDefaultData(database, options.now?.() ?? Date.now());
@@ -167,7 +172,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
 
     emitPhase("startup", PHASE_HTTP);
     return await new Promise<Server>((resolve) => {
-      server = createServer(handle).listen(options.port ?? 6677, options.host ?? "127.0.0.1", () => {
+      server = createServer(handle).listen(options.port ?? 6677, host, () => {
         ready = true;
         resolve(server as Server);
       });
@@ -434,6 +439,7 @@ function visible(event: EventEnvelope, view: ReplayView, roomId?: string, runId?
 
 function viewParam(value: string | null): ReplayView { return value === "main" || value === "raw" ? value : "detail"; }
 function numberQuery(url: URL, key: string): number | undefined { const value = url.searchParams.get(key); if (value === null) return undefined; const parsed = Number(value); return Number.isFinite(parsed) ? parsed : undefined; }
+function isLoopbackHost(host: string): boolean { return host === "127.0.0.1" || host === "::1" || host === "localhost"; }
 function authenticate(ctx: RouteContext, url: URL) {
   const authorization = typeof ctx.req.headers.authorization === "string" ? ctx.req.headers.authorization : url.searchParams.get("token") !== null ? `Bearer ${url.searchParams.get("token")}` : undefined;
   return authenticateBrowserRequest({ method: ctx.req.method ?? "GET", pathname: url.pathname, headers: { origin: header(ctx, "origin"), host: header(ctx, "host"), authorization, cookie: header(ctx, "cookie"), "content-type": header(ctx, "content-type"), "x-agenthub-csrf": header(ctx, "x-agenthub-csrf") }, database: ctx.database, ...(ctx.token !== undefined ? { token: ctx.token } : {}), host: ctx.host, ...(ctx.allowedOrigins !== undefined ? { allowedOrigins: ctx.allowedOrigins } : {}), now: ctx.now?.() ?? Date.now() });

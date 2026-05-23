@@ -80,6 +80,44 @@ describe("daemon M1.4 composition", () => {
     expect(phases.filter((event) => event.direction === "shutdown").map((event) => event.phase)).toEqual(expectedShutdown);
   });
 
+  it("starts on loopback without a token", async () => {
+    await daemon.close();
+    currentDaemon = undefined;
+    const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-loopback-"));
+    const loopbackDaemon = createDaemon({ databasePath: join(dir, "agenthub.sqlite"), port: 0, host: "127.0.0.1" });
+
+    const server = await loopbackDaemon.start();
+    expect(server.listening).toBe(true);
+
+    await loopbackDaemon.close();
+  });
+
+  it("refuses remote bind without token", async () => {
+    await daemon.close();
+    currentDaemon = undefined;
+    const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-remote-deny-"));
+    const remoteDaemon = createDaemon({ databasePath: join(dir, "agenthub.sqlite"), port: 0, host: "0.0.0.0" });
+    const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+    await expect(remoteDaemon.start()).rejects.toThrow("Remote binding requires token and allowRemote=true");
+    expect(stderrSpy).toHaveBeenCalled();
+
+    stderrSpy.mockRestore();
+    await remoteDaemon.close();
+  });
+
+  it("starts on remote bind with token and allowRemote", async () => {
+    await daemon.close();
+    currentDaemon = undefined;
+    const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-remote-allow-"));
+    const remoteDaemon = createDaemon({ databasePath: join(dir, "agenthub.sqlite"), port: 0, host: "0.0.0.0", token: "remote-token", allowRemote: true });
+
+    const server = await remoteDaemon.start();
+    expect(server.listening).toBe(true);
+
+    await remoteDaemon.close();
+  });
+
   it("returns healthz during startup and gates other routes with service_starting", async () => {
     await daemon.close();
     currentDaemon = undefined;
