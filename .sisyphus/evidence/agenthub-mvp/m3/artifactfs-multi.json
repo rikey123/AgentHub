@@ -1,0 +1,32 @@
+{
+    "packages":  [
+                     "@agenthub/artifacts",
+                     "@agenthub/orchestrator",
+                     "@agenthub/adapter-mock",
+                     "@agenthub/daemon"
+                 ],
+    "result":  "passed",
+    "assertions":  [
+                       "MockAdapter write steps route through AdapterBridge fs.writeTextFile into ArtifactFSRunRegistry",
+                       "real workspace remains unchanged for shadow_buffer writes",
+                       "session terminal builds exactly one draft run-level DiffArtifact when writes exist",
+                       "no-write runs do not create artifacts",
+                       "terminal/shadow and sensitive-write ArtifactFS safeguards remain covered"
+                   ],
+    "tests":  [
+                  "packages/artifacts/test/artifacts.test.ts",
+                  "packages/adapters/mock/test/mock-adapter.test.ts",
+                  "packages/orchestrator/test/orchestrator.test.ts",
+                  "packages/daemon/test/daemon.test.ts"
+              ],
+    "scenario":  "ArtifactFS adapter-boundary integration",
+    "commands":  [
+                     "pnpm.cmd --filter @agenthub/artifacts test",
+                     "pnpm.cmd --filter @agenthub/adapter-mock test",
+                     "pnpm.cmd --filter @agenthub/orchestrator test",
+                     "pnpm.cmd --filter @agenthub/daemon test",
+                     "pnpm.cmd typecheck",
+                     "pnpm.cmd lint",
+                     "pnpm.cmd check:all"
+                 ]
+}

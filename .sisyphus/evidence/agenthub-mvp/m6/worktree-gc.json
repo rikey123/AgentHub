@@ -1,0 +1,15 @@
+{
+  "change": "add-agenthub-mvp",
+  "milestone": "M6",
+  "scenario": "Worktree/run GC safety",
+  "coveredBy": [
+    "packages/security/test/security.test.ts"
+  ],
+  "assertions": [
+    "GC scans only AgentHub-managed worktrees/runs roots",
+    "terminal runs past retention are removable",
+    "non-terminal runs are skipped",
+    "removed/skipped durable audit events are emitted",
+    "worktree removal attempts git worktree remove --force before fallback"
+  ]
+}

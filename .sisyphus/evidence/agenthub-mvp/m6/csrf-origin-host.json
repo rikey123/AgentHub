@@ -1,0 +1,15 @@
+{
+  "change": "add-agenthub-mvp",
+  "milestone": "M6",
+  "scenario": "CSRF / Origin / Host browser auth matrix",
+  "coveredBy": [
+    "packages/security/test/security.test.ts",
+    "packages/daemon/test/daemon.test.ts"
+  ],
+  "assertions": [
+    "POST /auth/session bootstraps HttpOnly session cookie and CSRF token",
+    "mutating browser routes require allowed Origin, matching Host, JSON content type, session cookie, and X-Agenthub-CSRF",
+    "GET/SSE browser routes require session cookie plus Origin/Host and do not require CSRF header",
+    "Bearer requests with hostile Origin are rejected before token validation"
+  ]
+}

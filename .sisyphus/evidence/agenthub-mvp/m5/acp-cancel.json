@@ -1,0 +1,12 @@
+{
+  "task": "M5 ACP cancel pending",
+  "status": "passed",
+  "command": "pnpm.cmd --filter @agenthub/adapter-acp-base test",
+  "assertions": [
+    "cancel rejects only inflight prompt",
+    "non-prompt pending fs.writeTextFile remains pending",
+    "dispose rejects all pending session_disposed",
+    "line splitter and prompt serialization passed"
+  ],
+  "generatedAt": "2026-05-23T00:18:55.029Z"
+}

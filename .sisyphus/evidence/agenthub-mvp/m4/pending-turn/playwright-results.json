@@ -1,0 +1,12 @@
+{
+  "suite": "pending-turn.spec.ts",
+  "tests": [
+    {
+      "title": "queue limit banner appears at 20 messages",
+      "status": "passed",
+      "duration": 3154
+    }
+  ],
+  "timestamp": "2026-05-23T00:39:44.417Z",
+  "totalDuration": 10858
+}

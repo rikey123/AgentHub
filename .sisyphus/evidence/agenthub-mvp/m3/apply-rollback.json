@@ -1,0 +1,12 @@
+{
+    "test":  "packages/artifacts/test/artifacts.test.ts",
+    "assertions":  [
+                       "rename failure enters apply_partial failed state",
+                       "already-renamed files are restored to oldContent",
+                       "recovery_required persists affectedFiles and applied_state when rollback write fails"
+                   ],
+    "command":  "pnpm.cmd --filter @agenthub/artifacts test",
+    "scenario":  "Artifact apply partial rollback",
+    "package":  "@agenthub/artifacts",
+    "result":  "passed: 16 tests"
+}

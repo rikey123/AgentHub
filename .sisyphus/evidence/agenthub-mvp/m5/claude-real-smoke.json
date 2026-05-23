@@ -1,0 +1,17 @@
+{
+  "task": "M5 Claude real smoke",
+  "generatedAt": "2026-05-23T00:19:54.000Z",
+  "command": "claude --version",
+  "status": "detected",
+  "reason": "runtime_detected",
+  "detection": {
+    "status": 0,
+    "stdout": "C:\\Users\\26943\\AppData\\Roaming\\npm\\claude\r\nC:\\Users\\26943\\AppData\\Roaming\\npm\\claude.cmd",
+    "stderr": ""
+  },
+  "executablePath": "C:\\Users\\26943\\AppData\\Roaming\\npm\\claude.cmd",
+  "version": {
+    "status": 0,
+    "output": "2.1.149 (Claude Code)"
+  }
+}

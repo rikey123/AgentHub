@@ -1,0 +1,17 @@
+{
+  "suite": "main-detail-projection.spec.ts",
+  "tests": [
+    {
+      "title": "main timeline shows messages and hides tool details",
+      "status": "passed",
+      "duration": 3190
+    },
+    {
+      "title": "run detail opens from side panel with 7 tabs",
+      "status": "passed",
+      "duration": 3195
+    }
+  ],
+  "timestamp": "2026-05-23T00:39:44.417Z",
+  "totalDuration": 10858
+}

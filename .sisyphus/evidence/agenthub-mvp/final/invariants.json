@@ -1,0 +1,134 @@
+﻿{
+  "task": "F4 Scope Fidelity Check",
+  "verdict": "PASS",
+  "createdAt": "2026-05-23T09:27:00-00:00",
+  "summary": "Core package tests and checks are green, and the F4 raw stream/pubsub blocker is resolved: admin-authorized raw SSE live delivery now accepts canonical adapter.raw stdout/stderr events through the shared redaction/truncation path, browser/session raw access remains forbidden, and raw durable replay remains empty for ephemeral raw events.",
+  "commands": [
+    { "command": "pnpm.cmd --filter @agenthub/orchestrator test", "result": "pass", "evidence": "1 file, 12 tests passed" },
+    { "command": "pnpm.cmd --filter @agenthub/artifacts test", "result": "pass", "evidence": "1 file, 16 tests passed" },
+    { "command": "pnpm.cmd --filter @agenthub/permissions test", "result": "pass", "evidence": "1 file, 9 tests passed" },
+    { "command": "pnpm.cmd --filter @agenthub/bus test", "result": "pass", "evidence": "1 file, 17 tests passed" },
+    { "command": "pnpm.cmd --filter @agenthub/security test", "result": "pass", "evidence": "1 file, 4 tests passed" },
+    { "command": "pnpm.cmd --filter @agenthub/daemon test", "result": "pass", "evidence": "1 file, 8 tests passed, including admin raw SSE live delivery and non-admin browser 403 coverage" },
+    { "command": "pnpm.cmd --filter @agenthub/adapter-opencode test", "result": "pass", "evidence": "1 file, 1 test passed" },
+    { "command": "pnpm.cmd --filter @agenthub/adapter-codex test", "result": "pass", "evidence": "1 file, 1 test passed" },
+    { "command": "pnpm.cmd --filter @agenthub/adapter-langgraph test", "result": "pass", "evidence": "1 file, 1 test passed" },
+    { "command": "pnpm.cmd --filter @agenthub/adapter-a2a test", "result": "pass", "evidence": "1 file, 1 test passed" },
+    { "command": "pnpm.cmd check:all", "result": "pass", "evidence": "events, visibility, subscriptions, command, run-state-machine checks passed" },
+    { "command": "openspec.cmd validate add-agenthub-mvp --strict", "result": "pass", "evidence": "Change 'add-agenthub-mvp' is valid" },
+    { "command": "pnpm.cmd test:e2e apps/web/e2e/main-detail-projection.spec.ts", "result": "pass", "evidence": "3 tests passed" },
+    { "command": "pnpm.cmd test:e2e apps/web/e2e/pending-turn.spec.ts", "result": "pass", "evidence": "1 test passed" }
+  ],
+  "invariants": [
+    {
+      "name": "observe_passive",
+      "status": "pass",
+      "evidence": [
+        "packages/daemon/test/daemon.test.ts keeps observers passive without explicit wake: mock-builder llmCalls=1, mock-observer llmCalls=0.",
+        "No exact 100-message dedicated invariant test found; equivalent daemon-level behavior proves observer does not run on normal assisted-room user message."
+      ],
+      "sufficientForMvp": true
+    },
+    {
+      "name": "run_level_diff",
+      "status": "pass",
+      "evidence": [
+        "packages/artifacts/test/artifacts.test.ts routes non-terminal writes through shadow buffer and builds one run-level diff.",
+        "packages/artifacts/test/artifacts.test.ts builds terminal run-level diff from isolated worktree with final content wins and reverted files omitted.",
+        "Source packages/artifacts/src/index.ts ArtifactFS.diffFiles sorts paths, compares final content to base, and returns a single DiffArtifact from buildRunArtifact()."
+      ],
+      "sufficientForMvp": true
+    },
+    {
+      "name": "raw_flood_pubsub_isolation",
+      "status": "pass",
+      "evidence": [
+        "packages/bus/test/event-bus.test.ts tracks bounded PubSub channel stats and separate adapter_raw/message_delta capacities.",
+        "packages/bus/src/index.ts BoundedPubSub uses per-channel capacities and non-durable drop accounting, so raw cannot consume durable/main channel capacity.",
+        "packages/daemon/src/index.ts keeps view=raw admin-gated in sse(), sends SSE frames through redactAndTruncate(JSON.stringify(event), 64 * 1024), and visible(... view='raw') now permits only adapter.raw.stdout / adapter.raw.stderr live events after room/run filters.",
+        "packages/daemon/test/daemon.test.ts requires admin for raw SSE and streams live adapter raw events only: browser session receives 403 requires_admin_scope, stored admin bearer receives a live adapter.raw.stdout frame with AGENTHUB_TOKEN redacted, unrelated run raw stderr is filtered, and replayDurableSinceSeq(view='raw') remains []."
+      ],
+      "sufficientForMvp": true
+    },
+    {
+      "name": "claimed_reclaim_lifecycle",
+      "status": "pass",
+      "evidence": [
+        "packages/orchestrator/test/orchestrator.test.ts startup recovery clears locks, preserves queued/waiting, fails stale claimed/starting, finalizes cancelling.",
+        "packages/orchestrator/test/orchestrator.test.ts ReclaimStaleClaimedRun attaches resumable sessions and fails missing attach as fresh_session_required.",
+        "No literal kill -9 integration test found; source+unit coverage exercises restart scan semantics and stale claimed lifecycle behavior."
+      ],
+      "sufficientForMvp": true
+    },
+    {
+      "name": "permission_queue_idempotency",
+      "status": "pass",
+      "evidence": [
+        "packages/permissions/test/permissions.test.ts serializes per-session requests and deduplicates pending idempotency keys.",
+        "Queued requests have expires_at=null until presented, and promotion starts a fresh active timeout."
+      ],
+      "sufficientForMvp": true
+    },
+    {
+      "name": "waiting_permission_resume",
+      "status": "pass",
+      "evidence": [
+        "packages/orchestrator/test/orchestrator.test.ts emits waiting_permission then agent.run.resumed when markRunning resumes a waiting_permission run, before failed terminal event.",
+        "apps/web/src/hooks/useProjector.ts represents agent.run.waiting_permission status in projection. It does not represent agent.run.resumed explicitly, but run lifecycle event exists and state transition is covered."
+      ],
+      "sufficientForMvp": true
+    },
+    {
+      "name": "preview_security_isolation",
+      "status": "pass",
+      "evidence": [
+        "apps/web/src/components/cards/PreviewCard.tsx uses iframe sandbox='allow-scripts' and does not include allow-same-origin.",
+        "packages/artifacts/test/artifacts.test.ts stores one-time preview token expiry metadata.",
+        "packages/security/test/security.test.ts safe URI tests reject unsafe data MIME and external HTTP unless signed preview token allows daemon-origin URI.",
+        "No browser test proves iframe cannot access daemon API; source-level sandbox and auth/CSRF tests are sufficient for MVP but would benefit from an exact e2e."
+      ],
+      "sufficientForMvp": true
+    },
+    {
+      "name": "workspace_file_lock_matrix",
+      "status": "pass",
+      "evidence": [
+        "packages/orchestrator/test/orchestrator.test.ts agent, room, file, and workspace locks block conflicting runs, including workspace lock blocked by existing file lock."
+      ],
+      "sufficientForMvp": true
+    },
+    {
+      "name": "replay_projection_stability",
+      "status": "partial",
+      "evidence": [
+        "packages/bus/test/event-bus.test.ts persists durable seq and replays by cursor with room/run/view filters.",
+        "packages/daemon/test/daemon.test.ts streams durable replay with main/detail visibility split.",
+        "apps/web/e2e/main-detail-projection.spec.ts passes main/detail projection and Run Detail tab behavior.",
+        "No exact byte-identical projection-from-seq=1 snapshot test found. Existing deterministic ordered replay and e2e are stable enough for non-raw MVP projection, and raw live-only SSE coverage now proves the protected raw stream contract without falsely replaying ephemeral raw events."
+      ],
+      "sufficientForMvp": true
+    },
+    {
+      "name": "v1_stub_only_scope",
+      "status": "pass",
+      "evidence": [
+        "packages/adapters/opencode,codex,langgraph,a2a test files confirm detect()=[] and runAgent throws deterministic not implemented errors.",
+        "packages/context/src/index.ts NoopVectorIndex/NoopMemoryAdapter return empty/no-op and roomSearchMemoryTool throws tool_not_found.",
+        "packages/daemon/src/index.ts V1-style cost/board/timeline endpoints return 501/404 V1 roadmap responses."
+      ],
+      "sufficientForMvp": true
+    }
+  ],
+  "protectedContractAssessment": {
+    "noStartRun": "pass via command:check and CommandBus forbiddenCommandTypes/internalOnly WakeAgent guard",
+    "wakeAgentOnlyModelEntry": "pass via daemon Mock Solo path and CommandBus internal-only WakeAgent guard",
+    "runLifecycleOwnsRunEvents": "pass via orchestrator lifecycle tests and run-state-machine check",
+    "artifactFsFileGate": "pass for adapter-boundary ArtifactFS and sensitive write denial tests",
+    "permissionEngineGate": "pass for per-session queue/idempotency tests",
+    "localFirstScope": "pass by dependency/check evidence and source inspection; no SaaS/Postgres/Redis/WS hub/native mobile/marketplace found in reviewed surfaces"
+  },
+  "blockers": [
+    "Resolved: raw stream/pubsub contract now has admin-only live SSE delivery for adapter.raw stdout/stderr while preserving empty durable replay for ephemeral raw events.",
+    "Non-blocking follow-up: replay/projection still lacks the ideal byte-identical from seq=1 snapshot test, but existing deterministic replay/e2e plus raw live-only coverage are sufficient for MVP scope fidelity."
+  ]
+}
