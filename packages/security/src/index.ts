@@ -13,6 +13,7 @@ export type WorkspacePathResult = { readonly ok: true; readonly abs: string; rea
 export type SafeUriResult = { readonly ok: true; readonly kind: "file"; readonly abs: string; readonly relativePath: string; readonly mime?: never; readonly bytes?: never; readonly text?: never } | { readonly ok: true; readonly kind: "data"; readonly mime: string; readonly bytes: number; readonly text: string; readonly abs?: never; readonly relativePath?: never } | { readonly ok: false; readonly reason: string };
 export type BrowserAuthResult = { readonly ok: true; readonly scopes: readonly AuthScope[]; readonly authKind: "session" | "bearer" | "local" } | { readonly ok: false; readonly status: 401 | 403 | 415; readonly error: string };
 export type BrowserAuthInput = { readonly method: string; readonly pathname: string; readonly headers: Readonly<Record<string, string | undefined>>; readonly now?: number; readonly token?: string; readonly host?: string; readonly allowedOrigins?: readonly string[]; readonly database: AgentHubDatabase };
+export type AuditActor = { readonly type: string; readonly id: string };
 
 const defaultSensitiveGlobs = [".env", ".env.*", "*.pem", "*.key", "id_rsa", "id_ed25519", ".aws/**", ".gcp/**", ".ssh/**", ".netrc", "**/credentials.json", "**/service-account*.json"];
 const allowedDataMimes = new Set(["image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml", "text/plain", "text/markdown", "text/csv", "application/json"]);
@@ -62,6 +63,48 @@ export class SecretRedactor {
 
 export const defaultSecretRedactor = new SecretRedactor();
 
+export function publishAuditEvent(
+  eventBus: EventBus,
+  input: {
+    readonly type: string;
+    readonly workspaceId: string;
+    readonly actor: AuditActor;
+    readonly action: string;
+    readonly target: string;
+    readonly outcome: string;
+    readonly createdAt?: number;
+    readonly roomId?: string;
+    readonly runId?: string;
+    readonly agentId?: string;
+    readonly traceId?: string;
+    readonly causationId?: string;
+    readonly correlationId?: string;
+    readonly payload?: Record<string, unknown>;
+  }
+): void {
+  eventBus.publish({
+    id: randomUUID(),
+    type: input.type as Parameters<EventBus["publish"]>[0]["type"],
+    schemaVersion: 1,
+    workspaceId: input.workspaceId,
+    ...(input.roomId !== undefined ? { roomId: input.roomId } : {}),
+    ...(input.runId !== undefined ? { runId: input.runId } : {}),
+    ...(input.agentId !== undefined ? { agentId: input.agentId } : {}),
+    ...(input.traceId !== undefined ? { traceId: input.traceId } : {}),
+    ...(input.causationId !== undefined ? { causationId: input.causationId } : {}),
+    ...(input.correlationId !== undefined ? { correlationId: input.correlationId } : {}),
+    payload: {
+      audit: true,
+      actor: input.actor,
+      action: input.action,
+      target: input.target,
+      outcome: input.outcome,
+      ...(input.payload ?? {})
+    },
+    createdAt: input.createdAt ?? Date.now()
+  });
+}
+
 export function redactAndTruncate(line: string, max = 8 * 1024, redactor: SecretRedactor = defaultSecretRedactor): string {
   const redacted = redactor.redact(line);
   if (redacted.length <= max) return redacted;
@@ -107,12 +150,43 @@ export function sanitizeSvg(svg: string): string {
   return svg.replace(/<\s*(script|foreignObject)\b[\s\S]*?<\s*\/\s*\1\s*>/giu, "").replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*')/giu, "");
 }
 
-export function issueBrowserSession(database: AgentHubDatabase, now = Date.now()): { readonly sessionId: string; readonly csrfToken: string; readonly expiresAt: number } {
+export function issueBrowserSession(database: AgentHubDatabase, now = Date.now(), eventBus?: EventBus): { readonly sessionId: string; readonly csrfToken: string; readonly expiresAt: number } {
   const sessionId = randomBytes(32).toString("base64url");
   const csrfToken = randomBytes(32).toString("base64url");
   const expiresAt = now + 60 * 60 * 1000;
   database.sqlite.prepare("INSERT INTO sessions (session_id, csrf_token_hash, created_at, expires_at) VALUES (?, ?, ?, ?)").run(sessionId, sha256(csrfToken), now, expiresAt);
+  if (eventBus) {
+    publishAuditEvent(eventBus, {
+      type: "auth.token.issued",
+      workspaceId: "default-workspace",
+      actor: { type: "user", id: "local" },
+      action: "issue",
+      target: `browser-session:${sessionId}`,
+      outcome: "issued",
+      createdAt: now,
+      payload: { sessionId, csrfToken: "redacted" }
+    });
+  }
   return { sessionId, csrfToken, expiresAt };
+}
+
+export function revokeAuthToken(database: AgentHubDatabase, tokenId: string, eventBus?: EventBus, actor: AuditActor = { type: "user", id: "local" }, now = Date.now()): boolean {
+  const row = database.sqlite.prepare("SELECT id, fingerprint FROM auth_tokens WHERE id = ?").get(tokenId) as { readonly id: string; readonly fingerprint: string } | undefined;
+  if (!row) return false;
+  const result = database.sqlite.prepare("UPDATE auth_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").run(now, tokenId);
+  if (result.changes > 0 && eventBus) {
+    publishAuditEvent(eventBus, {
+      type: "auth.token.revoked",
+      workspaceId: "default-workspace",
+      actor,
+      action: "revoke",
+      target: `auth-token:${row.id}`,
+      outcome: "revoked",
+      createdAt: now,
+      payload: { tokenId: row.id, fingerprint: row.fingerprint }
+    });
+  }
+  return result.changes > 0;
 }
 
 export function authenticateBrowserRequest(input: BrowserAuthInput): BrowserAuthResult {

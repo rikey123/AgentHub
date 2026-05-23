@@ -7,12 +7,34 @@ import { createDatabase } from "@agenthub/db";
 import { createEventBus } from "@agenthub/bus";
 import { describe, expect, it } from "vitest";
 
-import { authenticateBrowserRequest, issueBrowserSession, ManagedRunGarbageCollector, resolveSafeUri, resolveWorkspacePath, SecretRedactor } from "../src/index.ts";
+import { authenticateBrowserRequest, issueBrowserSession, ManagedRunGarbageCollector, resolveSafeUri, resolveWorkspacePath, revokeAuthToken, SecretRedactor } from "../src/index.ts";
+
+let dir: string | undefined;
+let database = createDatabase({ path: join(mkdtempSync(join(tmpdir(), "agenthub-security-db-")), "db.sqlite"), applyMigrations: true });
 
 describe("M6 security package", () => {
+  it("persists an audit event when issuing a browser session", () => {
+    const eventBus = createEventBus({ database });
+    issueBrowserSession(database, 1_000, eventBus);
+    const row = database.sqlite.prepare("SELECT type, payload FROM events WHERE type = 'auth.token.issued' ORDER BY seq DESC LIMIT 1").get() as { readonly type: string; readonly payload: string } | undefined;
+    expect(row?.type).toBe("auth.token.issued");
+    expect(JSON.parse(row?.payload ?? "{}") as { audit?: boolean; action?: string; outcome?: string }).toMatchObject({ audit: true, action: "issue", outcome: "issued" });
+    eventBus.close();
+  });
+
+  it("persists an audit event when revoking a token", () => {
+    const eventBus = createEventBus({ database });
+    database.sqlite.prepare("INSERT INTO auth_tokens (id, fingerprint, hash, scopes, created_at) VALUES (?, ?, ?, ?, ?)").run("token_1", "fp_1", "hash_1", JSON.stringify(["read"]), 1_000);
+    expect(revokeAuthToken(database, "token_1", eventBus, { type: "user", id: "local" }, 2_000)).toBe(true);
+    const row = database.sqlite.prepare("SELECT type, payload FROM events WHERE type = 'auth.token.revoked' ORDER BY seq DESC LIMIT 1").get() as { readonly type: string; readonly payload: string } | undefined;
+    expect(row?.type).toBe("auth.token.revoked");
+    expect(JSON.parse(row?.payload ?? "{}") as { audit?: boolean; action?: string; outcome?: string }).toMatchObject({ audit: true, action: "revoke", outcome: "revoked" });
+    eventBus.close();
+  });
+
   it("enforces browser Origin/Host/session/CSRF matrix", () => {
-    const dir = mkdtempSync(join(tmpdir(), "agenthub-security-auth-"));
-    const database = createDatabase({ path: join(dir, "db.sqlite"), applyMigrations: true });
+    dir = mkdtempSync(join(tmpdir(), "agenthub-security-auth-"));
+    database = createDatabase({ path: join(dir, "db.sqlite"), applyMigrations: true });
     const session = issueBrowserSession(database, 1_000);
 
     const headers = { origin: "http://127.0.0.1:6677", host: "127.0.0.1:6677", "content-type": "application/json", cookie: `agenthub_session=${session.sessionId}`, "x-agenthub-csrf": session.csrfToken };

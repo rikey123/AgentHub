@@ -228,7 +228,7 @@
 - [ ] 16.5 实现 prompt injection 防护（external_content 包裹 + Permission 不提升）— refs: security/Prompt Injection 防护 [MISSING]
 - [x] 16.6 实现 spawn filterSafeEnv（不透传 secrets）— refs: security/子进程隔离
 - [ ] 16.7 实现 config.toml 文件权限警告（POSIX）— refs: security/配置文件权限校验 [MISSING]
-- [ ] 16.8 实现 audit 关键操作（token / permission / intervention / sensitive deny / settings change）— refs: security/Audit 边界 [MISSING]
+- [x] 16.8 实现 audit 关键操作（token / permission / intervention / sensitive deny / settings change）— refs: security/Audit 边界
 - [x] 16.9 实现 CSRF / Origin / Host 防护中间件：mutating route 校验 Origin（白名单含 127.0.0.1/localhost/tauri/dev port）+ Host + Content-Type=application/json + Session+CSRF 双 token（POST /auth/session bootstrap：返回 HttpOnly+SameSite=Strict 的 `agenthub_session` cookie + body `{ csrfToken }`；后续 **mutating** 请求 cookie + `X-Agenthub-CSRF` header 服务端比对一致）；**GET（含 SSE `/event`）仅校验 cookie + Origin/Host，不要求 CSRF header**（原生 EventSource 不支持自定义 header）；`POST /auth/session` 是 bootstrap 豁免，不要求已有 cookie/CSRF 但仍需 Origin 白名单 + Content-Type；Bearer 路径不豁免 Origin 校验 — refs: security/浏览器 CSRF / Origin / Host 防护
 - [x] 16.10 实现 SecretRedactor：默认正则集（bearer/anthropic/openai/github/aws/jwt/agenthub/env-secret/url-userinfo）+ 用户自定义 + keychain 已知密钥字面量；fail-closed 异常路径；接到 pino sink / adapter raw log writer / SSE writer / API error response writer / `events.payload` sensitive 字段 — refs: security/SecretRedactor 日志脱敏, observability/Adapter raw stream 持久化
 - [ ] 16.9 安全测试：试图读 .env / 试图通过 .. 越界 / 试图 file:// + symlink 越界 / 恶意 prompt injection [MISSING]

@@ -29,18 +29,6 @@ export type DaemonStartupPhase =
   | "HTTP server bind + SSE accept";
 export type DaemonOptions = { readonly databasePath: string; readonly host?: string; readonly port?: number; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly now?: () => number; readonly onLifecyclePhase?: (event: { readonly direction: "startup" | "shutdown"; readonly phase: DaemonStartupPhase }) => void };
 export type DaemonApp = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly roomMcpServer: RoomMcpServer; readonly adapterRegistry: AdapterRegistry; readonly mockAdapter: MockAdapterManager; readonly handle: (req: IncomingMessage, res: ServerResponse) => void; start(): Promise<Server>; close(): Promise<void> };
-
-const DAEMON_STARTUP_PHASES: readonly DaemonStartupPhase[] = [
-  "SQLite open + pragma + migrate",
-  "EventStore readiness check",
-  "EventBus (PubSub + per-type)",
-  "Outbox Dispatcher start",
-  "Durable Handler Registry (register all, catch-up, realtime)",
-  "RunQueue Worker start",
-  "AdapterManager detect + register",
-  "CommandBus open",
-  "HTTP server bind + SSE accept"
-];
 const PHASE_SQLITE: DaemonStartupPhase = "SQLite open + pragma + migrate";
 const PHASE_EVENT_STORE: DaemonStartupPhase = "EventStore readiness check";
 const PHASE_EVENT_BUS: DaemonStartupPhase = "EventBus (PubSub + per-type)";
@@ -285,7 +273,7 @@ async function route(ctx: RouteContext): Promise<void> {
 }
 
 function authSession(ctx: RouteContext): void {
-  const session = issueBrowserSession(ctx.database, ctx.now?.() ?? Date.now());
+  const session = issueBrowserSession(ctx.database, ctx.now?.() ?? Date.now(), ctx.eventBus);
   ctx.res.setHeader("set-cookie", `agenthub_session=${session.sessionId}; HttpOnly; SameSite=Strict; Path=/; Max-Age=3600`);
   json(ctx.res, 200, { csrfToken: session.csrfToken, expiresAt: session.expiresAt });
 }

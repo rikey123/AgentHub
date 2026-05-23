@@ -125,7 +125,7 @@ export class InterventionEngine {
     const now = this.now();
     this.options.database.sqlite.transaction(() => {
       this.setStatus(interventionId, "approved", null, null);
-      this.publish(current, "intervention.approved", { interventionId, status: "approved", effectiveText, originalPreview: current.preview }, now, trace);
+      this.publish(current, "intervention.approved", { interventionId, status: "approved", effectiveText, originalPreview: current.preview, audit: true, actor: { type: "user", id: "local" }, action: "approve", outcome: "approved" }, now, trace);
       this.syncPresence(current.roomId, current.sourceAgentId, now, trace);
       this.setStatus(interventionId, "injected", null, null);
       this.publish(current, "intervention.injected", { interventionId, status: "injected", injectionMode: "immediate", effectiveText: effectiveText ?? current.preview ?? current.reason }, now, trace);
@@ -203,7 +203,7 @@ export class InterventionEngine {
     const now = this.now();
     this.options.database.sqlite.transaction(() => {
       this.setStatus(interventionId, decisionStatus, null, now);
-      this.publish(current, eventType, { interventionId, status: decisionStatus, ...payload }, now, trace);
+      this.publish(current, eventType, { interventionId, status: decisionStatus, ...payload, audit: true, actor: { type: "user", id: "local" }, action: action, outcome: decisionStatus }, now, trace);
       this.setStatus(interventionId, "closed", null, now);
       this.publish(current, "intervention.closed", { interventionId, status: "closed", fromStatus: decisionStatus }, now, trace);
       this.syncPresence(current.roomId, current.sourceAgentId, now, trace);
