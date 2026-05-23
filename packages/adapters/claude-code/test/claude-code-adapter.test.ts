@@ -93,10 +93,23 @@ describe("ClaudeCodeACPAdapter", () => {
     lifecycle.create(null, { runId: "run", workspaceId: "w", roomId: "r", agentId: "a", wakeReason: "primary_turn" });
     lifecycle.markClaimed(null, "run");
     lifecycle.markStarting(null, "run", 123);
-    // Child emits one stdout line then exits immediately.  The parent's handleLine processes the
-    // line (proving the post-session.opened stdout path), then the exit event fires and
-    // failSession transitions the run to failed.  No stdin dependency, no timing race.
-    const adapter = new ClaudeCodeACPAdapter({ command: process.execPath, args: ["-e", "process.stdout.write(JSON.stringify({jsonrpc:'2.0',method:'ready',params:{}})+String.fromCharCode(10),()=>process.exit(7));"], services: { database, eventBus }, lifecycle, workspaceId: "w" });
+    // Child exits only after it receives the managed session/prompt request. This proves the
+    // post-session.opened prompt path while keeping the crash in a real child process.
+    const crashAfterPromptScript = `
+      let buffer = "";
+      process.stdin.setEncoding("utf8");
+      process.stdin.on("data", (chunk) => {
+        buffer += chunk;
+        const lines = buffer.split(/\\r?\\n/);
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          if (!line) continue;
+          const msg = JSON.parse(line);
+          if (msg.method === "session/prompt") process.exit(7);
+        }
+      });
+    `;
+    const adapter = new ClaudeCodeACPAdapter({ command: process.execPath, args: ["-e", crashAfterPromptScript], services: { database, eventBus }, lifecycle, workspaceId: "w" });
 
     try {
       await adapter.runManaged(lifecycle.read("run"));

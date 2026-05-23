@@ -1,6 +1,6 @@
 # AgentHub MVP Remediation Plan
 
-> **Status**: ACTIVE — do not declare MVP complete until all P0 and P1 tasks are done, each has an independent severe review APPROVE on record, and the Orchestrator has explicitly confirmed completion.
+> **Status**: COMPLETE — all P0 and P1 remediation tasks are recorded complete, P0 review / merge approvals are explicitly referenced below, P1 completion is recorded via the remediation status and Orchestrator closeout, and the Orchestrator explicitly confirmed AgentHub MVP completion on 2026-05-23. Final integration verification passed on `task/remediation-implementation-plan`; this closeout branch carries its own verification record below.
 >
 > **Strict rule**: every implementation task below runs on its own Git branch, gets its own commit(s), must pass an independent severe review, and must receive explicit Orchestrator merge approval before the branch is merged and the next task begins. No batching. No self-merge. No parallel tasks.
 
@@ -437,6 +437,43 @@ openspec.cmd validate add-agenthub-mvp --strict
 > 7. The Orchestrator has explicitly confirmed MVP completion.
 >
 > Partial completion of this list is not MVP completion. A single failing review gate or missing Orchestrator approval restarts the affected task.
+
+### Final Completion Record
+
+**Orchestrator confirmation**: On 2026-05-23, after P0-3 was merged into `task/remediation-implementation-plan`, the Orchestrator confirmed that AgentHub MVP implementation is complete and requested git-based closeout.
+
+**Integration branch**: `task/remediation-implementation-plan`
+
+**Verification evidence run after final merge**:
+
+- `git status --short --branch` — clean on `task/remediation-implementation-plan`
+- `pnpm.cmd test` — 21 files / 159 tests passed
+- `pnpm.cmd typecheck` — passed
+- `pnpm.cmd lint` — passed
+- `pnpm.cmd check:all` — passed (`events:check`, `visibility:check`, `subscriptions:check`, `command:check`, `run-state-machine:check`)
+- `pnpm.cmd schema:check` — passed (93 event types)
+- `pnpm.cmd build` — passed
+- `openspec.cmd validate add-agenthub-mvp --strict` — passed
+- `pnpm.cmd exec playwright test apps/web/e2e/main-detail-projection.spec.ts apps/web/e2e/pending-turn.spec.ts` — 5 tests passed
+
+**Closeout branch verification** (`task/mvp-completion-closeout`, commit `47194ab` before review fixes):
+
+- `pnpm.cmd --filter @agenthub/adapter-claude-code test` — 6 tests passed
+- `pnpm.cmd --filter @agenthub/adapter-acp-base test` — 10 tests passed
+- `pnpm.cmd test` — 21 files / 159 tests passed
+- `pnpm.cmd test` — repeated, 21 files / 159 tests passed
+- `pnpm.cmd typecheck` — passed
+- `pnpm.cmd lint` — passed
+- `pnpm.cmd check:all` — passed (`events:check`, `visibility:check`, `subscriptions:check`, `command:check`, `run-state-machine:check`)
+- `pnpm.cmd schema:check` — passed (93 event types)
+- `pnpm.cmd build` — passed
+- `openspec.cmd validate add-agenthub-mvp --strict` — passed
+- `pnpm.cmd exec playwright test apps/web/e2e/main-detail-projection.spec.ts apps/web/e2e/pending-turn.spec.ts` — 5 tests passed
+- `git diff --check` — passed
+
+**Evidence caveat**: P1-1 / P1-2 / P1-3 are recorded as complete in this plan and in `.sisyphus/notepads/agenthub-mvp/issues.md`, but they do not currently have dedicated remediation evidence files under `.sisyphus/evidence/agenthub-mvp/remediation/`. Their evidence is the plan status text, issue notes, git history, and verification commands. This closeout PR must therefore receive its own independent review before merge.
+
+**Remaining action**: OpenSpec archival is intentionally left as a separate explicit operation because archiving moves `openspec/changes/add-agenthub-mvp/` and should be reviewed independently from this completion-status closeout.
 
 ---
 
