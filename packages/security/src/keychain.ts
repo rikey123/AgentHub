@@ -78,6 +78,13 @@ class ResilientKeychainBridge implements KeychainBridge {
 
   private async loadKeytar(): Promise<KeytarModule | null> {
     if (this.keytarOverride !== undefined) return this.keytarOverride;
+    // SPEC RECONCILIATION §16.1: keytar is a native addon that requires compilation
+    // against the host Node.js version. In environments where the native build is
+    // unavailable (e.g. Node v24 without node-gyp, CI without build tools), the
+    // dynamic import will fail and the implementation falls back to AES-256-GCM
+    // encrypted-file storage. The fallback provides confidentiality-at-rest for
+    // the local-first MVP use case. Real OS keychain integration is available when
+    // keytar is compiled (run: cd node_modules/.pnpm/keytar@7.9.0/node_modules/keytar && node-gyp rebuild).
     this.keytarPromise ??= keytarImporter("keytar")
       .then((module) => normalizeKeytarModule(module))
       .catch(() => null);
