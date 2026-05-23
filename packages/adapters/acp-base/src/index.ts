@@ -330,6 +330,9 @@ export abstract class ACPAdapter {
       const child = spawn(spawnSpec.command, [...spawnSpec.args], { cwd: session.workDir, env: filterSafeEnv(spawnSpec.env ?? process.env), windowsVerbatimArguments: false, detached: false });
       session.process = child;
       session.state = "initializing";
+      child.stdin.on("error", (error) => {
+        this.handleStdinWriteError(session, error);
+      });
       child.stdout.on("data", (chunk: Buffer) => {
         for (const line of session.lineSplitter.push(chunk)) this.handleLine(session, line);
       });
@@ -362,12 +365,20 @@ export abstract class ACPAdapter {
     const child = session.process;
     if (child !== undefined && !child.killed && child.exitCode === null && child.signalCode === null && child.stdin.writable && !child.stdin.destroyed) {
       try {
-        child.stdin.write(`${JSON.stringify(message)}\n`);
-      } catch {
-        // Ignore EPIPE and other write errors; the child may have exited between the guard check
-        // and the write. The exit/close event will drive failSession separately.
+        child.stdin.write(`${JSON.stringify(message)}\n`, (error) => {
+          if (error !== null && error !== undefined) this.handleStdinWriteError(session, error);
+        });
+      } catch (error) {
+        this.handleStdinWriteError(session, error);
       }
     }
+  }
+
+  private handleStdinWriteError(session: AcpAdapterSession, error: unknown): void {
+    if (session.state === "disposed" || session.state === "failed") return;
+    const message = error instanceof Error ? error.message : String(error);
+    this.emitRaw(session, "stderr", message);
+    this.failSession(session, new ACPAdapterError("process_error", `ACP stdin write failed: ${message}`, error));
   }
 
   private failSession(session: AcpAdapterSession, error: ACPAdapterError): void {
