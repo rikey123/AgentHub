@@ -341,11 +341,13 @@ export abstract class ACPAdapter {
         this.emitRaw(session, "stderr", message);
         this.failSession(session, new ACPAdapterError("process_error", message, error));
       });
-      child.on("exit", (code, signal) => {
+      const handleProcessExit = (code: number | null, signal: NodeJS.Signals | null) => {
         if (session.state === "disposed") return;
         const detail = signal !== null ? `signal ${signal}` : `exit code ${code ?? "unknown"}`;
         this.failSession(session, new ACPAdapterError("process_exit", `ACP process exited with ${detail}`, { code, signal }));
-      });
+      };
+      child.on("exit", handleProcessExit);
+      child.on("close", handleProcessExit);
       this.writeJson(session, { jsonrpc: "2.0", method: "initialize", params: { clientCapabilities: session.clientCapabilities } });
       this.startLiveness(session);
       this.markReadyUnlessFailed(session);
@@ -357,7 +359,8 @@ export abstract class ACPAdapter {
   }
 
   private writeJson(session: AcpAdapterSession, message: JsonRpcMessage): void {
-    if (session.process !== undefined && !session.process.killed) session.process.stdin.write(`${JSON.stringify(message)}\n`);
+    const child = session.process;
+    if (child !== undefined && !child.killed && child.exitCode === null && child.signalCode === null && child.stdin.writable && !child.stdin.destroyed) child.stdin.write(`${JSON.stringify(message)}\n`);
   }
 
   private failSession(session: AcpAdapterSession, error: ACPAdapterError): void {

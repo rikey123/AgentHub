@@ -93,11 +93,12 @@ describe("ClaudeCodeACPAdapter", () => {
     lifecycle.create(null, { runId: "run", workspaceId: "w", roomId: "r", agentId: "a", wakeReason: "primary_turn" });
     lifecycle.markClaimed(null, "run");
     lifecycle.markStarting(null, "run", 123);
-    const adapter = new ClaudeCodeACPAdapter({ command: "node", args: ["-e", "process.exit(7)"], services: { database, eventBus }, lifecycle, workspaceId: "w" });
+    const adapter = new ClaudeCodeACPAdapter({ command: process.execPath, args: ["-e", "process.exit(7)"], services: { database, eventBus }, lifecycle, workspaceId: "w" });
 
     await adapter.runManaged(lifecycle.read("run"));
     await waitFor(() => database.sqlite.prepare("SELECT status FROM runs WHERE id = 'run'").get() as { readonly status: string }, (row) => row.status === "failed");
 
+    expect(adapter.debugSession("acp-claude-code-run")?.state).toBe("failed");
     expect(database.sqlite.prepare("SELECT status, failure_class, error FROM runs WHERE id = 'run'").get()).toMatchObject({ status: "failed", failure_class: "retryable_visible", error: "ACP process exited with exit code 7" });
     expect(database.sqlite.prepare("SELECT type FROM events WHERE type = 'agent.run.failed' AND run_id = 'run'").get()).toMatchObject({ type: "agent.run.failed" });
     database.sqlite.close();

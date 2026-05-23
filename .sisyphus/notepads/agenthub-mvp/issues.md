@@ -105,3 +105,4 @@
 ## 2026-05-23 P0-3 ACP crash race
 
 - A fast ACP child exit can fire before `ClaudeCodeACPAdapter.runManaged()` handles `session.opened`, so the crash must be queued until AdapterBridge has moved the durable run to `running`; otherwise the run may remain running or the prompt path may throw against an already failed ACP session. ACP startup should also avoid overwriting a fast failed session back to ready.
+- The real child-exit regression should spawn `process.execPath` rather than a PATH-dependent `node` command on Windows, and ACP base should listen to both `exit` and `close` while avoiding stdin writes after `exitCode` / `signalCode` / stream teardown so a fast process termination cannot be missed or masked.
