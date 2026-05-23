@@ -137,3 +137,21 @@
 
 - The real child-exit crash regression can exceed Vitest's 5s default per-test timeout under the root suite even though the filtered package test passes. Keep the regression real, but wait for ACP session state, durable run failure, and agent.run.failed event together with an explicit per-test timeout and cleanup in finally.
 
+## 2026-05-23 MVP completion closeout
+
+- P0-1, P0-2, P0-3 and P1-1, P1-2, P1-3 are recorded as complete in `.sisyphus/plans/agenthub-mvp-remediation.md`.
+- P0-3 was merged into `task/remediation-implementation-plan` and the integration branch contains the final Oracle APPROVE / merge record.
+- The Orchestrator confirmed AgentHub MVP implementation completion on 2026-05-23 and requested git-based closeout.
+- Final integration verification was rerun after the merge:
+  - `pnpm.cmd test` passed: 21 files / 159 tests.
+  - `pnpm.cmd typecheck` passed.
+  - `pnpm.cmd lint` passed.
+  - `pnpm.cmd check:all` passed all 5 custom checks.
+  - `pnpm.cmd schema:check` passed with 93 event types.
+  - `pnpm.cmd build` passed.
+  - `openspec.cmd validate add-agenthub-mvp --strict` passed.
+  - `pnpm.cmd exec playwright test apps/web/e2e/main-detail-projection.spec.ts apps/web/e2e/pending-turn.spec.ts` passed: 5 tests.
+- During closeout verification, the Claude adapter crash bridge regression exposed an ACP stdin `EPIPE` supervision gap under root-suite load. The closeout branch fixes that runtime supervision path and records its own verification in `.sisyphus/plans/agenthub-mvp-remediation.md`.
+- Evidence caveat: P1-1 / P1-2 / P1-3 completion is recorded in plan status, issue notes, git history, and verification commands, but dedicated remediation evidence files are still absent. The closeout PR therefore requires independent review before merge.
+- Final status after closeout review: MVP code implementation and merge validation are complete. OpenSpec archival remains a separate, explicit follow-up operation.
+
