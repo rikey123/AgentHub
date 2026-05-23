@@ -1,0 +1,7 @@
+{
+  "name": "agenthub-banned-dep-fixture",
+  "private": true,
+  "dependencies": {
+    "redis": "latest"
+  }
+}
