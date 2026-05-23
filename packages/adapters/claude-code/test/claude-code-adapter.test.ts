@@ -3,10 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { ArtifactFSRunRegistry, ArtifactService } from "@agenthub/artifacts";
+import { ACPAdapterError } from "@agenthub/adapter-acp-base";
 import { CommandBus, createEventBus } from "@agenthub/bus";
 import { createDatabase } from "@agenthub/db";
 import { RoomMcpServer, RunLifecycleService, TaskService } from "@agenthub/orchestrator";
 import { PermissionEngine, seedBuiltInPermissionProfiles } from "@agenthub/permissions";
+import type { CreateSessionInput } from "@agenthub/protocol";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 
@@ -100,7 +102,38 @@ describe("ClaudeCodeACPAdapter", () => {
     expect(database.sqlite.prepare("SELECT type FROM events WHERE type = 'agent.run.failed' AND run_id = 'run'").get()).toMatchObject({ type: "agent.run.failed" });
     database.sqlite.close();
   });
+
+  it("bridges ACP failure even when it happens before session.opened is handled", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "agenthub-claude-early-crash-"));
+    const database = createDatabase({ path: join(dir, "agenthub.sqlite"), applyMigrations: true });
+    database.sqlite.prepare("INSERT INTO workspaces (id, name, root_path, created_at, updated_at) VALUES ('w', 'w', ?, 1, 1)").run(dir);
+    database.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES ('r', 'w', 'r', 'solo', 'conversation', 'a', NULL, 1, 1)").run();
+    const eventBus = createEventBus({ database });
+    const lifecycle = new RunLifecycleService(database, eventBus);
+    lifecycle.create(null, { runId: "run", workspaceId: "w", roomId: "r", agentId: "a", wakeReason: "primary_turn" });
+    lifecycle.markClaimed(null, "run");
+    lifecycle.markStarting(null, "run", 123);
+    const adapter = new EarlyFailClaudeCodeACPAdapter({ command: "", services: { database, eventBus }, lifecycle, workspaceId: "w" });
+
+    await adapter.runManaged(lifecycle.read("run"));
+
+    expect(database.sqlite.prepare("SELECT status, failure_class, error FROM runs WHERE id = 'run'").get()).toMatchObject({ status: "failed", failure_class: "retryable_visible", error: "early failure" });
+    expect(database.sqlite.prepare("SELECT type FROM events WHERE type = 'agent.run.failed' AND run_id = 'run'").get()).toMatchObject({ type: "agent.run.failed" });
+    database.sqlite.close();
+  });
 });
+
+class EarlyFailClaudeCodeACPAdapter extends ClaudeCodeACPAdapter {
+  protected override spawnArgs() { return { command: "", args: [] as const }; }
+  protected override createSessionSync(input: CreateSessionInput) {
+    const session = super.createSessionSync(input);
+    const debug = this.debugSession(session.id);
+    if (debug === undefined) throw new Error("missing test session");
+    debug.state = "failed";
+    this.onSessionFailed(debug, new ACPAdapterError("process_exit", "early failure"));
+    return session;
+  }
+}
 
 async function waitFor<T>(read: () => T, done: (value: T) => boolean): Promise<T> {
   const deadline = Date.now() + 2_000;

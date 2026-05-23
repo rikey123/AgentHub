@@ -101,3 +101,7 @@
 
 - F4 raw-view blocker was fixed and F4 rerun returned APPROVE. F1/F2/F3 had already returned APPROVE.
 - The only remaining unchecked top-level items are F1-F4. The plan explicitly says to present consolidated results and wait for explicit user approval before marking them complete, so Atlas must not check them until the user says `okay`.
+
+## 2026-05-23 P0-3 ACP crash race
+
+- A fast ACP child exit can fire before `ClaudeCodeACPAdapter.runManaged()` handles `session.opened`, so the crash must be queued until AdapterBridge has moved the durable run to `running`; otherwise the run may remain running or the prompt path may throw against an already failed ACP session. ACP startup should also avoid overwriting a fast failed session back to ready.

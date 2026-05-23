@@ -348,7 +348,7 @@ export abstract class ACPAdapter {
       });
       this.writeJson(session, { jsonrpc: "2.0", method: "initialize", params: { clientCapabilities: session.clientCapabilities } });
       this.startLiveness(session);
-      session.state = "ready";
+      this.markReadyUnlessFailed(session);
       return true;
     } catch (error) {
       session.state = "failed";
@@ -365,6 +365,10 @@ export abstract class ACPAdapter {
     if (session.livenessTimer !== undefined) clearInterval(session.livenessTimer);
     session.state = "failed";
     this.onSessionFailed(session, error);
+  }
+
+  private markReadyUnlessFailed(session: AcpAdapterSession): void {
+    if (session.state !== "failed") session.state = "ready";
   }
 
   private startLiveness(session: AcpAdapterSession): void {

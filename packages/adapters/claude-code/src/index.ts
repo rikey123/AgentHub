@@ -36,6 +36,8 @@ export class ClaudeCodeACPAdapter extends ACPAdapter {
   private readonly env: NodeJS.ProcessEnv | undefined;
   private readonly bridgeByRun = new Map<string, AdapterBridge>();
   private readonly workspaceByRun = new Map<string, string>();
+  private readonly openedRuns = new Set<string>();
+  private readonly pendingFailuresByRun = new Map<string, ACPAdapterError>();
   private readonly permissionEngine: PermissionEngine | undefined;
   private readonly health: AdapterHealthRegistry | undefined;
 
@@ -71,7 +73,12 @@ export class ClaudeCodeACPAdapter extends ACPAdapter {
     this.bridgeByRun.set(run.id, bridge);
     this.workspaceByRun.set(run.id, run.workspace_id);
     const session = Effect.runSync(this.createSession({ runId: run.id, roomId: run.room_id, agentId: run.agent_id, workDir, ...(this.options.mcpServer !== undefined ? { mcpServer: this.options.mcpServer } : {}) }));
+    const acpSession = this.debugSession(session.id);
+    if (acpSession === undefined) throw new ACPAdapterError("session_not_found", `ACP session '${session.id}' not found`);
     bridge.handle({ type: "session.opened", sessionId: session.id, workDir, ...(session.providerConversationId !== undefined ? { providerConversationId: session.providerConversationId } : {}) });
+    this.openedRuns.add(run.id);
+    this.drainPendingFailure(run.id, acpSession);
+    if (acpSession.state === "failed") return;
     this.health?.update({ adapterId: this.id, workspaceId: run.workspace_id, liveness: "busy", pendingRunIds: [run.id] });
     this.sendPrompt(session.id, { role: "user", content: promptFromRun(run) });
   }
@@ -108,6 +115,22 @@ export class ClaudeCodeACPAdapter extends ACPAdapter {
   }
 
   protected override onSessionFailed(session: AcpAdapterSession, error: ACPAdapterError): void {
+    if (session.runId === undefined) return;
+    if (!this.openedRuns.has(session.runId)) {
+      this.pendingFailuresByRun.set(session.runId, error);
+      return;
+    }
+    this.bridgeSessionCrashed(session, error);
+  }
+
+  private drainPendingFailure(runId: string, session: AcpAdapterSession): void {
+    const error = this.pendingFailuresByRun.get(runId);
+    if (error === undefined) return;
+    this.pendingFailuresByRun.delete(runId);
+    this.bridgeSessionCrashed(session, error);
+  }
+
+  private bridgeSessionCrashed(session: AcpAdapterSession, error: ACPAdapterError): void {
     if (session.runId === undefined) return;
     const bridge = this.bridgeByRun.get(session.runId);
     if (bridge === undefined) return;
