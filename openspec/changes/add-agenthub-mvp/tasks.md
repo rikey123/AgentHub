@@ -291,7 +291,7 @@
 - [ ] 19.3.3 引入 `StageBoundary` 枚举（plan.completed / run.completed / artifact.diff.created / tests.failed / user.review_requested）；rule 只能绑定到 StageBoundary — refs: orchestrator/Observing 是被动状态 + WakeAgent [UNCLEAR]
 - [ ] 19.3.4 实现 `AgentPromptDelta`（first_wake 完整 role / delta_only 后续）+ 在 PromptAssembly 检查"是否第一次 wake"决定 kind — refs: orchestrator/Observing 是被动状态 + WakeAgent [PARTIAL]
 - [x] 19.3.5 把 `runs.wake_reason` 字段写入；Run Detail 可展示 — refs: agents/Run 状态机扩展（claimed / sessionId 持久化 / wake_reason）
-- [ ] 19.3.6 单元测试：100 条 message 流过 observer agent，LLM 调用次数 = 0（用 spy）— refs: orchestrator/Observing 是被动状态 + WakeAgent [MISSING]
+- [x] 19.3.6 单元测试：100 条 message 流过 observer agent，LLM 调用次数 = 0（用 spy）— refs: orchestrator/Observing 是被动状态 + WakeAgent
 
 ### 19.4 Run claimed/dispatched + sessionId 持久化 + 失败分类（D26）
 
@@ -304,7 +304,7 @@
 - [x] 19.4.7 transient + 无 visible output 自动 1 次重试（指数退避 5s）；其它分类不静默重试，UI 提供"重试"按钮 — refs: agents/Run 失败分类 + 与 Handler 重试隔离
 - [ ] 19.4.8 poisoned session 检测（iteration_limit / context_overflow / api_invalid_request 连续两次相同 fingerprint / 5 分钟无输出）→ failureClass='fresh_session_required'，下次重试强制新 session — refs: agents/Run 失败分类 + 与 Handler 重试隔离 [MISSING]
 - [ ] 19.4.9 Run reuse 策略：manifest 声明 `always_fresh / reuse_per_room_agent / reuse_per_workspace`；reuse 时 RunLifecycleService.create 接受 `parentRunId?` — refs: agents/SessionId / WorkDir 中途持久化 [PARTIAL]
-- [ ] 19.4.10 集成测试：daemon kill -9 → 重启 → 扫到 stuck `claimed` run → 按 crashRecovery 路径恢复 [MISSING]
+- [x] 19.4.10 集成测试：daemon kill -9 → 重启 → 扫到 stuck `claimed` run → 按 crashRecovery 路径恢复
 
 ### 19.5 Permission per-session 队列 + 幂等 + Timeout Pause（D27）
 
@@ -376,7 +376,7 @@
 - [x] 19.12.6 实现 `MailboxService.appendNextTurn(tx, runId, payload)` 唯一写入口；payload 至少含 promptDelta / messageId / pendingTurnId 之一，且必带 sourceReason / sourceIdempotencyKey；零输入返回 `{ appended: false }` 不 INSERT — refs: orchestrator/run_next_turns 表
 - [x] 19.12.7 实现 `room.read_mailbox` MCP tool 双源原子消费（0-5 步事务流）：① 幂等检查 `mailbox_deliveries WHERE delivery_batch_id=:batchId AND run_id=:runId`，命中直接返回 batch；② 读 mailbox（**`(read=0 AND claimed_run_id IS NULL) OR claimed_run_id=:runId`**，过滤 `delivery_batch_id IS NULL OR delivery_batch_id=:batchId`；MUST NOT 用 `read=0` 不加 `claimed_run_id IS NULL` 的宽泛条件，防止幽灵投递）；③ 标 mailbox `read=1, claimed_run_id, claimed_at, delivery_batch_id=:batchId`；**UPDATE affected rows 必须等于 SELECT 返回行数，不等回滚返回 MailboxDeliveryConflict**；④ 读 run_next_turns（`run_id=:runId AND consumed_at IS NULL`）；⑤ 标 next_turn `consumed_at=now()`；⑥ 写 `mailbox_deliveries`；runId 由 adapter session 上下文隐式注入；agent 不能伪造 runId；`deliveryBatchId` MUST stable for same logical retry（优先 ACP toolCallId，其次 MCP request id，最后才允许 bridge 生成 UUID）— refs: orchestrator/room.read_mailbox 双源原子消费
 - [x] 19.12.8 Orchestrator hook `agent.run.completed/failed/cancelled` 三步顺序：presence 更新 → 查 unconsumed run_next_turns 命中即派发 `WakeAgent({ carryNextTurnIds, sourceRunId=oldRunId, idempotencyKey=hash(oldRunId+ids) })` → 否则消费 PendingTurn；CI 集成测试覆盖 next_turn 优先于 pending_turn 的串行调度 — refs: bus-runtime/订阅图谱（单一真相）, orchestrator/run_next_turns 表
-- [ ] 19.12.9 集成测试：① appendNextTurn 在 promptDelta 空但 pendingTurnId 非空时仍写入 ② run_A complete 后 carry 链路把 nt_1/nt_2 rebind 到 run_B（防御 SQL 含 sourceRunId），run_B 通过 read_mailbox 拉到 ③ fail transient 不动 next_turns、carry 链路接续 ④ fail permission_denied 标 next_turns consumed 不重投 ⑤ run_A complete 同时有 nt_5 与 pt_9，串行先 carry 再 consume ⑥ 同 deliveryBatchId 重试返回同 batch，新 deliveryBatchId 不返回旧 mailbox ⑦ transient fail 回滚 mailbox 清 delivery_batch_id，新 run read_mailbox 能读到 — refs: orchestrator/run_next_turns 表, orchestrator/room.read_mailbox 双源原子消费 [MISSING]
+- [x] 19.12.9 集成测试：① appendNextTurn 在 promptDelta 空但 pendingTurnId 非空时仍写入 ② run_A complete 后 carry 链路把 nt_1/nt_2 rebind 到 run_B（防御 SQL 含 sourceRunId），run_B 通过 read_mailbox 拉到 ③ fail transient 不动 next_turns、carry 链路接续 ④ fail permission_denied 标 next_turns consumed 不重投 ⑤ run_A complete 同时有 nt_5 与 pt_9，串行先 carry 再 consume ⑥ 同 deliveryBatchId 重试返回同 batch，新 deliveryBatchId 不返回旧 mailbox ⑦ transient fail 回滚 mailbox 清 delivery_batch_id，新 run read_mailbox 能读到 — refs: orchestrator/run_next_turns 表, orchestrator/room.read_mailbox 双源原子消费
 - [x] 19.12.10 failed transient/retryable_visible/fresh_session_required 回滚 mailbox claim（`read=0, claimed_run_id=NULL, claimed_at=NULL, delivery_batch_id=NULL`）；其它分类保持 read=1；通过 `RunLifecycleSideEffects.finalizeNextTurns(tx, runId, failureClass)` 注入接口完成 next_turn finalization（bus-runtime 不直接 import orchestrator）— refs: orchestrator/Mailbox 原子认领 + activeWakes 防重入, bus-runtime/RunLifecycleService 是 runs 表的唯一写入口
 
 ### 19.13 file:// / data: URI + Debug 授权（D29）
@@ -401,7 +401,7 @@
 - [ ] 19.15.2 跑 19.x 全部 P1 / P2 / P3 集成测试 [MISSING]
 - [ ] 19.15.3 跑 observe 不烧 token 用例 + 多文件 run-level diff 用例 + adapter raw 暴涨不挤主流用例 + claimed reclaim 用例 + permission per-session 队列用例 [MISSING]
 - [ ] 19.15.4 在主流 + Run Detail 双视图下跑 golden path 验证 [MISSING]
-- [ ] 19.15.5 锁矩阵集成测试：① workspace 锁存在时 file 锁申请阻塞 ② file 锁存在时 workspace 锁申请阻塞 ③ 不同 workspace 间互不阻塞 ④ 同 workspace 内多个 file 锁可并行（lock_key 不同）⑤ targetFiles=undefined 自动退化为 workspace 锁 — refs: bus-runtime/RunQueue 是 bus 的一条命名队列 [MISSING]
+- [x] 19.15.5 锁矩阵集成测试：① workspace 锁存在时 file 锁申请阻塞 ② file 锁存在时 workspace 锁申请阻塞 ③ 不同 workspace 间互不阻塞 ④ 同 workspace 内多个 file 锁可并行（lock_key 不同）⑤ targetFiles=undefined 自动退化为 workspace 锁 — refs: bus-runtime/RunQueue 是 bus 的一条命名队列
 
 ## 20. 一致性收口（Round-2 P1+P2 补丁）
 
@@ -411,7 +411,7 @@
 - [x] 20.1.2 实现 `WakeAgent` Command handler：activeWakes guard（try/finally；release 在 createdRunId 为 null 时执行，bindToRun 在创建成功后执行）+ IMMEDIATE 事务（runRepo.findActive DB 二次校验 → mailboxService.claimUnread(tx) → 零输入判断 → runLifecycleService.create(tx, input)）；handler **不**裸写 INSERT_RUN / INSERT_EVENT / INSERT_OUTBOX；零输入定义（正向）= `hasInput = claimedIds.length > 0 || hasMeaningfulPromptDelta(promptDelta) || !!messageId || !!pendingTurnId || (carryNextTurnIds?.length ?? 0) > 0`；hasInput=false 时 audit `wake_rejected_zero_input` 并放弃创建 — refs: orchestrator/Solo 模式调度, orchestrator/Mailbox 原子认领, bus-runtime/RunLifecycleService 是 runs 表的唯一写入口
 - [ ] 20.1.3 改 Orchestrator `message.created` handler：仅在 `turn_dispatch_mode='immediate'` 时 dispatch WakeAgent；pending → 不动 — refs: orchestrator/Solo 模式调度, messaging/用户 Turn 排队 [UNCLEAR]
 - [x] 20.1.4 实现 `ConsumePendingTurn` Command handler：UPDATE pending_turns.status='scheduled' + emit pending_turn.scheduled + 内部 dispatch WakeAgent(reason='consume_pending_turn')；完成后 UPDATE consumed + emit pending_turn.consumed — refs: messaging/用户 Turn 排队
-- [ ] 20.1.5 集成测试：busy 时连发 5 条 user message，全部 PendingTurn `queued`；run_1 终结后按顺序 consume，调用 LLM 5 次仅由 WakeAgent 触发，无第二条调度路径 [MISSING]
+- [x] 20.1.5 集成测试：busy 时连发 5 条 user message，全部 PendingTurn `queued`；run_1 终结后按顺序 consume，调用 LLM 5 次仅由 WakeAgent 触发，无第二条调度路径
 
 ### 20.2 RunLifecycleService 接口补齐（D26 + D30）
 
