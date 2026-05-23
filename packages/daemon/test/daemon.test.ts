@@ -8,6 +8,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createDaemon, type DaemonApp } from "../src/index.ts";
 
+let currentDaemon: DaemonApp | undefined;
+
 describe("daemon M1.4 composition", () => {
   let daemon: DaemonApp;
   let baseUrl: string;
@@ -15,6 +17,7 @@ describe("daemon M1.4 composition", () => {
   beforeEach(async () => {
     const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-test-"));
     daemon = createDaemon({ databasePath: join(dir, "agenthub.sqlite"), port: 0 });
+    currentDaemon = daemon;
     const server = await daemon.start();
     const address = server.address();
     if (typeof address !== "object" || address === null) throw new Error("expected TCP address");
@@ -23,6 +26,7 @@ describe("daemon M1.4 composition", () => {
 
   afterEach(async () => {
     await daemon.close();
+    currentDaemon = undefined;
   });
 
   it("serves OpenAPI and runs Mock Solo through SDK", async () => {
@@ -105,6 +109,80 @@ describe("daemon M1.4 composition", () => {
     expect(daemon.mockAdapter.llmCallsFor("mock-observer")).toBe(0);
   });
 
+  it("queues pending turns while primary is busy and preserves immediate wake when idle", async () => {
+    const client = new AgentHubClient({ baseUrl });
+    const room = await client.createRoom({ title: "Pending", mode: "solo", primaryAgentId: "mock-builder" }) as { readonly data: { readonly roomId: string } };
+    seedBusyRun(room.data.roomId, "mock-builder", "run_busy");
+
+    const queued = await client.sendMessage(room.data.roomId, { text: "queued", idempotencyKey: "queued-1" }) as { readonly ok: boolean; readonly data: { readonly messageId: string } };
+
+    expect(queued.ok).toBe(true);
+    expect(daemon.database.sqlite.prepare("SELECT status, user_message_id FROM pending_turns WHERE id = ?").get(queued.data.messageId)).toMatchObject({ status: "queued", user_message_id: queued.data.messageId });
+    expect(daemon.database.sqlite.prepare("SELECT turn_dispatch_mode, pending_turn_id FROM messages WHERE id = ?").get(queued.data.messageId)).toMatchObject({ turn_dispatch_mode: "pending", pending_turn_id: queued.data.messageId });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM runs WHERE wake_reason = 'primary_turn'").get()).toMatchObject({ count: 1 });
+
+    daemon.database.sqlite.prepare("UPDATE runs SET status = 'completed', ended_at = ? WHERE id = 'run_busy'").run(Date.now());
+    const immediate = await client.sendMessage(room.data.roomId, { text: "immediate", idempotencyKey: "immediate-1" }) as { readonly ok: boolean };
+    expect(immediate.ok).toBe(true);
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM runs WHERE wake_reason = 'primary_turn'").get()).toMatchObject({ count: 2 });
+  });
+
+  it("caps queued pending turns at 20 and returns 429 for the 21st", async () => {
+    const client = new AgentHubClient({ baseUrl });
+    const room = await client.createRoom({ title: "Cap", mode: "solo", primaryAgentId: "mock-builder" }) as { readonly data: { readonly roomId: string } };
+    seedBusyRun(room.data.roomId, "mock-builder", "run_cap");
+    for (let index = 0; index < 20; index += 1) {
+      const sent = await client.sendMessage(room.data.roomId, { text: `queued ${index}`, idempotencyKey: `cap-${index}` }) as { readonly ok: boolean };
+      expect(sent.ok).toBe(true);
+    }
+
+    const rejected = await fetch(`${baseUrl}/rooms/${room.data.roomId}/messages`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "too many", idempotencyKey: "cap-21" }) });
+    const payload = await rejected.json() as { readonly ok: boolean; readonly error: { readonly message: string; readonly details?: unknown } };
+
+    expect(rejected.status).toBe(429);
+    expect(payload.ok).toBe(false);
+    expect(payload.error.message).toBe("pending_turn_quota_exceeded");
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM pending_turns WHERE room_id = ? AND status = 'queued'").get(room.data.roomId)).toMatchObject({ count: 20 });
+  });
+
+  it("cancels queued pending turns and rejects non-queued states", async () => {
+    const client = new AgentHubClient({ baseUrl });
+    const room = await client.createRoom({ title: "Cancel Pending", mode: "solo", primaryAgentId: "mock-builder" }) as { readonly data: { readonly roomId: string } };
+    seedBusyRun(room.data.roomId, "mock-builder", "run_cancel_pending");
+    const sent = await client.sendMessage(room.data.roomId, { text: "cancel me", idempotencyKey: "cancel-pending-1" }) as { readonly data: { readonly messageId: string } };
+
+    const cancelled = await fetch(`${baseUrl}/pending-turns/${sent.data.messageId}`, { method: "DELETE" });
+    expect(cancelled.status).toBe(200);
+    expect(daemon.database.sqlite.prepare("SELECT status FROM pending_turns WHERE id = ?").get(sent.data.messageId)).toMatchObject({ status: "cancelled" });
+
+    const conflict = await fetch(`${baseUrl}/pending-turns/${sent.data.messageId}`, { method: "DELETE" });
+    expect(conflict.status).toBe(409);
+  });
+
+  it("edits queued pending message as cancel plus new queued or immediate message", async () => {
+    const client = new AgentHubClient({ baseUrl });
+    const room = await client.createRoom({ title: "Edit Pending", mode: "solo", primaryAgentId: "mock-builder" }) as { readonly data: { readonly roomId: string } };
+    seedBusyRun(room.data.roomId, "mock-builder", "run_edit_pending");
+    const sent = await client.sendMessage(room.data.roomId, { text: "old", idempotencyKey: "edit-pending-1" }) as { readonly data: { readonly messageId: string } };
+
+    const editedQueued = await fetch(`${baseUrl}/messages/${sent.data.messageId}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "new queued" }) });
+    const queuedPayload = await editedQueued.json() as { readonly ok: boolean; readonly data: { readonly messageId: string } };
+    expect(editedQueued.status).toBe(200);
+    expect(queuedPayload.ok).toBe(true);
+    expect(daemon.database.sqlite.prepare("SELECT status FROM pending_turns WHERE id = ?").get(sent.data.messageId)).toMatchObject({ status: "cancelled" });
+    expect(daemon.database.sqlite.prepare("SELECT turn_dispatch_mode FROM messages WHERE id = ?").get(queuedPayload.data.messageId)).toMatchObject({ turn_dispatch_mode: "pending" });
+
+    daemon.database.sqlite.prepare("UPDATE runs SET status = 'completed', ended_at = ? WHERE id = 'run_edit_pending'").run(Date.now());
+    const seededMessageId = "msg_seeded_edit_immediate";
+    seedPendingMessage(room.data.roomId, "mock-builder", seededMessageId, "old immediate");
+    const editedImmediate = await fetch(`${baseUrl}/messages/${seededMessageId}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "new immediate" }) });
+    const immediatePayload = await editedImmediate.json() as { readonly ok: boolean; readonly data: { readonly messageId: string } };
+
+    expect(editedImmediate.status).toBe(200);
+    expect(immediatePayload.ok).toBe(true);
+    expect(daemon.database.sqlite.prepare("SELECT turn_dispatch_mode FROM messages WHERE id = ?").get(immediatePayload.data.messageId)).toMatchObject({ turn_dispatch_mode: "immediate" });
+  });
+
   it("exposes permission APIs and resolves requests through CommandBus", async () => {
     const client = new AgentHubClient({ baseUrl });
     const profiles = await client.listPermissionProfiles() as { readonly profiles: readonly { readonly id: string }[] };
@@ -155,6 +233,28 @@ describe("daemon M1.4 composition", () => {
 
 function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function seedBusyRun(roomId: string, agentId: string, runId: string): void {
+  activeDaemon().database.sqlite.prepare(
+    `INSERT INTO runs (
+      id, workspace_id, task_id, room_id, agent_id, adapter_id, adapter_session_id, provider_conversation_id,
+      parent_run_id, status, wake_reason, waiting_reason, workspace_path, work_dir, workspace_mode, context_version,
+      target_files, mailbox_claim_count, pid_at_start, claimed_at, started_at, ended_at, input_tokens, output_tokens,
+      cached_tokens, cost_usd, model_id, failure_class, error, created_at, updated_at
+    ) VALUES (?, 'default-workspace', NULL, ?, ?, NULL, NULL, NULL, NULL, 'running', 'primary_turn', NULL, NULL, NULL, NULL, NULL, '[]', 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)`
+  ).run(runId, roomId, agentId, Date.now(), Date.now());
+}
+
+function seedPendingMessage(roomId: string, agentId: string, messageId: string, text: string): void {
+  activeDaemon().database.sqlite.prepare("INSERT INTO messages (id, workspace_id, room_id, sender_type, sender_id, run_id, role, status, quoted_message_id, turn_dispatch_mode, pending_turn_id, created_at, updated_at, deleted_at) VALUES (?, 'default-workspace', ?, 'user', 'local', NULL, 'user', 'completed', NULL, 'pending', ?, ?, ?, NULL)").run(messageId, roomId, messageId, Date.now(), Date.now());
+  activeDaemon().database.sqlite.prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, 1, 'text', ?, ?)").run(messageId, JSON.stringify({ text }), Date.now());
+  activeDaemon().database.sqlite.prepare("INSERT INTO pending_turns (id, room_id, user_message_id, primary_agent_id, status, enqueued_at, scheduled_at, cancelled_at, notes) VALUES (?, ?, ?, ?, 'queued', ?, NULL, NULL, NULL)").run(messageId, roomId, messageId, agentId, Date.now());
+}
+
+function activeDaemon(): DaemonApp {
+  if (!currentDaemon) throw new Error("daemon is not initialized");
+  return currentDaemon;
 }
 
 async function readSseEvent(body: ReadableStream<Uint8Array> | null, eventName: string): Promise<string> {

@@ -11,12 +11,14 @@ import {
   ActiveWakesRegistry,
   AdapterBridge,
   MailboxService,
+  PendingTurnService,
   ReclaimStaleClaimedRun,
   RunLifecycleError,
   RunLifecycleService,
   RunQueue,
   StartupRecovery,
   createCancelRunHandler,
+  createConsumePendingTurnHandler,
   createWakeAgentHandler,
 } from "../src/index.ts";
 
@@ -171,6 +173,61 @@ describe("WakeAgent and CancelRun handlers", () => {
     expect(result).toMatchObject({ ok: true, data: { status: "cancelling" } });
     expect(statusOf("run_cancel")).toBe("cancelling");
     expect(cancelRun).toHaveBeenCalledWith("run_cancel");
+  });
+
+  test("ConsumePendingTurn rejects origin http", () => {
+    seedRoom("room_1", "agent_1");
+    seedPendingTurn("pt_http", "msg_http");
+    const pendingTurns = new PendingTurnService({ database: currentDatabase(), eventBus: currentBus(), getCommandBus: (): CommandBus => commandBus, now: () => now });
+    const commandBus = new CommandBus({ database: currentDatabase(), handlers: { ConsumePendingTurn: createConsumePendingTurnHandler(pendingTurns) as CommandHandler } });
+
+    const result = commandBus.dispatch({ type: "ConsumePendingTurn", pendingTurnId: "pt_http" }, { actor: { type: "user", id: "u_1" }, traceId: "trace_http", origin: "http" }) as CommandResult;
+
+    expect(result).toMatchObject({ ok: false, error: { code: "validation_failed" } });
+    expect(pendingTurnStatus("pt_http")).toBe("queued");
+  });
+
+  test("ConsumePendingTurn transitions queued to scheduled to consumed and wakes internally", () => {
+    seedRoom("room_1", "agent_1");
+    seedPendingTurn("pt_1", "msg_pt_1", "consume me");
+    const commandBusRef: { current?: CommandBus } = {};
+    const pendingTurns = new PendingTurnService({ database: currentDatabase(), eventBus: currentBus(), getCommandBus: (): CommandBus => {
+      if (!commandBusRef.current) throw new Error("CommandBus is not initialized");
+      return commandBusRef.current;
+    }, now: () => now });
+    const commandBus = new CommandBus({
+      database: currentDatabase(),
+      handlers: {
+        WakeAgent: createWakeAgentHandler({ database: currentDatabase(), activeWakes: currentActiveWakes(), mailbox: currentMailbox(), lifecycle: currentLifecycle() }) as CommandHandler,
+        ConsumePendingTurn: createConsumePendingTurnHandler(pendingTurns) as CommandHandler
+      }
+    });
+    commandBusRef.current = commandBus;
+
+    const result = commandBus.dispatch({ type: "ConsumePendingTurn", pendingTurnId: "pt_1" }, internalMeta("consume_pt_1")) as CommandResult;
+
+    expect(result).toMatchObject({ ok: true, data: { status: "consumed" } });
+    expect(pendingTurnStatus("pt_1")).toBe("consumed");
+    expect(eventTypes()).toEqual(expect.arrayContaining(["pending_turn.scheduled", "pending_turn.consumed", "agent.run.queued"]));
+    expect(currentDatabase().sqlite.prepare("SELECT wake_reason, room_id, agent_id FROM runs ORDER BY created_at DESC LIMIT 1").get()).toMatchObject({ wake_reason: "consume_pending_turn", room_id: "room_1", agent_id: "agent_1" });
+  });
+});
+
+describe("PendingTurn terminal hook", () => {
+  test("prioritizes unconsumed run_next_turns over queued PendingTurn", () => {
+    seedRoom("room_1", "agent_1");
+    seedPendingTurn("pt_wait", "msg_wait");
+    createRun("run_terminal");
+    insertNextTurn("nt_wait", "run_terminal");
+    const dispatched: unknown[] = [];
+    const commandBus = { dispatch: (command: unknown) => { dispatched.push(command); return { ok: true, data: {}, emittedEvents: [] } satisfies CommandResult; } } as unknown as CommandBus;
+    const pendingTurns = new PendingTurnService({ database: currentDatabase(), eventBus: currentBus(), getCommandBus: () => commandBus, now: () => now });
+
+    pendingTurns.handleTerminal("run_terminal");
+
+    expect(dispatched).toHaveLength(1);
+    expect(dispatched[0]).toMatchObject({ type: "WakeAgent", carryNextTurnIds: ["nt_wait"], sourceRunId: "run_terminal" });
+    expect(pendingTurnStatus("pt_wait")).toBe("queued");
   });
 });
 
@@ -395,6 +452,17 @@ function seedMailbox(id: string, roomId: string, agentId: string): void {
     .run(id, roomId, agentId, now);
 }
 
+function seedRoom(roomId: string, agentId: string): void {
+  currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO workspaces (id, name, root_path, created_at, updated_at) VALUES ('ws_1', 'Workspace', '.', ?, ?)").run(now, now);
+  currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES (?, 'ws_1', 'Room', 'solo', 'conversation', ?, NULL, ?, ?)").run(roomId, agentId, now, now);
+}
+
+function seedPendingTurn(id: string, messageId: string, text = "pending text"): void {
+  currentDatabase().sqlite.prepare("INSERT INTO messages (id, workspace_id, room_id, sender_type, sender_id, run_id, role, status, quoted_message_id, turn_dispatch_mode, pending_turn_id, created_at, updated_at, deleted_at) VALUES (?, 'ws_1', 'room_1', 'user', 'u_1', NULL, 'user', 'completed', NULL, 'pending', ?, ?, ?, NULL)").run(messageId, id, now, now);
+  currentDatabase().sqlite.prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, 1, 'text', ?, ?)").run(messageId, JSON.stringify({ text }), now);
+  currentDatabase().sqlite.prepare("INSERT INTO pending_turns (id, room_id, user_message_id, primary_agent_id, status, enqueued_at, scheduled_at, cancelled_at, notes) VALUES (?, 'room_1', ?, 'agent_1', 'queued', ?, NULL, NULL, NULL)").run(id, messageId, now);
+}
+
 function insertNextTurn(id: string, runId: string): void {
   currentDatabase().sqlite
     .prepare(
@@ -434,6 +502,10 @@ function runCount(): number {
 
 function nextTurnCount(runId: string): number {
   return (currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM run_next_turns WHERE run_id = ?").get(runId) as { count: number }).count;
+}
+
+function pendingTurnStatus(id: string): string {
+  return (currentDatabase().sqlite.prepare("SELECT status FROM pending_turns WHERE id = ?").get(id) as { status: string }).status;
 }
 
 function lockRows(): unknown[] {
