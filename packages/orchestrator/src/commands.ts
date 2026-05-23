@@ -29,6 +29,25 @@ export type AdapterCancelManager = {
   cancelRun(runId: string): void | Promise<void>;
 };
 
+export function createCancelRunHandler(options: { readonly lifecycle: RunLifecycleService; readonly adapterManager: AdapterCancelManager }): CommandHandler {
+  return (command): CommandResult => {
+    if (typeof command.runId !== "string" || command.runId.length === 0) {
+      return failed("validation_failed", "CancelRun requires runId");
+    }
+    const runId = command.runId;
+    try {
+      options.lifecycle.markCancelling(null, runId);
+    } catch (error) {
+      return lifecycleFailure(error);
+    }
+    // Fire-and-forget adapter cancel per spec: "不依赖 event 回环" (bus-runtime/spec.md §CancelRun).
+    // Both sync throws and async rejections are swallowed; lifecycle state is already driven by
+    // markCancelling and the run stays in cancelling until AdapterBridge drives cancelFinalized.
+    void Promise.resolve().then(() => options.adapterManager.cancelRun(runId)).catch(() => undefined);
+    return { ok: true, data: { runId, status: "cancelling" }, emittedEvents: [] };
+  };
+}
+
 export function createWakeAgentHandler(options: {
   readonly database: AgentHubDatabase;
   readonly activeWakes: ActiveWakesRegistry;
@@ -36,21 +55,6 @@ export function createWakeAgentHandler(options: {
   readonly lifecycle: RunLifecycleService;
 }): CommandHandler<WakeAgentCommand> {
   return (command, meta) => handleWakeAgent(options, command, meta);
-}
-
-export function createCancelRunHandler(options: { readonly lifecycle: RunLifecycleService; readonly adapterManager: AdapterCancelManager }): CommandHandler {
-  return async (command): Promise<CommandResult> => {
-    if (typeof command.runId !== "string" || command.runId.length === 0) {
-      return failed("validation_failed", "CancelRun requires runId");
-    }
-    try {
-      options.lifecycle.markCancelling(null, command.runId);
-      await options.adapterManager.cancelRun(command.runId);
-      return { ok: true, data: { runId: command.runId, status: "cancelling" }, emittedEvents: [] };
-    } catch (error) {
-      return lifecycleFailure(error);
-    }
-  };
 }
 
 function handleWakeAgent(

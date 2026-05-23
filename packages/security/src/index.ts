@@ -129,7 +129,7 @@ export function authenticateBrowserRequest(input: BrowserAuthInput): BrowserAuth
     if (scopes !== undefined) return { ok: true, scopes, authKind: "bearer" };
     return { ok: false, status: 401, error: "unauthorized" };
   }
-  if (!hasOrigin) return input.token === undefined ? { ok: true, scopes: ["admin", "read", "write"], authKind: "local" } : { ok: false, status: 401, error: "unauthorized" };
+  if (!hasOrigin) return input.token === undefined ? { ok: true, scopes: ["read", "write"], authKind: "local" } : { ok: false, status: 401, error: "unauthorized" };
   if (method !== "GET" && contentType(input.headers["content-type"]) !== "application/json") return { ok: false, status: 415, error: "content_type_not_json" };
   if (method === "POST" && input.pathname === "/auth/session") return { ok: true, scopes: ["read"], authKind: "session" };
   const session = sessionFromCookie(input.headers.cookie);

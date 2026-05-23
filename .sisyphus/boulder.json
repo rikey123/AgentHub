@@ -7,7 +7,11 @@
     "ses_1ad92008effeBZ4lGAQklPkU4J",
     "ses_1ad91fdfcffeIPMMGnlPHrdaEy",
     "ses_1ad91fd88ffekFRtaNeKq64o5I",
-    "ses_1ad0a551dffew6fT91uGkigb0s"
+    "ses_1ad0a551dffew6fT91uGkigb0s",
+    "ses_1aba73625ffeOfwCFq1YV5FVhy",
+    "ses_1aba72cdbffeDsgOt8u8pC36hd",
+    "ses_1aba72cc6ffeUwhd5YhLp2EP8f",
+    "ses_1aba726acffe2vkdP8h2EusRUo"
   ],
   "session_origins": {
     "ses_1af0ea2b2ffelI1i8aHyHQL6vU": "direct",
@@ -15,7 +19,11 @@
     "ses_1ad92008effeBZ4lGAQklPkU4J": "appended",
     "ses_1ad91fdfcffeIPMMGnlPHrdaEy": "appended",
     "ses_1ad91fd88ffekFRtaNeKq64o5I": "appended",
-    "ses_1ad0a551dffew6fT91uGkigb0s": "appended"
+    "ses_1ad0a551dffew6fT91uGkigb0s": "appended",
+    "ses_1aba73625ffeOfwCFq1YV5FVhy": "appended",
+    "ses_1aba72cdbffeDsgOt8u8pC36hd": "appended",
+    "ses_1aba72cc6ffeUwhd5YhLp2EP8f": "appended",
+    "ses_1aba726acffe2vkdP8h2EusRUo": "appended"
   },
   "plan_name": "agenthub-mvp",
   "agent": "atlas",

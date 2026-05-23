@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useProjector } from "../hooks/useProjector.ts";
+import { useRawStream } from "../hooks/useRawStream.ts";
 
 type RunDetailProps = {
   readonly roomId: string;
@@ -86,7 +87,7 @@ export function RunDetail({ roomId, runId, onClose }: RunDetailProps) {
         {activeTab === "context" && <ContextTab room={room} runId={runId} />}
         {activeTab === "permissions" && <PermissionsTab room={room} runId={runId} />}
         {activeTab === "artifacts" && <ArtifactsTab room={room} runId={runId} />}
-        {activeTab === "raw" && <RawStreamTab runId={runId} />}
+        {activeTab === "raw" && <RawStreamTab roomId={roomId} runId={runId} />}
         {activeTab === "cost" && <CostTab run={run} />}
       </div>
     </div>
@@ -223,7 +224,10 @@ function ArtifactsTab({ room, runId }: { readonly room: import("../types.ts").Ro
   );
 }
 
-function RawStreamTab({ runId }: { readonly runId: string }) {
+function RawStreamTab({ roomId, runId }: { readonly roomId: string; readonly runId: string }) {
+  const rawStream = useRawStream(roomId, runId);
+  const hasLines = rawStream.lines.length > 0;
+
   return (
     <div>
       <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 8 }}>Raw adapter stdout/stderr for run {runId}</div>
@@ -238,8 +242,26 @@ function RawStreamTab({ runId }: { readonly runId: string }) {
           minHeight: 200,
           whiteSpace: "pre-wrap"
         }}
+        data-testid="raw-stream-content"
       >
-        Raw stream content requires admin scope or debug mode.
+        {!hasLines && (
+          <div style={{ color: "#9ca3af" }}>
+            {rawStream.status === "connected"
+              ? "No raw output has arrived yet."
+              : "Raw stream content requires admin scope or debug mode."}
+          </div>
+        )}
+        {hasLines &&
+          rawStream.lines.map((line, idx) => (
+            <div
+              key={idx}
+              style={{
+                color: line.stream === "stderr" ? "#fca5a5" : "#e5e7eb"
+              }}
+            >
+              {line.text}
+            </div>
+          ))}
       </div>
     </div>
   );

@@ -118,10 +118,101 @@ test.describe("main timeline and run detail projection", () => {
     await page.click('[data-testid="run-detail-tab-permissions"]');
     await page.click('[data-testid="run-detail-tab-artifacts"]');
     await page.click('[data-testid="run-detail-tab-raw"]');
+    await page.waitForSelector('[data-testid="raw-stream-content"]');
+    const rawText = await page.locator('[data-testid="raw-stream-content"]').textContent();
+    expect(rawText).toBe("Raw stream content requires admin scope or debug mode.");
     await page.click('[data-testid="run-detail-tab-cost"]');
 
     // Close run detail
     await page.click("[aria-label='Close run detail']");
     await expect(page.locator("text=Run Detail")).not.toBeVisible();
+  });
+
+  test("raw stream tab renders live adapter raw lines for admin-authorized sessions", async ({ page }) => {
+    const { createHash } = await import("node:crypto");
+    const sha256 = (value: string): string => createHash("sha256").update(value).digest("hex");
+    daemon.database.sqlite.prepare("INSERT INTO auth_tokens (id, fingerprint, hash, scopes, created_at) VALUES (?, ?, ?, ?, ?)").run("e2e_admin", "e2e-admin", sha256("e2e-admin-token"), JSON.stringify(["admin"]), 1);
+
+    const roomRes = await fetch(`${testUrl}/rooms`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Raw Room", mode: "solo", primaryAgentId: "mock-builder" })
+    });
+    const roomData = (await roomRes.json()) as { data: { roomId: string } };
+    const roomId = roomData.data.roomId;
+
+    await fetch(`${testUrl}/rooms/${roomId}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "trigger raw", idempotencyKey: "e2e-raw" })
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    await page.goto(testUrl);
+    await page.waitForSelector("text=Raw Room");
+    await page.click("text=Raw Room");
+    await page.waitForSelector("text=trigger raw");
+
+    await page.click("text=Runs");
+    await page.waitForSelector("text=completed", { timeout: 5000 });
+    await page.locator("text=completed").first().click();
+
+    // Set admin bearer token so the raw stream fetch sends Authorization header
+    await page.evaluate(() => {
+      (window as unknown as Record<string, unknown>).__AGENTHUB_RAW_TOKEN__ = "e2e-admin-token";
+    });
+
+    // Observe raw SSE requests to verify auth header and no token leakage
+    const rawRequests: { readonly url: string; readonly authorization: string | undefined }[] = [];
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (url.pathname === "/event" && url.searchParams.get("view") === "raw") {
+        rawRequests.push({ url: request.url(), authorization: request.headers()["authorization"] });
+      }
+    });
+
+    await page.click('[data-testid="run-detail-tab-raw"]');
+    await page.waitForSelector('[data-testid="raw-stream-content"]');
+
+    const runs = daemon.database.sqlite.prepare("SELECT id FROM runs WHERE room_id = ?").all(roomId) as { readonly id: string }[];
+    const runId = runs[0]?.id;
+    if (!runId) throw new Error("No run found");
+
+    // Give the raw stream fetch time to connect before publishing the live event
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    // Verify auth header is sent and token is not leaked in query params
+    expect(rawRequests.length).toBeGreaterThanOrEqual(1);
+    const firstRaw = rawRequests[0]!;
+    expect(firstRaw.authorization).toBe("Bearer e2e-admin-token");
+    expect(new URL(firstRaw.url).searchParams.has("token")).toBe(false);
+
+    daemon.eventBus.publish({
+      id: "e2e-raw-stdout",
+      type: "adapter.raw.stdout",
+      schemaVersion: 1,
+      workspaceId: "default-workspace",
+      roomId,
+      runId,
+      agentId: "mock-builder",
+      payload: { line: "live raw stdout line", stream: "stdout" },
+      createdAt: Date.now()
+    });
+
+    daemon.eventBus.publish({
+      id: "e2e-raw-stderr",
+      type: "adapter.raw.stderr",
+      schemaVersion: 1,
+      workspaceId: "default-workspace",
+      roomId,
+      runId,
+      agentId: "mock-builder",
+      payload: { line: "live raw stderr line", stream: "stderr" },
+      createdAt: Date.now()
+    });
+
+    await page.waitForSelector("text=live raw stdout line", { timeout: 3000 });
+    await page.waitForSelector("text=live raw stderr line", { timeout: 3000 });
   });
 });

@@ -11,13 +11,14 @@ import { createInterventionCommandHandlers, InterventionEngine } from "@agenthub
 import { ActiveWakesRegistry, createCancelRunHandler, createCompleteTaskHandler, createConsumePendingTurnHandler, createCreateTaskHandler, createUpdateTaskHandler, createWakeAgentHandler, MailboxService, PendingTurnService, RoomMcpServer, RunLifecycleService, RunQueue, TaskService } from "@agenthub/orchestrator";
 import { createPermissionCommandHandlers, PermissionEngine, seedBuiltInPermissionProfiles } from "@agenthub/permissions";
 import type { EventEnvelope } from "@agenthub/protocol/events";
-import { authenticateBrowserRequest, issueBrowserSession, redactAndTruncate } from "@agenthub/security";
+import { authenticateBrowserRequest, issueBrowserSession, redactAndTruncate, type BrowserAuthResult } from "@agenthub/security";
 
+import { AdapterRegistry } from "./adapters/registry.ts";
 import { createDaemonCommandHandlers, seedDefaultData } from "./commands.ts";
 import { openApiDocument } from "./openapi.ts";
 
 export type DaemonOptions = { readonly databasePath: string; readonly host?: string; readonly port?: number; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly now?: () => number };
-export type DaemonApp = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly roomMcpServer: RoomMcpServer; readonly mockAdapter: MockAdapterManager; readonly handle: (req: IncomingMessage, res: ServerResponse) => void; start(): Promise<Server>; close(): Promise<void> };
+export type DaemonApp = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly roomMcpServer: RoomMcpServer; readonly adapterRegistry: AdapterRegistry; readonly mockAdapter: MockAdapterManager; readonly handle: (req: IncomingMessage, res: ServerResponse) => void; start(): Promise<Server>; close(): Promise<void> };
 
 export function createDaemon(options: DaemonOptions): DaemonApp {
   const database = createDatabase({ path: options.databasePath, applyMigrations: true });
@@ -39,8 +40,9 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     sideEffects: { onTerminal: (runId: string) => { activeWakes.releaseRun(runId); runQueue.releaseLocks(runId); pendingTurns.handleTerminal(runId); }, finalizeNextTurns: (tx: AgentHubDatabase["sqlite"], runId: string, failureClass: Parameters<MailboxService["finalizeForRun"]>[2], now: number) => mailbox.finalizeForRun(tx, runId, failureClass, now) }
   };
   const lifecycle = new RunLifecycleService(database, eventBus, lifecycleOptions);
-  const mockAdapter = new MockAdapterManager({ database, eventBus, lifecycle, artifactFs, ...(options.now !== undefined ? { now: options.now } : {}) });
-  const runQueue = new RunQueue({ database, lifecycle, adapterManager: mockAdapter, ...(options.now !== undefined ? { now: options.now } : {}) });
+  const adapterRegistry = new AdapterRegistry({ database, eventBus, lifecycle, permissionEngine, artifactFs, getRoomMcpServer: () => roomMcpServer, ...(options.now !== undefined ? { now: options.now } : {}) });
+  const mockAdapter = adapterRegistry.mockAdapter;
+  const runQueue = new RunQueue({ database, lifecycle, adapterManager: adapterRegistry, ...(options.now !== undefined ? { now: options.now } : {}) });
   const handlers = createDurableHandlerRegistry({ database, retryDelaysMs: [0] });
   handlers.register({ name: "run-queue", subscribes: ["agent.run.queued", "agent.run.completed", "agent.run.failed", "agent.run.cancelled"], handle: (event) => runQueue.handleEvent(event) });
   const outbox = createOutboxDispatcher({ database, eventBus, handlers });
@@ -57,7 +59,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
       CompleteTask: createCompleteTaskHandler(taskService),
       WakeAgent: createWakeAgentHandler({ database, activeWakes, mailbox, lifecycle }) as CommandHandler,
       ConsumePendingTurn: createConsumePendingTurnHandler(pendingTurns) as CommandHandler,
-      CancelRun: createCancelRunHandler({ lifecycle, adapterManager: mockAdapter })
+      CancelRun: createCancelRunHandler({ lifecycle, adapterManager: adapterRegistry })
     }
   });
   commandBusRef.current = commandBus;
@@ -65,7 +67,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
 
   const handle = (req: IncomingMessage, res: ServerResponse) => { void route({ req, res, database, eventBus, commandBus, artifactService, taskService, outbox, ...(options.token !== undefined ? { token: options.token } : {}), ...(options.allowedOrigins !== undefined ? { allowedOrigins: options.allowedOrigins } : {}), host: `${options.host ?? "127.0.0.1"}:${options.port ?? 6677}`, ...(options.now !== undefined ? { now: options.now } : {}) }); };
   let server: Server | undefined;
-  return { database, eventBus, commandBus, roomMcpServer, mockAdapter, handle, start: () => new Promise((resolve) => { server = createServer(handle).listen(options.port ?? 6677, options.host ?? "127.0.0.1", () => resolve(server as Server)); }), close: () => new Promise((resolve, reject) => { eventBus.close(); database.sqlite.close(); if (!server) resolve(); else server.close((err) => err ? reject(err) : resolve()); }) };
+  return { database, eventBus, commandBus, roomMcpServer, adapterRegistry, mockAdapter, handle, start: () => new Promise((resolve) => { server = createServer(handle).listen(options.port ?? 6677, options.host ?? "127.0.0.1", () => resolve(server as Server)); }), close: () => new Promise((resolve, reject) => { eventBus.close(); database.sqlite.close(); if (!server) resolve(); else server.close((err) => err ? reject(err) : resolve()); }) };
 }
 
 type RouteContext = { readonly req: IncomingMessage; readonly res: ServerResponse; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly artifactService: ArtifactService; readonly taskService: TaskService; readonly outbox: { drainPending(): Promise<void> }; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly host: string; readonly now?: () => number };
@@ -127,8 +129,8 @@ async function route(ctx: RouteContext): Promise<void> {
   if (ctx.req.method === "POST" && parts[0] === "artifacts" && parts[2] === "revert") return dispatch(ctx, { artifactId: parts[1] }, "RevertArtifact");
   if (ctx.req.method === "GET" && parts[0] === "artifacts" && parts[2] === "files" && parts.length === 3) return json(ctx.res, 200, { files: ctx.artifactService.files(parts[1] as string) });
   if (ctx.req.method === "GET" && parts[0] === "artifacts" && parts[2] === "files" && parts.length >= 4) return json(ctx.res, 200, { content: ctx.artifactService.fileContent(parts[1] as string, decodeURIComponent(parts.slice(3).join("/"))) ?? null });
-  if (ctx.req.method === "GET" && url.pathname === "/debug/events") return debugEvents(ctx, url);
-  if (ctx.req.method === "GET" && url.pathname === "/debug/stats") return debugStats(ctx);
+  if (ctx.req.method === "GET" && url.pathname === "/debug/events") return debugEvents(ctx, url, auth);
+  if (ctx.req.method === "GET" && url.pathname === "/debug/stats") return debugStats(ctx, auth);
   if (ctx.req.method === "GET" && parts[0] === "workspaces" && parts[2] === "cost-summary") return json(ctx.res, 501, { error: "cost-panel-local is V0.5", capability: "v1-roadmap" });
   if (ctx.req.method === "GET" && (url.pathname === "/board" || url.pathname === "/timeline")) return json(ctx.res, 404, { error: "not_found", capability: "v1-roadmap" });
   return json(ctx.res, 404, { error: "not_found" });
@@ -167,7 +169,12 @@ function interventions(ctx: RouteContext, url: URL): void {
   json(ctx.res, 200, { interventions: all(ctx.database, `SELECT * FROM interventions${where} ORDER BY created_at ASC`, ...params) });
 }
 
-function debugEvents(ctx: RouteContext, url: URL): void {
+function debugEvents(ctx: RouteContext, url: URL, auth: BrowserAuthResult & { readonly ok: true }): void {
+  // Spec: local loopback (authKind=local) or admin bearer may access /debug/events.
+  // Browser session or non-admin bearer → 403 debug_disabled.
+  if (auth.authKind !== "local" && !auth.scopes.includes("admin")) {
+    return json(ctx.res, 403, { error: "debug_disabled" });
+  }
   const clauses: string[] = [];
   const params: unknown[] = [];
   for (const [column, param] of [["trace_id", "traceId"], ["run_id", "runId"], ["room_id", "roomId"], ["type", "type"]] as const) {
@@ -186,8 +193,20 @@ function debugEvents(ctx: RouteContext, url: URL): void {
   json(ctx.res, 200, { events: all(ctx.database, `SELECT * FROM events${where} ORDER BY created_at ASC, seq ASC LIMIT ?`, ...params, limit) });
 }
 
-function debugStats(ctx: RouteContext): void {
+function debugStats(ctx: RouteContext, auth: BrowserAuthResult & { readonly ok: true }): void {
   const now = Date.now();
+  // Spec: local loopback or admin bearer → full stats; browser session → basic health only (no PII).
+  const isDebugAllowed = auth.authKind === "local" || auth.scopes.includes("admin");
+  if (!isDebugAllowed) {
+    return json(ctx.res, 200, {
+      uptimeMs: Math.floor(process.uptime() * 1000),
+      roomCount: scalar(ctx.database, "SELECT COUNT(*) AS count FROM rooms WHERE archived_at IS NULL"),
+      activeRunCount: scalar(ctx.database, "SELECT COUNT(*) AS count FROM runs WHERE status IN ('queued', 'running', 'waiting_permission')"),
+      pendingPermissionCount: scalar(ctx.database, "SELECT COUNT(*) AS count FROM permission_requests WHERE status = 'pending'"),
+      pendingInterventionCount: scalar(ctx.database, "SELECT COUNT(*) AS count FROM interventions WHERE status = 'pending_user_decision'"),
+      sseClientCount: 0
+    });
+  }
   json(ctx.res, 200, {
     uptimeMs: Math.floor(process.uptime() * 1000),
     roomCount: scalar(ctx.database, "SELECT COUNT(*) AS count FROM rooms WHERE archived_at IS NULL"),

@@ -22,6 +22,7 @@ describe("M6 security package", () => {
     expect(authenticateBrowserRequest({ method: "POST", pathname: "/rooms", headers: { ...headers, "x-agenthub-csrf": "wrong" }, database, now: 2_000 })).toMatchObject({ ok: false, status: 403, error: "csrf_token_mismatch" });
     expect(authenticateBrowserRequest({ method: "GET", pathname: "/event", headers: { origin: headers.origin, host: headers.host, cookie: headers.cookie }, database, now: 2_000 }).ok).toBe(true);
     expect(authenticateBrowserRequest({ method: "POST", pathname: "/auth/session", headers: { origin: headers.origin, host: headers.host, "content-type": "application/json" }, database, now: 2_000 }).ok).toBe(true);
+    expect(authenticateBrowserRequest({ method: "GET", pathname: "/event", headers: { host: headers.host }, database, now: 2_000 })).toMatchObject({ ok: true, scopes: ["read", "write"], authKind: "local" });
     database.sqlite.close();
   });
 
