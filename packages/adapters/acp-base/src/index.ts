@@ -119,6 +119,12 @@ export abstract class ACPAdapter {
     // Subclasses may bridge provider events into AdapterBridge or other boundaries.
   }
 
+  protected onSessionFailed(session: AcpAdapterSession, error: ACPAdapterError): void {
+    void session;
+    void error;
+    // Subclasses may bridge supervision failures into AdapterBridge or other boundaries.
+  }
+
   createSession(input: CreateSessionInput): Effect.Effect<ExternalSession, AdapterError> {
     return Effect.try({ try: () => this.createSessionSync(input), catch: (error) => toAdapterError(error) });
   }
@@ -331,13 +337,14 @@ export abstract class ACPAdapter {
         for (const line of session.stderrLineSplitter.push(chunk)) this.emitRaw(session, "stderr", line);
       });
       child.on("error", (error) => {
-        if (session.livenessTimer !== undefined) clearInterval(session.livenessTimer);
-        session.state = "failed";
-        this.emitRaw(session, "stderr", error instanceof Error ? error.message : String(error));
+        const message = error instanceof Error ? error.message : String(error);
+        this.emitRaw(session, "stderr", message);
+        this.failSession(session, new ACPAdapterError("process_error", message, error));
       });
-      child.on("exit", () => {
-        if (session.livenessTimer !== undefined) clearInterval(session.livenessTimer);
-        if (session.state !== "disposed") session.state = "failed";
+      child.on("exit", (code, signal) => {
+        if (session.state === "disposed") return;
+        const detail = signal !== null ? `signal ${signal}` : `exit code ${code ?? "unknown"}`;
+        this.failSession(session, new ACPAdapterError("process_exit", `ACP process exited with ${detail}`, { code, signal }));
       });
       this.writeJson(session, { jsonrpc: "2.0", method: "initialize", params: { clientCapabilities: session.clientCapabilities } });
       this.startLiveness(session);
@@ -351,6 +358,13 @@ export abstract class ACPAdapter {
 
   private writeJson(session: AcpAdapterSession, message: JsonRpcMessage): void {
     if (session.process !== undefined && !session.process.killed) session.process.stdin.write(`${JSON.stringify(message)}\n`);
+  }
+
+  private failSession(session: AcpAdapterSession, error: ACPAdapterError): void {
+    if (session.state === "disposed" || session.state === "failed") return;
+    if (session.livenessTimer !== undefined) clearInterval(session.livenessTimer);
+    session.state = "failed";
+    this.onSessionFailed(session, error);
   }
 
   private startLiveness(session: AcpAdapterSession): void {
@@ -367,7 +381,7 @@ export abstract class ACPAdapter {
         timer: setTimeout(() => {
           session.pendingRequests.delete(requestId);
           session.consecutivePingMisses += 1;
-          if (session.consecutivePingMisses >= 5) session.state = "failed";
+          if (session.consecutivePingMisses >= 5) this.failSession(session, new ACPAdapterError("liveness_timeout", "ACP process missed 5 consecutive liveness pings"));
         }, 2_500)
       };
       pending.timer?.unref?.();

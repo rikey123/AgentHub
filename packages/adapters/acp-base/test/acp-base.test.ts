@@ -1,13 +1,14 @@
 import { Effect, Stream } from "effect";
 import { redactAndTruncate } from "@agenthub/security";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ACPAdapter, ACPAdapterError, NdjsonLineSplitter, notImplementedEffect, notImplementedStream, serializePrompt, type AcpAdapterSession, type AcpProviderEvent, type JsonRpcMessage } from "../src/index.ts";
 
 class TestAcpAdapter extends ACPAdapter {
   readonly providerEvents: AcpProviderEvent[] = [];
+  readonly failures: { readonly sessionId: string; readonly code: string; readonly message: string }[] = [];
 
-  constructor() {
+  constructor(private readonly spawnSpec: { readonly command: string; readonly args: readonly string[] } = { command: "", args: [] }) {
     super("test-acp", "Test ACP", {
       id: "test-acp",
       name: "Test ACP",
@@ -21,7 +22,7 @@ class TestAcpAdapter extends ACPAdapter {
   }
 
   detect() { return Effect.succeed([]); }
-  protected spawnArgs() { return { command: "", args: [] as const }; }
+  protected spawnArgs() { return this.spawnSpec; }
   protected mapProviderEvent(message: JsonRpcMessage) { return message.method ? { type: message.method, payload: message.params } : undefined; }
   protected mapProviderError(error: unknown) { return new ACPAdapterError("provider_error", JSON.stringify(error)); }
 
@@ -34,9 +35,17 @@ class TestAcpAdapter extends ACPAdapter {
   protected override onProviderEvent(_session: AcpAdapterSession, event: AcpProviderEvent): void {
     this.providerEvents.push(event);
   }
+
+  protected override onSessionFailed(session: AcpAdapterSession, error: ACPAdapterError): void {
+    this.failures.push({ sessionId: session.acpSessionId, code: error.code, message: error.message });
+  }
 }
 
 describe("ACPAdapter base", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("splits NDJSON lines across chunk boundaries", () => {
     const splitter = new NdjsonLineSplitter();
     expect(splitter.push('{"a":')).toEqual([]);
@@ -88,6 +97,20 @@ describe("ACPAdapter base", () => {
     adapter.feedLine(session.id, JSON.stringify({ jsonrpc: "2.0", method: "tool/pre_use", params: { name: "Bash" } }));
 
     expect(adapter.providerEvents).toEqual([{ type: "tool/pre_use", payload: { name: "Bash" } }]);
+  });
+
+  it("notifies subclasses when ACP liveness failures mark a session failed", () => {
+    vi.useFakeTimers();
+    const adapter = new TestAcpAdapter({ command: process.execPath, args: ["-e", "setInterval(() => undefined, 1000)"] });
+    const session = Effect.runSync(adapter.createSession({ runId: "run-liveness", roomId: "room", agentId: "agent" }));
+    const debug = adapter.debugSession(session.id);
+    if (debug === undefined) throw new Error("missing test session");
+
+    vi.advanceTimersByTime(27_500);
+
+    expect(debug.state).toBe("failed");
+    expect(adapter.failures).toEqual([{ sessionId: session.id, code: "liveness_timeout", message: "ACP process missed 5 consecutive liveness pings" }]);
+    Effect.runSync(adapter.dispose(session.id));
   });
 
   it("dispose rejects all pending requests and marks session disposed", () => {

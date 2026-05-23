@@ -35,6 +35,7 @@ export class ClaudeCodeACPAdapter extends ACPAdapter {
   private readonly args: readonly string[];
   private readonly env: NodeJS.ProcessEnv | undefined;
   private readonly bridgeByRun = new Map<string, AdapterBridge>();
+  private readonly workspaceByRun = new Map<string, string>();
   private readonly permissionEngine: PermissionEngine | undefined;
   private readonly health: AdapterHealthRegistry | undefined;
 
@@ -68,6 +69,7 @@ export class ClaudeCodeACPAdapter extends ACPAdapter {
     const artifactFs = this.options.artifactFs ?? this.options.services.artifactFs;
     const bridge = new AdapterBridge({ runId: run.id, workspaceId: run.workspace_id, roomId: run.room_id, agentId: run.agent_id, lifecycle: this.options.lifecycle, eventBus: this.options.services.eventBus, ...(this.options.now !== undefined ? { now: this.options.now } : {}), ...(run.task_id !== null ? { taskId: run.task_id } : {}), messageId: `msg_${run.id}`, ...(run.workspace_mode !== null ? { workspaceMode: run.workspace_mode } : {}), terminalEnabled: false, ...(artifactFs !== undefined ? { artifactFs } : {}) });
     this.bridgeByRun.set(run.id, bridge);
+    this.workspaceByRun.set(run.id, run.workspace_id);
     const session = Effect.runSync(this.createSession({ runId: run.id, roomId: run.room_id, agentId: run.agent_id, workDir, ...(this.options.mcpServer !== undefined ? { mcpServer: this.options.mcpServer } : {}) }));
     bridge.handle({ type: "session.opened", sessionId: session.id, workDir, ...(session.providerConversationId !== undefined ? { providerConversationId: session.providerConversationId } : {}) });
     this.health?.update({ adapterId: this.id, workspaceId: run.workspace_id, liveness: "busy", pendingRunIds: [run.id] });
@@ -103,6 +105,14 @@ export class ClaudeCodeACPAdapter extends ACPAdapter {
   protected override onProviderEvent(session: AcpAdapterSession, event: AcpProviderEvent): void {
     if (session.runId === undefined) return;
     this.mapToBridgeEvent(session.runId, event);
+  }
+
+  protected override onSessionFailed(session: AcpAdapterSession, error: ACPAdapterError): void {
+    if (session.runId === undefined) return;
+    const bridge = this.bridgeByRun.get(session.runId);
+    if (bridge === undefined) return;
+    bridge.handle({ type: "session.crashed", sessionId: session.acpSessionId, error: error.message });
+    this.health?.update({ adapterId: this.id, workspaceId: this.workspaceByRun.get(session.runId) ?? "default-workspace", liveness: "crashed", pendingRunIds: [session.runId], reason: error.message });
   }
 
   mapToBridgeEvent(runId: string, event: AcpProviderEvent): void {

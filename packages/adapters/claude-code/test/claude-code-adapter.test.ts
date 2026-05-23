@@ -80,4 +80,35 @@ describe("ClaudeCodeACPAdapter", () => {
     expect(database.sqlite.prepare("SELECT type FROM events WHERE type = 'agent.run.completed' AND run_id = 'run'").get()).toMatchObject({ type: "agent.run.completed" });
     database.sqlite.close();
   });
+
+  it("bridges managed ACP supervision failure to RunLifecycleService as session.crashed", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "agenthub-claude-crash-bridge-"));
+    const database = createDatabase({ path: join(dir, "agenthub.sqlite"), applyMigrations: true });
+    database.sqlite.prepare("INSERT INTO workspaces (id, name, root_path, created_at, updated_at) VALUES ('w', 'w', ?, 1, 1)").run(dir);
+    database.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES ('r', 'w', 'r', 'solo', 'conversation', 'a', NULL, 1, 1)").run();
+    const eventBus = createEventBus({ database });
+    const lifecycle = new RunLifecycleService(database, eventBus);
+    lifecycle.create(null, { runId: "run", workspaceId: "w", roomId: "r", agentId: "a", wakeReason: "primary_turn" });
+    lifecycle.markClaimed(null, "run");
+    lifecycle.markStarting(null, "run", 123);
+    const adapter = new ClaudeCodeACPAdapter({ command: "node", args: ["-e", "process.exit(7)"], services: { database, eventBus }, lifecycle, workspaceId: "w" });
+
+    await adapter.runManaged(lifecycle.read("run"));
+    await waitFor(() => database.sqlite.prepare("SELECT status FROM runs WHERE id = 'run'").get() as { readonly status: string }, (row) => row.status === "failed");
+
+    expect(database.sqlite.prepare("SELECT status, failure_class, error FROM runs WHERE id = 'run'").get()).toMatchObject({ status: "failed", failure_class: "retryable_visible", error: "ACP process exited with exit code 7" });
+    expect(database.sqlite.prepare("SELECT type FROM events WHERE type = 'agent.run.failed' AND run_id = 'run'").get()).toMatchObject({ type: "agent.run.failed" });
+    database.sqlite.close();
+  });
 });
+
+async function waitFor<T>(read: () => T, done: (value: T) => boolean): Promise<T> {
+  const deadline = Date.now() + 2_000;
+  let value = read();
+  while (!done(value) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    value = read();
+  }
+  if (!done(value)) throw new Error(`Timed out waiting for condition: ${JSON.stringify(value)}`);
+  return value;
+}

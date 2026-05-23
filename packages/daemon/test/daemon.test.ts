@@ -53,8 +53,8 @@ describe("daemon M1.4 composition", () => {
 
     expect(sent.ok).toBe(true);
     expect(daemon.mockAdapter.llmCallsFor("claude-agent")).toBe(0);
-    const run = daemon.database.sqlite.prepare("SELECT id, status, adapter_session_id FROM runs WHERE agent_id = 'claude-agent'").get() as { readonly id: string; readonly status: string; readonly adapter_session_id: string };
-    expect(run).toMatchObject({ status: "running", adapter_session_id: `acp-claude-code-${run.id}` });
+    const run = daemon.database.sqlite.prepare("SELECT id, adapter_session_id FROM runs WHERE agent_id = 'claude-agent'").get() as { readonly id: string; readonly adapter_session_id: string };
+    expect(run).toMatchObject({ adapter_session_id: `acp-claude-code-${run.id}` });
     expect(daemon.adapterRegistry.getClaudeAdapterForTest()?.debugSession(run.adapter_session_id)).toBeDefined();
   });
 
