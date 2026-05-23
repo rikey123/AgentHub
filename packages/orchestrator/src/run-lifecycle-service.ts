@@ -256,8 +256,8 @@ export class RunLifecycleService {
         waiting_reason: null
       });
       this.publishRunEvent(db, "agent.run.completed", runId, run.workspace_id, run.room_id, run.agent_id, { runId, cost });
-      this.sideEffects.onTerminal?.(runId);
     });
+    this.sideEffects.onTerminal?.(runId);
   }
 
   fail(tx: SqliteTx | null, runId: string, reason: string, failureClass: RunFailureClass, error?: string): void {
@@ -274,8 +274,8 @@ export class RunLifecycleService {
       }
       this.sideEffects.finalizeNextTurns?.(db, runId, failureClass, now);
       this.publishRunEvent(db, "agent.run.failed", runId, run.workspace_id, run.room_id, run.agent_id, { runId, reason, failureClass, error });
-      this.sideEffects.onTerminal?.(runId);
     });
+    this.sideEffects.onTerminal?.(runId);
   }
 
   cancelFinalized(tx: SqliteTx | null, runId: string): void {
@@ -284,8 +284,8 @@ export class RunLifecycleService {
       this.requireStatus(run, ["cancelling"], "cancelFinalized");
       this.updateStatus(db, runId, "cancelled", { ended_at: this.now(), failure_class: "user_cancelled", waiting_reason: null });
       this.publishRunEvent(db, "agent.run.cancelled", runId, run.workspace_id, run.room_id, run.agent_id, { runId });
-      this.sideEffects.onTerminal?.(runId);
     });
+    this.sideEffects.onTerminal?.(runId);
   }
 
   updateSessionState(
