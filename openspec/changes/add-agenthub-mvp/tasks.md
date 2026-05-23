@@ -225,7 +225,7 @@
 - [ ] 16.2 实现 token issue / list / revoke CLI 与 API — refs: security/Token 协议 [MISSING]
 - [ ] 16.3 实现 token 中间件 + query token fallback — refs: security/Token 协议, v1-roadmap/V1.4 响应式 Web 占位（responsive-web） [PARTIAL]
 - [x] 16.4 实现工作区路径 canonicalize + symlink 检测 — refs: security/工作区路径校验
-- [ ] 16.5 实现 prompt injection 防护（external_content 包裹 + Permission 不提升）— refs: security/Prompt Injection 防护 [MISSING]
+- [x] 16.5 实现 prompt injection 防护（external_content 包裹 + Permission 不提升）— refs: security/Prompt Injection 防护
 - [x] 16.6 实现 spawn filterSafeEnv（不透传 secrets）— refs: security/子进程隔离
 - [ ] 16.7 实现 config.toml 文件权限警告（POSIX）— refs: security/配置文件权限校验 [MISSING]
 - [x] 16.8 实现 audit 关键操作（token / permission / intervention / sensitive deny / settings change）— refs: security/Audit 边界
