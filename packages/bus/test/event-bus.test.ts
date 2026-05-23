@@ -337,6 +337,29 @@ describe("CommandBus", () => {
     ).toMatchObject({ trace_id: "trace_reclaim" });
   });
 
+  test("rejects async idempotent handlers before invocation to prevent post-await side effects", () => {
+    currentDatabase().sqlite.exec("CREATE TABLE command_side_effects (id TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    let invoked = false;
+    const commandBus = new CommandBus({
+      database: currentDatabase(),
+      handlers: {
+        CreateRoom: async (command) => {
+          invoked = true;
+          currentDatabase().sqlite.prepare("INSERT INTO command_side_effects (id, value) VALUES (?, ?)").run(command.roomId, "async-side-effect");
+          return { ok: true, data: { roomId: command.roomId }, emittedEvents: [] };
+        }
+      }
+    });
+    const meta = { actor: { type: "user" as const, id: "user_1" }, traceId: "trace_async", idempotencyKey: "idem_async", origin: "http" as const };
+
+    const result = commandBus.dispatch({ type: "CreateRoom", roomId: "room_async" }, meta) as CommandResult;
+
+    expect(result).toMatchObject({ ok: false, error: { code: "internal_error" } });
+    expect(invoked).toBe(false);
+    expect(tableRowCount("command_side_effects")).toBe(0);
+    expect(commandRecordStatuses()).toEqual([]);
+  });
+
   test("rejects forbidden, unknown, and internal-only HTTP commands before handlers", () => {
     const commandBus = new CommandBus({ database: currentDatabase() });
     const meta = { actor: { type: "user" as const, id: "user_1" }, traceId: "trace_1", origin: "http" as const };

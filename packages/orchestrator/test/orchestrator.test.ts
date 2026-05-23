@@ -201,6 +201,21 @@ describe("WakeAgent and CancelRun handlers", () => {
     expect(statusOf("run_cancel_reject")).toBe("cancelled");
   });
 
+  test("CancelRun swallows synchronous adapter cancel throw", () => {
+    createRun("run_cancel_sync_throw");
+    currentLifecycle().markClaimed(null, "run_cancel_sync_throw");
+    currentLifecycle().markStarting(null, "run_cancel_sync_throw", 123);
+    currentLifecycle().markRunning(null, "run_cancel_sync_throw", "s_1");
+    // Adapter cancel throws synchronously — must also be swallowed.
+    const cancelRun = vi.fn((): void => { throw new Error("sync adapter cancel failed"); });
+    const commandBus = new CommandBus({ database: currentDatabase(), handlers: { CancelRun: createCancelRunHandler({ lifecycle: currentLifecycle(), adapterManager: { cancelRun } }) } });
+
+    const result = commandBus.dispatch({ type: "CancelRun", runId: "run_cancel_sync_throw" }, { actor: { type: "user", id: "u_1" }, traceId: "trace_sync_throw", origin: "http" }) as CommandResult;
+
+    expect(result).toMatchObject({ ok: true, data: { status: "cancelling" } });
+    expect(statusOf("run_cancel_sync_throw")).toBe("cancelling");
+  });
+
   test("ConsumePendingTurn rejects origin http", () => {
     seedRoom("room_1", "agent_1");
     seedPendingTurn("pt_http", "msg_http");

@@ -553,6 +553,13 @@ export class CommandBus {
   }
 
   private dispatchIdempotent<C extends Command>(command: C, meta: CommandMeta, idempotencyKey: string): CommandResult | Promise<CommandResult> {
+    // Reject async handlers before touching the DB: an async handler can produce side effects
+    // after its first await even if we rollback the savepoint, so we must never invoke one in
+    // the idempotent path.
+    const handler = this.handlers[command.type];
+    if (handler !== undefined && isAsyncFunction(handler)) {
+      return failedCommand("internal_error", "idempotent command handlers must be synchronous to preserve transaction atomicity");
+    }
     const actor = actorIdentity(meta);
     const commandHash = hashCommand(command);
     const now = this.now();
@@ -1012,6 +1019,11 @@ function stableStringify(value: unknown): string {
 
 function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
   return typeof value === "object" && value !== null && "then" in value && typeof value.then === "function";
+}
+
+function isAsyncFunction(fn: unknown): boolean {
+  // Detect native async functions by constructor name; covers async () => {} and async function f() {}.
+  return typeof fn === "function" && fn.constructor?.name === "AsyncFunction";
 }
 
 function sleep(ms: number): Promise<void> {

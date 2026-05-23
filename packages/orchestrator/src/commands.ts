@@ -34,15 +34,17 @@ export function createCancelRunHandler(options: { readonly lifecycle: RunLifecyc
     if (typeof command.runId !== "string" || command.runId.length === 0) {
       return failed("validation_failed", "CancelRun requires runId");
     }
+    const runId = command.runId;
     try {
-      options.lifecycle.markCancelling(null, command.runId);
-      // Fire-and-forget adapter cancel per spec: "不依赖 event 回环" (bus-runtime/spec.md §CancelRun).
-      // The adapter cancel is best-effort; lifecycle state is already driven by markCancelling.
-      void Promise.resolve(options.adapterManager.cancelRun(command.runId)).catch(() => undefined);
-      return { ok: true, data: { runId: command.runId, status: "cancelling" }, emittedEvents: [] };
+      options.lifecycle.markCancelling(null, runId);
     } catch (error) {
       return lifecycleFailure(error);
     }
+    // Fire-and-forget adapter cancel per spec: "不依赖 event 回环" (bus-runtime/spec.md §CancelRun).
+    // Both sync throws and async rejections are swallowed; lifecycle state is already driven by
+    // markCancelling and the run stays in cancelling until AdapterBridge drives cancelFinalized.
+    void Promise.resolve().then(() => options.adapterManager.cancelRun(runId)).catch(() => undefined);
+    return { ok: true, data: { runId, status: "cancelling" }, emittedEvents: [] };
   };
 }
 
