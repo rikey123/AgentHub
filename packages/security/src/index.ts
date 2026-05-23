@@ -7,6 +7,10 @@ import { spawnSync } from "node:child_process";
 import type { EventBus } from "@agenthub/bus";
 import type { AgentHubDatabase } from "@agenthub/db";
 
+export { wrapExternalContent } from "./external-content.ts";
+export type { KeychainBridge } from "./keychain.ts";
+export { createKeychain, createKeychainAccount } from "./keychain.ts";
+
 export type AuthScope = "read" | "write" | "admin";
 export type WorkspacePathClassification = "internal" | "external" | "sensitive";
 export type WorkspacePathResult = { readonly ok: true; readonly abs: string; readonly relativePath: string; readonly classification: WorkspacePathClassification } | { readonly ok: false; readonly reason: string };
