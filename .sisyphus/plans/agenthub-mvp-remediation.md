@@ -456,7 +456,7 @@ openspec.cmd validate add-agenthub-mvp --strict
 - `openspec.cmd validate add-agenthub-mvp --strict` — passed
 - `pnpm.cmd exec playwright test apps/web/e2e/main-detail-projection.spec.ts apps/web/e2e/pending-turn.spec.ts` — 5 tests passed
 
-**Closeout branch verification** (`task/mvp-completion-closeout`, commit `47194ab` before review fixes):
+**Closeout branch verification** (`task/mvp-completion-closeout`; commits `1e518f6` runtime stability fix + `b11ca8b` completion record; merged as `755a085`):
 
 - `pnpm.cmd --filter @agenthub/adapter-claude-code test` — 6 tests passed
 - `pnpm.cmd --filter @agenthub/adapter-acp-base test` — 10 tests passed
