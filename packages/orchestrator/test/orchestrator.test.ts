@@ -80,6 +80,30 @@ describe("RunLifecycleService", () => {
     expect(eventPayload("agent.run.completed", "run_life")).toMatchObject({ cost: zeroCost() });
   });
 
+  test("persists cost fields on run completion", () => {
+    const cost = {
+      inputTokens: 100,
+      outputTokens: 50,
+      cachedTokens: 10,
+      costUsd: 0.005,
+      modelId: "claude-3-5-sonnet"
+    };
+
+    createRun("run_cost");
+    currentLifecycle().markClaimed(null, "run_cost");
+    currentLifecycle().markStarting(null, "run_cost", 123);
+    currentLifecycle().markRunning(null, "run_cost", "s_cost");
+    currentLifecycle().complete(null, "run_cost", cost);
+
+    expect(currentDatabase().sqlite.prepare("SELECT input_tokens, output_tokens, cached_tokens, cost_usd, model_id FROM runs WHERE id = ?").get("run_cost")).toMatchObject({
+      input_tokens: 100,
+      output_tokens: 50,
+      cached_tokens: 10,
+      cost_usd: 0.005,
+      model_id: "claude-3-5-sonnet"
+    });
+  });
+
   test("emits waiting, waiting_permission, resumed, failed, and rolls back transient mailbox claims", () => {
     seedMailbox("mb_1", "room_1", "agent_1");
     createRun("run_fail", { mailboxClaimIds: ["mb_1"] });
