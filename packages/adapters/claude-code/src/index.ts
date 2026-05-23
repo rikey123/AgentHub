@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { ACPAdapter, ACPAdapterError, AdapterHealthRegistry, AdapterRawLogger, classifyClaudeDetection, emitAdapterRegistered, permissionForTool, type AcpProviderEvent, type AdapterRuntimeServices, type JsonRpcMessage } from "@agenthub/adapter-acp-base";
+import { ACPAdapter, ACPAdapterError, AdapterHealthRegistry, AdapterRawLogger, classifyClaudeDetection, emitAdapterRegistered, permissionForTool, type AcpAdapterSession, type AcpProviderEvent, type AdapterRuntimeServices, type JsonRpcMessage } from "@agenthub/adapter-acp-base";
 import { AdapterBridge, type AdapterArtifactFSBoundary, type RoomMcpServer, type RunLifecycleService, type RunRow } from "@agenthub/orchestrator";
 import type { PermissionEngine } from "@agenthub/permissions";
 import type { AdapterError, AgentAdapterManifest, DetectedRuntime } from "@agenthub/protocol";
@@ -74,9 +74,19 @@ export class ClaudeCodeACPAdapter extends ACPAdapter {
     this.sendPrompt(session.id, { role: "user", content: promptFromRun(run) });
   }
 
+  async cancelManagedRun(runId: string): Promise<void> {
+    await Effect.runPromise(this.cancelRun(runId));
+  }
+
   override attachSession(input: Parameters<ACPAdapter["attachSession"]>[0]) {
     const attached = super.attachSession(input);
     return attached;
+  }
+
+  feedProviderLineForTest(sessionId: string, line: string): AcpProviderEvent | undefined {
+    const session = this.debugSession(sessionId);
+    if (session === undefined) throw new ACPAdapterError("session_not_found", `ACP session '${sessionId}' not found`);
+    return this.handleLine(session, line);
   }
 
   protected spawnArgs() { return { command: this.command, args: this.args, ...(this.env !== undefined ? { env: this.env } : {}) }; }
@@ -88,6 +98,11 @@ export class ClaudeCodeACPAdapter extends ACPAdapter {
 
   protected mapProviderError(error: unknown): AdapterError {
     return new ACPAdapterError("provider_error", typeof error === "string" ? error : JSON.stringify(error), error);
+  }
+
+  protected override onProviderEvent(session: AcpAdapterSession, event: AcpProviderEvent): void {
+    if (session.runId === undefined) return;
+    this.mapToBridgeEvent(session.runId, event);
   }
 
   mapToBridgeEvent(runId: string, event: AcpProviderEvent): void {
