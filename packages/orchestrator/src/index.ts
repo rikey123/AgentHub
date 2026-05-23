@@ -6,3 +6,5 @@ export * from "./pending-turn.ts";
 export * from "./recovery.ts";
 export * from "./run-lifecycle-service.ts";
 export * from "./run-queue.ts";
+export * from "./task-service.ts";
+export * from "./mcp/room-mcp-server.ts";

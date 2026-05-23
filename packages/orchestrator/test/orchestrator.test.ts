@@ -13,12 +13,17 @@ import {
   MailboxService,
   PendingTurnService,
   ReclaimStaleClaimedRun,
+  RoomMcpServer,
   RunLifecycleError,
   RunLifecycleService,
   RunQueue,
+  TaskService,
   StartupRecovery,
   createCancelRunHandler,
+  createCompleteTaskHandler,
   createConsumePendingTurnHandler,
+  createCreateTaskHandler,
+  createUpdateTaskHandler,
   createWakeAgentHandler,
 } from "../src/index.ts";
 
@@ -228,6 +233,59 @@ describe("PendingTurn terminal hook", () => {
     expect(dispatched).toHaveLength(1);
     expect(dispatched[0]).toMatchObject({ type: "WakeAgent", carryNextTurnIds: ["nt_wait"], sourceRunId: "run_terminal" });
     expect(pendingTurnStatus("pt_wait")).toBe("queued");
+  });
+});
+
+describe("TaskService and RoomMcpServer", () => {
+  test("CreateTask handler persists task and emits task.created plus task.assigned", () => {
+    seedRoom("room_1", "agent_1");
+    const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const commandBus = new CommandBus({ database: currentDatabase(), handlers: { CreateTask: createCreateTaskHandler(service) } });
+
+    const result = commandBus.dispatch({ type: "CreateTask", roomId: "room_1", title: "Implement task chain", assigneeAgentId: "agent_1" }, { actor: { type: "user", id: "local" }, traceId: "trace_task", origin: "http" }) as CommandResult<{ readonly taskId: string }>;
+
+    expect(result).toMatchObject({ ok: true });
+    if (!result.ok) throw new Error("expected task create success");
+    expect(currentDatabase().sqlite.prepare("SELECT title, status, assignee_agent_id FROM tasks WHERE id = ?").get(result.data.taskId)).toMatchObject({ title: "Implement task chain", status: "pending", assignee_agent_id: "agent_1" });
+    expect(eventTypes()).toEqual(expect.arrayContaining(["task.created", "task.assigned"]));
+  });
+
+  test("CompleteTask rejects terminal and inactive task states", () => {
+    seedRoom("room_1", "agent_1");
+    const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const commandBus = new CommandBus({ database: currentDatabase(), handlers: { CreateTask: createCreateTaskHandler(service), UpdateTask: createUpdateTaskHandler(service), CompleteTask: createCompleteTaskHandler(service) } });
+    const created = commandBus.dispatch({ type: "CreateTask", roomId: "room_1", title: "Complete me", assigneeAgentId: "agent_1" }, { actor: { type: "user", id: "local" }, traceId: "trace_create", origin: "http" }) as CommandResult<{ readonly taskId: string }>;
+    if (!created.ok) throw new Error("expected task create success");
+
+    const inactive = commandBus.dispatch({ type: "CompleteTask", taskId: created.data.taskId }, { actor: { type: "user", id: "local" }, traceId: "trace_complete_pending", origin: "http" }) as CommandResult;
+    expect(inactive).toMatchObject({ ok: false, error: { code: "conflict" } });
+
+    expect(commandBus.dispatch({ type: "UpdateTask", taskId: created.data.taskId, status: "in_progress" }, { actor: { type: "user", id: "local" }, traceId: "trace_progress", origin: "http" })).toMatchObject({ ok: true });
+    expect(commandBus.dispatch({ type: "CompleteTask", taskId: created.data.taskId }, { actor: { type: "user", id: "local" }, traceId: "trace_complete", origin: "http" })).toMatchObject({ ok: true });
+    const terminal = commandBus.dispatch({ type: "CompleteTask", taskId: created.data.taskId }, { actor: { type: "user", id: "local" }, traceId: "trace_complete_again", origin: "http" }) as CommandResult;
+    expect(terminal).toMatchObject({ ok: false, error: { code: "conflict" } });
+  });
+
+  test("room MCP task tools create, update, list by current room, and reject unknown tools", async () => {
+    seedRoom("room_1", "agent_1");
+    seedRoom("room_2", "agent_2");
+    const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const commandBus = new CommandBus({ database: currentDatabase(), handlers: { CreateTask: createCreateTaskHandler(service), UpdateTask: createUpdateTaskHandler(service) } });
+    const mcp = new RoomMcpServer({ commandBus, taskService: service });
+
+    const created = await mcp.callTool("room.create_task", { title: "MCP task", assigneeAgentId: "agent_1" }, { roomId: "room_1", runId: "run_1", agentId: "agent_1" });
+    expect(created).toMatchObject({ ok: true });
+    if (!created.ok || !isRecord(created.data) || typeof created.data.taskId !== "string") throw new Error("expected task id");
+    expect(await mcp.callTool("room.update_task", { taskId: created.data.taskId, status: "done" }, { roomId: "room_1", runId: "run_1", agentId: "agent_1" })).toMatchObject({ ok: true });
+    service.create({ roomId: "room_2", title: "Other room", createdBy: "user", assigneeAgentId: "agent_2" });
+
+    const listed = await mcp.callTool("room.list_tasks", {}, { roomId: "room_1", runId: "run_1", agentId: "agent_1" });
+    expect(listed).toMatchObject({ ok: true });
+    if (!listed.ok || !isRecord(listed.data) || !Array.isArray(listed.data.tasks)) throw new Error("expected task list");
+    expect(listed.data.tasks).toHaveLength(1);
+    expect(listed.data.tasks[0]).toMatchObject({ title: "MCP task", status: "completed" });
+    expect(await mcp.callTool("room.read_mailbox", {}, { roomId: "room_1", runId: "run_1", agentId: "agent_1" })).toMatchObject({ ok: false, error: { code: "tool_not_found" } });
+    expect(await mcp.callTool("room.update_task", { taskId: created.data.taskId, status: "in_progress" }, { roomId: "room_1", runId: "run_1", agentId: "agent_1" })).toMatchObject({ ok: false, error: { code: "conflict" } });
   });
 });
 
@@ -455,6 +513,7 @@ function seedMailbox(id: string, roomId: string, agentId: string): void {
 function seedRoom(roomId: string, agentId: string): void {
   currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO workspaces (id, name, root_path, created_at, updated_at) VALUES ('ws_1', 'Workspace', '.', ?, ?)").run(now, now);
   currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES (?, 'ws_1', 'Room', 'solo', 'conversation', ?, NULL, ?, ?)").run(roomId, agentId, now, now);
+  currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, default_presence, joined_at) VALUES (?, ?, 'agent', 'primary', 'mock', NULL, 'active', ?)").run(roomId, agentId, now);
 }
 
 function seedPendingTurn(id: string, messageId: string, text = "pending text"): void {
@@ -506,6 +565,10 @@ function nextTurnCount(runId: string): number {
 
 function pendingTurnStatus(id: string): string {
   return (currentDatabase().sqlite.prepare("SELECT status FROM pending_turns WHERE id = ?").get(id) as { status: string }).status;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function lockRows(): unknown[] {

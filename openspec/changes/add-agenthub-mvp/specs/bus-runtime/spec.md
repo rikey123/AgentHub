@@ -63,6 +63,9 @@ type Command =
   | { type: "ConfirmContextItem"; contextId: string; baseVersion: number }
   | { type: "DeprecateContextItem"; contextId: string; reason?: string }
   | { type: "CancelRun"; runId: string }
+  | { type: "CreateTask"; roomId: string; title: string; parentTaskId?: string; description?: string; assigneeAgentId?: string; sourceRunId?: string; sourceMessageId?: string; dependencies?: string[]; priority?: string; dueAt?: number; idempotencyKey?: string }
+  | { type: "UpdateTask"; taskId: string; status: "pending" | "in_progress" | "blocked" | "review" | "completed" | "cancelled" | "open" | "done"; reason?: string; idempotencyKey?: string }
+  | { type: "CompleteTask"; taskId: string; idempotencyKey?: string }
   | { type: "CreateRoom"; mode: RoomMode; title: string; primaryAgentId?: string; observerAgentIds?: string[] }
   | { type: "ArchiveRoom"; roomId: string }
   | { type: "UnarchiveRoom"; roomId: string }
