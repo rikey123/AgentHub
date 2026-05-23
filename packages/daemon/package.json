@@ -1,0 +1,26 @@
+{
+  "name": "@agenthub/daemon",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./openapi": "./src/openapi.ts"
+  },
+  "scripts": {
+    "test": "node scripts/run-tests.mjs"
+  },
+  "dependencies": {
+    "@agenthub/adapter-mock": "workspace:*",
+    "@agenthub/artifacts": "workspace:*",
+    "@agenthub/bus": "workspace:*",
+    "@agenthub/context": "workspace:*",
+    "@agenthub/db": "workspace:*",
+    "@agenthub/interventions": "workspace:*",
+    "@agenthub/orchestrator": "workspace:*",
+    "@agenthub/permissions": "workspace:*",
+    "@agenthub/protocol": "workspace:*",
+    "@agenthub/security": "workspace:*",
+    "@agenthub/sdk": "workspace:*"
+  }
+}
