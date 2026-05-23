@@ -1,8 +1,8 @@
 # AgentHub MVP Remediation Plan
 
-> **Status**: ACTIVE — do not declare MVP complete until all P0 and P1 tasks are done and an independent severe review APPROVES.
+> **Status**: ACTIVE — do not declare MVP complete until all P0 and P1 tasks are done, each has an independent severe review APPROVE on record, and the Orchestrator has explicitly confirmed completion.
 >
-> **Strict rule**: every implementation task below runs on its own Git branch, gets its own commit(s), and must pass an independent severe review before the branch is merged and the next task begins. No batching. No self-merge.
+> **Strict rule**: every implementation task below runs on its own Git branch, gets its own commit(s), must pass an independent severe review, and must receive explicit Orchestrator merge approval before the branch is merged and the next task begins. No batching. No self-merge. No parallel tasks.
 
 ---
 
@@ -114,14 +114,15 @@ Use this PR description template for every task:
 
 ### Merge rules
 
-The implementing agent must not merge its own PR. Merge only after:
+The implementing agent must not merge its own PR. Merge only after ALL of the following are satisfied:
 
 - Independent severe review agent returns APPROVE with no blocking issues.
+- Upper-agent / Orchestrator explicitly approves the merge in writing.
 - All verification commands pass (exit code 0).
 - PR description is complete.
 - No undocumented spec deviations.
 
-After merge: delete the task branch, update task status in this plan (via the Orchestrator), and proceed to the next task.
+After merge: delete the task branch, update task status in this plan (via the Orchestrator), and proceed to the next task. Do not start the next task until the Orchestrator confirms the merge is recorded.
 
 ---
 
@@ -375,35 +376,39 @@ openspec.cmd validate add-agenthub-mvp --strict
 
 ---
 
-### P1-3: Git workspace cleanup and OpenSpec tasks status/evidence synchronization
+### P1-3: Git workspace audit and OpenSpec evidence synchronization
 
-**Scope**: Clean the git workspace so there are no uncommitted changes on the integration branch. Synchronize OpenSpec task evidence so that completed tasks have verifiable evidence records. This is a housekeeping task, not a product code change.
+**Scope**: Audit the git workspace and OpenSpec evidence state; produce a written report for the Orchestrator. This task makes NO commits, NO stashes, and NO discards of dirty files. Any concrete cleanup of dirty files requires a separate Orchestrator-approved PR boundary that is outside this task.
 
-Does NOT include: any product code changes, any spec changes, or any changes to the plan file.
+Does NOT include: any product code changes, any spec changes, any changes to the plan file, or any git mutations (no commit, no stash, no discard, no branch creation).
 
 **Steps**:
 
-1. Run `git status --short` to enumerate all uncommitted changes.
-2. For each uncommitted change, determine whether it belongs to a completed task (commit it with the correct task reference) or is a stray file (stash or discard it after confirming with the Orchestrator).
-3. Run `openspec.cmd validate add-agenthub-mvp --strict` and confirm it passes on the clean branch.
-4. For each task in tasks.md §0-§20 that has been implemented, verify that a corresponding evidence file exists under `.sisyphus/evidence/agenthub-mvp/`. If evidence is missing, generate a minimal evidence summary (verification command output + pass/fail) and write it to the correct path.
-5. Do not mark any task checkbox in tasks.md — that is the Orchestrator's responsibility.
+1. Run `git status --short` and record every uncommitted file path and its status (modified / untracked / deleted).
+2. For each dirty file, classify it: belongs to a completed task, belongs to an in-progress task, or origin unknown. Do not touch the file.
+3. Run `openspec.cmd validate add-agenthub-mvp --strict` and record the result (pass / fail + error output).
+4. For each task in tasks.md §0-§20 that has been implemented, check whether a corresponding evidence file exists under `.sisyphus/evidence/agenthub-mvp/`. Record which tasks are missing evidence.
+5. Write the full audit report to `.sisyphus/notepads/agenthub-mvp/issues.md` (append only) under a dated heading. The report must list: dirty files with classification, OpenSpec validation result, and missing evidence entries.
+6. Do not mark any task checkbox in tasks.md — that is the Orchestrator's responsibility.
+7. Present the report to the Orchestrator and wait for explicit direction before any file is committed, stashed, or discarded.
 
-**Verification commands**:
+**Verification commands** (read-only, no mutations):
 ```powershell
 git status --short
 openspec.cmd validate add-agenthub-mvp --strict
-pnpm.cmd test
-pnpm.cmd typecheck
-pnpm.cmd lint
-pnpm.cmd check:all
 ```
 
-**PR boundary**: one PR containing only committed stray files (if any) and new evidence documents. No product code changes.
+**PR boundary**: this task produces only an appended audit report in `.sisyphus/notepads/agenthub-mvp/issues.md`. Each dirty-file cleanup, if the Orchestrator approves one, becomes its own separate PR with its own branch, independent severe review, and Orchestrator merge approval.
 
-**Independent review gate**: severe review must confirm `git status --short` returns a clean working tree, `openspec.cmd validate` passes, and evidence files are present for all claimed-complete tasks.
+**Independent review gate**: severe review must confirm the audit report is complete and accurate, that no git mutations were made, and that no dirty files were committed or discarded without Orchestrator direction.
 
-**Done criteria**: same as P0-1.
+**Done criteria**:
+- Audit report appended to issues.md.
+- `openspec.cmd validate add-agenthub-mvp --strict` result recorded.
+- Missing evidence entries listed.
+- No git mutations performed.
+- Independent severe review returns APPROVE.
+- Orchestrator explicitly approves and records the task as complete.
 
 ---
 
@@ -411,40 +416,39 @@ pnpm.cmd check:all
 
 > **WARNING**: Do not declare the AgentHub MVP complete until ALL of the following are true:
 >
-> 1. All P0 tasks (P0-1, P0-2, P0-3) are merged and each has an independent severe review APPROVE on record.
-> 2. All P1 tasks (P1-1, P1-2, P1-3) are merged and each has an independent severe review APPROVE on record.
+> 1. All P0 tasks (P0-1, P0-2, P0-3) are merged and each has an independent severe review APPROVE **and** Orchestrator merge approval on record.
+> 2. All P1 tasks (P1-1, P1-2, P1-3) are merged/recorded and each has an independent severe review APPROVE **and** Orchestrator approval on record.
 > 3. `openspec.cmd validate add-agenthub-mvp --strict` passes on the integration branch after all merges.
 > 4. `pnpm.cmd test`, `pnpm.cmd typecheck`, `pnpm.cmd lint`, and `pnpm.cmd check:all` all pass on the integration branch.
 > 5. The Playwright E2E suite passes (at minimum `main-detail-projection.spec.ts` and `pending-turn.spec.ts`).
 > 6. The git workspace is clean (no uncommitted changes).
 > 7. The Orchestrator has explicitly confirmed MVP completion.
 >
-> Partial completion of this list is not MVP completion. A single failing review gate restarts the affected task.
+> Partial completion of this list is not MVP completion. A single failing review gate or missing Orchestrator approval restarts the affected task.
 
 ---
 
 ## Task Execution Order
 
+Every task is strictly sequential. Complete one task, get independent severe review APPROVE, get Orchestrator merge approval, merge, then start the next. No task may begin until the previous task's branch is merged and the Orchestrator has confirmed.
+
 ```
-P0-1 (PendingTurn backend)          P0-2 (Task API / MCP minimum chain)
-  |                                    |
-  +----------+-------------------------+
-             |
-             v
-     P0-3 (Claude adapter + ACP supervisor + bridge)
-             |
-             v
-     P1-1 (CommandBus idempotency)
-     P1-2 (Raw Stream live UI)      <-- can run in parallel with P1-1
-     P1-3 (Workspace cleanup)       <-- can run in parallel with P1-1 and P1-2
-             |
-             v
-     Completion Gate
+P0-1 (PendingTurn backend)
+  → [independent severe review → Orchestrator approval → merge]
+P0-2 (Task API / MCP minimum chain)
+  → [independent severe review → Orchestrator approval → merge]
+P0-3 (Claude adapter + ACP supervisor + bridge)
+  → [independent severe review → Orchestrator approval → merge]
+P1-1 (CommandBus idempotency)
+  → [independent severe review → Orchestrator approval → merge]
+P1-2 (Raw Stream live UI)
+  → [independent severe review → Orchestrator approval → merge]
+P1-3 (Workspace audit and evidence report)
+  → [independent severe review → Orchestrator approval → record]
+Completion Gate
 ```
 
-P0-1 and P0-2 touch different modules (pending_turns/orchestrator hooks vs tasks/MCP server) and may run in parallel. P0-3 must wait for both P0-1 and P0-2 to be merged because it wires the adapter session to the MCP server (P0-2) and to the run lifecycle that ConsumePendingTurn depends on (P0-1). When in doubt about file conflicts, run sequentially.
-
-P1 tasks may run in parallel with each other after all P0 tasks are merged.
+No parallel execution. No skipping review gates. No self-merge.
 
 ---
 
