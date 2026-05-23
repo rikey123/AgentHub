@@ -1,0 +1,20 @@
+{
+  "name": "@agenthub/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/schema.ts"
+  },
+  "scripts": {
+    "test": "node scripts/run-tests.mjs"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.5.0",
+    "drizzle-orm": "^0.45.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13"
+  }
+}
