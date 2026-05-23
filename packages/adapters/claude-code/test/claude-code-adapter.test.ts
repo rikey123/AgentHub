@@ -93,16 +93,32 @@ describe("ClaudeCodeACPAdapter", () => {
     lifecycle.create(null, { runId: "run", workspaceId: "w", roomId: "r", agentId: "a", wakeReason: "primary_turn" });
     lifecycle.markClaimed(null, "run");
     lifecycle.markStarting(null, "run", 123);
-    const adapter = new ClaudeCodeACPAdapter({ command: process.execPath, args: ["-e", "process.stdin.setEncoding('utf8');let buffer='';process.stdin.on('data',(chunk)=>{buffer+=chunk;for(;;){const index=buffer.indexOf('\\n');if(index<0)break;const line=buffer.slice(0,index);buffer=buffer.slice(index+1);if(line.includes('\\\"method\\\":\\\"session/prompt\\\"')) process.exit(7);}});"], services: { database, eventBus }, lifecycle, workspaceId: "w" });
+    // Child emits one stdout line then exits immediately.  The parent's handleLine processes the
+    // line (proving the post-session.opened stdout path), then the exit event fires and
+    // failSession transitions the run to failed.  No stdin dependency, no timing race.
+    const adapter = new ClaudeCodeACPAdapter({ command: process.execPath, args: ["-e", "process.stdout.write(JSON.stringify({jsonrpc:'2.0',method:'ready',params:{}})+String.fromCharCode(10),()=>process.exit(7));"], services: { database, eventBus }, lifecycle, workspaceId: "w" });
 
-    await adapter.runManaged(lifecycle.read("run"));
-    await waitFor(() => database.sqlite.prepare("SELECT status FROM runs WHERE id = 'run'").get() as { readonly status: string }, (row) => row.status === "failed");
+    try {
+      await adapter.runManaged(lifecycle.read("run"));
+      await waitFor(
+        () => ({
+          sessionState: adapter.debugSession("acp-claude-code-run")?.state,
+          run: database.sqlite.prepare("SELECT status, failure_class, error FROM runs WHERE id = 'run'").get() as { readonly status: string; readonly failure_class: string | null; readonly error: string | null },
+          failedEvent: database.sqlite.prepare("SELECT type FROM events WHERE type = 'agent.run.failed' AND run_id = 'run'").get() as { readonly type: string } | undefined
+        }),
+        (value) => value.sessionState === "failed" && value.run.status === "failed" && value.failedEvent?.type === "agent.run.failed",
+        { timeoutMs: 10_000 }
+      );
 
-    expect(adapter.debugSession("acp-claude-code-run")?.state).toBe("failed");
-    expect(database.sqlite.prepare("SELECT status, failure_class, error FROM runs WHERE id = 'run'").get()).toMatchObject({ status: "failed", failure_class: "retryable_visible", error: "ACP process exited with exit code 7" });
-    expect(database.sqlite.prepare("SELECT type FROM events WHERE type = 'agent.run.failed' AND run_id = 'run'").get()).toMatchObject({ type: "agent.run.failed" });
-    database.sqlite.close();
-  });
+      expect(adapter.debugSession("acp-claude-code-run")?.state).toBe("failed");
+      expect(database.sqlite.prepare("SELECT status, failure_class, error FROM runs WHERE id = 'run'").get()).toMatchObject({ status: "failed", failure_class: "retryable_visible", error: "ACP process exited with exit code 7" });
+      expect(database.sqlite.prepare("SELECT type FROM events WHERE type = 'agent.run.failed' AND run_id = 'run'").get()).toMatchObject({ type: "agent.run.failed" });
+    } finally {
+      const session = adapter.debugSession("acp-claude-code-run");
+      if (session !== undefined && session.state !== "disposed") Effect.runSync(adapter.dispose("acp-claude-code-run"));
+      database.sqlite.close();
+    }
+  }, 15_000);
 
   it("bridges ACP failure even when it happens before session.opened is handled", async () => {
     const dir = mkdtempSync(join(tmpdir(), "agenthub-claude-early-crash-"));
@@ -136,8 +152,8 @@ class EarlyFailClaudeCodeACPAdapter extends ClaudeCodeACPAdapter {
   }
 }
 
-async function waitFor<T>(read: () => T, done: (value: T) => boolean): Promise<T> {
-  const deadline = Date.now() + 2_000;
+async function waitFor<T>(read: () => T, done: (value: T) => boolean, options: { readonly timeoutMs?: number } = {}): Promise<T> {
+  const deadline = Date.now() + (options.timeoutMs ?? 2_000);
   let value = read();
   while (!done(value) && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, 10));

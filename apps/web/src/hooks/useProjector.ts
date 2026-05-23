@@ -214,16 +214,25 @@ class Projector {
       }
       case "pending_turn.created": {
         if (payload && typeof payload.messageId === "string") {
+          const pendingTurnId = typeof payload.pendingTurnId === "string" ? payload.pendingTurnId : payload.messageId;
           const existing = room.messages.find((m) => m.id === payload.messageId);
           if (existing) {
+            const updatedMessage = {
+              ...existing,
+              pendingTurnId,
+              pendingTurnStatus: "queued" as const,
+              pendingTurnPosition: room.pendingTurns.length + 1
+            };
             room = {
               ...room,
               messages: room.messages.map((m) =>
                 m.id === payload.messageId
-                  ? { ...m, pendingTurnStatus: "queued", pendingTurnPosition: room.pendingTurns.length + 1 }
+                  ? updatedMessage
                   : m
               ),
-              pendingTurns: [...room.pendingTurns, existing]
+              pendingTurns: room.pendingTurns.some((m) => m.pendingTurnId === pendingTurnId)
+                ? room.pendingTurns.map((m) => (m.pendingTurnId === pendingTurnId ? updatedMessage : m))
+                : [...room.pendingTurns, updatedMessage]
             };
             this.rooms.set(roomId, room);
             changed = true;

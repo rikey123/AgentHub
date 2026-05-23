@@ -107,3 +107,33 @@
 - A fast ACP child exit can fire before `ClaudeCodeACPAdapter.runManaged()` handles `session.opened`, so the crash must be queued until AdapterBridge has moved the durable run to `running`; otherwise the run may remain running or the prompt path may throw against an already failed ACP session. ACP startup should also avoid overwriting a fast failed session back to ready.
 - The real child-exit regression should spawn `process.execPath` rather than a PATH-dependent `node` command on Windows, and ACP base should listen to both `exit` and `close` while avoiding stdin writes after `exitCode` / `signalCode` / stream teardown so a fast process termination cannot be missed or masked.
 - The stable real-exit regression should not exit immediately at process startup; waiting until the child reads the managed `session/prompt` JSON-RPC line proves the real child exit path after AdapterBridge has handled `session.opened`, while the separate early-crash test covers before-opened queueing.
+
+## 2026-05-23 P1-3 workspace audit and evidence synchronization
+
+### Dirty workspace report
+
+- `M .sisyphus/notepads/agenthub-mvp/learnings.md` — belongs to completed/in-progress remediation evidence notes for P1-2; append-only history was restored after a temporary overwrite and P1-2 learnings were appended.
+- `M .sisyphus/plans/agenthub-mvp-remediation.md` — belongs to remediation status synchronization for completed P0-3/P1-1/P1-2 and this audit lifecycle.
+- `M apps/web/e2e/main-detail-projection.spec.ts` — belongs to completed P1-2 raw stream live UI coverage; adds admin-authorized raw SSE header/no-token-leak assertions and stdout/stderr rendering assertions.
+- `M apps/web/src/components/RunDetail.tsx` — belongs to completed P1-2 raw stream UI; wires Raw Stream tab to the live raw hook and preserves non-admin/no-output placeholders.
+- `M packages/adapters/claude-code/test/claude-code-adapter.test.ts` — belongs to completed P0-3 stabilization; real child-exit regression now parses JSON-RPC `session/prompt` instead of brittle raw substring matching.
+- `?? apps/web/src/hooks/useRawStream.ts` — belongs to completed P1-2 raw stream UI; new fetch-based SSE reader that uses an Authorization header and parses live raw stdout/stderr events.
+
+### OpenSpec validation
+
+- `openspec.cmd validate add-agenthub-mvp --strict` passed: `Change 'add-agenthub-mvp' is valid`.
+
+### Evidence inventory
+
+- Existing evidence files under `.sisyphus/evidence/agenthub-mvp/`: `final/invariants.json`, `final/playwright-golden/summary.md`, `m0/index.md`, `m1/index.md`, `m2/index.md`, `m3/apply-rollback.json`, `m3/artifactfs-multi.json`, `m3/index.md`, `m4/main-detail/playwright-results.json`, `m4/pending-turn/playwright-results.json`, `m4/verification-summary.json`, `m5/acp-cancel.json`, `m5/claude-real-smoke.json`, `m6/csrf-origin-host.json`, `m6/index.md`, `m6/worktree-gc.json`.
+- Missing remediation-specific evidence files for the new补救 tasks: P0-1 PendingTurn backend, P0-2 Task API/MCP chain, P0-3 Claude adapter runtime, P1-1 CommandBus idempotency evidence-only closeout, P1-2 Raw Stream live UI, and P1-3 workspace audit. Their current evidence is in plan status text, notepad notes, tests, and git diff rather than dedicated `.sisyphus/evidence/agenthub-mvp/remediation/` files.
+
+### Constraints observed
+
+- No dirty files were committed, stashed, discarded, or otherwise cleaned during this audit.
+- No OpenSpec task checkboxes were modified.
+
+## 2026-05-23 Claude adapter full-suite crash bridge stabilization
+
+- The real child-exit crash regression can exceed Vitest's 5s default per-test timeout under the root suite even though the filtered package test passes. Keep the regression real, but wait for ACP session state, durable run failure, and agent.run.failed event together with an explicit per-test timeout and cleanup in finally.
+

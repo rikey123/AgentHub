@@ -60,7 +60,7 @@ test.describe("pending turn UI", () => {
         schemaVersion: 1,
         workspaceId: "default-workspace",
         roomId,
-        payload: { messageId: msgId, text: `msg ${i}`, senderId: "user" },
+        payload: { messageId: msgId, text: `msg ${i}`, senderId: "user", turnDispatchMode: "pending" },
         createdAt: now + i
       });
       daemon.eventBus.publish({
@@ -87,6 +87,8 @@ test.describe("pending turn UI", () => {
     await page.waitForSelector("text=Limit Room");
     await page.click("text=Limit Room");
     await page.waitForSelector("text=Queue limit reached", { timeout: 5000 });
+    await page.waitForSelector("text=queued (1)", { timeout: 5000 });
+    await page.waitForSelector("text=Cancel", { timeout: 5000 });
     const textarea = page.locator("textarea");
     await expect(textarea).toHaveAttribute("placeholder", /Queue full/i);
   });

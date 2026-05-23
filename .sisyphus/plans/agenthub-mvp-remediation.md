@@ -232,6 +232,8 @@ openspec.cmd validate add-agenthub-mvp --strict
 
 ### P0-3: Claude adapter registry/selector + ACP process supervisor + automatic stdout/provider-event bridge to AdapterBridge/RunLifecycle
 
+**Status**: COMPLETE — implemented on `task/p0-3-claude-adapter-runtime`, independently reviewed APPROVE in `ses_1ac672217ffedwGaTB8rYgj4hw`, explicitly approved by Atlas/Orchestrator, and verified with the stabilized real child-exit regression.
+
 **Scope**: Wire the ClaudeCodeAdapter into AdapterManager so the daemon selects it at runtime. Implement the ACP process supervisor (spawn, NDJSON line-splitter, JSON-RPC pending table, stderr tail, liveness ping). Implement the automatic bridge from ACP stdout provider events to AdapterBridge, which in turn calls RunLifecycleService.
 
 This task covers tasks.md §12.1-12.10, §19.1.1-19.1.5, §19.10.1-19.10.5, and the AdapterManager registration gap.
@@ -295,6 +297,8 @@ openspec.cmd validate add-agenthub-mvp --strict
 
 ### P1-1: CommandBus idempotency transaction-boundary remediation or explicit spec reconciliation decision
 
+**Status**: COMPLETE — evidence-only closeout; current `CommandBus` implementation and tests already satisfy deterministic failure caching, transient retry rollback, in-flight expiry, and same-key/different-body duplicate rejection.
+
 **Scope**: Audit the current CommandBus.dispatch() implementation against tasks.md §3.9. Specifically verify:
 
 1. Deterministic failures (validation_failed / not_found / conflict / permission_denied / duplicate / not_implemented) write `status='failed'` to `command_records` and roll back the business transaction in the same atomic operation.
@@ -339,6 +343,8 @@ openspec.cmd validate add-agenthub-mvp --strict
 
 ### P1-2: Run Detail Raw Stream live UI via `view=raw`
 
+**Status**: COMPLETE — implemented fetch-based admin-authorized raw SSE consumption in the Run Detail Raw Stream tab, with live stdout/stderr E2E coverage and preserved non-admin/raw-replay gating.
+
 **Scope**: Implement live SSE delivery for `view=raw` in the daemon SSE handler, and wire the Run Detail Raw Stream tab to consume it. The raw view carries `adapter.raw.stdout` and `adapter.raw.stderr` ephemeral events, admin-gated, with redaction and 64 KB truncation already in place from M6.
 
 This task covers tasks.md §19.6.11 (Raw Stream tab), §19.13.5-19.13.6 (admin scope gating), and the F4 raw-view blocker fix that was partially addressed but not fully verified end-to-end in the UI.
@@ -381,6 +387,8 @@ openspec.cmd validate add-agenthub-mvp --strict
 ---
 
 ### P1-3: Git workspace audit and OpenSpec evidence synchronization
+
+**Status**: COMPLETE — audit report appended to `.sisyphus/notepads/agenthub-mvp/issues.md`; no git cleanup, stash, discard, commit, OpenSpec checkbox edits, or other mutations were performed beyond the required append-only report/status record.
 
 **Scope**: Audit the git workspace and OpenSpec evidence state; produce a written report for the Orchestrator. This task makes NO commits, NO stashes, and NO discards of dirty files. Any concrete cleanup of dirty files requires a separate Orchestrator-approved PR boundary that is outside this task.
 
