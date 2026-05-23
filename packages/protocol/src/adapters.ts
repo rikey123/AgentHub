@@ -64,7 +64,8 @@ export const CreateSessionInputSchema = Schema.Struct({
   roomId: IdSchema,
   agentId: IdSchema,
   workDir: Schema.optional(Schema.String),
-  context: Schema.optional(Schema.Array(ContextItemSchema))
+  context: Schema.optional(Schema.Array(ContextItemSchema)),
+  mcpServer: Schema.optional(Schema.Unknown)
 });
 export type CreateSessionInput = typeof CreateSessionInputSchema.Type;
 
@@ -80,7 +81,8 @@ export const ExternalSessionSchema = Schema.Struct({
   id: IdSchema,
   runId: IdSchema,
   workDir: Schema.optional(Schema.String),
-  providerConversationId: Schema.optional(Schema.String)
+  providerConversationId: Schema.optional(Schema.String),
+  mcpServer: Schema.optional(Schema.Unknown)
 });
 export type ExternalSession = typeof ExternalSessionSchema.Type;
 

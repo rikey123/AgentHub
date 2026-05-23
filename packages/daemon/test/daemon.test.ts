@@ -242,6 +242,29 @@ describe("daemon M1.4 composition", () => {
     expect(stats.eventsLast5min).toBeGreaterThan(0);
     expect(stats.uptimeMs).toBeGreaterThanOrEqual(0);
   });
+
+  it("exposes task HTTP routes through CommandBus and returns conflicts for invalid completion", async () => {
+    const client = new AgentHubClient({ baseUrl });
+    const room = await client.createRoom({ title: "Tasks", mode: "solo", primaryAgentId: "mock-builder" }) as { readonly data: { readonly roomId: string } };
+
+    const created = await fetch(`${baseUrl}/rooms/${room.data.roomId}/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "HTTP task", assigneeAgentId: "mock-builder", idempotencyKey: "task-http-1" }) });
+    const payload = await created.json() as { readonly ok: boolean; readonly data: { readonly taskId: string; readonly task: { readonly status: string } } };
+    expect(created.status).toBe(201);
+    expect(payload).toMatchObject({ ok: true, data: { task: { status: "pending" } } });
+
+    const pendingConflict = await fetch(`${baseUrl}/tasks/${payload.data.taskId}/complete`, { method: "POST" });
+    expect(pendingConflict.status).toBe(409);
+
+    daemon.database.sqlite.prepare("UPDATE tasks SET status = 'in_progress' WHERE id = ?").run(payload.data.taskId);
+    const completed = await fetch(`${baseUrl}/tasks/${payload.data.taskId}/complete`, { method: "POST" });
+    expect(completed.status).toBe(200);
+    const doneConflict = await fetch(`${baseUrl}/tasks/${payload.data.taskId}/complete`, { method: "POST" });
+    expect(doneConflict.status).toBe(409);
+
+    const listed = await fetch(`${baseUrl}/rooms/${room.data.roomId}/tasks`);
+    const listedPayload = await listed.json() as { readonly tasks: readonly { readonly id: string; readonly status: string }[] };
+    expect(listedPayload.tasks).toEqual([expect.objectContaining({ id: payload.data.taskId, status: "completed" })]);
+  });
 });
 
 function sha256(value: string): string {

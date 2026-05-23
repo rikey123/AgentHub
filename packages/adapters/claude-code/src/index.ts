@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { ACPAdapter, ACPAdapterError, AdapterHealthRegistry, AdapterRawLogger, classifyClaudeDetection, emitAdapterRegistered, permissionForTool, type AcpProviderEvent, type AdapterRuntimeServices, type JsonRpcMessage } from "@agenthub/adapter-acp-base";
-import { AdapterBridge, type AdapterArtifactFSBoundary, type RunLifecycleService, type RunRow } from "@agenthub/orchestrator";
+import { AdapterBridge, type AdapterArtifactFSBoundary, type RoomMcpServer, type RunLifecycleService, type RunRow } from "@agenthub/orchestrator";
 import type { PermissionEngine } from "@agenthub/permissions";
 import type { AdapterError, AgentAdapterManifest, DetectedRuntime } from "@agenthub/protocol";
 import { Effect } from "effect";
@@ -25,6 +25,7 @@ export type ClaudeCodeAdapterOptions = {
   readonly workspaceId?: string;
   readonly lifecycle?: RunLifecycleService;
   readonly artifactFs?: AdapterArtifactFSBoundary;
+  readonly mcpServer?: RoomMcpServer;
   readonly permissionEngine?: PermissionEngine;
   readonly now?: () => number;
 };
@@ -67,7 +68,7 @@ export class ClaudeCodeACPAdapter extends ACPAdapter {
     const artifactFs = this.options.artifactFs ?? this.options.services.artifactFs;
     const bridge = new AdapterBridge({ runId: run.id, workspaceId: run.workspace_id, roomId: run.room_id, agentId: run.agent_id, lifecycle: this.options.lifecycle, eventBus: this.options.services.eventBus, ...(this.options.now !== undefined ? { now: this.options.now } : {}), ...(run.task_id !== null ? { taskId: run.task_id } : {}), messageId: `msg_${run.id}`, ...(run.workspace_mode !== null ? { workspaceMode: run.workspace_mode } : {}), terminalEnabled: false, ...(artifactFs !== undefined ? { artifactFs } : {}) });
     this.bridgeByRun.set(run.id, bridge);
-    const session = Effect.runSync(this.createSession({ runId: run.id, roomId: run.room_id, agentId: run.agent_id, workDir }));
+    const session = Effect.runSync(this.createSession({ runId: run.id, roomId: run.room_id, agentId: run.agent_id, workDir, ...(this.options.mcpServer !== undefined ? { mcpServer: this.options.mcpServer } : {}) }));
     bridge.handle({ type: "session.opened", sessionId: session.id, workDir, ...(session.providerConversationId !== undefined ? { providerConversationId: session.providerConversationId } : {}) });
     this.health?.update({ adapterId: this.id, workspaceId: run.workspace_id, liveness: "busy", pendingRunIds: [run.id] });
     this.sendPrompt(session.id, { role: "user", content: promptFromRun(run) });

@@ -172,3 +172,14 @@ ot_implemented result rather than a thrown HTTP route branch, preserving the thi
 - packages/daemon/src/index.ts keeps admin gating in sse() and shared edactAndTruncate(JSON.stringify(event), 64 * 1024) output, while isible(..., view='raw') allows only canonical dapter.raw.stdout / dapter.raw.stderr after room/run filters.
 - Node fetch-based SSE tests need an initial comment frame (: connected) and reader-level cancellation to avoid hanging server close after asserting a live event.
 
+## 2026-05-23 P0-2 Task API / MCP minimum chain
+
+- The existing `0004_runs_tasks.sql` migration already creates `tasks`; no new migration was needed. P0-2 implemented against the OpenSpec MVP status enum (`pending`, `in_progress`, `blocked`, `review`, `completed`, `cancelled`) while accepting P0-2 shorthand aliases `open` -> `pending` and `done` -> `completed` at service/MCP boundaries.
+- Task HTTP mutating routes follow the thin daemon rule: `POST /rooms/:id/tasks` and `POST /tasks/:id/complete` dispatch `CreateTask` / `CompleteTask` through CommandBus; `TaskService` owns SQLite writes and canonical `task.*` event publication.
+- The requested package filter `@agenthub/adapters-acp-base` does not match a workspace project; the actual package is `@agenthub/adapter-acp-base`, whose filtered tests pass.
+
+## 2026-05-23 P0-2 MCP managed startup wiring
+
+- ACP base already persists `CreateSessionInput.mcpServer`, but real provider coverage must assert the managed adapter path too; `ClaudeCodeACPAdapter.runManaged()` is the startup path that must forward the room MCP server into `createSession()`.
+- Claude adapter tests can exercise managed startup without spawning an external provider by constructing `ClaudeCodeACPAdapter({ command: "" })`, matching the existing ArtifactFS managed-run test pattern.
+

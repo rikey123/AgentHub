@@ -42,6 +42,7 @@ export type AcpAdapterSession = {
   pendingRequests: Map<string, AcpPendingRequest>;
   inflightPromptRequestId: string | undefined;
   clientCapabilities: AcpClientCapabilities;
+  mcpServer: unknown | undefined;
   process: ChildProcessWithoutNullStreams | undefined;
   lineSplitter: NdjsonLineSplitter;
   promptTimeoutPaused: boolean;
@@ -182,16 +183,16 @@ export abstract class ACPAdapter {
   protected createSessionSync(input: CreateSessionInput): ExternalSession {
     const sessionId = `acp-${this.id}-${input.runId}`;
     if (this.sessions.has(sessionId)) throw new ACPAdapterError("session_exists", `ACP session '${sessionId}' already exists`);
-    const session: AcpAdapterSession = { state: "connecting", acpSessionId: sessionId, runId: input.runId, workDir: input.workDir ?? process.cwd(), pendingRequests: new Map(), inflightPromptRequestId: undefined, clientCapabilities: acpClientCapabilities, process: undefined, lineSplitter: new NdjsonLineSplitter(), promptTimeoutPaused: false };
+    const session: AcpAdapterSession = { state: "connecting", acpSessionId: sessionId, runId: input.runId, workDir: input.workDir ?? process.cwd(), pendingRequests: new Map(), inflightPromptRequestId: undefined, clientCapabilities: acpClientCapabilities, mcpServer: input.mcpServer, process: undefined, lineSplitter: new NdjsonLineSplitter(), promptTimeoutPaused: false };
     this.sessions.set(sessionId, session);
     this.pendingByRun.set(input.runId, sessionId);
     const spawned = this.trySpawn(session);
     if (!spawned) session.state = "ready";
-    return { id: sessionId, runId: input.runId, workDir: session.workDir };
+    return { id: sessionId, runId: input.runId, workDir: session.workDir, ...(input.mcpServer !== undefined ? { mcpServer: input.mcpServer } : {}) };
   }
 
   protected attachSessionSync(input: AttachSessionInput): ExternalSession {
-    const session: AcpAdapterSession = { state: "ready", acpSessionId: input.adapterSessionId, runId: input.runId, workDir: input.workDir ?? process.cwd(), pendingRequests: new Map(), inflightPromptRequestId: undefined, clientCapabilities: acpClientCapabilities, process: undefined, lineSplitter: new NdjsonLineSplitter(), promptTimeoutPaused: false };
+    const session: AcpAdapterSession = { state: "ready", acpSessionId: input.adapterSessionId, runId: input.runId, workDir: input.workDir ?? process.cwd(), pendingRequests: new Map(), inflightPromptRequestId: undefined, clientCapabilities: acpClientCapabilities, mcpServer: undefined, process: undefined, lineSplitter: new NdjsonLineSplitter(), promptTimeoutPaused: false };
     this.sessions.set(input.adapterSessionId, session);
     this.pendingByRun.set(input.runId, input.adapterSessionId);
     return { id: input.adapterSessionId, runId: input.runId, workDir: session.workDir, ...(input.providerConversationId !== undefined ? { providerConversationId: input.providerConversationId } : {}) };

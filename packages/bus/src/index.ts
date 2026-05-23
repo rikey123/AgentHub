@@ -107,6 +107,9 @@ export type CommandType =
   | "DeprecateContextItem"
   | "PinContextItem"
   | "CancelRun"
+  | "CreateTask"
+  | "UpdateTask"
+  | "CompleteTask"
   | "CreateRoom"
   | "ArchiveRoom"
   | "UnarchiveRoom"
@@ -219,6 +222,9 @@ const canonicalCommandTypes = new Set<CommandType>([
   "DeprecateContextItem",
   "PinContextItem",
   "CancelRun",
+  "CreateTask",
+  "UpdateTask",
+  "CompleteTask",
   "CreateRoom",
   "ArchiveRoom",
   "UnarchiveRoom",
