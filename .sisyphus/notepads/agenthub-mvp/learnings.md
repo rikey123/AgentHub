@@ -190,3 +190,8 @@ ot_implemented result rather than a thrown HTTP route branch, preserving the thi
 - ACP stdout provider events should be bridged from ACPAdapter.handleLine via an overridable onProviderEvent hook so subclasses cannot forget to route parsed events; Claude maps that hook through AdapterBridge, preserving RunLifecycleService as the only terminal run-state writer.
 - ACP process supervision needs persistent stdout/stderr line splitters plus an async child error handler; spawn ENOENT is emitted after spawn() returns on Windows/Node and must be converted into failed session state/stderr tail rather than an unhandled exception.
 - The requested plural pnpm filters (@agenthub/adapters-*) do not match workspace package names; actual verified packages remain @agenthub/adapter-acp-base and @agenthub/adapter-claude-code.
+
+## 2026-05-23 P0-3 ACP crash propagation fix
+
+- ACP process supervision failures must cross the adapter boundary, not only mutate AcpAdapterSession.state. Use a single onSessionFailed hook for child error, child exit, and liveness timeout, and let ClaudeCodeACPAdapter translate that hook into AdapterBridge session.crashed so RunLifecycleService remains the durable terminal run-state writer.
+- Daemon Claude-selection tests should assert adapter selection/session creation rather than a durable running status, because a missing or crashing local Claude ACP process now correctly transitions the run to failed through the managed lifecycle path.
