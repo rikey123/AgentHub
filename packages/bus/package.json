@@ -1,0 +1,17 @@
+{
+  "name": "@agenthub/bus",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node scripts/run-tests.mjs"
+  },
+  "dependencies": {
+    "@agenthub/db": "workspace:*",
+    "@agenthub/protocol": "workspace:*",
+    "effect": "^3.19.6"
+  }
+}

@@ -1,0 +1,441 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
+import { CommandBus, EventBus, type CommandHandler, type CommandResult } from "@agenthub/bus";
+import { createDatabase, type AgentHubDatabase } from "@agenthub/db";
+
+import {
+  ActiveWakesRegistry,
+  AdapterBridge,
+  MailboxService,
+  ReclaimStaleClaimedRun,
+  RunLifecycleError,
+  RunLifecycleService,
+  RunQueue,
+  StartupRecovery,
+  createCancelRunHandler,
+  createWakeAgentHandler,
+} from "../src/index.ts";
+
+let tempDir: string | undefined;
+let database: AgentHubDatabase | undefined;
+let eventBus: EventBus | undefined;
+let lifecycle: RunLifecycleService | undefined;
+let mailbox: MailboxService | undefined;
+let activeWakes: ActiveWakesRegistry | undefined;
+let now = 1000;
+
+beforeEach(() => {
+  tempDir = mkdtempSync(join(tmpdir(), "agenthub-orchestrator-"));
+  database = createDatabase({ path: join(tempDir, "agenthub.sqlite"), applyMigrations: true });
+  eventBus = new EventBus({ database: currentDatabase() });
+  activeWakes = new ActiveWakesRegistry(() => now);
+  mailbox = new MailboxService(currentDatabase(), () => now);
+  lifecycle = new RunLifecycleService(currentDatabase(), currentBus(), {
+    now: () => now,
+    sideEffects: {
+      onTerminal: (runId) => currentActiveWakes().releaseRun(runId),
+      finalizeNextTurns: (tx, runId, failureClass, timestamp) => currentMailbox().finalizeForRun(tx, runId, failureClass, timestamp)
+    }
+  });
+});
+
+afterEach(() => {
+  currentBus().close();
+  currentDatabase().sqlite.close();
+  if (tempDir) rmSync(tempDir, { recursive: true, force: true });
+  tempDir = undefined;
+  database = undefined;
+  eventBus = undefined;
+  lifecycle = undefined;
+  mailbox = undefined;
+  activeWakes = undefined;
+  now = 1000;
+  vi.restoreAllMocks();
+});
+
+describe("RunLifecycleService", () => {
+  test("owns run transitions and writes durable run events in order", () => {
+    createRun("run_life", { targetFiles: ["src/a.ts"] });
+
+    currentLifecycle().markClaimed(null, "run_life");
+    currentLifecycle().markStarting(null, "run_life", 123);
+    currentLifecycle().updateSessionState(null, "run_life", { adapterSessionId: "s_1", workDir: "work/run_life" });
+    currentLifecycle().markRunning(null, "run_life", "s_1");
+    currentLifecycle().complete(null, "run_life", zeroCost());
+
+    expect(statusOf("run_life")).toBe("completed");
+    expect(runEvents("run_life")).toEqual(["agent.run.queued", "agent.run.started", "agent.run.completed"]);
+    expect(() => currentLifecycle().markStarting(null, "run_life", 123)).toThrow(RunLifecycleError);
+    expect(eventPayload("agent.run.completed", "run_life")).toMatchObject({ cost: zeroCost() });
+  });
+
+  test("emits waiting, waiting_permission, resumed, failed, and rolls back transient mailbox claims", () => {
+    seedMailbox("mb_1", "room_1", "agent_1");
+    createRun("run_fail", { mailboxClaimIds: ["mb_1"] });
+    currentDatabase().sqlite.prepare("UPDATE mailbox_messages SET read = 1, claimed_run_id = ?, claimed_at = ? WHERE id = ?").run("run_fail", now, "mb_1");
+
+    currentLifecycle().markWaiting(null, "run_fail", "agent_lock_held_by:run_other");
+    currentLifecycle().markWaiting(null, "run_fail", "agent_lock_held_by:run_other");
+    currentLifecycle().markClaimed(null, "run_fail");
+    currentLifecycle().markStarting(null, "run_fail", 123);
+    currentLifecycle().markRunning(null, "run_fail", "s_1");
+    currentLifecycle().markWaitingPermission(null, "run_fail", "perm_1");
+    currentLifecycle().markRunning(null, "run_fail", "s_1");
+    currentLifecycle().fail(null, "run_fail", "upstream_5xx", "transient");
+
+    expect(runEvents("run_fail")).toEqual([
+      "agent.run.queued",
+      "agent.run.waiting",
+      "agent.run.started",
+      "agent.run.waiting_permission",
+      "agent.run.resumed",
+      "agent.run.failed"
+    ]);
+    expect(currentDatabase().sqlite.prepare("SELECT read, claimed_run_id, claimed_at, delivery_batch_id FROM mailbox_messages WHERE id = 'mb_1'").get()).toMatchObject({
+      read: 0,
+      claimed_run_id: null,
+      claimed_at: null,
+      delivery_batch_id: null
+    });
+  });
+
+  test("non-retryable failure consumes unhandled next turns", () => {
+    createRun("run_perm");
+    insertNextTurn("nt_1", "run_perm");
+
+    currentLifecycle().fail(null, "run_perm", "permission denied", "permission_denied");
+
+    expect(statusOf("run_perm")).toBe("failed");
+    expect(currentDatabase().sqlite.prepare("SELECT consumed_at FROM run_next_turns WHERE id = 'nt_1'").get()).toMatchObject({ consumed_at: now });
+  });
+});
+
+describe("WakeAgent and CancelRun handlers", () => {
+  test("rejects zero-input wake and releases activeWake guard", () => {
+    const commandBus = commandBusWithHandlers();
+
+    const rejected = commandBus.dispatch(wakeCommand({ promptDelta: { kind: "delta_only", instructions: "   " } }), internalMeta("wake_zero")) as CommandResult;
+    const accepted = commandBus.dispatch(wakeCommand({ messageId: "msg_1" }), internalMeta("wake_msg")) as CommandResult;
+
+    expect(rejected).toMatchObject({ ok: false, error: { code: "validation_failed", message: "wake_rejected_zero_input" } });
+    expect(accepted).toMatchObject({ ok: true });
+    expect(runCount()).toBe(1);
+  });
+
+  test("creates queued run through lifecycle, claims mailbox atomically, and command idempotency caches result", () => {
+    seedMailbox("mb_1", "room_1", "agent_1");
+    const commandBus = commandBusWithHandlers();
+    const command = wakeCommand({ idempotencyKey: "idem_wake", promptDelta: { kind: "delta_only", instructions: "review mailbox" } });
+    const meta = internalMeta("idem_wake");
+
+    const first = commandBus.dispatch(command, meta) as CommandResult<{ runId: string }>;
+    const second = commandBus.dispatch(command, meta) as CommandResult<{ runId: string }>;
+
+    expect(first).toEqual(second);
+    expect(first).toMatchObject({ ok: true });
+    if (!first.ok) throw new Error("expected wake success");
+    expect(statusOf(first.data.runId)).toBe("queued");
+    expect(runEvents(first.data.runId)).toEqual(["agent.run.queued"]);
+    expect(currentDatabase().sqlite.prepare("SELECT read, claimed_run_id FROM mailbox_messages WHERE id = 'mb_1'").get()).toMatchObject({
+      read: 1,
+      claimed_run_id: first.data.runId
+    });
+  });
+
+  test("active duplicate wake appends next_turn instead of creating another run", () => {
+    const commandBus = commandBusWithHandlers();
+    const first = commandBus.dispatch(wakeCommand({ messageId: "msg_1", idempotencyKey: "wake_1" }), internalMeta("wake_1")) as CommandResult<{ runId: string }>;
+    if (!first.ok) throw new Error("expected wake success");
+
+    const second = commandBus.dispatch(wakeCommand({ messageId: "msg_2", idempotencyKey: "wake_2" }), internalMeta("wake_2")) as CommandResult;
+
+    expect(second).toMatchObject({ ok: true, data: { appendedToRunId: first.data.runId } });
+    expect(runCount()).toBe(1);
+    expect(nextTurnCount(first.data.runId)).toBe(1);
+  });
+
+  test("CancelRun marks cancelling and synchronously calls adapter cancel", async () => {
+    createRun("run_cancel");
+    currentLifecycle().markClaimed(null, "run_cancel");
+    currentLifecycle().markStarting(null, "run_cancel", 123);
+    currentLifecycle().markRunning(null, "run_cancel", "s_1");
+    const cancelRun = vi.fn(async (): Promise<void> => undefined);
+    const commandBus = new CommandBus({ database: currentDatabase(), handlers: { CancelRun: createCancelRunHandler({ lifecycle: currentLifecycle(), adapterManager: { cancelRun } }) } });
+
+    const result = await commandBus.dispatch({ type: "CancelRun", runId: "run_cancel" }, { actor: { type: "user", id: "u_1" }, traceId: "trace", origin: "http" }) as CommandResult;
+
+    expect(result).toMatchObject({ ok: true, data: { status: "cancelling" } });
+    expect(statusOf("run_cancel")).toBe("cancelling");
+    expect(cancelRun).toHaveBeenCalledWith("run_cancel");
+  });
+});
+
+describe("RunQueue", () => {
+  test("claims queued run, writes locks, starts run, then AdapterBridge opens/runs/completes", async () => {
+    createRun("run_happy", { targetFiles: ["b.ts", "a.ts"] });
+    const started: string[] = [];
+    const queue = new RunQueue({
+      database: currentDatabase(),
+      lifecycle: currentLifecycle(),
+      pid: 321,
+      adapterManager: {
+        runAgent: (run) => {
+          started.push(run.id);
+        }
+      }
+    });
+
+    await queue.scheduleTick();
+    const bridge = bridgeFor("run_happy");
+    bridge.handle({ type: "session.opened", sessionId: "s_happy", workDir: "work/run_happy", providerConversationId: "pc_1" });
+    bridge.handle({ type: "tool.call.requested", toolCallId: "tc_1", name: "Bash", input: { cmd: "test" } });
+    bridge.handle({ type: "file.changed", path: "a.ts", change: "modified" });
+    bridge.handle({ type: "session.ended", sessionId: "s_happy", reason: "completed", cost: zeroCost() });
+    await queue.handleEvent({ type: "agent.run.completed", runId: "run_happy" });
+
+    expect(started).toEqual(["run_happy"]);
+    expect(statusOf("run_happy")).toBe("completed");
+    expect(currentDatabase().sqlite.prepare("SELECT adapter_session_id, work_dir, provider_conversation_id, pid_at_start FROM runs WHERE id = 'run_happy'").get()).toMatchObject({
+      adapter_session_id: "s_happy",
+      work_dir: "work/run_happy",
+      provider_conversation_id: "pc_1",
+      pid_at_start: 321
+    });
+    expect(lockRows()).toEqual([]);
+    expect(runEvents("run_happy")).toEqual(["agent.run.queued", "agent.run.started", "agent.run.completed"]);
+    expect(eventTypes()).toContain("tool.call.requested");
+    expect(eventTypes()).toContain("file.changed");
+  });
+
+  test("agent, room, file, and workspace locks block conflicting runs", async () => {
+    createRun("run_a", { targetFiles: ["src/a.ts"] });
+    createRun("run_same_agent", { agentId: "agent_1", roomId: "room_2", targetFiles: ["src/b.ts"] });
+    createRun("run_same_room", { agentId: "agent_2", roomId: "room_1", targetFiles: ["src/c.ts"] });
+    createRun("run_same_file", { agentId: "agent_3", roomId: "room_3", targetFiles: ["src/a.ts"] });
+    createRun("run_workspace", { agentId: "agent_4", roomId: "room_4", targetFiles: [] });
+    const queue = new RunQueue({ database: currentDatabase(), lifecycle: currentLifecycle(), pid: 321 });
+
+    await queue.scheduleTick();
+
+    expect(statusOf("run_a")).toBe("starting");
+    expect(statusOf("run_same_agent")).toBe("waiting");
+    expect(waitingReason("run_same_agent")).toContain("agent_lock_held_by:run_a");
+    expect(statusOf("run_same_room")).toBe("waiting");
+    expect(waitingReason("run_same_room")).toContain("room_lock_held_by:run_a");
+    expect(statusOf("run_same_file")).toBe("waiting");
+    expect(waitingReason("run_same_file")).toContain("file_lock_held_by:run_a");
+    expect(statusOf("run_workspace")).toBe("waiting");
+    expect(waitingReason("run_workspace")).toContain("file_locks_held_in_workspace:ws_1");
+  });
+
+  test("waiting lock timeout fails run as transient", async () => {
+    createRun("run_wait");
+    currentLifecycle().markWaiting(null, "run_wait", "agent_lock_held_by:run_a");
+    now += 301_000;
+    const queue = new RunQueue({ database: currentDatabase(), lifecycle: currentLifecycle(), lockTimeoutMs: 300_000, now: () => now });
+
+    await queue.scheduleTick();
+
+    expect(statusOf("run_wait")).toBe("failed");
+    expect(currentLifecycle().read("run_wait").failure_class).toBe("transient");
+  });
+});
+
+describe("startup recovery and reclaim", () => {
+  test("clears locks, preserves queued/waiting, fails stale claimed/starting, and finalizes cancelling", async () => {
+    createRun("run_queued");
+    createRun("run_waiting");
+    currentLifecycle().markWaiting(null, "run_waiting", "agent_lock_held_by:old");
+    createRun("run_claimed");
+    currentLifecycle().markClaimed(null, "run_claimed");
+    currentDatabase().sqlite.prepare("UPDATE runs SET claimed_at = ? WHERE id = 'run_claimed'").run(now - 31_000);
+    createRun("run_starting");
+    currentLifecycle().markClaimed(null, "run_starting");
+    currentLifecycle().markStarting(null, "run_starting", 111);
+    createRun("run_cancelling");
+    currentLifecycle().markCancelling(null, "run_cancelling");
+    currentDatabase().sqlite.prepare("INSERT INTO run_locks (lock_type, lock_key, workspace_id, run_id, acquired_at) VALUES ('agent', 'old', NULL, 'run_claimed', ?)").run(now);
+    const reclaim = new ReclaimStaleClaimedRun(currentDatabase(), currentLifecycle(), () => ({ crashRecovery: "fail_run" }), () => now, 999);
+
+    await new StartupRecovery(currentDatabase(), currentLifecycle(), reclaim, () => now, 999).run();
+
+    expect(lockRows()).toEqual([]);
+    expect(statusOf("run_queued")).toBe("queued");
+    expect(statusOf("run_waiting")).toBe("waiting");
+    expect(statusOf("run_claimed")).toBe("failed");
+    expect(statusOf("run_starting")).toBe("failed");
+    expect(statusOf("run_cancelling")).toBe("cancelled");
+  });
+
+  test("ReclaimStaleClaimedRun attaches resumable sessions and handles failed attach", async () => {
+    createRun("run_resume");
+    currentLifecycle().markClaimed(null, "run_resume");
+    currentLifecycle().markStarting(null, "run_resume", 111);
+    currentLifecycle().updateSessionState(null, "run_resume", { adapterSessionId: "s_resume", workDir: "work/run_resume" });
+    createRun("run_fail_attach", { agentId: "agent_2", roomId: "room_2" });
+    currentLifecycle().markClaimed(null, "run_fail_attach");
+    currentLifecycle().markStarting(null, "run_fail_attach", 111);
+    currentLifecycle().markRunning(null, "run_fail_attach", "s_missing");
+    const attached: string[] = [];
+    const reclaim = new ReclaimStaleClaimedRun(
+      currentDatabase(),
+      currentLifecycle(),
+      (run) => ({
+        crashRecovery: "resumable",
+        attachSession: async ({ adapterSessionId }) => {
+          if (run.id === "run_fail_attach") throw new Error("gone");
+          attached.push(adapterSessionId);
+        }
+      }),
+      () => now,
+      999
+    );
+
+    await reclaim.scan();
+
+    expect(attached).toEqual(["s_resume"]);
+    expect(statusOf("run_resume")).toBe("running");
+    expect(currentLifecycle().read("run_resume").pid_at_start).toBe(999);
+    expect(statusOf("run_fail_attach")).toBe("failed");
+    expect(currentLifecycle().read("run_fail_attach").failure_class).toBe("fresh_session_required");
+  });
+});
+
+function currentDatabase(): AgentHubDatabase {
+  expect(database).toBeDefined();
+  return database as AgentHubDatabase;
+}
+
+function currentBus(): EventBus {
+  expect(eventBus).toBeDefined();
+  return eventBus as EventBus;
+}
+
+function currentLifecycle(): RunLifecycleService {
+  expect(lifecycle).toBeDefined();
+  return lifecycle as RunLifecycleService;
+}
+
+function currentMailbox(): MailboxService {
+  expect(mailbox).toBeDefined();
+  return mailbox as MailboxService;
+}
+
+function currentActiveWakes(): ActiveWakesRegistry {
+  expect(activeWakes).toBeDefined();
+  return activeWakes as ActiveWakesRegistry;
+}
+
+function createRun(
+  runId: string,
+  options: {
+    readonly workspaceId?: string;
+    readonly roomId?: string;
+    readonly agentId?: string;
+    readonly targetFiles?: readonly string[];
+    readonly mailboxClaimIds?: readonly string[];
+  } = {}
+): void {
+  currentLifecycle().create(null, {
+    runId,
+    workspaceId: options.workspaceId ?? "ws_1",
+    roomId: options.roomId ?? "room_1",
+    agentId: options.agentId ?? "agent_1",
+    wakeReason: "primary_turn",
+    targetFiles: options.targetFiles ?? [],
+    ...(options.mailboxClaimIds !== undefined ? { mailboxClaimIds: options.mailboxClaimIds } : {}),
+    messageId: `msg_${runId}`
+  });
+}
+
+function commandBusWithHandlers(): CommandBus {
+  return new CommandBus({
+    database: currentDatabase(),
+    handlers: {
+      WakeAgent: createWakeAgentHandler({ database: currentDatabase(), activeWakes: currentActiveWakes(), mailbox: currentMailbox(), lifecycle: currentLifecycle() }) as CommandHandler
+    }
+  });
+}
+
+function wakeCommand(overrides: Partial<Parameters<typeof createWakeAgentHandler>[0]> & Record<string, unknown> = {}) {
+  return {
+    type: "WakeAgent" as const,
+    roomId: "room_1",
+    agentId: "agent_1",
+    workspaceId: "ws_1",
+    reason: "primary_turn" as const,
+    idempotencyKey: "wake_default",
+    ...overrides
+  };
+}
+
+function internalMeta(idempotencyKey: string) {
+  return { actor: { type: "system" as const }, traceId: `trace_${idempotencyKey}`, idempotencyKey, origin: "internal" as const };
+}
+
+function bridgeFor(runId: string): AdapterBridge {
+  return new AdapterBridge({ runId, workspaceId: "ws_1", roomId: "room_1", agentId: "agent_1", lifecycle: currentLifecycle(), eventBus: currentBus(), now: () => now });
+}
+
+function zeroCost() {
+  return { inputTokens: 0, outputTokens: 0, cachedTokens: 0, costUsd: 0, modelId: "mock" };
+}
+
+function seedMailbox(id: string, roomId: string, agentId: string): void {
+  currentDatabase().sqlite
+    .prepare(
+      `INSERT INTO mailbox_messages (
+        id, workspace_id, room_id, from_type, from_id, to_agent_id, kind, content, files, read, claimed_run_id, claimed_at, delivery_batch_id, created_at, consumed_at
+      ) VALUES (?, 'ws_1', ?, 'user', 'u_1', ?, 'message', 'hello', '[]', 0, NULL, NULL, NULL, ?, NULL)`
+    )
+    .run(id, roomId, agentId, now);
+}
+
+function insertNextTurn(id: string, runId: string): void {
+  currentDatabase().sqlite
+    .prepare(
+      `INSERT INTO run_next_turns (id, run_id, room_id, agent_id, prompt_delta_json, message_id, pending_turn_id, source_reason, source_idempotency_key, created_at, consumed_at)
+       VALUES (?, ?, 'room_1', 'agent_1', '', 'msg_next', NULL, 'primary_turn', 'idem_next', ?, NULL)`
+    )
+    .run(id, runId, now);
+}
+
+function statusOf(runId: string): string {
+  return currentLifecycle().read(runId).status;
+}
+
+function waitingReason(runId: string): string | null {
+  return currentLifecycle().read(runId).waiting_reason;
+}
+
+function runEvents(runId: string): string[] {
+  return currentDatabase().sqlite
+    .prepare("SELECT type FROM events WHERE run_id = ? AND type LIKE 'agent.run.%' ORDER BY seq ASC")
+    .all(runId)
+    .map((row) => (row as { type: string }).type);
+}
+
+function eventTypes(): string[] {
+  return currentDatabase().sqlite.prepare("SELECT type FROM events ORDER BY seq ASC").all().map((row) => (row as { type: string }).type);
+}
+
+function eventPayload(type: string, runId: string): unknown {
+  const row = currentDatabase().sqlite.prepare("SELECT payload FROM events WHERE type = ? AND run_id = ? ORDER BY seq DESC LIMIT 1").get(type, runId) as { payload: string };
+  return JSON.parse(row.payload) as unknown;
+}
+
+function runCount(): number {
+  return (currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM runs").get() as { count: number }).count;
+}
+
+function nextTurnCount(runId: string): number {
+  return (currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM run_next_turns WHERE run_id = ?").get(runId) as { count: number }).count;
+}
+
+function lockRows(): unknown[] {
+  return currentDatabase().sqlite.prepare("SELECT lock_type, lock_key, workspace_id, run_id FROM run_locks ORDER BY lock_type, lock_key").all();
+}
