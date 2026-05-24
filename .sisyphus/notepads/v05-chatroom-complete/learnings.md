@@ -1,8 +1,8 @@
 
-## ¡ì0.3 BriefGenerator
+## ï¿½ï¿½0.3 BriefGenerator
 - packages/context keeps exports in src/index.ts; HeuristicBriefGenerator.generate() returns Effect.succeed(...) and stays pure/synchronous for V0.5.
 - The context package needed an explicit effect dependency once its public interface imported Effect; run tests through pnpm.cmd on Windows when pnpm.ps1 is blocked by execution policy.
-- packages/protocol/src/domains.ts did not define RunFailureClass at this point, so ¡ì0.3 used a local compatible context union to stay within the package boundary.
+- packages/protocol/src/domains.ts did not define RunFailureClass at this point, so ï¿½ï¿½0.3 used a local compatible context union to stay within the package boundary.
 
 
 ## Task 0.4 run lifecycle brief publishing - 2026-05-24
@@ -16,7 +16,7 @@
 
 ## W0 Oracle review - 2026-05-24
 - APPROVE: W0 foundation is spec-compliant and merge-ready. Verified targeted tests plus typecheck/lint/check:all pass.
-- ¡ì0.4 publishes message.brief.published after terminal agent.run.* event inside RunLifecycleService.withTransaction(); EventBus nested better-sqlite3 transaction/savepoint keeps events/outbox and messages.brief_published_at atomic when lifecycle and bus share the same AgentHubDatabase instance.
+- ï¿½ï¿½0.4 publishes message.brief.published after terminal agent.run.* event inside RunLifecycleService.withTransaction(); EventBus nested better-sqlite3 transaction/savepoint keeps events/outbox and messages.brief_published_at atomic when lifecycle and bus share the same AgentHubDatabase instance.
 - WHERE clause for brief timestamp matches spec exactly: run_id + role='assistant' + status='completed'; no dependency on runs.message_id.
 
 
@@ -36,3 +36,8 @@
 - Final verification: cmd /c pnpm --filter @agenthub/web build exits 0; LSP diagnostics for apps/web reports 0 errors.
 - Root cmd /c pnpm typecheck is blocked by existing packages/adapters/claude-code/test/claude-code-adapter.test.ts constructor fixture error outside the W3 web scope.
 - packages/daemon/src/commands.ts still has an uncommitted out-of-scope change and was intentionally not included because the task constrained commits to apps/web/** and pnpm-lock.yaml.
+
+## v05-w5-final web cleanup - 2026-05-24
+- RoomMembersPopover needed explicit VirtualItem and Floating UI middleware parameter types to satisfy TypeScript under noImplicitAny.
+- pnpm.cmd install was required in this Windows worktree before typecheck could resolve @floating-ui/react, @tanstack/react-virtual, and ansi-to-html from the lockfile.
+- Repository lint clean-up was mostly unused bindings/imports in apps/web and one console warning guard in the OpenCode adapter smoke test.

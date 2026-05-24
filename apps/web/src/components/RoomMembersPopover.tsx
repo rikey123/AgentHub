@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useFloating, offset, flip, shift, size, autoUpdate } from "@floating-ui/react";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { useVirtualizer, type VirtualItem } from "@tanstack/react-virtual";
 
 export type MentionCandidate = {
   readonly agentId: string;
@@ -38,13 +38,13 @@ export function RoomMembersPopover({ candidates, query, onSelect, onClose, ancho
     },
     placement: "top-start",
     strategy: "fixed",
-    middleware: [
+      middleware: [
       offset(4),
       flip({ padding: 8 }),
       shift({ padding: 8 }),
       size({
         padding: 8,
-        apply({ availableHeight, elements }) {
+        apply({ availableHeight, elements }: { readonly availableHeight: number; readonly elements: { readonly floating: HTMLElement } }) {
           elements.floating.style.maxHeight = `${Math.min(availableHeight, 320)}px`;
         }
       })
@@ -126,7 +126,7 @@ export function RoomMembersPopover({ candidates, query, onSelect, onClose, ancho
         style={{ overflow: "auto", maxHeight: 320 }}
       >
         <div style={{ height: virtualizer.getTotalSize(), position: "relative", width: "100%" }}>
-          {virtualItems.map((virtualItem) => {
+          {virtualItems.map((virtualItem: VirtualItem) => {
             const candidate = filtered[virtualItem.index];
             if (!candidate) return null;
             const isSelected = virtualItem.index === selectedIndex;

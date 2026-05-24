@@ -107,7 +107,6 @@ export function App() {
   }, []);
 
   const isOffline = projector.connectionStatus === "offline";
-  const isReconnecting = projector.connectionStatus === "reconnecting";
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -244,7 +243,6 @@ export function App() {
             room={room}
             activeTab={sidePanelTab}
             onChangeTab={setSidePanelTab}
-            onOpenRunDetail={handleOpenRunDetail}
             workspaceId="default-workspace"
           />
         ) : (

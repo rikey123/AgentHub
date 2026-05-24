@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import type { VirtualItem } from "@tanstack/react-virtual";
 import AnsiToHtml from "ansi-to-html";
 
 const ansiConverter = new AnsiToHtml({
@@ -276,7 +277,7 @@ function TerminalExpanded({
         </div>
         <div ref={listRef} style={{ flex: 1, overflow: "auto", padding: "var(--ah-space-2) var(--ah-space-4)", fontFamily: "monospace", fontSize: "var(--ah-font-size-sm)", lineHeight: "var(--ah-line-height-normal)" }}>
           <div style={{ height: virtualizer.getTotalSize(), position: "relative", width: "100%" }}>
-            {virtualItems.map((virtualItem) => {
+            {virtualItems.map((virtualItem: VirtualItem) => {
               const line = filteredLines[virtualItem.index];
               if (!line) return null;
               return (

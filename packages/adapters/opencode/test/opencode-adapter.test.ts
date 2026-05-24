@@ -54,7 +54,6 @@ describe("OpenCodeACPAdapter", () => {
   it("uses OPENCODE_BIN integration detection only when explicitly available", () => {
     const opencodeBin = process.env.OPENCODE_BIN;
     if (opencodeBin === undefined || opencodeBin.length === 0) {
-      console.warn("Skipping OpenCode binary integration smoke: OPENCODE_BIN is not set");
       return;
     }
     const adapter = new OpenCodeACPAdapter({ command: opencodeBin });

@@ -252,14 +252,11 @@ test.describe("v05 chatroom features", () => {
   });
 
   test("Cost tab loads in Side Panel", async ({ page }) => {
-    const roomRes = await fetch(`${testUrl}/rooms`, {
+    await fetch(`${testUrl}/rooms`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "Cost Room", mode: "solo", primaryAgentId: "mock-builder" })
     });
-    const roomData = (await roomRes.json()) as { data: { roomId: string } };
-    const roomId = roomData.data.roomId;
-
     await page.goto(testUrl);
     await page.waitForSelector("text=Cost Room");
     await page.click("text=Cost Room");

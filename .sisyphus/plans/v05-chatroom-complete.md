@@ -803,7 +803,7 @@
 
 ### Wave W2 — Backend, Cost/CLI, Attachments (`§4.*`, `§5.*`, `§6.*`)
 
-- [ ] §4.1 Implement `parseMentions(text, members)`
+- [x] §4.1 Implement `parseMentions(text, members)`
   - **Spec refs**: `orchestrator/Mention 解析`.
   - **What to do**: Add `packages/orchestrator/src/mention-parser.ts` with regex `/(^|\s)@([a-z0-9][a-z0-9-]*)\b/g`, membership validation, dedupe preserving first order/offset.
   - **Must NOT do**: Do not trust frontend mentions; backend remains authoritative.
@@ -828,7 +828,7 @@
     ```
   - **Commit**: YES | Message: `feat(orchestrator): parse agent mentions` | Files: orchestrator parser/tests.
 
-- [ ] §4.2 Wire mention parsing into `SendMessage` dispatch
+- [x] §4.2 Wire mention parsing into `SendMessage` dispatch
   - **Spec refs**: `orchestrator/Assisted 模式调度`.
   - **What to do**: In SendMessage handler, for Assisted rooms parse mentions; no mentions → wake primary; mentions with primary → wake primary + mentioned observers; mentions without primary → wake only mentioned agents in textual order; idempotency key `wake:<messageId>:<agentId>`.
   - **Must NOT do**: Do not dispatch adapter directly; do not wake primary when mentions omit primary.
@@ -854,7 +854,7 @@
     ```
   - **Commit**: YES | Message: `feat(orchestrator): dispatch mentioned agents` | Files: command/orchestrator tests.
 
-- [ ] §4.3 Implement `RoomMcpServer.handleSendMessage` group discipline
+- [x] §4.3 Implement `RoomMcpServer.handleSendMessage` group discipline
   - **Spec refs**: `orchestrator/群聊纪律执行器（Observer 发言降级）`.
   - **What to do**: Enforce observer `presence != active` downgrade to mailbox; allow active observer after knock with audit log; primary in active wake sends main message.
   - **Must NOT do**: Do not simply reject observer messages; do not let observing agents write main timeline.
@@ -880,7 +880,7 @@
     ```
   - **Commit**: YES | Message: `feat(orchestrator): enforce observer chat discipline` | Files: orchestrator MCP/mailbox/audit tests.
 
-- [ ] §4.4 Implement status line throttling
+- [x] §4.4 Implement status line throttling
   - **Spec refs**: `orchestrator/状态行节流`.
   - **What to do**: Add daemon-side BoundedPubSub `status_line` coalesce/flush per `(agentId,roomId)` every 30s with boundary forced flush; coordinate client Projector throttle with `§8.7` owner to avoid conflict.
   - **Must NOT do**: Do not throttle durable run boundary events; do not hide working→idle transitions.
@@ -906,7 +906,7 @@
     ```
   - **Commit**: YES | Message: `feat(orchestrator): throttle status lines` | Files: PubSub/projector tests per ownership note.
 
-- [ ] §4.5 Emit `mailbox.delivery.failed`
+- [x] §4.5 Emit `mailbox.delivery.failed`
   - **Spec refs**: `messaging/mailbox.delivery.failed 失败可见性事件`.
   - **What to do**: Implement claim_conflict, target_unavailable, max_retries detection; increment `attempt_count` at PF.6 site; write `delivery_failure_reason`; add in-memory 5-minute LRU 256 dedupe with metric counter.
   - **Must NOT do**: Do not change mailbox read state contract; do not persist LRU dedupe unless spec changes.
@@ -932,7 +932,7 @@
     ```
   - **Commit**: YES | Message: `feat(messaging): emit mailbox delivery failures` | Files: orchestrator/mailbox tests/protocol if needed.
 
-- [ ] §4.6 Implement cursor-based message pagination
+- [x] §4.6 Implement cursor-based message pagination
   - **Spec refs**: `messaging/消息列表分页`.
   - **What to do**: Implement `GET /messages?roomId=&before=&after=&limit=&includeDeleted=` keyset pagination with base64 `{createdAt,id}` cursor and `(created_at,id)` ordering.
   - **Must NOT do**: Do not use OFFSET; do not assume UUID id ordering equals time.
@@ -957,7 +957,7 @@
     ```
   - **Commit**: YES | Message: `feat(messages): add cursor pagination` | Files: daemon/message tests.
 
-- [ ] §4.7 Implement `POST /messages/:id/regenerate`
+- [x] §4.7 Implement `POST /messages/:id/regenerate`
   - **Spec refs**: `messaging/消息操作（固定 6 个）`.
   - **What to do**: Implement `RegenerateMessage` CommandBus handler: assistant-only, cancel old assistant message, trigger new run through WakeAgent with prior context excluding old assistant output.
   - **Must NOT do**: Do not regenerate user messages; do not start adapter directly.
@@ -983,7 +983,7 @@
     ```
   - **Commit**: YES | Message: `feat(messages): regenerate assistant messages` | Files: command/daemon tests.
 
-- [ ] §4.8 Implement `POST /messages/:id/pin`
+- [x] §4.8 Implement `POST /messages/:id/pin`
   - **Spec refs**: `messaging/消息操作（固定 6 个）`.
   - **What to do**: Implement `PinMessage` CommandBus handler for messages containing ContextItem; promote ContextItem scope to workspace and emit appropriate context/message event.
   - **Must NOT do**: Do not pin arbitrary messages without ContextItem; do not bypass ContextLedger semantics.
@@ -1009,7 +1009,7 @@
     ```
   - **Commit**: YES | Message: `feat(messages): pin context messages` | Files: command/context tests.
 
-- [ ] §4.9 Implement `PATCH /messages/:id` for queued PendingTurn edit
+- [x] §4.9 Implement `PATCH /messages/:id` for queued PendingTurn edit
   - **Spec refs**: `messaging/用户 Turn 排队（primary busy 时不阻止发送）`.
   - **What to do**: Add `EditMessage` command path restricted to user message with queued PendingTurn; update message content, cancel old PendingTurn, create new PendingTurn with new enqueuedAt, emit `message.updated`, `pending_turn.cancelled`, `pending_turn.created`.
   - **Must NOT do**: Do not preserve old enqueuedAt; do not allow scheduled/consumed/cancelled edit.
@@ -1035,7 +1035,7 @@
     ```
   - **Commit**: YES | Message: `feat(messages): edit queued pending turns` | Files: pending-turn/command/daemon tests.
 
-- [ ] §4.10 Integration tests for chat backend features
+- [x] §4.10 Integration tests for chat backend features
   - **Spec refs**: `orchestrator/*`; `messaging/*`.
   - **What to do**: Add/confirm integration tests covering @mention dispatch, group discipline, status throttling, mailbox failure, pagination, regenerate, pin, pending edit. Treat each scenario as a named test even if in one file.
   - **Must NOT do**: Do not leave this as one coarse smoke test.
@@ -1060,7 +1060,7 @@
     ```
   - **Commit**: YES | Message: `test(orchestrator): cover v05 chat backend` | Files: tests only unless small fixes needed.
 
-- [ ] §5.1 Implement `GET /workspaces/:id/cost-summary`
+- [x] §5.1 Implement `GET /workspaces/:id/cost-summary`
   - **Spec refs**: `cost-panel-local/单机 Cost 聚合接口`; `cost-panel-local/不区分用户归因`.
   - **What to do**: Add API with read-scope auth, workspace existence 404, groupBy agent/model/day, default 7-day window, local-time day grouping, totals, SLA-friendly SQL using `ended_at` and index.
   - **Must NOT do**: Do not add user attribution, budget fields, materialized views, or new run columns.
@@ -1085,7 +1085,7 @@
     ```
   - **Commit**: YES | Message: `feat(cost): add local cost summary api` | Files: daemon/openapi/sdk tests.
 
-- [ ] §5.2 Implement `POST /workspaces/:id/cost-budget` as 501
+- [x] §5.2 Implement `POST /workspaces/:id/cost-budget` as 501
   - **Spec refs**: `cost-panel-local/不实现预算告警 / 降级`.
   - **What to do**: Add explicit 501 response `{ error: "budget alerts are V1.5 (permission-dsl)" }` for cost-budget route.
   - **Must NOT do**: Do not implement budget thresholds, alerts, or auto-downgrade.
@@ -1110,7 +1110,7 @@
     ```
   - **Commit**: YES | Message: `feat(cost): reject budget alerts for v05` | Files: daemon/openapi tests.
 
-- [ ] §5.3 Implement `config.toml` loading
+- [x] §5.3 Implement `config.toml` loading
   - **Spec refs**: `local-daemon/Daemon 启动与端口绑定`; `design/V05-D10`.
   - **What to do**: Use `smol-toml`; load CLI > env > `~/.agenthub/config.toml` > defaults; support `[server] bind/port/preview_port`, `[auth]`, `[server.remote]`, `[debug]`, `[adapters.*]`, `[bus.pubsub]`; redact secrets in effective config output.
   - **Must NOT do**: Do not rename fields to host/security; do not allow `0.0.0.0` without token and remote.enabled=true.
@@ -1136,7 +1136,7 @@
     ```
   - **Commit**: YES | Message: `feat(daemon): load config toml` | Files: config/daemon tests.
 
-- [ ] §5.4 Implement SIGINT/SIGTERM graceful stop
+- [x] §5.4 Implement SIGINT/SIGTERM graceful stop
   - **Spec refs**: `local-daemon/优雅停止`.
   - **What to do**: Add shutdownRequested state, 503 for non-health routes, healthz shutting_down, SSE `server.shutting_down`, wait in-flight runs up to 30s, force cancel remaining via RunLifecycleService, reverse shutdown phases, close DB, delete PID.
   - **Must NOT do**: Do not raw-update runs; do not leave SSE hanging; do not skip RunLifecycleService cancel path.
@@ -1162,7 +1162,7 @@
     ```
   - **Commit**: YES | Message: `feat(daemon): stop gracefully on signals` | Files: daemon lifecycle tests.
 
-- [ ] §5.5 Implement `agenthub start/stop/status/doctor/auth*/agents reset` CLI
+- [x] §5.5 Implement `agenthub start/stop/status/doctor/auth*/agents reset` CLI
   - **Spec refs**: `local-daemon/daemon CLI 子命令`.
   - **What to do**: Add CLI subcommands from spec table, using PF.4/PF.7 findings; start foreground daemon, stop PID SIGTERM/SIGKILL, status healthz, doctor five checks, auth issue/list/revoke wrapping token APIs, agents reset from `§3.4`.
   - **Must NOT do**: Do not print token except issue once; do not force kill by default; do not merge all logic into untestable monolith if PF.7 recommends modules.
@@ -1187,7 +1187,7 @@
     ```
   - **Commit**: YES | Message: `feat(cli): add daemon and auth commands` | Files: CLI/daemon token tests.
 
-- [ ] §5.6 Adjust Vitest timeout to 10s
+- [x] §5.6 Adjust Vitest timeout to 10s
   - **Spec refs**: `design/V05-D12`.
   - **What to do**: Add/adjust `testTimeout: 10_000` in `vitest.config.ts`.
   - **Must NOT do**: Do not hide failing tests by skipping or lowering assertions.
@@ -1212,7 +1212,7 @@
     ```
   - **Commit**: YES | Message: `test: raise vitest timeout to 10s` | Files: `vitest.config.ts`.
 
-- [ ] §5.7 Unit tests for cost/config/SIGINT/CLI doctor
+- [x] §5.7 Unit tests for cost/config/SIGINT/CLI doctor
   - **Spec refs**: `cost-panel-local/*`; `local-daemon/*`.
   - **What to do**: Add named tests for cost groupBy agent/model/day, 404, empty data; config precedence; SIGINT 30s wait; CLI doctor five checks.
   - **Must NOT do**: Do not treat as one smoke test.
@@ -1237,7 +1237,7 @@
     ```
   - **Commit**: YES | Message: `test(daemon): cover v05 cost config cli` | Files: tests.
 
-- [ ] §6.1 Implement secure `POST /attachments` multipart upload
+- [x] §6.1 Implement secure `POST /attachments` multipart upload
   - **Spec refs**: `security/文件附件上传安全（multipart）`.
   - **What to do**: Add mutating upload route with CSRF + Origin, MIME allowlist + magic bytes, 50MB request/file limit, UUID fileId path under `<workspace>/.agenthub/attachments/yyyy/mm/fileId`, canonical path check, SVG sanitize, DB row/write semantics compatible with existing attachment schema.
   - **Must NOT do**: Do not allow native form post without CSRF; do not use user filename in path; do not store raw unsafe SVG; do not alter schema beyond plan without issue.
@@ -1263,7 +1263,7 @@
     ```
   - **Commit**: YES | Message: `feat(security): add secure attachment uploads` | Files: security/daemon tests.
 
-- [ ] §6.2 Implement attachment GC
+- [x] §6.2 Implement attachment GC
   - **Spec refs**: `security/文件附件上传安全（multipart）`.
   - **What to do**: Extend existing GC/background task to remove orphan uploads after 24h and message-associated soft-deleted attachments after 30 days.
   - **Must NOT do**: Do not delete attachments immediately on message soft delete.
@@ -1288,7 +1288,7 @@
     ```
   - **Commit**: YES | Message: `feat(security): garbage collect attachments` | Files: GC/security tests.
 
-- [ ] §6.3 Unit tests for attachment security
+- [x] §6.3 Unit tests for attachment security
   - **Spec refs**: `security/文件附件上传安全（multipart）`.
   - **What to do**: Ensure named tests cover legal PDF, executable rejection, SVG sanitize, oversized 413, path traversal prevention/workspace containment.
   - **Must NOT do**: Do not rely only on UI drag-drop E2E.
@@ -1315,7 +1315,7 @@
 
 ### Wave W3 — Web UI Chatroom Features (`§7.1`–`§7.10`)
 
-- [ ] §7.1 Implement `@` autocomplete (`RoomMembersPopover`)
+- [x] §7.1 Implement `@` autocomplete (`RoomMembersPopover`)
   - **Spec refs**: `web-ui/输入框`; `orchestrator/Mention 解析`.
   - **What to do**: Add popover on `@`, source candidates from `RoomViewModel.members`, match display name/agentId/role, keyboard Tab/Enter, multi-mention ordering, virtualize >20 candidates, send canonical `agentId` mentions.
   - **Must NOT do**: Do not send display names with spaces as mention ids; do not trust frontend as sole validation.
@@ -1340,7 +1340,7 @@
     ```
   - **Commit**: YES | Message: `feat(web): add mention autocomplete` | Files: web input/popover/tests.
 
-- [ ] §7.2 Implement drag-drop attachments in input
+- [x] §7.2 Implement drag-drop attachments in input
   - **Spec refs**: `web-ui/输入框`; `security/文件附件上传安全（multipart）`.
   - **What to do**: Add drag/drop and file picker using `fetch(FormData)` through CSRF SDK wrapper; show AttachmentPart preview icon/name/size; enforce max 50 UI-side while daemon enforces hard limits.
   - **Must NOT do**: Do not use native form post without CSRF header; do not trust UI MIME/size checks as security.
@@ -1365,7 +1365,7 @@
     ```
   - **Commit**: YES | Message: `feat(web): upload attachments from composer` | Files: web input/sdk/tests.
 
-- [ ] §7.3 Implement message quote
+- [x] §7.3 Implement message quote
   - **Spec refs**: `web-ui/输入框`; `messaging/消息操作（固定 6 个）`.
   - **What to do**: Add quote action via `q` and menu; insert quoted block above input, store hidden `quotedMessageId`, POST it on send; allow removing quote block.
   - **Must NOT do**: Do not copy entire long message into payload beyond UI preview; `quotedMessageId` is canonical.
@@ -1390,7 +1390,7 @@
     ```
   - **Commit**: YES | Message: `feat(web): quote messages from timeline` | Files: web chat/input tests.
 
-- [ ] §7.4 Implement message operation menu
+- [x] §7.4 Implement message operation menu
   - **Spec refs**: `web-ui/Main Timeline 与 Agent Run Detail 双视图`; `messaging/消息操作（固定 6 个）`.
   - **What to do**: Add hover kebab/action menu with quote/regenerate/pin/delete as applicable; keyboard `r/q/p/d`; disable mutating actions offline.
   - **Must NOT do**: Do not show regenerate on user messages or pin on non-context messages.
@@ -1415,7 +1415,7 @@
     ```
   - **Commit**: YES | Message: `feat(web): add message operation menu` | Files: web message components/tests.
 
-- [ ] §7.5 Implement PendingTurnList component
+- [x] §7.5 Implement PendingTurnList component
   - **Spec refs**: `web-ui/PendingTurn 操作面板`; `messaging/用户 Turn 排队`.
   - **What to do**: Render queued pending turns above input; cancel/edit actions; queue warning at ≥15; edit drafts in sessionStorage; PATCH queued messages; handle 409 preserving draft.
   - **Must NOT do**: Do not allow edit for scheduled/consumed turns; do not lose drafts on failed PATCH.
@@ -1440,7 +1440,7 @@
     ```
   - **Commit**: YES | Message: `feat(web): manage pending turns` | Files: web pending/input tests.
 
-- [ ] §7.6 Implement MailboxFailureCard
+- [x] §7.6 Implement MailboxFailureCard
   - **Spec refs**: `messaging/mailbox.delivery.failed 失败可见性事件`; `web-ui/Main Timeline`.
   - **What to do**: Project `mailbox.delivery.failed` to main timeline system card with reason/target/time, retry button for claim_conflict/target_unavailable, disabled retry for max_retries, debug link.
   - **Must NOT do**: Do not show internal trace/debug data to non-admin beyond card summary; do not retry max_retries.
@@ -1465,7 +1465,7 @@
     ```
   - **Commit**: YES | Message: `feat(web): show mailbox delivery failures` | Files: projector/card tests.
 
-- [ ] §7.7 Implement TerminalCard PTY renderer
+- [x] §7.7 Implement TerminalCard PTY renderer
   - **Spec refs**: `web-ui/终端 Artifact 渲染（PTY 输出）`.
   - **What to do**: Render terminal artifacts with first 10 lines collapsed, ANSI colors via `ansi-to-html`, expand modal/slide-over with virtualized log viewer, search, copy, auto-scroll.
   - **Must NOT do**: Do not expose raw admin-only stream in main timeline; do not render huge logs without virtualization.
@@ -1490,7 +1490,7 @@
     ```
   - **Commit**: YES | Message: `feat(web): render terminal artifacts` | Files: card/run-detail tests.
 
-- [ ] §7.8 Implement Run Detail 7-tab real information
+- [x] §7.8 Implement Run Detail 7-tab real information
   - **Spec refs**: `web-ui/Main Timeline 与 Agent Run Detail 双视图`.
   - **What to do**: Add PreCompact summary highlight in Transcript/Context, subagent nodes in Tools, TerminalCard in Artifacts, Cost tab comparison using cost-summary API.
   - **Must NOT do**: Do not move raw/tool/token details into main timeline; do not create extra tabs beyond the 7 specified.
@@ -1515,7 +1515,7 @@
     ```
   - **Commit**: YES | Message: `feat(web): complete run detail tabs` | Files: RunDetail/projector tests.
 
-- [ ] §7.9 Implement Cost panel UI
+- [x] §7.9 Implement Cost panel UI
   - **Spec refs**: `web-ui/Cost 面板视图`; `web-ui/Side Panel 视图`; `cost-panel-local/单机 Cost 聚合接口`.
   - **What to do**: Add Side Panel fifth tab Cost with default 7-day agent grouping, time window selector, group buttons, stacked bar/list, total, empty state, debug link, 300ms debounce.
   - **Must NOT do**: Do not display user/token id columns; do not implement budget alerts.
@@ -1540,7 +1540,7 @@
     ```
   - **Commit**: YES | Message: `feat(web): add local cost panel` | Files: web side panel/cost tests.
 
-- [ ] §7.10 Playwright E2E for W3 chatroom features
+- [x] §7.10 Playwright E2E for W3 chatroom features
   - **Spec refs**: `web-ui/测试基础设施` plus `§7.1`, `§7.5`, `§7.7`, `§7.9`.
   - **What to do**: Add split E2E specs for @ completion, PendingTurn operations, TerminalCard expand, Cost tab loading; use concrete `data-testid` selectors and saved traces/screenshots.
   - **Must NOT do**: Do not write one broad brittle test; do not rely on text-only selectors where testid is required by plan.
@@ -1567,7 +1567,7 @@
 
 ### Wave W4 — Frontend Polish (`§8.1`–`§8.12`)
 
-- [ ] §8.1 Tokenize CSS variables with `--ah-*`
+- [x] §8.1 Tokenize CSS variables with `--ah-*`
   - **Spec refs**: `web-ui/主题与密度系统`.
   - **What to do**: First W4 task. Introduce `--ah-*` tokens for color/spacing/radius/font-size/line-height and convert existing CSS hard-coded values in `apps/web` to tokens.
   - **Must NOT do**: Do not introduce Tailwind/shadcn/styled-components or full design system.
@@ -1592,7 +1592,7 @@
     ```
   - **Commit**: YES | Message: `feat(web): tokenize ui styles` | Files: web styles/components.
 
-- [ ] §8.2 Implement light/dark/auto theme
+- [x] §8.2 Implement light/dark/auto theme
   - **Spec refs**: `web-ui/主题与密度系统`.
   - **What to do**: Add root `data-theme`, localStorage `agenthub.theme`, auto follows `prefers-color-scheme`, Settings + command palette entry.
   - **Must NOT do**: Do not store resolved light/dark when user chose auto.
@@ -1617,7 +1617,7 @@
     ```
   - **Commit**: YES | Message: `feat(web): add theme switching` | Files: web theme/settings tests.
 
-- [ ] §8.3 Implement cozy/compact density
+- [x] §8.3 Implement cozy/compact density
   - **Spec refs**: `web-ui/主题与密度系统`.
   - **What to do**: Add `data-density`, localStorage `agenthub.density`, cozy default, compact spacing ~0.75x, Settings + command palette entry.
   - **Must NOT do**: Do not change information architecture or font sizes beyond spec.
@@ -1642,7 +1642,7 @@
     ```
   - **Commit**: YES | Message: `feat(web): add density switching` | Files: web density/settings tests.
 
-- [ ] §8.4 Implement command palette (Cmd/Ctrl+K)
+- [x] §8.4 Implement command palette (Cmd/Ctrl+K)
   - **Spec refs**: `web-ui/键盘流第一轮收口`.
   - **What to do**: Build pure React command palette for Room search, agent switch, recent Run jump, theme/density toggles, reload agents/cancel current run; virtualize ≥20 candidates.
   - **Must NOT do**: Do not add cmdk library; do not expose admin-only Debug actions without admin scope.
@@ -1667,7 +1667,7 @@
     ```
   - **Commit**: YES | Message: `feat(web): add command palette` | Files: web command palette tests.
 
-- [ ] §8.5 Implement message keyboard navigation and keymap
+- [x] §8.5 Implement message keyboard navigation and keymap
   - **Spec refs**: `web-ui/键盘流第一轮收口`.
   - **What to do**: Add `j/k`, `r`, `Enter`, `Esc`, `?`, `g r`, `g d` shortcuts with focus management and input-focus exclusions.
   - **Must NOT do**: Do not capture keys while typing except specified input shortcuts.
@@ -1692,7 +1692,7 @@
     ```
   - **Commit**: YES | Message: `feat(web): add chat keyboard flow` | Files: web keyboard tests.
 
-- [ ] §8.6 Implement message stream virtualization
+- [x] §8.6 Implement message stream virtualization
   - **Spec refs**: `web-ui/性能基线（虚拟化 + 60fps batch + 骨架屏）`.
   - **What to do**: Use `@tanstack/react-virtual` when room has ≥50 messages, estimated heights with measurement fallback, 2x viewport overscan.
   - **Must NOT do**: Do not break scroll-to-bottom or selected message navigation.
@@ -1717,7 +1717,7 @@
     ```
   - **Commit**: YES | Message: `feat(web): virtualize message stream` | Files: chat stream/tests.
 
-- [ ] §8.7 Implement delta 60fps batch
+- [x] §8.7 Implement delta 60fps batch
   - **Spec refs**: `web-ui/性能基线（虚拟化 + 60fps batch + 骨架屏）`.
   - **What to do**: In `useProjector`, coalesce `message.part.delta` per messageId inside one `requestAnimationFrame`, concat content without loss, single state update per frame; coordinate with `§4.4` status throttle.
   - **Must NOT do**: Do not drop token deltas; do not batch durable non-delta events incorrectly.
@@ -1742,7 +1742,7 @@
     ```
   - **Commit**: YES | Message: `feat(web): batch token deltas per frame` | Files: projector/tests.
 
-- [ ] §8.8 Implement skeleton screens and lazy images
+- [x] §8.8 Implement skeleton screens and lazy images
   - **Spec refs**: `web-ui/性能基线（虚拟化 + 60fps batch + 骨架屏）`.
   - **What to do**: Add skeletons for Room switch, initial load, Run Detail load, Cost panel load; timeout banner after 5s; image attachments `loading="lazy"`, `decoding="async"`, IntersectionObserver thumbnail predecode.
   - **Must NOT do**: Do not show blank panes during loading.
@@ -1767,7 +1767,7 @@
     ```
   - **Commit**: YES | Message: `feat(web): add loading skeletons` | Files: web components/tests.
 
-- [ ] §8.9 Implement motion polish and reduced-motion fallback
+- [x] §8.9 Implement motion polish and reduced-motion fallback
   - **Spec refs**: `web-ui/主题与密度系统`; `web-ui/a11y AA 基线`.
   - **What to do**: Add message fade-in, Run Detail slide-over easing, PendingTurn no-flash transitions; `prefers-reduced-motion: reduce` disables/shortens animations per spec.
   - **Must NOT do**: Do not animate when reduced motion is enabled.
@@ -1792,7 +1792,7 @@
     ```
   - **Commit**: YES | Message: `feat(web): polish motion with reduced-motion` | Files: styles/components tests.
 
-- [ ] §8.10 Implement a11y AA baseline and axe CI
+- [x] §8.10 Implement a11y AA baseline and axe CI
   - **Spec refs**: `web-ui/a11y AA 基线`.
   - **What to do**: Add focus rings, aria labels, aria-live, focus traps, contrast token checks, reduced-motion validation; centralize UI strings in `apps/web/src/i18n/en.ts` if absent; add axe script/CI check for Room, Run Detail, Settings in light/dark.
   - **Must NOT do**: Do not claim AAA or manual screen-reader certification.
@@ -1817,7 +1817,7 @@
     ```
   - **Commit**: YES | Message: `feat(web): meet a11y aa baseline` | Files: web components/a11y scripts/tests.
 
-- [ ] §8.11 Implement reconnect/offline banner polish
+- [x] §8.11 Implement reconnect/offline banner polish
   - **Spec refs**: `web-ui/错误与重连`.
   - **What to do**: Replace bare reconnect text with banner states connecting/connected/reconnecting/offline, icon/progress, exponential backoff display, offline read-only disabling mutating controls, restored success flash.
   - **Must NOT do**: Do not disable read-only browsing; do not allow mutating actions offline.
@@ -1842,7 +1842,7 @@
     ```
   - **Commit**: YES | Message: `feat(web): polish reconnect states` | Files: web connection/components tests.
 
-- [ ] §8.12 Performance verification
+- [x] §8.12 Performance verification
   - **Spec refs**: `web-ui/性能基线（虚拟化 + 60fps batch + 骨架屏）`.
   - **What to do**: Add repeatable Playwright/perf harness for 10k messages first paint ≤500ms, 100 delta/s p95 frame ≤16ms, room switch ≤200ms; save trace JSON.
   - **Must NOT do**: Do not mark perf complete without machine/context note; do not weaken budgets without Oracle issue.
@@ -1869,7 +1869,7 @@
 
 ### Wave W5 — Spec Validation and Closeout (`§9.1`–`§9.7`)
 
-- [ ] §9.1 Apply/verify migration `0012_v05.sql` and schema consistency
+- [x] §9.1 Apply/verify migration `0012_v05.sql` and schema consistency
   - **Spec refs**: `design/Migration Plan`.
   - **What to do**: Run DB migration on fresh and existing test DB; verify schema matches spec. This is validation of `§0.1`, not creation of a second migration.
   - **Must NOT do**: Do not add late schema changes unless issue/Oracle decision exists.
@@ -1894,7 +1894,7 @@
     ```
   - **Commit**: YES only for validation script/evidence metadata if tracked | Message: `test(db): verify v05 migration`.
 
-- [ ] §9.2 Run full `pnpm test`, `pnpm typecheck`, `pnpm lint`
+- [x] §9.2 Run full `pnpm test`, `pnpm typecheck`, `pnpm lint`
   - **Spec refs**: `design/V05-D12`.
   - **What to do**: Run root test/typecheck/lint and fix in-scope failures only.
   - **Must NOT do**: Do not skip tests or relax lint/type rules to pass.
@@ -1919,7 +1919,7 @@
     ```
   - **Commit**: NO unless fixing in-scope validation failures.
 
-- [ ] §9.3 Run `pnpm check:all`
+- [x] §9.3 Run `pnpm check:all`
   - **Spec refs**: `event-system/events:check 与 visibility:check CI 校验`.
   - **What to do**: Run all custom checks including events, visibility, subscriptions, command, schema, run-state-machine, deps/Bun API.
   - **Must NOT do**: Do not bypass check scripts.
@@ -1944,7 +1944,7 @@
     ```
   - **Commit**: NO unless fixing check failures.
 
-- [ ] §9.4 Run OpenSpec strict validation
+- [x] §9.4 Run OpenSpec strict validation
   - **Spec refs**: `design/Goals G3`.
   - **What to do**: Run `openspec.cmd validate add-v05-chatroom-complete --strict` after implementation and task checkbox updates are staged appropriately.
   - **Must NOT do**: Do not edit spec to hide implementation gaps without review.
@@ -1969,7 +1969,7 @@
     ```
   - **Commit**: NO unless updating task checkboxes/spec status after implementation.
 
-- [ ] §9.5 Run Playwright E2E including V0.5 scenarios
+- [x] §9.5 Run Playwright E2E including V0.5 scenarios
   - **Spec refs**: `web-ui/测试基础设施`.
   - **What to do**: Run full Playwright suite with daemon/web bootstrap per `playwright.config.ts`; include V0.5 E2E from `§7.10`, keyboard/theme/perf critical paths where configured.
   - **Must NOT do**: Do not mark as passed with only unit tests.
@@ -1994,7 +1994,7 @@
     ```
   - **Commit**: NO unless fixing E2E failures.
 
-- [ ] §9.6 Update `tasks.md` checkboxes
+- [x] §9.6 Update `tasks.md` checkboxes
   - **Spec refs**: `design/Goals G3`.
   - **What to do**: After all validation passes, update `openspec/changes/add-v05-chatroom-complete/tasks.md` `[ ]` to `[x]` for completed items only.
   - **Must NOT do**: Do not check off failed/untested tasks; do not update before final validation evidence exists.
@@ -2019,7 +2019,7 @@
     ```
   - **Commit**: YES | Message: `docs(spec): mark v05 tasks complete` | Files: `tasks.md` only.
 
-- [ ] §9.7 Prepare V1.0 entry-criteria checklist
+- [x] §9.7 Prepare V1.0 entry-criteria checklist
   - **Spec refs**: `design/Roadmap Beyond MVP V1.0`.
   - **What to do**: Write `.sisyphus/notepads/v05-chatroom-complete/v1-entry-criteria.md` with checklist of whether V0.5 outcomes satisfy Squad Mode + Team Mode + deployment entry criteria.
   - **Must NOT do**: Do not create V1.0 plan/design; do not implement Squad/Team/Deployment.

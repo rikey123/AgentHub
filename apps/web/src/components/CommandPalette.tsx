@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import type { VirtualItem } from "@tanstack/react-virtual";
 import type { RoomViewModel } from "../types.ts";
 import type { Theme, Density } from "../hooks/useTheme.ts";
 
@@ -191,7 +192,7 @@ export function CommandPalette({
           )}
           {items.length > 0 && (
             <div style={{ height: virtualizer.getTotalSize(), position: "relative", width: "100%" }}>
-              {virtualItems.map((virtualItem) => {
+              {virtualItems.map((virtualItem: VirtualItem) => {
                 const item = items[virtualItem.index];
                 if (!item) return null;
                 const isSelected = virtualItem.index === selectedIndex;

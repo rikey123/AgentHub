@@ -1,5 +1,6 @@
 import { useRef, useEffect, useState, useCallback } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import type { VirtualItem } from "@tanstack/react-virtual";
 import type { RoomViewModel, MessageViewModel } from "../types.ts";
 import { PermissionCard } from "./cards/PermissionCard.tsx";
 import { InterventionCard } from "./cards/InterventionCard.tsx";
@@ -9,7 +10,6 @@ import { TaskCard } from "./cards/TaskCard.tsx";
 import { PreviewCard } from "./cards/PreviewCard.tsx";
 import { UnknownCard } from "./cards/UnknownCard.tsx";
 import { MailboxFailureCard } from "./cards/MailboxFailureCard.tsx";
-import { TerminalCard } from "./cards/TerminalCard.tsx";
 import type { Card } from "@agenthub/protocol/domains";
 import { useCsrfFetch } from "../hooks/useSdk.ts";
 
@@ -203,7 +203,7 @@ export function ChatStream({ room, onOpenRunDetail, onCancelPendingTurn, onEditP
       >
         {shouldVirtualize ? (
           <div style={{ height: virtualizer.getTotalSize(), position: "relative", width: "100%" }}>
-            {virtualItems.map((virtualItem) => {
+            {virtualItems.map((virtualItem: VirtualItem) => {
               const message = room.messages[virtualItem.index];
               if (!message) return null;
               return (
@@ -669,6 +669,7 @@ function BriefItem({
 
   return (
     <div
+      data-testid="brief-card"
       style={{
         marginTop: "var(--ah-space-3)",
         padding: "var(--ah-space-3) var(--ah-space-4)",

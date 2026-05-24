@@ -235,7 +235,7 @@ export function InputBox({ onSend, disabled, room, pendingTurnCount, editingPend
               { fileId: data.fileId!, name: data.name ?? file.name, sizeBytes: data.sizeBytes ?? file.size, mimeType: data.mimeType ?? file.type }
             ]);
           }
-        } catch (err) {
+        } catch {
           setUploadError(`Upload error for "${file.name}".`);
         }
       }

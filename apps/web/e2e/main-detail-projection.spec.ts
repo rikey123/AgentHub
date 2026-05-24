@@ -98,9 +98,9 @@ test.describe("main timeline and run detail projection", () => {
     await page.click("text=Run Room");
     await page.waitForSelector("text=trigger run");
 
-    // Open Run Detail from the brief with "run completed" in main timeline
-    await page.waitForSelector("text=run completed", { timeout: 5000 });
-    await page.locator("text=run completed").first().click();
+    // Open Run Detail from the brief card in main timeline
+    await page.locator('[data-testid="brief-card"]').first().click();
+    await expect(page.locator('[data-testid="run-detail-tabs"]')).toBeVisible();
 
     // Run detail should open with 7 tabs
     await page.waitForSelector('[data-testid="run-detail-tab-transcript"]');
@@ -153,8 +153,8 @@ test.describe("main timeline and run detail projection", () => {
     await page.click("text=Raw Room");
     await page.waitForSelector("text=trigger raw");
 
-    await page.waitForSelector("text=run completed", { timeout: 5000 });
-    await page.locator("text=run completed").first().click();
+    await page.locator('[data-testid="brief-card"]').first().click();
+    await expect(page.locator('[data-testid="run-detail-tabs"]')).toBeVisible();
 
     // Set admin bearer token so the raw stream fetch sends Authorization header
     await page.evaluate(() => {
