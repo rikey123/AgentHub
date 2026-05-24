@@ -1,4 +1,4 @@
-import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { mkdtempSync } from "node:fs";
@@ -7,7 +7,7 @@ import { createDatabase } from "@agenthub/db";
 import { createEventBus } from "@agenthub/bus";
 import { describe, expect, it } from "vitest";
 
-import { authenticateBrowserRequest, issueBrowserSession, ManagedRunGarbageCollector, resolveSafeUri, resolveWorkspacePath, revokeAuthToken, SecretRedactor } from "../src/index.ts";
+import { attachmentMaxBytes, authenticateBrowserRequest, issueBrowserSession, ManagedRunGarbageCollector, orphanAttachmentMessageId, resolveSafeUri, resolveWorkspacePath, revokeAuthToken, SecretRedactor, storeAttachment } from "../src/index.ts";
 
 let dir: string | undefined;
 let database = createDatabase({ path: join(mkdtempSync(join(tmpdir(), "agenthub-security-db-")), "db.sqlite"), applyMigrations: true });
@@ -39,6 +39,8 @@ describe("M6 security package", () => {
 
     const headers = { origin: "http://127.0.0.1:6677", host: "127.0.0.1:6677", "content-type": "application/json", cookie: `agenthub_session=${session.sessionId}`, "x-agenthub-csrf": session.csrfToken };
     expect(authenticateBrowserRequest({ method: "POST", pathname: "/rooms", headers, database, now: 2_000 }).ok).toBe(true);
+    expect(authenticateBrowserRequest({ method: "POST", pathname: "/attachments", headers: { ...headers, "content-type": "multipart/form-data; boundary=test" }, database, now: 2_000 }).ok).toBe(true);
+    expect(authenticateBrowserRequest({ method: "POST", pathname: "/attachments", headers: { ...headers, "content-type": "multipart/form-data; boundary=test", "x-agenthub-csrf": "wrong" }, database, now: 2_000 })).toMatchObject({ ok: false, status: 403, error: "csrf_token_mismatch" });
     expect(authenticateBrowserRequest({ method: "POST", pathname: "/rooms", headers: { ...headers, origin: "http://attacker.example.com" }, database, now: 2_000 })).toMatchObject({ ok: false, status: 403, error: "origin_or_host_mismatch" });
     expect(authenticateBrowserRequest({ method: "POST", pathname: "/rooms", headers: { ...headers, "content-type": "text/plain" }, database, now: 2_000 })).toMatchObject({ ok: false, status: 415 });
     expect(authenticateBrowserRequest({ method: "POST", pathname: "/rooms", headers: { ...headers, "x-agenthub-csrf": "wrong" }, database, now: 2_000 })).toMatchObject({ ok: false, status: 403, error: "csrf_token_mismatch" });
@@ -70,6 +72,61 @@ describe("M6 security package", () => {
     expect(resolveSafeUri("data:text/html;base64,PGgxPm5vPC9oMT4=", { workspaceRoot: root })).toMatchObject({ ok: false, reason: "data_uri_mime_rejected" });
   });
 
+  it("stores valid PDF attachments with UUID paths and orphan sentinel rows", () => {
+    const root = mkdtempSync(join(tmpdir(), "agenthub-security-attachment-pdf-"));
+    const database = createDatabase({ path: join(root, "db.sqlite"), applyMigrations: true });
+    const bytes = Buffer.from("%PDF-1.7\nbody");
+
+    const result = storeAttachment({ database, workspaceRoot: root, originalName: "../report.pdf", mimeType: "application/pdf", bytes, now: Date.UTC(2026, 4, 24), fileId: "123e4567-e89b-12d3-a456-426614174000" });
+
+    expect(result).toMatchObject({ ok: true, fileId: "123e4567-e89b-12d3-a456-426614174000", originalName: "../report.pdf", sizeBytes: bytes.byteLength });
+    const row = database.sqlite.prepare("SELECT message_id, file_id, file_name, mime_type, byte_size, storage_path FROM attachments WHERE file_id = ?").get("123e4567-e89b-12d3-a456-426614174000") as { readonly message_id: string; readonly file_id: string; readonly file_name: string; readonly mime_type: string; readonly byte_size: number; readonly storage_path: string };
+    expect(row).toMatchObject({ message_id: orphanAttachmentMessageId, file_name: "../report.pdf", mime_type: "application/pdf", byte_size: bytes.byteLength, storage_path: ".agenthub/attachments/2026/05/123e4567-e89b-12d3-a456-426614174000" });
+    expect(existsSync(join(root, row.storage_path))).toBe(true);
+    database.sqlite.close();
+  });
+
+  it("rejects executable magic bytes even when MIME claims octet-stream", () => {
+    const root = mkdtempSync(join(tmpdir(), "agenthub-security-attachment-exe-"));
+    const database = createDatabase({ path: join(root, "db.sqlite"), applyMigrations: true });
+    const result = storeAttachment({ database, workspaceRoot: root, originalName: "malware.bin", mimeType: "application/octet-stream", bytes: Buffer.from("#!/bin/sh\necho bad"), now: 1, fileId: "123e4567-e89b-12d3-a456-426614174001" });
+
+    expect(result).toMatchObject({ ok: false, status: 415, error: "attachment_mime_not_allowed", mime: "application/octet-stream" });
+    expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM attachments").get()).toMatchObject({ count: 0 });
+    database.sqlite.close();
+  });
+
+  it("sanitizes SVG before storing and hashing", () => {
+    const root = mkdtempSync(join(tmpdir(), "agenthub-security-attachment-svg-"));
+    const database = createDatabase({ path: join(root, "db.sqlite"), applyMigrations: true });
+    const result = storeAttachment({ database, workspaceRoot: root, originalName: "diagram.svg", mimeType: "image/svg+xml", bytes: Buffer.from("<svg onclick=\"evil()\"><script>alert(1)</script><rect /></svg>"), now: Date.UTC(2026, 4, 24), fileId: "123e4567-e89b-12d3-a456-426614174002" });
+
+    expect(result).toMatchObject({ ok: true });
+    const stored = readFileSync(join(root, ".agenthub/attachments/2026/05/123e4567-e89b-12d3-a456-426614174002"), "utf8");
+    expect(stored).toBe("<svg><rect /></svg>");
+    database.sqlite.close();
+  });
+
+  it("rejects oversized attachments before writing", () => {
+    const root = mkdtempSync(join(tmpdir(), "agenthub-security-attachment-large-"));
+    const database = createDatabase({ path: join(root, "db.sqlite"), applyMigrations: true });
+    const result = storeAttachment({ database, workspaceRoot: root, originalName: "large.txt", mimeType: "text/plain", bytes: Buffer.alloc(attachmentMaxBytes + 1), now: 1, fileId: "123e4567-e89b-12d3-a456-426614174003" });
+
+    expect(result).toEqual({ ok: false, status: 413, error: "attachment_too_large", maxBytes: attachmentMaxBytes });
+    expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM attachments").get()).toMatchObject({ count: 0 });
+    database.sqlite.close();
+  });
+
+  it("prevents path traversal by rejecting non-UUID file ids", () => {
+    const root = mkdtempSync(join(tmpdir(), "agenthub-security-attachment-path-"));
+    const database = createDatabase({ path: join(root, "db.sqlite"), applyMigrations: true });
+    const result = storeAttachment({ database, workspaceRoot: root, originalName: "ok.txt", mimeType: "text/plain", bytes: Buffer.from("hello"), now: 1, fileId: "../../escape" });
+
+    expect(result).toEqual({ ok: false, status: 400, error: "attachment_path_invalid" });
+    expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM attachments").get()).toMatchObject({ count: 0 });
+    database.sqlite.close();
+  });
+
   it("GC only removes managed terminal runs and skips unsafe candidates", () => {
     const dir = mkdtempSync(join(tmpdir(), "agenthub-security-gc-"));
     const database = createDatabase({ path: join(dir, "db.sqlite"), applyMigrations: true });
@@ -84,7 +141,29 @@ describe("M6 security package", () => {
     const result = new ManagedRunGarbageCollector({ database, eventBus, agenthubRoot: root, now: () => 10 * 86_400_000, execGit: () => ({ ok: false }) }).collect();
     expect(result.removed).toEqual([oldRunId]);
     expect(result.skipped).toEqual([{ runId: activeRunId, reason: "run_not_terminal" }]);
+    expect(result.attachments).toEqual({ removed: [], skipped: [] });
     expect(database.sqlite.prepare("SELECT type FROM events WHERE type = 'worktree.gc.removed'").get()).toMatchObject({ type: "worktree.gc.removed" });
+    database.sqlite.close();
+  });
+
+  it("GC removes expired orphan and soft-deleted message attachments", () => {
+    const dir = mkdtempSync(join(tmpdir(), "agenthub-security-attachment-gc-"));
+    const database = createDatabase({ path: join(dir, "db.sqlite"), applyMigrations: true });
+    const eventBus = createEventBus({ database });
+    const root = join(dir, ".agenthub");
+    mkdirSync(join(root, "attachments", "2026", "05"), { recursive: true });
+    writeFileSync(join(root, "attachments", "2026", "05", "orphan-file"), "orphan");
+    writeFileSync(join(root, "attachments", "2026", "05", "deleted-file"), "deleted");
+    database.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, primary_agent_id, created_at, updated_at) VALUES ('room', 'default-workspace', 'Room', 'solo', 'agent', 1, 1)").run();
+    database.sqlite.prepare("INSERT INTO messages (id, workspace_id, room_id, sender_type, role, status, turn_dispatch_mode, created_at, updated_at, deleted_at) VALUES ('message_deleted', 'default-workspace', 'room', 'user', 'user', 'completed', 'immediate', 1, 1, ?)").run(1);
+    database.sqlite.prepare("INSERT INTO attachments (id, message_id, file_id, file_name, mime_type, byte_size, sha256, storage_path, created_at) VALUES ('att_orphan', ?, 'orphan-file', 'orphan.txt', 'text/plain', 6, 'hash', '.agenthub/attachments/2026/05/orphan-file', 1), ('att_deleted', 'message_deleted', 'deleted-file', 'deleted.txt', 'text/plain', 7, 'hash', '.agenthub/attachments/2026/05/deleted-file', 1)").run(orphanAttachmentMessageId);
+
+    const result = new ManagedRunGarbageCollector({ database, eventBus, agenthubRoot: root, workspaceRoot: dir, now: () => 31 * 86_400_000, execGit: () => ({ ok: false }) }).collect();
+
+    expect(result.attachments.removed).toEqual(["orphan-file", "deleted-file"]);
+    expect(existsSync(join(root, "attachments", "2026", "05", "orphan-file"))).toBe(false);
+    expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM attachments").get()).toMatchObject({ count: 0 });
+    eventBus.close();
     database.sqlite.close();
   });
 });

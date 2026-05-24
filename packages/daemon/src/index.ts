@@ -12,7 +12,7 @@ import { createInterventionCommandHandlers, InterventionEngine } from "@agenthub
 import { ActiveWakesRegistry, createCancelRunHandler, createCompleteTaskHandler, createConsumePendingTurnHandler, createCreateTaskHandler, createUpdateTaskHandler, createWakeAgentHandler, MailboxService, PendingTurnService, RoomMcpServer, RunLifecycleService, RunQueue, TaskService } from "@agenthub/orchestrator";
 import { createPermissionCommandHandlers, PermissionEngine, seedBuiltInPermissionProfiles } from "@agenthub/permissions";
 import type { EventEnvelope } from "@agenthub/protocol/events";
-import { authenticateBrowserRequest, issueBrowserSession, redactAndTruncate, type BrowserAuthResult } from "@agenthub/security";
+import { attachmentMaxBytes, authenticateBrowserRequest, issueBrowserSession, redactAndTruncate, storeAttachment, type BrowserAuthResult } from "@agenthub/security";
 
 import { AdapterRegistry } from "./adapters/registry.ts";
 import { createDaemonCommandHandlers, seedDefaultData } from "./commands.ts";
@@ -297,6 +297,7 @@ async function route(ctx: RouteContext): Promise<void> {
   if (ctx.req.method === "POST" && url.pathname === "/auth/session") return authSession(ctx);
   if (ctx.req.method === "POST" && url.pathname === "/auth/tokens") { if (!requireScope(auth, "write", ctx.res)) return; return issueAuthToken(ctx, await body(ctx)); }
   if (ctx.req.method === "GET" && url.pathname === "/auth/tokens") { if (!requireScope(auth, "read", ctx.res)) return; return listAuthTokens(ctx); }
+  if (ctx.req.method === "POST" && url.pathname === "/attachments") return attachments(ctx);
   if (ctx.req.method === "GET" && url.pathname === "/healthz") return json(ctx.res, 200, { ok: true });
   if (ctx.req.method === "GET" && url.pathname === "/openapi.json") return json(ctx.res, 200, openApiDocument);
   if (ctx.req.method === "GET" && url.pathname === "/event") return sse(ctx, url, auth.scopes);
@@ -408,6 +409,16 @@ function costSummary(ctx: RouteContext, workspaceId: string, url: URL): void {
   const groups = rows.map(normalizeCostRow);
   const total = groups.reduce((acc, row) => ({ inputTokens: acc.inputTokens + row.inputTokens, outputTokens: acc.outputTokens + row.outputTokens, cachedTokens: acc.cachedTokens + row.cachedTokens, costUsd: acc.costUsd + row.costUsd, runCount: acc.runCount + row.runCount }), zeroCost());
   json(ctx.res, 200, { groupBy, from, to, groups, total });
+}
+
+async function attachments(ctx: RouteContext): Promise<void> {
+  const contentLength = Number(header(ctx, "content-length") ?? 0);
+  if (Number.isFinite(contentLength) && contentLength > attachmentMaxBytes) return json(ctx.res, 413, { error: "attachment_too_large", maxBytes: attachmentMaxBytes });
+  const parsed = await multipartFile(ctx);
+  if (!parsed.ok) return json(ctx.res, parsed.status, parsed.body);
+  const result = storeAttachment({ database: ctx.database, workspaceRoot: process.cwd(), originalName: parsed.file.originalName, mimeType: parsed.file.mimeType, bytes: parsed.file.bytes, now: ctx.now?.() ?? Date.now() });
+  if (!result.ok) return json(ctx.res, result.status, result.error === "attachment_too_large" ? { error: result.error, maxBytes: result.maxBytes } : result.error === "attachment_mime_not_allowed" ? { error: result.error, mime: result.mime } : { error: result.error });
+  return json(ctx.res, 200, result);
 }
 
 function artifacts(ctx: RouteContext, url: URL): void {
@@ -572,6 +583,57 @@ async function dispatchCreated(ctx: RouteContext, data: Record<string, unknown>,
 function statusForError(code: string): number { return code === "rate_limited" ? 429 : code === "conflict" ? 409 : code === "not_found" ? 404 : code === "permission_denied" ? 403 : 400; }
 function currentCommandBus(ref: { readonly current?: CommandBus }): CommandBus { if (!ref.current) throw new Error("CommandBus is not initialized"); return ref.current; }
 function currentRoomMcpServer(ref: { readonly current?: RoomMcpServer }): RoomMcpServer { if (!ref.current) throw new Error("RoomMcpServer is not initialized"); return ref.current; }
+
+type MultipartFile = { readonly originalName: string; readonly mimeType: string; readonly bytes: Buffer };
+type MultipartResult = { readonly ok: true; readonly file: MultipartFile } | { readonly ok: false; readonly status: 400 | 413 | 415; readonly body: Record<string, unknown> };
+
+async function multipartFile(ctx: RouteContext): Promise<MultipartResult> {
+  const type = header(ctx, "content-type") ?? "";
+  const boundary = type.match(/multipart\/form-data\s*;\s*boundary=(?:(?:"([^"]+)")|([^;]+))/iu)?.[1] ?? type.match(/multipart\/form-data\s*;\s*boundary=(?:(?:"([^"]+)")|([^;]+))/iu)?.[2];
+  if (boundary === undefined || boundary.length === 0) return { ok: false, status: 415, body: { error: "attachment_multipart_required" } };
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of ctx.req) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    total += buffer.byteLength;
+    if (total > attachmentMaxBytes) return { ok: false, status: 413, body: { error: "attachment_too_large", maxBytes: attachmentMaxBytes } };
+    chunks.push(buffer);
+  }
+  return parseMultipart(Buffer.concat(chunks), boundary.trim());
+}
+
+function parseMultipart(body: Buffer, boundary: string): MultipartResult {
+  const delimiter = Buffer.from(`--${boundary}`);
+  const files: MultipartFile[] = [];
+  let position = body.indexOf(delimiter);
+  while (position !== -1) {
+    let partStart = position + delimiter.length;
+    if (body.subarray(partStart, partStart + 2).toString("ascii") === "--") break;
+    if (body.subarray(partStart, partStart + 2).toString("ascii") === "\r\n") partStart += 2;
+    const next = body.indexOf(delimiter, partStart);
+    if (next === -1) break;
+    const rawPart = body.subarray(partStart, next - 2 >= partStart && body.subarray(next - 2, next).toString("ascii") === "\r\n" ? next - 2 : next);
+    const split = rawPart.indexOf(Buffer.from("\r\n\r\n"));
+    if (split !== -1) {
+      const headers = parsePartHeaders(rawPart.subarray(0, split).toString("utf8"));
+      const disposition = headers.get("content-disposition") ?? "";
+      const filename = disposition.match(/filename="([^"]*)"/iu)?.[1];
+      if (filename !== undefined) files.push({ originalName: filename, mimeType: headers.get("content-type") ?? "", bytes: rawPart.subarray(split + 4) });
+    }
+    position = next;
+  }
+  if (files.length !== 1) return { ok: false, status: 400, body: { error: "attachment_single_file_required" } };
+  return { ok: true, file: files[0] as MultipartFile };
+}
+
+function parsePartHeaders(value: string): Map<string, string> {
+  const headers = new Map<string, string>();
+  for (const line of value.split("\r\n")) {
+    const index = line.indexOf(":");
+    if (index > 0) headers.set(line.slice(0, index).trim().toLowerCase(), line.slice(index + 1).trim());
+  }
+  return headers;
+}
 
 function sse(ctx: RouteContext, url: URL, scopes: readonly string[]): void {
   const view = viewParam(url.searchParams.get("view"));
