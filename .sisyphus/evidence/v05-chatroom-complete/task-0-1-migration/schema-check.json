@@ -1,0 +1,53 @@
+{
+  "task": "task-0-1-migration",
+  "migration": {
+    "file": "packages/db/migrations/0012_v05.sql",
+    "appliedCountFreshInMemory": 12,
+    "lastMigrationFreshInMemory": "0012_v05.sql",
+    "ledgerRunner": "packages/db/src/sqlite.ts applies sorted /^\\d{4}_.+\\.sql$/ files and records filenames in __agenthub_migrations"
+  },
+  "v05Columns": {
+    "messages": ["brief_published_at"],
+    "mailbox_messages": ["delivery_failure_reason", "attempt_count"],
+    "agent_profiles": ["description", "avatar", "version", "provider", "default_presence"]
+  },
+  "v05Indexes": ["idx_messages_room_created_desc", "idx_runs_workspace_ended"],
+  "negativeChecks": {
+    "runsEndedAtExists": true,
+    "runsCompletedAtExists": false,
+    "costMaterializedTablesAdded": false,
+    "customColumnIdempotencyGuardsAdded": false
+  },
+  "attachments": {
+    "messageIdNotNull": true,
+    "note": "Existing attachments.message_id is NOT NULL; orphan attachment support needs a separate schema decision if required."
+  },
+  "commands": [
+    {
+      "command": "pnpm --filter @agenthub/db build",
+      "exitCode": 1,
+      "note": "PowerShell blocked pnpm.ps1 execution policy before package execution."
+    },
+    {
+      "command": "pnpm.cmd --filter @agenthub/db build",
+      "exitCode": 0,
+      "note": "pnpm completed successfully and reported: None of the selected packages has a build script."
+    },
+    {
+      "command": "pnpm.cmd --filter @agenthub/db test",
+      "exitCode": 0,
+      "summary": "Test Files 1 passed (1); Tests 18 passed (18)"
+    },
+    {
+      "command": "node --input-type=module -e <fresh in-memory migration schema probe>",
+      "workdir": "packages/db",
+      "exitCode": 0,
+      "summary": "Fresh :memory: migration applied 12 migrations; all V0.5 columns and indexes exist; attachments.message_id is NOT NULL; runs.completed_at does not exist."
+    }
+  ],
+  "lspDiagnostics": {
+    "packages/db/src/schema.ts": "No diagnostics found",
+    "packages/db/test/sqlite.test.ts": "No diagnostics found",
+    "packages/db/migrations/0012_v05.sql": "No SQL LSP server configured"
+  }
+}
