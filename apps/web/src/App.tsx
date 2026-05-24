@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Layout } from "./components/Layout.tsx";
 import { RoomList } from "./components/RoomList.tsx";
 import { ChatStream } from "./components/ChatStream.tsx";
@@ -6,8 +6,12 @@ import { InputBox, type SendPayload } from "./components/InputBox.tsx";
 import { SidePanel } from "./components/SidePanel.tsx";
 import { RunDetail } from "./components/RunDetail.tsx";
 import { PendingTurnList } from "./components/PendingTurnList.tsx";
+import { CommandPalette } from "./components/CommandPalette.tsx";
+import { KeymapModal } from "./components/KeymapModal.tsx";
+import { ChatStreamSkeleton } from "./components/Skeleton.tsx";
 import { useProjector } from "./hooks/useProjector.ts";
 import { useCsrfFetch, useSdk } from "./hooks/useSdk.ts";
+import { useTheme } from "./hooks/useTheme.ts";
 
 export function App() {
   const [activeRoomId, setActiveRoomId] = useState<string | undefined>();
@@ -17,10 +21,13 @@ export function App() {
   const [rightCollapsed, setRightCollapsed] = useState(false);
   const [editingPendingTurn, setEditingPendingTurn] = useState<{ readonly messageId: string; readonly text: string } | undefined>(undefined);
   const [editError, setEditError] = useState<string | undefined>(undefined);
+  const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false);
+  const [keymapOpen, setKeymapOpen] = useState(false);
 
   const projector = useProjector("main", activeRoomId);
   const sdk = useSdk();
   const csrfFetch = useCsrfFetch();
+  const { theme, density, setTheme, setDensity } = useTheme();
 
   const room = activeRoomId ? projector.rooms.get(activeRoomId) : undefined;
 
@@ -102,7 +109,57 @@ export function App() {
   const isOffline = projector.connectionStatus === "offline";
   const isReconnecting = projector.connectionStatus === "reconnecting";
 
+  // Global keyboard shortcuts
+  useEffect(() => {
+    let lastKey = "";
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      const isInput = target.tagName === "TEXTAREA" || target.tagName === "INPUT" || target.isContentEditable;
+
+      // Cmd/Ctrl+K for command palette
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setCmdPaletteOpen((v) => !v);
+        setKeymapOpen(false);
+        return;
+      }
+
+      // ? for keymap (when not in input)
+      if (e.key === "?" && !isInput) {
+        e.preventDefault();
+        setKeymapOpen((v) => !v);
+        setCmdPaletteOpen(false);
+        return;
+      }
+
+      // g r / g d sequence shortcuts
+      if (!isInput && e.key === "g") {
+        lastKey = "g";
+        return;
+      }
+      if (!isInput && lastKey === "g") {
+        if (e.key === "r") {
+          e.preventDefault();
+          setLeftCollapsed(false);
+          lastKey = "";
+          return;
+        }
+        if (e.key === "d") {
+          e.preventDefault();
+          setRightCollapsed(false);
+          setSidePanelTab("debug");
+          lastKey = "";
+          return;
+        }
+      }
+      lastKey = "";
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   return (
+    <>
     <Layout
       leftCollapsed={leftCollapsed}
       onToggleLeft={() => setLeftCollapsed((v) => !v)}
@@ -173,8 +230,10 @@ export function App() {
               editError={editError}
             />
           </>
+        ) : activeRoomId ? (
+          <ChatStreamSkeleton count={5} />
         ) : (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "#888" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--ah-text-muted)" }}>
             Select or create a room to start
           </div>
         )
@@ -189,7 +248,7 @@ export function App() {
             workspaceId="default-workspace"
           />
         ) : (
-          <div style={{ padding: 16, color: "#888" }}>No room selected</div>
+          <div style={{ padding: "var(--ah-space-4)", color: "var(--ah-text-muted)" }}>No room selected</div>
         )
       }
       overlay={
@@ -202,5 +261,28 @@ export function App() {
         ) : undefined
       }
     />
+    {cmdPaletteOpen && (
+      <CommandPalette
+        rooms={Array.from(projector.rooms.values())}
+        activeRoomId={activeRoomId}
+        onSelectRoom={(roomId) => {
+          setActiveRoomId(roomId);
+          setActiveRunId(undefined);
+          setEditingPendingTurn(undefined);
+          setCmdPaletteOpen(false);
+        }}
+        onOpenRunDetail={(runId) => {
+          setActiveRunId(runId);
+          setCmdPaletteOpen(false);
+        }}
+        onClose={() => setCmdPaletteOpen(false)}
+        onSwitchTheme={setTheme}
+        onSwitchDensity={setDensity}
+        currentTheme={theme}
+        currentDensity={density}
+      />
+    )}
+    {keymapOpen && <KeymapModal onClose={() => setKeymapOpen(false)} />}
+    </>
   );
 }
