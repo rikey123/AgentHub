@@ -3,6 +3,8 @@ export const openApiDocument = {
   info: { title: "AgentHub Local Daemon API", version: "0.1.0" },
   paths: {
     "/healthz": { get: { summary: "Daemon health" } },
+    "/auth/tokens": { get: { summary: "List auth tokens without token secret values" }, post: { summary: "Issue an auth token and return it once" } },
+    "/auth/tokens/{tokenId}": { delete: { summary: "Revoke an auth token" } },
     "/event": { get: { summary: "SSE stream with durable replay and live events" } },
     "/rooms": { get: { summary: "List rooms" }, post: { summary: "Create solo or assisted room through CommandBus" } },
     "/rooms/{roomId}": { get: { summary: "Read room" } },
@@ -41,6 +43,8 @@ export const openApiDocument = {
     "/artifacts/{artifactId}/files": { get: { summary: "List artifact files" } },
     "/artifacts/{artifactId}/files/{path}": { get: { summary: "Read artifact file content" } },
     "/debug/events": { get: { summary: "Query durable events for debug replay" } },
-    "/debug/stats": { get: { summary: "Read daemon debug counters" } }
+    "/debug/stats": { get: { summary: "Read daemon debug counters" } },
+    "/workspaces/{workspaceId}/cost-summary": { get: { summary: "Aggregate workspace run costs by agent, model, or day" } },
+    "/workspaces/{workspaceId}/cost-budget": { post: { summary: "Budget alerts are reserved for V1.5 permission-dsl" } }
   }
 } as const;
