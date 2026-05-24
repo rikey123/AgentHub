@@ -1,6 +1,7 @@
 import { ClaudeCodeACPAdapter } from "@agenthub/adapter-claude-code";
 import { OpenCodeACPAdapter } from "@agenthub/adapter-opencode";
 import { MockAdapterManager } from "@agenthub/adapter-mock";
+import type { AgentHubDatabase } from "@agenthub/db";
 import type { AdapterArtifactFSBoundary, RoomMcpServer, RunLifecycleService, RunRow } from "@agenthub/orchestrator";
 import type { EventBus } from "@agenthub/bus";
 import type { PermissionEngine } from "@agenthub/permissions";

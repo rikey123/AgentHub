@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useProjector } from "../hooks/useProjector.ts";
 import { useRawStream } from "../hooks/useRawStream.ts";
 import { TerminalCard, type TerminalLine } from "./cards/TerminalCard.tsx";
@@ -267,29 +267,30 @@ function PermissionsTab({ room, runId }: { readonly room: import("../types.ts").
 }
 
 function ArtifactsTab({ room, runId }: { readonly room: import("../types.ts").RoomViewModel | undefined; readonly runId: string }) {
+  const [terminalArtifacts, setTerminalArtifacts] = useState<readonly TerminalArtifact[]>([]);
   const artifactParts =
     room?.messages
       .filter((m) => m.runId === runId)
       .flatMap((m) => m.parts.filter((p) => p.type === "card" && (p.card.type === "diff" || p.card.type === "preview"))) ?? [];
 
-  // Mock terminal data - in real implementation this would come from artifact data
-  const terminalLines: TerminalLine[] = [
-    { text: "npm test", stream: "stdout" },
-    { text: "\u001b[32mPASS\u001b[0m src/index.test.js", stream: "stdout" },
-    { text: "\u001b[31mFAIL\u001b[0m src/utils.test.js", stream: "stdout" },
-    { text: "  Expected: 42", stream: "stdout" },
-    { text: "  Received: 43", stream: "stdout" },
-    { text: "", stream: "stdout" },
-    { text: "Test Suites: 1 failed, 1 passed", stream: "stdout" },
-    { text: "Tests:       1 failed, 5 passed", stream: "stdout" },
-    { text: "Snapshots:   0 total", stream: "stdout" },
-    { text: "Time:        1.234s", stream: "stdout" },
-    { text: "Ran all test suites.", stream: "stdout" }
-  ];
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/artifacts?roomId=${encodeURIComponent(room?.id ?? "")}`)
+      .then(async (res) => res.ok ? await res.json() as { readonly artifacts?: readonly TerminalArtifact[] } : { artifacts: [] })
+      .then((payload) => {
+        if (!cancelled) setTerminalArtifacts((payload.artifacts ?? []).filter((artifact) => artifact.runId === runId && artifact.type === "terminal"));
+      })
+      .catch(() => {
+        if (!cancelled) setTerminalArtifacts([]);
+      });
+    return () => { cancelled = true; };
+  }, [room?.id, runId]);
+
+  const terminalCards = useMemo(() => terminalArtifacts.map((artifact) => ({ artifact, lines: terminalLinesFromMetadata(artifact.metadata), exitCode: numberField(artifact.metadata.exitCode) })), [terminalArtifacts]);
 
   return (
     <div>
-      {artifactParts.length === 0 && <div style={{ fontSize: "var(--ah-font-size-md)", color: "var(--ah-text-muted)" }}>No artifacts</div>}
+      {artifactParts.length === 0 && terminalCards.length === 0 && <div style={{ fontSize: "var(--ah-font-size-md)", color: "var(--ah-text-muted)" }}>No artifacts</div>}
       {artifactParts.map((part, idx) => {
         if (part.type !== "card") return null;
         if (part.card.type === "diff") {
@@ -313,13 +314,37 @@ function ArtifactsTab({ room, runId }: { readonly room: import("../types.ts").Ro
         }
         return null;
       })}
-      {/* TerminalCard for artifact terminal output */}
-      <div style={{ marginTop: "var(--ah-space-3)" }}>
-        <div style={{ fontSize: "var(--ah-font-size-xs)", fontWeight: 600, color: "var(--ah-text-muted)", marginBottom: "var(--ah-space-2)", textTransform: "uppercase" }}>Terminal Output</div>
-        <TerminalCard lines={terminalLines} exitCode={1} collapsed={true} />
-      </div>
+      {terminalCards.map(({ artifact, lines, exitCode }) => (
+        <div key={artifact.id} style={{ marginTop: "var(--ah-space-3)" }}>
+          <div style={{ fontSize: "var(--ah-font-size-xs)", fontWeight: 600, color: "var(--ah-text-muted)", marginBottom: "var(--ah-space-2)", textTransform: "uppercase" }}>{artifact.title}</div>
+          <TerminalCard lines={lines} exitCode={exitCode} collapsed={true} />
+        </div>
+      ))}
     </div>
   );
+}
+
+type TerminalArtifact = {
+  readonly id: string;
+  readonly runId?: string;
+  readonly type: string;
+  readonly title: string;
+  readonly metadata: Record<string, unknown>;
+};
+
+function terminalLinesFromMetadata(metadata: Record<string, unknown>): TerminalLine[] {
+  return [
+    ...previewLines(metadata.stdoutPreview, "stdout"),
+    ...previewLines(metadata.stderrPreview, "stderr")
+  ];
+}
+
+function previewLines(value: unknown, stream: TerminalLine["stream"]): TerminalLine[] {
+  return typeof value === "string" && value.length > 0 ? value.split(/\r?\n/u).map((text) => ({ text, stream })) : [];
+}
+
+function numberField(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function RawStreamTab({ roomId, runId }: { readonly roomId: string; readonly runId: string }) {

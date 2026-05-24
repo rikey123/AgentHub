@@ -140,7 +140,10 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     const runQueueRef: { current?: RunQueue } = {};
     const lifecycleOptions = {
       ...(options.now !== undefined ? { now: options.now } : {}),
-      sideEffects: { onTerminal: (runId: string) => { activeWakes.releaseRun(runId); runQueueRef.current?.releaseLocks(runId); pendingTurns.handleTerminal(runId); }, finalizeNextTurns: (tx: AgentHubDatabase["sqlite"], runId: string, failureClass: Parameters<MailboxService["finalizeForRun"]>[2], now: number) => mailbox.finalizeForRun(tx, runId, failureClass, now) }
+      sideEffects: { onTerminal: (runId: string) => { activeWakes.releaseRun(runId); runQueueRef.current?.releaseLocks(runId); pendingTurns.handleTerminal(runId); }, finalizeNextTurns: (tx: AgentHubDatabase["sqlite"], runId: string, failureClass: Parameters<MailboxService["finalizeForRun"]>[2], now: number) => mailbox.finalizeForRun(tx, runId, failureClass, now), onTargetUnavailable: (tx: AgentHubDatabase["sqlite"], runId: string) => {
+        const rows = tx.prepare("SELECT id FROM mailbox_messages WHERE claimed_run_id = ? AND delivery_failure_reason IS NULL").all(runId) as { readonly id: string }[];
+        for (const row of rows) mailbox.publishTargetUnavailable(tx, row.id);
+      } }
     };
     const lifecycle = new RunLifecycleService(database, eventBus, lifecycleOptions);
     const roomMcpServerRef: { current?: RoomMcpServer } = {};

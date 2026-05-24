@@ -106,6 +106,7 @@ export type RunRow = {
 export type RunLifecycleSideEffects = {
   readonly onTerminal?: (runId: string) => void;
   readonly finalizeNextTurns?: (tx: SqliteTx, runId: string, failureClass: RunFailureClass, now: number) => void;
+  readonly onTargetUnavailable?: (tx: SqliteTx, runId: string) => void;
 };
 
 export class RunLifecycleError extends Error {
@@ -272,6 +273,8 @@ export class RunLifecycleService {
       this.updateStatus(db, runId, "failed", { ended_at: now, failure_class: failureClass, error: error ?? reason, waiting_reason: null });
       if (failureClass === "transient" || failureClass === "retryable_visible" || failureClass === "fresh_session_required") {
         db.prepare("UPDATE mailbox_messages SET read = 0, claimed_run_id = NULL, claimed_at = NULL, delivery_batch_id = NULL WHERE claimed_run_id = ?").run(runId);
+      } else if (failureClass === "configuration" || failureClass === "fatal") {
+        this.sideEffects.onTargetUnavailable?.(db, runId);
       }
       this.sideEffects.finalizeNextTurns?.(db, runId, failureClass, now);
       this.publishRunEvent(db, "agent.run.failed", runId, run.workspace_id, run.room_id, run.agent_id, { runId, reason, failureClass, error });

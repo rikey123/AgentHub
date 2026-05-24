@@ -93,6 +93,8 @@ function sendMessage(options: DaemonCommandHandlersOptions, command: Command, me
   const messageId = randomUUID();
   const members = roomMembers(options.database, roomId);
   const mentions = room.mode === "assisted" ? parseMentions(text, members) : [];
+  const quotedMessageId = stringField(command, "quotedMessageId") ?? stringField(command, "quoted_message_id");
+  const attachmentFileIds = stringArrayField(command, "attachmentFileIds", "attachments");
   const wakeTargets = wakeTargetsForMessage(room, mentions);
   const primaryTargeted = room.primary_agent_id !== null && wakeTargets.includes(room.primary_agent_id);
   const busy = primaryTargeted && room.primary_agent_id !== null && primaryBusy(options.database, roomId, room.primary_agent_id);
@@ -108,11 +110,15 @@ function sendMessage(options: DaemonCommandHandlersOptions, command: Command, me
         `INSERT INTO messages (
           id, workspace_id, room_id, sender_type, sender_id, run_id, role, status,
           quoted_message_id, turn_dispatch_mode, pending_turn_id, created_at, updated_at, deleted_at
-        ) VALUES (?, ?, ?, 'user', ?, NULL, 'user', 'completed', NULL, ?, ?, ?, ?, NULL)`
+        ) VALUES (?, ?, ?, 'user', ?, NULL, 'user', 'completed', ?, ?, ?, ?, ?, NULL)`
       )
-      .run(messageId, room.workspace_id, roomId, actorId(meta), busy ? "pending" : "immediate", pendingTurnId ?? null, now, now);
-    options.database.sqlite.prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, 1, 'text', ?, ?)").run(messageId, JSON.stringify({ text }), now);
-    options.eventBus.publish(messageEvent("message.created", room.workspace_id, roomId, messageId, { text, senderId: actorId(meta), role: "user", turnDispatchMode: busy ? "pending" : "immediate", ...(pendingTurnId !== undefined ? { pendingTurnId } : {}) }, now));
+      .run(messageId, room.workspace_id, roomId, actorId(meta), quotedMessageId ?? null, busy ? "pending" : "immediate", pendingTurnId ?? null, now, now);
+    options.database.sqlite.prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, 1, 'text', ?, ?)").run(messageId, JSON.stringify({ text, mentions }), now);
+    if (attachmentFileIds.length > 0) {
+      const placeholders = attachmentFileIds.map(() => "?").join(", ");
+      options.database.sqlite.prepare(`UPDATE attachments SET message_id = ? WHERE file_id IN (${placeholders})`).run(messageId, ...attachmentFileIds);
+    }
+    options.eventBus.publish(messageEvent("message.created", room.workspace_id, roomId, messageId, { text, senderId: actorId(meta), role: "user", turnDispatchMode: busy ? "pending" : "immediate", mentions, attachmentFileIds, ...(quotedMessageId !== undefined ? { quotedMessageId } : {}), ...(pendingTurnId !== undefined ? { pendingTurnId } : {}) }, now));
     options.eventBus.publish(messageEvent("message.completed", room.workspace_id, roomId, messageId, { text }, now));
     if (pendingTurnId && room.primary_agent_id) {
       options.database.sqlite.prepare("INSERT INTO pending_turns (id, room_id, user_message_id, primary_agent_id, status, enqueued_at, scheduled_at, cancelled_at, notes) VALUES (?, ?, ?, ?, 'queued', ?, NULL, NULL, NULL)").run(pendingTurnId, roomId, messageId, room.primary_agent_id, now);
@@ -285,6 +291,17 @@ function actorId(meta: CommandMeta): string {
 function stringField(command: Command, key: string): string | undefined {
   const value = command[key];
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function stringArrayField(command: Command, ...keys: readonly string[]): string[] {
+  for (const key of keys) {
+    const value = command[key];
+    if (!Array.isArray(value)) continue;
+    return value
+      .map((item) => typeof item === "string" ? item : isObject(item) && typeof item.fileId === "string" ? item.fileId : undefined)
+      .filter((item): item is string => item !== undefined && item.length > 0);
+  }
+  return [];
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

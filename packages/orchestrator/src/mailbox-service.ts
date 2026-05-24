@@ -24,7 +24,7 @@ export class MailboxService {
     const rows = tx
       .prepare(
         `SELECT id FROM mailbox_messages
-         WHERE room_id = ? AND to_agent_id = ? AND read = 0 AND claimed_run_id IS NULL
+         WHERE room_id = ? AND to_agent_id = ? AND read = 0 AND claimed_run_id IS NULL AND delivery_failure_reason IS NULL
          ORDER BY created_at ASC LIMIT ?`
       )
       .all(input.roomId, input.toAgentId, input.limit ?? 20) as { readonly id: string }[];
@@ -84,6 +84,10 @@ export class MailboxService {
   }
 
   private publishDeliveryFailures(tx: SqliteTx, ids: readonly string[], reason: "claim_conflict" | "max_retries" | "target_unavailable", failedAt: number): void {
+    if (ids.length > 0) {
+      const placeholders = ids.map(() => "?").join(", ");
+      tx.prepare(`UPDATE mailbox_messages SET delivery_failure_reason = ? WHERE id IN (${placeholders}) AND delivery_failure_reason IS NULL`).run(reason, ...ids);
+    }
     for (const row of this.mailboxRows(tx, ids)) this.publishDeliveryFailure(row, reason, failedAt);
   }
 

@@ -232,3 +232,5 @@ Correction: Missing Origin is no longer an admin signal. authenticateBrowserRequ
 - Task completion from `pending` is intentionally not an UpdateTask shortcut: callers must move through `in_progress` or `review`, while illegal transitions emit live-only `task.status.changed.rejected` and do not write durable `events` rows.
 - Queued user messages must carry `pendingTurnId` and `turnDispatchMode` in `message.created`; the web projector also backfills `pendingTurnId` from `pending_turn.created` so cancel/scheduled/consumed matching works with older or incomplete message payloads.
 
+
+- F4 scope fidelity check: CommandType excludes StartRun; Codex/LangGraph/A2A adapters are deterministic 501 stubs; daemon routes remain local-first with no cloud/multi-user routes. Background scan's tasks-schema Kanban concern appears to be core V0.5 task support rather than task-board UI scope creep.

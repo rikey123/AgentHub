@@ -6,3 +6,6 @@
 ## v05-w5-final cleanup notes
 - TypeScript initially reported missing web dependencies because node_modules was absent in the worktree snapshot; reinstalling via pnpm.cmd fixed module resolution.
 - One e2e lint cleanup had to preserve roomId bindings in tests that actually use them; only the truly unused binding was removed.
+
+## F1 plan compliance audit notes
+- REQUEST CHANGES: tasks.md has 72 checked items, but audit found material gaps: OpenCode adapter not wired into daemon runtime; mention/quote/attachment payloads ignored by SendMessage; mailbox.delivery.failed lacks full target/max-retry persistence/invocation; Run Detail TerminalCard uses hardcoded mock data; CostPanel expects a different API shape than daemon returns; axe/perf evidence is absent.

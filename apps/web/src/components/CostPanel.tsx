@@ -42,22 +42,22 @@ export function CostPanel({ workspaceId }: CostPanelProps) {
 
   const totalTokens = (cost: Pick<CostGroup, "inputTokens" | "outputTokens" | "cachedTokens">) => cost.inputTokens + cost.outputTokens + cost.cachedTokens;
 
-  const getDateRange = useCallback((window: TimeWindow): { from: string; to: string } => {
+  const getDateRange = useCallback((window: TimeWindow): { from: number; to: number } => {
     const now = new Date();
-    const to = now.toISOString();
-    let from: string;
+    const to = now.getTime();
+    let from: number;
     switch (window) {
       case "today":
-        from = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+        from = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
         break;
       case "7d":
-        from = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
+        from = now.getTime() - 7 * 24 * 60 * 60 * 1000;
         break;
       case "30d":
-        from = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+        from = now.getTime() - 30 * 24 * 60 * 60 * 1000;
         break;
       case "custom":
-        return { from: customFrom || to, to: customTo || to };
+        return { from: customFrom ? new Date(customFrom).getTime() : to, to: customTo ? new Date(customTo).getTime() : to };
     }
     return { from, to };
   }, [customFrom, customTo]);
