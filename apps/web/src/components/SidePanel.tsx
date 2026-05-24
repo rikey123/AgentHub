@@ -1,4 +1,3 @@
-import { useState } from "react";
 import type { RoomViewModel } from "../types.ts";
 import { CostPanel } from "./CostPanel.tsx";
 
@@ -6,11 +5,10 @@ type SidePanelProps = {
   readonly room: RoomViewModel;
   readonly activeTab: "context" | "tasks" | "members" | "debug" | "cost";
   readonly onChangeTab: (tab: "context" | "tasks" | "members" | "debug" | "cost") => void;
-  readonly onOpenRunDetail?: (runId: string) => void;
   readonly workspaceId?: string;
 };
 
-export function SidePanel({ room, activeTab, onChangeTab, onOpenRunDetail, workspaceId }: SidePanelProps) {
+export function SidePanel({ room, activeTab, onChangeTab, workspaceId }: SidePanelProps) {
   const tabs: { key: SidePanelProps["activeTab"]; label: string }[] = [
     { key: "context", label: "Context" },
     { key: "tasks", label: "Tasks" },

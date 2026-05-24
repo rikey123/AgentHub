@@ -1,6 +1,5 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
-import { dirname } from "node:path";
 
 import { createDatabase, defaultMigrationsDir } from "@agenthub/db";
 import { createDaemon, daemonPidPath, ensureAgentHubHome, ensureParentDirectory, loadAgentHubConfig, redactConfig } from "@agenthub/daemon";

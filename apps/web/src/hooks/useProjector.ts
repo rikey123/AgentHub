@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { EventEnvelope } from "@agenthub/protocol/events";
 import { EVENT_REGISTRY } from "@agenthub/protocol/events";
 import type { RoomViewModel, ProjectorState, MessageViewModel, BriefViewModel, RunViewModel, PermissionViewModel, InterventionViewModel } from "../types.ts";
