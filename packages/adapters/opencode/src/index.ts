@@ -1,31 +1,167 @@
-import { AdapterNotImplementedError, notImplementedEffect, notImplementedStream } from "@agenthub/adapter-acp-base";
-import type { AdapterError, AdapterMessage, AdapterRunInput, AgentAdapterManifest, AttachSessionInput, ContextInjectionResult, ContextProjection, CreateSessionInput, DetectedRuntime, ExternalSession } from "@agenthub/protocol";
-import { Effect, Stream } from "effect";
+import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
+
+import { ACPAdapter, ACPAdapterError, type AcpProviderEvent, type JsonRpcMessage } from "@agenthub/adapter-acp-base";
+import type { AdapterError, AgentAdapterManifest, DetectedRuntime } from "@agenthub/protocol";
+import { Effect } from "effect";
 
 export const opencodeManifest: AgentAdapterManifest = {
   id: "opencode",
-  name: "OpenCode Adapter Stub",
-  runtimeKind: "server",
+  name: "OpenCode Adapter",
+  runtimeKind: "acp",
   provider: "opencode",
-  capabilities: { canStreamTokens: false, canEmitToolEvents: false, canEmitPermissionEvents: false, canEmitSubagentEvents: false, canInjectAtStart: true, canInjectNextTurn: true, canInjectRuntime: false, canCancel: false, canReadContextSnapshot: false, canRestoreSession: false, supportsMcp: false, supportsHooks: false, supportsWorkspaceIsolation: false },
-  reliability: { level: "manual", eventSource: "filesystem_polling", crashRecovery: "fail_run", parseFailure: "fail_run", maxRestartAttempts: 0 },
-  context: { startupInjection: true, runtimeInjection: false, injectionMode: "next_turn", canPullExternalContext: false, canPushLedgerUpdates: false },
-  workspace: { mode: "external" }
+  capabilities: { canStreamTokens: true, canEmitToolEvents: true, canEmitPermissionEvents: true, canEmitSubagentEvents: true, canInjectAtStart: true, canInjectNextTurn: true, canInjectRuntime: true, canCancel: true, canReadContextSnapshot: true, canRestoreSession: true, supportsMcp: true, supportsHooks: true, supportsWorkspaceIsolation: true },
+  reliability: { level: "structured", eventSource: "native_event_stream", crashRecovery: "resumable", parseFailure: "skip_event", maxRestartAttempts: 3 },
+  context: { startupInjection: true, runtimeInjection: true, injectionMode: "immediate", canPullExternalContext: true, canPushLedgerUpdates: true },
+  workspace: { mode: "worktree" }
 };
 
-export class OpenCodeAdapterStub {
-  readonly id = "opencode";
-  readonly name = "OpenCode Adapter Stub";
-  readonly kind = "server" as const;
-  readonly manifest = opencodeManifest;
-  detect(): Effect.Effect<DetectedRuntime[], AdapterError> { return Effect.succeed([]); }
-  createSession(input: CreateSessionInput): Effect.Effect<ExternalSession, AdapterError> { void input; return notImplementedEffect("OpenCodeAdapter", "V0.5"); }
-  runAgent(input: AdapterRunInput): Stream.Stream<never, AdapterError> { void input; return notImplementedStream("OpenCodeAdapter", "V0.5"); }
-  sendMessage(sessionId: string, message: AdapterMessage): Effect.Effect<void, AdapterError> { void sessionId; void message; return notImplementedEffect("OpenCodeAdapter", "V0.5"); }
-  cancelRun(runId: string): Effect.Effect<void, AdapterError> { void runId; return notImplementedEffect("OpenCodeAdapter", "V0.5"); }
-  injectContext(sessionId: string, patch: ContextProjection): Effect.Effect<ContextInjectionResult, AdapterError> { void sessionId; void patch; return notImplementedEffect("OpenCodeAdapter", "V0.5"); }
-  attachSession(input: AttachSessionInput): Effect.Effect<ExternalSession, AdapterError> { void input; return Effect.fail(new AdapterNotImplementedError("OpenCodeAdapter", "V0.5")); }
-  dispose(sessionId: string): Effect.Effect<void, AdapterError> { void sessionId; return notImplementedEffect("OpenCodeAdapter", "V0.5"); }
+export type OpenCodeAdapterOptions = {
+  readonly command?: string;
+  readonly args?: readonly string[];
+  readonly env?: NodeJS.ProcessEnv;
+};
+
+export class OpenCodeACPAdapter extends ACPAdapter {
+  private readonly command: string;
+  private readonly args: readonly string[];
+  private readonly env: NodeJS.ProcessEnv | undefined;
+
+  constructor(options: OpenCodeAdapterOptions = {}) {
+    super("opencode", "OpenCode Adapter", opencodeManifest);
+    this.command = options.command ?? process.env.OPENCODE_BIN ?? "opencode";
+    this.args = options.args ?? ["acp"];
+    this.env = options.env;
+  }
+
+  detect(): Effect.Effect<DetectedRuntime[], AdapterError> {
+    return Effect.sync(() => detectOpenCode(this.command));
+  }
+
+  feedProviderLineForTest(sessionId: string, line: string): AcpProviderEvent | undefined {
+    const session = this.debugSession(sessionId);
+    if (session === undefined) throw new ACPAdapterError("session_not_found", `ACP session '${sessionId}' not found`);
+    return this.handleLine(session, line);
+  }
+
+  protected spawnArgs() { return { command: this.command, args: this.args, ...(this.env !== undefined ? { env: this.env } : {}) }; }
+
+  protected mapProviderEvent(message: JsonRpcMessage): AcpProviderEvent | undefined {
+    if (message.method === undefined) return undefined;
+    const payload = isRecord(message.params) ? message.params : {};
+    const nativeType = stringField(payload, "type") ?? message.method;
+    const params = isRecord(payload.event) ? payload.event : payload;
+
+    if (isPromptEvent(nativeType)) return { type: "prompt.started", payload: params };
+    if (isMessageDeltaEvent(nativeType)) return { type: "message.part.delta", payload: params };
+    if (isToolRequestedEvent(nativeType)) return { type: "tool.call.requested", payload: normalizeToolRequested(params) };
+    if (isToolCompletedEvent(nativeType)) return { type: "tool.call.completed", payload: normalizeToolCompleted(params) };
+    if (isPermissionEvent(nativeType)) return { type: "permission.requested", payload: normalizePermission(params) };
+    if (isSubagentStartedEvent(nativeType)) return { type: "subagent.started", payload: normalizeSubagent(params) };
+    if (isSubagentCompletedEvent(nativeType)) return { type: "subagent.completed", payload: normalizeSubagent(params) };
+    if (isContextSnapshotEvent(nativeType)) return { type: "context.snapshot", payload: normalizeContextSnapshot(params) };
+    if (isCancelEvent(nativeType)) return { type: "session.ended", payload: { ...params, reason: "cancelled" } };
+    if (isSessionEndEvent(nativeType)) return { type: "session.ended", payload: normalizeSessionEnd(params) };
+    if (isErrorEvent(nativeType)) return { type: "session.crashed", payload: normalizeError(params) };
+
+    return undefined;
+  }
+
+  protected mapProviderError(error: unknown): AdapterError {
+    const message = providerErrorMessage(error);
+    const code = /cancel|abort|interrupt/iu.test(message) ? "user_cancelled" : "provider_error";
+    return new ACPAdapterError(code, message, error);
+  }
 }
 
-export function createOpenCodeAdapter(): OpenCodeAdapterStub { return new OpenCodeAdapterStub(); }
+export function createOpenCodeAdapter(options: OpenCodeAdapterOptions = {}): OpenCodeACPAdapter { return new OpenCodeACPAdapter(options); }
+
+function detectOpenCode(command: string): DetectedRuntime[] {
+  const found = findExecutable(command);
+  if (found === undefined) return [];
+  const version = spawnSyncText(found, ["--version"]).trim().split(/\r?\n/u)[0] ?? "";
+  return [{ id: "opencode", name: "opencode", ...(version.length > 0 ? { version } : {}), executablePath: found }];
+}
+
+function findExecutable(command: string): string | undefined {
+  if (command.includes("\\") || command.includes("/")) return command;
+  const result = process.platform === "win32" ? spawnSyncStdout("where", [command]) : spawnSyncStdout("bash", ["-lc", `command -v ${shellQuote(command)}`]);
+  return result.trim().split(/\r?\n/u).find(Boolean);
+}
+
+function spawnSyncText(command: string, args: readonly string[]): string {
+  const invocation = windowsCommandInvocation(command, args);
+  const result = spawnSync(invocation.command, invocation.args, { encoding: "utf8", shell: false, windowsVerbatimArguments: false });
+  if (result.error !== undefined) return "";
+  return `${result.stdout ?? ""}${result.stderr ?? ""}`;
+}
+
+function spawnSyncStdout(command: string, args: readonly string[]): string {
+  const invocation = windowsCommandInvocation(command, args);
+  const result = spawnSync(invocation.command, invocation.args, { encoding: "utf8", shell: false, windowsVerbatimArguments: false });
+  if (result.error !== undefined || result.status !== 0) return "";
+  return result.stdout ?? "";
+}
+
+function windowsCommandInvocation(command: string, args: readonly string[]): { readonly command: string; readonly args: string[] } {
+  if (process.platform === "win32" && /\.(cmd|bat)$/iu.test(command)) return { command: "cmd.exe", args: ["/c", command, ...args] };
+  return { command, args: [...args] };
+}
+
+function isPromptEvent(type: string): boolean { return matches(type, "prompt/start", "prompt_started", "session/prompt/start", "session/prompt_started"); }
+function isMessageDeltaEvent(type: string): boolean { return matches(type, "message/delta", "message_delta", "message/part_delta", "message_part_delta", "assistant/message_delta"); }
+function isToolRequestedEvent(type: string): boolean { return matches(type, "tool/call/requested", "tool.call.requested", "tool/pre_use", "tool_call_start", "tool_call_requested"); }
+function isToolCompletedEvent(type: string): boolean { return matches(type, "tool/call/completed", "tool.call.completed", "tool/post_use", "tool_call_stop", "tool_call_completed"); }
+function isPermissionEvent(type: string): boolean { return matches(type, "permission/requested", "permission.requested", "permission/request", "permission_request"); }
+function isSubagentStartedEvent(type: string): boolean { return matches(type, "subagent/started", "subagent.started", "subagent_start", "subagent/start"); }
+function isSubagentCompletedEvent(type: string): boolean { return matches(type, "subagent/completed", "subagent.completed", "subagent_stop", "subagent/stop"); }
+function isContextSnapshotEvent(type: string): boolean { return matches(type, "context/snapshot", "context.snapshot", "context_snapshot", "session/context_snapshot"); }
+function isCancelEvent(type: string): boolean { return matches(type, "session/cancelled", "session.cancelled", "session/canceled", "cancelled", "canceled"); }
+function isSessionEndEvent(type: string): boolean { return matches(type, "session/end", "session.ended", "session_end", "session/completed"); }
+function isErrorEvent(type: string): boolean { return matches(type, "error", "session/error", "session.error", "session/crashed", "session.crashed"); }
+
+function matches(type: string, ...candidates: readonly string[]): boolean {
+  return candidates.includes(type.toLowerCase());
+}
+
+function normalizeToolRequested(payload: Record<string, unknown>): Record<string, unknown> {
+  return { ...payload, toolCallId: stringField(payload, "toolCallId") ?? stringField(payload, "id") ?? randomUUID(), name: stringField(payload, "name") ?? stringField(payload, "tool") ?? "unknown", input: payload.input ?? payload.arguments ?? {} };
+}
+
+function normalizeToolCompleted(payload: Record<string, unknown>): Record<string, unknown> {
+  return { ...payload, toolCallId: stringField(payload, "toolCallId") ?? stringField(payload, "id") ?? randomUUID(), output: payload.output ?? payload.result ?? {}, ok: payload.ok !== false && payload.error === undefined };
+}
+
+function normalizePermission(payload: Record<string, unknown>): Record<string, unknown> {
+  return { ...payload, permissionId: stringField(payload, "permissionId") ?? stringField(payload, "id") ?? randomUUID(), reason: stringField(payload, "reason") ?? "OpenCode requested permission" };
+}
+
+function normalizeSubagent(payload: Record<string, unknown>): Record<string, unknown> {
+  return { ...payload, subRunId: stringField(payload, "subRunId") ?? stringField(payload, "id") ?? randomUUID(), profileRef: stringField(payload, "profileRef") ?? stringField(payload, "role") ?? stringField(payload, "name") ?? "opencode-subagent" };
+}
+
+function normalizeContextSnapshot(payload: Record<string, unknown>): Record<string, unknown> {
+  const text = stringField(payload, "text") ?? stringField(payload, "summary") ?? JSON.stringify(payload);
+  return { kind: "opencode_context", text, metadata: payload.metadata ?? { adapterId: "opencode" } };
+}
+
+function normalizeSessionEnd(payload: Record<string, unknown>): Record<string, unknown> {
+  return { ...payload, sessionId: stringField(payload, "sessionId") ?? stringField(payload, "id") ?? "opencode-session", reason: stringField(payload, "reason") ?? "completed" };
+}
+
+function normalizeError(payload: Record<string, unknown>): Record<string, unknown> {
+  return { ...payload, error: stringField(payload, "error") ?? stringField(payload, "message") ?? JSON.stringify(payload) };
+}
+
+function providerErrorMessage(error: unknown): string {
+  if (typeof error === "string") return error;
+  if (isRecord(error)) {
+    const message = stringField(error, "message");
+    if (message !== undefined) return message;
+  }
+  return JSON.stringify(error);
+}
+
+function shellQuote(value: string): string { return `'${value.replace(/'/gu, "'\\''")}'`; }
+function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
+function stringField(value: Record<string, unknown>, key: string): string | undefined { const field = value[key]; return typeof field === "string" && field.length > 0 ? field : undefined; }
