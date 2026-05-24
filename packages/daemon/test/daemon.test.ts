@@ -217,6 +217,18 @@ describe("daemon M1.4 composition", () => {
     expect(daemon.mockAdapter.llmCallsFor("mock-observer")).toBe(0);
   });
 
+  it("routes assisted mentions without waking primary when omitted", async () => {
+    const client = new AgentHubClient({ baseUrl });
+    const room = await client.createRoom({ title: "Mentions", mode: "assisted", primaryAgentId: "mock-builder", participants: [{ type: "agent", agentId: "mock-observer", role: "observer", defaultPresence: "active" }] }) as { readonly data: { readonly roomId: string } };
+
+    await client.sendMessage(room.data.roomId, { text: "@mock-observer please review", idempotencyKey: "mention-observer-1" });
+
+    expect(daemon.mockAdapter.llmCallsFor("mock-builder")).toBe(0);
+    expect(daemon.mockAdapter.llmCallsFor("mock-observer")).toBe(1);
+    const idempotencyKeys = daemon.database.sqlite.prepare("SELECT idempotency_key FROM command_records WHERE command_type = 'WakeAgent' ORDER BY created_at ASC").all() as { readonly idempotency_key: string }[];
+    expect(idempotencyKeys.every((row) => /^wake:.+:mock-observer$/u.test(row.idempotency_key))).toBe(true);
+  });
+
   it("queues pending turns while primary is busy and preserves immediate wake when idle", async () => {
     const client = new AgentHubClient({ baseUrl });
     const room = await client.createRoom({ title: "Pending", mode: "solo", primaryAgentId: "mock-builder" }) as { readonly data: { readonly roomId: string } };
@@ -294,6 +306,8 @@ describe("daemon M1.4 composition", () => {
     expect(queuedPayload.ok).toBe(true);
     expect(daemon.database.sqlite.prepare("SELECT status FROM pending_turns WHERE id = ?").get(sent.data.messageId)).toMatchObject({ status: "cancelled" });
     expect(daemon.database.sqlite.prepare("SELECT turn_dispatch_mode FROM messages WHERE id = ?").get(queuedPayload.data.messageId)).toMatchObject({ turn_dispatch_mode: "pending" });
+    const turnRows = daemon.database.sqlite.prepare("SELECT enqueued_at FROM pending_turns WHERE user_message_id IN (?, ?) ORDER BY enqueued_at ASC").all(sent.data.messageId, queuedPayload.data.messageId) as { readonly enqueued_at: number }[];
+    expect(turnRows[1]?.enqueued_at).toBeGreaterThanOrEqual(turnRows[0]?.enqueued_at ?? 0);
 
     daemon.database.sqlite.prepare("UPDATE runs SET status = 'completed', ended_at = ? WHERE id = 'run_edit_pending'").run(Date.now());
     const seededMessageId = "msg_seeded_edit_immediate";
@@ -304,6 +318,40 @@ describe("daemon M1.4 composition", () => {
     expect(editedImmediate.status).toBe(200);
     expect(immediatePayload.ok).toBe(true);
     expect(daemon.database.sqlite.prepare("SELECT turn_dispatch_mode FROM messages WHERE id = ?").get(immediatePayload.data.messageId)).toMatchObject({ turn_dispatch_mode: "immediate" });
+  });
+
+  it("paginates messages with base64 cursors and can include deleted messages", async () => {
+    const client = new AgentHubClient({ baseUrl });
+    const room = await client.createRoom({ title: "Pagination", mode: "solo", primaryAgentId: "mock-builder" }) as { readonly data: { readonly roomId: string } };
+    const first = await client.sendMessage(room.data.roomId, { text: "one", idempotencyKey: "page-1" }) as { readonly data: { readonly messageId: string } };
+    const second = await client.sendMessage(room.data.roomId, { text: "two", idempotencyKey: "page-2" }) as { readonly data: { readonly messageId: string } };
+    await fetch(`${baseUrl}/messages/${first.data.messageId}`, { method: "DELETE" });
+
+    const page = await fetch(`${baseUrl}/messages?roomId=${room.data.roomId}&limit=1&includeDeleted=true`);
+    const payload = await page.json() as { readonly messages: readonly { readonly id: string }[]; readonly nextCursor: string | null };
+    expect(payload.messages).toHaveLength(1);
+    expect(payload.nextCursor).toEqual(expect.any(String));
+    const next = await fetch(`${baseUrl}/messages?roomId=${room.data.roomId}&after=${payload.nextCursor}&limit=20&includeDeleted=false`);
+    const nextPayload = await next.json() as { readonly messages: readonly { readonly id: string }[] };
+    expect(nextPayload.messages.map((message) => message.id)).not.toContain(first.data.messageId);
+    expect(nextPayload.messages.map((message) => message.id)).toContain(second.data.messageId);
+  });
+
+  it("pins messages into workspace context and regenerates assistant messages through WakeAgent", async () => {
+    const client = new AgentHubClient({ baseUrl });
+    const room = await client.createRoom({ title: "Pin Regen", mode: "solo", primaryAgentId: "mock-builder" }) as { readonly data: { readonly roomId: string } };
+    const sent = await client.sendMessage(room.data.roomId, { text: "remember this", idempotencyKey: "pin-regen-1" }) as { readonly data: { readonly messageId: string } };
+
+    const pinned = await fetch(`${baseUrl}/messages/${sent.data.messageId}/pin`, { method: "POST" });
+    expect(pinned.status).toBe(200);
+    expect(daemon.database.sqlite.prepare("SELECT scope, pinned, content FROM context_items WHERE content = 'remember this'").get()).toMatchObject({ scope: "workspace", pinned: 1, content: "remember this" });
+
+    const assistant = daemon.database.sqlite.prepare("SELECT id FROM messages WHERE role = 'assistant' ORDER BY created_at DESC LIMIT 1").get() as { readonly id: string };
+    const regenerated = await fetch(`${baseUrl}/messages/${assistant.id}/regenerate`, { method: "POST" });
+    const payload = await regenerated.json() as { readonly ok: boolean };
+    expect(regenerated.status).toBe(200);
+    expect(payload.ok).toBe(true);
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM command_records WHERE command_type = 'WakeAgent' AND idempotency_key LIKE ?").get(`wake:${assistant.id}:%`)).toMatchObject({ count: 1 });
   });
 
   it("exposes permission APIs and resolves requests through CommandBus", async () => {
