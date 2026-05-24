@@ -52,3 +52,7 @@
 - For `TerminalCard` E2E coverage, the test must seed a real `artifacts` row with `type="terminal"` and enough stdout lines to expose the expand control; otherwise the modal path never renders.
 
 - 2026-05-25: Real ACP adapters need the daemon command bus propagated through AdapterRegistry services for AdapterBridge terminal tool completions to create terminal artifacts. Use lazy getCommandBus: () => commandBusRef.current to avoid daemon startup circularity, and conditionally spread optional commandBus values for exact optional property compatibility.
+
+## 2026-05-25 - commandBus startup ordering race
+- Adapter terminal artifact dispatch must resolve commandBus through getCommandBus at dispatch time, not adapter construction time, because daemon startup catchUp/scheduleTick can lazily create adapters before commandBusRef.current is populated.
+- Verified fix with LSP diagnostics on changed files, pnpm.cmd test, and pnpm.cmd typecheck; bare pnpm is blocked by local PowerShell execution policy, so use pnpm.cmd on Windows.
