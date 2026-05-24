@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { EventBus, PublishInput } from "@agenthub/bus";
+import type { Command, CommandBus, EventBus, PublishInput } from "@agenthub/bus";
 import type { EventType } from "@agenthub/protocol/events";
 
 import { RunLifecycleService, type Cost } from "./run-lifecycle-service.ts";
@@ -27,6 +27,8 @@ export type AdapterArtifactFSBoundary = {
 };
 
 export class AdapterBridge {
+  private readonly toolNamesByCallId = new Map<string, string>();
+
   constructor(
     private readonly input: {
       readonly runId: string;
@@ -41,6 +43,7 @@ export class AdapterBridge {
       readonly workspaceMode?: string;
       readonly terminalEnabled?: boolean;
       readonly artifactFs?: AdapterArtifactFSBoundary;
+      readonly commandBus?: CommandBus;
     }
   ) {}
 
@@ -80,7 +83,20 @@ export class AdapterBridge {
       this.publishAdapterDomainEvent({ type: "file.changed", path: event.path, change: "deleted" });
       return;
     }
+    if (event.type === "tool.call.requested") this.toolNamesByCallId.set(event.toolCallId, event.name);
+    if (event.type === "tool.call.completed") this.createTerminalArtifact(event);
     this.publishAdapterDomainEvent(event);
+  }
+
+  private createTerminalArtifact(event: Extract<AdapterEvent, { readonly type: "tool.call.completed" }>): void {
+    const toolName = this.toolNamesByCallId.get(event.toolCallId);
+    if (toolName === undefined || !isTerminalTool(toolName)) return;
+    const output = isRecord(event.output) ? event.output : {};
+    const stdout = typeof output.stdout === "string" ? output.stdout : "";
+    const stderr = typeof output.stderr === "string" ? output.stderr : "";
+    const idempotencyKey = `terminal-artifact:${this.input.runId}:${event.toolCallId}`;
+    const command: Command = { type: "CreateArtifact", workspaceId: this.input.workspaceId, roomId: this.input.roomId, ...(this.input.taskId !== undefined ? { taskId: this.input.taskId } : {}), runId: this.input.runId, ...(this.input.messageId !== undefined ? { messageId: this.input.messageId } : {}), artifactType: "terminal", title: `${toolName} output`, metadata: { toolCallId: event.toolCallId, toolName, ok: event.ok, stdout, stderr }, idempotencyKey };
+    void this.input.commandBus?.dispatch(command, { actor: { type: "agent", id: this.input.agentId }, traceId: `terminal:${this.input.runId}:${event.toolCallId}`, idempotencyKey, origin: "internal" });
   }
 
   private publishAdapterDomainEvent(event: Exclude<AdapterEvent, { readonly type: "session.opened" | "provider.conversation.updated" | "session.ended" | "session.crashed" | "fs.writeTextFile" | "fs.deleteFile" }>): void {
@@ -100,4 +116,13 @@ export class AdapterBridge {
 
 function zeroCost(): Cost {
   return { inputTokens: 0, outputTokens: 0, cachedTokens: 0, costUsd: 0, modelId: "unknown" };
+}
+
+function isTerminalTool(name: string): boolean {
+  const normalized = name.toLowerCase();
+  return normalized === "bash" || normalized === "terminal" || normalized.endsWith(".bash") || normalized.endsWith("/bash") || normalized.includes("terminal");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

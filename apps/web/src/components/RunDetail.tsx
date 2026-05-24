@@ -334,8 +334,8 @@ type TerminalArtifact = {
 
 function terminalLinesFromMetadata(metadata: Record<string, unknown>): TerminalLine[] {
   return [
-    ...previewLines(metadata.stdoutPreview, "stdout"),
-    ...previewLines(metadata.stderrPreview, "stderr")
+    ...previewLines(metadata.stdout ?? metadata.stdoutPreview, "stdout"),
+    ...previewLines(metadata.stderr ?? metadata.stderrPreview, "stderr")
   ];
 }
 
