@@ -6,12 +6,15 @@
 
 AgentHub 的开发必须遵守以下优先级：
 
-1. **OpenSpec spec 是最高实现依据**：以 `openspec/changes/add-agenthub-mvp/` 下的 `proposal.md`、`design.md`、`tasks.md` 和各 capability 的 `spec.md` 为准。
+1. **OpenSpec spec 是最高实现依据**：以当前 active change 下的 `proposal.md`、`design.md`、`tasks.md` 和各 capability 的 `spec.md` 为准；例如 MVP 阶段是 `openspec/changes/add-agenthub-mvp/`，V0.5 阶段是 `openspec/changes/add-v05-chatroom-complete/`。
 2. **任务必须可审查、可回滚、可追踪**：任何代码或文档改动都必须经过 Git 分支、提交、PR 和审查。
-3. **小步提交，小步审查**：完成一个明确任务后立即交给上级 agent 或审查 agent 检查；通过后再 merge。
-4. **不能私自扩大范围**：实现当前任务所需以外的重构、技术栈替换、协议改动、数据库 schema 改动都必须先记录 issue 并请求上级确认。
-5. **不确定就升级**：遇到解决不了的问题、spec 与实现冲突、外部框架行为不明确、参考项目与 spec 相矛盾时，不要硬猜；先记录问题，再咨询上级 agent。
-6. **参考项目只能参考，不可替代 spec**：`C:\project\refrence` 中的成熟开源项目可以用于理解技术细节和边界处理，但不能直接覆盖 AgentHub spec 的设计。
+3. **阶段提交，阶段审查**：MVP 阶段的经验是，不需要每个小 task 都单独审查，但每完成一个大阶段、自然任务包或 milestone，必须提交 PR 并进入审查。
+4. **Oracle 是阶段质量门**：每个大阶段实现完成后必须交给 Oracle / 上级审查 agent 做独立审查；审查通过后才能 merge 并进入下一阶段。
+5. **任务分派要匹配 agent 能力**：不要把所有任务都交给 deep agent；简单、机械、可局部验证的任务交给 quick agent，复杂跨模块任务交给 deep agent，特殊领域任务交给更擅长的 specialist agent。
+6. **并行任务必须隔离**：可以并行委派的任务应并行推进，但必须先划清文件/模块所有权；存在冲突风险时使用不同 git worktree。
+7. **不能私自扩大范围**：实现当前任务所需以外的重构、技术栈替换、协议改动、数据库 schema 改动都必须先记录 issue 并请求上级确认。
+8. **不确定就升级**：遇到解决不了的问题、spec 与实现冲突、外部框架行为不明确、参考项目与 spec 相矛盾时，不要硬猜；先记录问题，再咨询上级 agent。
+9. **参考项目只能参考，不可替代 spec**：`C:\project\refrence` 中的成熟开源项目可以用于理解技术细节和边界处理，但不能直接覆盖 AgentHub spec 的设计。
 
 ## 2. 角色分工
 
@@ -22,7 +25,7 @@ AgentHub 的开发必须遵守以下优先级：
 - 开始任务前读取相关 spec 和 `tasks.md` 中对应条目。
 - 在新 Git 分支上工作。
 - 按测试优先或测试同步的方式实现。
-- 每个任务完成后提交 PR，不直接 merge。
+- 按阶段或自然任务包提交 PR，不直接 merge。小 task 可以在同一阶段 PR 中累积，但不能跨越无关范围。
 - 在 PR 描述中列出：
   - 实现了哪个 task 编号；
   - 对应哪些 spec requirement；
@@ -30,36 +33,85 @@ AgentHub 的开发必须遵守以下优先级：
   - 跑了哪些验证命令；
   - 是否存在未解决问题或风险。
 
-### 2.2 审查 Agent
+### 2.2 调度 / 分派 Agent
+
+调度 agent 负责把阶段计划拆成适合不同 agent 的任务包。MVP 阶段暴露出的一个问题是：把所有任务都交给 deep agent 会造成上下文过载、review 颗粒度过大，也浪费 quick agent 的执行效率。
+
+分派规则：
+
+- **Quick agent**：适合文档同步、命名清理、局部测试补齐、简单 UI wiring、机械 schema/check 更新、grep 审计和小范围 bugfix。
+- **Deep agent**：适合跨 package 事务边界、状态机、adapter runtime、RunLifecycle、CommandBus/EventBus、迁移设计、安全边界和复杂失败链路。
+- **Specialist agent**：适合前端交互、Playwright/E2E、性能、SQLite/Drizzle migration、安全审计、OpenSpec consistency、外部协议/SDK 集成等专项任务。
+- **Oracle / 上级审查 agent**：不承担常规实现堆量，主要负责阶段审查、spec 合规审查、架构方向和 merge gate。
+
+可以并行的任务必须优先并行委派，但委派前要写清：
+
+- 每个 agent 的任务目标、spec refs 和验收命令；
+- 每个 agent 拥有的文件/模块范围；
+- 预期输出是 commit、PR、review report 还是 issue；
+- 是否需要独立 worktree；
+- 与其他任务的依赖和不能触碰的边界。
+
+### 2.3 审查 Agent
 
 审查 agent 负责从多角度检查 PR。不能只看代码能否运行，还必须检查：
 
 - 是否符合 OpenSpec。
+- 是否完整实现了阶段目标和对应 Scenario。
 - 是否符合 Git/PR 流程。
 - 是否符合任务范围。
 - 是否有边界条件遗漏。
 - 是否有事务、状态机、事件、权限、安全方面的破坏。
 - 是否有测试覆盖。
 - 是否有不必要的架构发明或过早抽象。
-- 可以使用LSP工具进行代码检查
+- 是否存在与其他并行分支的潜在冲突。
+- 可以使用 LSP 工具进行代码检查。
 
-### 2.3 上级 Agent
+### 2.4 Oracle / 上级 Agent
 
-上级 agent 负责判断：
+Oracle / 上级 agent 负责判断：
 
 - 是否可以 merge。
 - 是否需要修改 spec。
 - 是否需要开新 issue 或新 OpenSpec change。
 - 代码 agent 遇到阻塞时应该走哪条路径。
 - 参考项目中的做法是否适合 AgentHub。
+- 阶段实现是否真的符合 spec，而不是只通过了测试。
+- 任务分派是否合理，是否需要拆分、并行或换 agent。
 
-上级 agent 的职责不是替代码 agent 写所有代码，而是控制方向、边界和质量。
+Oracle / 上级 agent 的职责不是替代码 agent 写所有代码，而是控制方向、边界和质量。
 
 ## 3. Git 工作流
 
 任何改动都必须遵守以下流程。
 
-### 3.1 开始任务
+### 3.1 分支与 worktree 策略
+
+默认情况下，一个大阶段或自然任务包使用一个任务分支。多个小 task 可以在同一个阶段分支中完成，但 PR 描述必须列清楚覆盖范围。
+
+当多个 agent 需要并行修改代码时，必须先判断是否会触碰相同 package、相同 migration、相同事件 registry、相同 UI 投影或相同测试文件：
+
+- 如果完全不重叠，可以在不同分支或不同 worktree 中并行推进。
+- 如果可能重叠，优先拆分所有权；拆不开时不要并行写同一片代码。
+- 如果一个 agent 只做审查或只读分析，不需要新 worktree。
+- 禁止通过 `git reset --hard`、强制 checkout 或手动覆盖来解决并行冲突；冲突必须在对应分支/PR 中显式处理。
+
+推荐 worktree 命令：
+
+```powershell
+git worktree list
+git worktree add ..\AgentHub-v05-m1 -b task/v05-m1-opencode
+git worktree add ..\AgentHub-v05-m2 -b task/v05-m2-chatroom
+```
+
+阶段完成、PR merge 后再清理 worktree：
+
+```powershell
+git worktree remove ..\AgentHub-v05-m1
+git branch -d task/v05-m1-opencode
+```
+
+### 3.2 开始任务
 
 1. 确认当前工作区状态：
 
@@ -70,7 +122,7 @@ git status --short --branch
 2. 确认当前任务对应的 OpenSpec 条目：
 
 ```powershell
-openspec.cmd validate add-agenthub-mvp --strict
+openspec.cmd validate <change-id> --strict
 ```
 
 3. 从主分支创建任务分支：
@@ -85,7 +137,7 @@ git switch -c task/<task-id>-<short-name>
 git switch -c task/3-1-event-envelope
 ```
 
-### 3.2 开发中提交
+### 3.3 开发中提交
 
 每个提交必须是一个清楚、可审查的逻辑单元。推荐提交格式：
 
@@ -111,19 +163,21 @@ git diff --check
 pnpm test
 pnpm typecheck
 pnpm lint
-openspec.cmd validate add-agenthub-mvp --strict
+openspec.cmd validate <change-id> --strict
 ```
 
 实际命令以仓库最终脚本为准。
 
-### 3.3 提 PR
+### 3.4 提 PR
 
-完成一个任务后，代码 agent 必须提交 PR。PR 描述必须包含：
+完成一个大阶段、自然任务包或 milestone 后，代码 agent 必须提交 PR。小 task 可以合并到同一个阶段 PR，但 PR 描述必须让审查 agent 能清楚看到每个 task 的完成情况。PR 描述必须包含：
 
 ```markdown
 ## Task
 
-- Task: `tasks.md §<编号>`
+- Stage / Task Package: `<milestone 或任务包名称>`
+- Tasks:
+  - `tasks.md §<编号>`
 - Spec refs:
   - `<capability>/<Requirement 名>`
 
@@ -133,13 +187,19 @@ openspec.cmd validate add-agenthub-mvp --strict
 
 ## Verification
 
-- [ ] `openspec.cmd validate add-agenthub-mvp --strict`
+- [ ] `openspec.cmd validate <change-id> --strict`
 - [ ] `<test command>`
 - [ ] `<typecheck/lint command>`
 
 ## Risks / Open Questions
 
 - ...
+
+## Parallel / Worktree Notes
+
+- Worktree:
+- Owned files/modules:
+- Known merge dependencies:
 ```
 
 如果没有 GitHub 或远程 PR 系统，仍必须在本地模拟 PR 边界：
@@ -149,11 +209,29 @@ openspec.cmd validate add-agenthub-mvp --strict
 - 请求审查 agent 审查该分支 diff；
 - 审查通过后再由上级 agent merge。
 
-### 3.4 Merge 规则
+### 3.5 阶段审查 Gate
+
+每个大阶段完成后必须先停下来进入阶段审查，不允许一边修上一阶段 blocker 一边继续开发下一阶段核心功能。阶段审查至少包括：
+
+- 代码审查：逻辑、事务、状态机、错误路径、资源释放、并发和测试。
+- Spec 审查：逐条核对 requirement、Scenario、事件 registry、Command/API、schema/migration、权限边界。
+- 产品审查：用户路径是否完整，UI 投影是否符合主流 brief + Run Detail 的信息分层。
+- 安全审查：debug/raw、token/CSRF/Origin/Host、文件路径、secret redaction、外部进程。
+- Git 审查：branch/worktree 是否清楚，dirty/untracked 是否全部解释，PR 描述和验证证据是否完整。
+
+Oracle / 上级审查 agent 对阶段审查给出结论：
+
+- **Approve**：可以 merge。
+- **Request changes**：必须在当前 PR 修复后复审。
+- **Needs spec decision**：暂停实现，记录 issue 或更新 OpenSpec。
+- **Split required**：任务包过大或职责混乱，需要拆 PR 或换 agent。
+
+### 3.6 Merge 规则
 
 代码 agent 不允许自己 merge 自己的 PR。必须满足：
 
 - 审查 agent 无阻塞问题；
+- Oracle / 上级审查 agent 已完成阶段 gate；
 - 上级 agent 明确批准；
 - 必要测试通过；
 - PR 描述完整；
@@ -163,18 +241,23 @@ merge 后删除任务分支，并更新任务状态。
 
 ## 4. 任务执行流程
 
-每个任务按照以下顺序执行：
+每个大阶段或自然任务包按照以下顺序执行：
 
 1. **读 spec**：阅读任务引用的 capability spec、`design.md` 决策、相关 `tasks.md` 条目。
 2. **确认范围**：写一句话说明本任务要交付什么，不交付什么。
-3. **检查现有代码**：先找已有模式，不要凭空发明目录结构或抽象。
-4. **写测试或验收用例**：优先写能证明 spec 行为的测试。
-5. **实现最小功能**：只实现当前任务所需。
-6. **运行验证**：测试、lint、typecheck、OpenSpec strict。
-7. **提交 commit**：提交可审查的逻辑单元。
-8. **提 PR**：请求审查。
-9. **处理 review**：只处理审查指出的问题；如审查意见与 spec 冲突，升级给上级 agent。
-10. **merge 后再继续下一任务**。
+3. **拆分与分派**：判断哪些小 task 可并行、哪些必须串行；把简单任务交给 quick agent，复杂任务交给 deep agent，专项任务交给 specialist agent。
+4. **隔离工作区**：并行写代码前建立分支或 worktree，并写清文件/模块所有权。
+5. **检查现有代码**：先找已有模式，不要凭空发明目录结构或抽象。
+6. **写测试或验收用例**：优先写能证明 spec 行为的测试。
+7. **实现最小功能**：只实现当前阶段所需。
+8. **运行验证**：测试、lint、typecheck、OpenSpec strict。
+9. **提交 commit**：提交可审查的逻辑单元。
+10. **提阶段 PR**：请求审查。
+11. **Oracle 阶段审查**：代码审查通过后，交给 Oracle / 上级审查 agent 从 spec、边界、任务分派、风险和 Git 证据角度复核。
+12. **处理 review**：只处理审查指出的问题；如审查意见与 spec 冲突，升级给上级 agent。
+13. **merge 后再继续下一阶段**。
+
+小 task 可以不单独 PR，但不能因此跳过测试、commit、记录和最终阶段审查。
 
 ## 5. 遇到问题时的升级机制
 
@@ -309,6 +392,9 @@ Issue 记录模板：
 - 是否引入未在 spec 中定义的状态、事件、命令、字段或 API？
 - 是否遗漏 spec 中的 Scenario？
 - 是否有“实现方便”导致的 spec 偏离？
+- 是否有事件类型未进入 canonical registry？
+- 是否有 migration、schema、索引、字段命名与 spec/design 不一致？
+- 是否把后续阶段能力提前实现，或者把本阶段必须实现的能力留成 stub？
 
 ### 9.2 代码逻辑
 
@@ -375,9 +461,21 @@ Issue 记录模板：
 - 是否把 V0.5 / V1.x 的占位能力提前做成真实功能？
 - 是否修改了不该修改的文件？
 
+### 9.9 阶段 / Oracle 审查
+
+- 本 PR 是否代表一个清楚的大阶段或自然任务包？
+- 是否列出了该阶段覆盖的 task、spec refs 和验收命令？
+- 是否解释了未覆盖的 task、延后项和风险？
+- 是否说明了任务分派：哪些由 quick agent、deep agent、specialist agent 完成？
+- 是否存在“所有任务都堆给 deep agent”导致的上下文过载或审查困难？
+- 并行任务是否使用了独立分支或 worktree？
+- 是否有文件/模块所有权冲突？
+- 是否有 dirty/untracked 文件没有进入 PR 或没有解释？
+- Oracle / 上级审查 agent 是否已经给出明确结论？
+
 ## 10. 必须重点保护的核心契约
 
-以下契约属于 AgentHub MVP 的骨架。任何修改都必须上级 agent 批准。
+以下契约属于 AgentHub 的骨架。任何修改都必须上级 agent 批准。
 
 - `WakeAgent` 是模型调用唯一入口。
 - 没有 `StartRun` Command。
@@ -397,13 +495,14 @@ Issue 记录模板：
 
 ## 11. 完成任务的定义
 
-一个任务只有同时满足以下条件才算完成：
+一个大阶段或自然任务包只有同时满足以下条件才算完成：
 
 - 代码实现完成；
 - 测试补齐并通过；
 - OpenSpec strict 通过；
 - PR 描述完整；
 - 审查 agent 通过；
+- Oracle / 上级审查 agent 已完成阶段审查；
 - 上级 agent 批准 merge；
 - merge 后任务状态更新；
 - 遗留问题已记录 issue，不是藏在代码注释里。
@@ -414,6 +513,10 @@ Issue 记录模板：
 
 - 在主分支直接改代码；
 - 自己 merge 自己的 PR；
+- 跳过 Oracle / 上级审查 agent 的阶段 gate；
+- 把所有任务不加区分地交给 deep agent；
+- 在并行任务中让多个 agent 同时修改同一文件/模块而不划分所有权；
+- 不使用 worktree 就并行推进存在明显冲突风险的代码改动；
 - 遇到 spec 不明确时自行发明协议；
 - 为了测试通过降低校验标准；
 - 跳过 Permission Engine 直接写文件或跑 shell；
