@@ -48,6 +48,8 @@ describe("bounded pubsub isolation", () => {
     expect(published[0]).toBe("d0");
     expect(published[99]).toBe("d99");
     expect(currentBus().pubSubStats().find((item) => item.channel === "message_delta")).toMatchObject({ dropped: 0 });
+    const rawStats = currentBus().pubSubStats().find((item) => item.channel === "adapter_raw");
+    expect(rawStats?.dropped).toBeGreaterThan(0);
   });
 });
 

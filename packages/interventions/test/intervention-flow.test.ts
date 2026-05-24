@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { EventBus } from "@agenthub/bus";
 import { createDatabase, type AgentHubDatabase } from "@agenthub/db";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { InterventionEngine } from "../src/index.ts";
 
@@ -42,10 +42,21 @@ describe("InterventionEngine full flow", () => {
 
     expect(currentEngine().get(requested.interventionId)).toMatchObject({ status: "pending_user_decision", type: "knock" });
 
-    const approved = currentEngine().approve(requested.interventionId);
+    const publishSpy = vi.spyOn(currentEventBus(), "publish");
+
+    const approved = currentEngine().approve(requested.interventionId, "Please incorporate reviewer guidance.");
 
     expect(approved?.status === "resolved" || approved?.status === "closed").toBe(true);
     expect(currentEngine().get(requested.interventionId)?.status).toBe("closed");
+    const publishedTypes = publishSpy.mock.calls.map(([event]) => event.type);
+    const injectedIndex = publishedTypes.indexOf("intervention.injected");
+    const resolvedIndex = publishedTypes.indexOf("intervention.resolved");
+    expect(injectedIndex).toBeGreaterThanOrEqual(0);
+    expect(resolvedIndex).toBeGreaterThan(injectedIndex);
+    expect(publishSpy.mock.calls[injectedIndex]?.[0]).toMatchObject({
+      type: "intervention.injected",
+      payload: { interventionId: requested.interventionId, status: "injected", injectionMode: "immediate", effectiveText: "Please incorporate reviewer guidance." }
+    });
   });
 });
 
