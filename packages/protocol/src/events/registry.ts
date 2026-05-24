@@ -1,4 +1,5 @@
-import type { EventDurability, EventVisibility } from "../primitives.ts";
+import { Schema } from "effect";
+import { EpochMillisSchema, IdSchema, type EventDurability, type EventVisibility } from "../primitives.ts";
 
 export type EventCategory =
   | "room"
@@ -26,6 +27,41 @@ export type EventRegistryEntry = {
   readonly schemaVersion: 1;
 };
 
+export const AgentProfileRemovedPayloadSchema = Schema.Struct({
+  agentId: IdSchema,
+  workspaceId: Schema.Union(IdSchema, Schema.Literal(null))
+});
+export type AgentProfileRemovedPayload = typeof AgentProfileRemovedPayloadSchema.Type;
+
+export const AgentProfileErrorPayloadSchema = Schema.Struct({
+  path: Schema.String,
+  reason: Schema.String
+});
+export type AgentProfileErrorPayload = typeof AgentProfileErrorPayloadSchema.Type;
+
+export const MailboxDeliveryFailedPayloadSchema = Schema.Struct({
+  mailboxMessageId: IdSchema,
+  roomId: IdSchema,
+  targetAgentId: IdSchema,
+  reason: Schema.Literal("claim_conflict", "max_retries", "target_unavailable"),
+  attemptCount: Schema.Number,
+  failedAt: EpochMillisSchema
+});
+export type MailboxDeliveryFailedPayload = typeof MailboxDeliveryFailedPayloadSchema.Type;
+
+export const ArtifactDiffDetectedPayloadSchema = Schema.Struct({
+  runId: IdSchema,
+  path: Schema.String
+});
+export type ArtifactDiffDetectedPayload = typeof ArtifactDiffDetectedPayloadSchema.Type;
+
+export const EVENT_PAYLOAD_SCHEMAS = {
+  "agent.profile.removed": AgentProfileRemovedPayloadSchema,
+  "agent.profile.error": AgentProfileErrorPayloadSchema,
+  "mailbox.delivery.failed": MailboxDeliveryFailedPayloadSchema,
+  "artifact.diff.detected": ArtifactDiffDetectedPayloadSchema
+} as const;
+
 export const EVENT_REGISTRY = [
   { type: "message.created", category: "message", durability: "durable", visibility: "both", schemaVersion: 1 },
   { type: "message.part.delta", category: "message", durability: "ephemeral", visibility: "detail", schemaVersion: 1 },
@@ -43,6 +79,8 @@ export const EVENT_REGISTRY = [
   { type: "room.closed", category: "room", durability: "durable", visibility: "both", schemaVersion: 1 },
   { type: "agent.profile.loaded", category: "agent", durability: "durable", visibility: "detail", schemaVersion: 1 },
   { type: "agent.profile.updated", category: "agent", durability: "durable", visibility: "detail", schemaVersion: 1 },
+  { type: "agent.profile.removed", category: "agent", durability: "durable", visibility: "detail", schemaVersion: 1 },
+  { type: "agent.profile.error", category: "agent", durability: "ephemeral", visibility: "detail", schemaVersion: 1 },
   { type: "agent.joined", category: "agent", durability: "durable", visibility: "both", schemaVersion: 1 },
   { type: "agent.left", category: "agent", durability: "durable", visibility: "both", schemaVersion: 1 },
   { type: "agent.state.changed", category: "agent", durability: "durable", visibility: "both", schemaVersion: 1 },
@@ -91,6 +129,7 @@ export const EVENT_REGISTRY = [
   { type: "intervention.closed", category: "intervention", durability: "durable", visibility: "both", schemaVersion: 1 },
   { type: "intervention.invalid_transition", category: "intervention", durability: "durable", visibility: "detail", schemaVersion: 1 },
   { type: "artifact.diff.created", category: "artifact", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "artifact.diff.detected", category: "artifact", durability: "ephemeral", visibility: "detail", schemaVersion: 1 },
   { type: "artifact.file.created", category: "artifact", durability: "durable", visibility: "both", schemaVersion: 1 },
   { type: "artifact.reviewing", category: "artifact", durability: "durable", visibility: "both", schemaVersion: 1 },
   { type: "artifact.accepted", category: "artifact", durability: "durable", visibility: "both", schemaVersion: 1 },
@@ -110,6 +149,7 @@ export const EVENT_REGISTRY = [
   { type: "adapter.raw.stdout", category: "adapter", durability: "ephemeral", visibility: "detail", schemaVersion: 1 },
   { type: "adapter.raw.stderr", category: "adapter", durability: "ephemeral", visibility: "detail", schemaVersion: 1 },
   { type: "mailbox.message.created", category: "mailbox", durability: "durable", visibility: "detail", schemaVersion: 1 },
+  { type: "mailbox.delivery.failed", category: "mailbox", durability: "durable", visibility: "both", schemaVersion: 1 },
   { type: "worktree.gc.removed", category: "local-daemon", durability: "durable", visibility: "detail", schemaVersion: 1 },
   { type: "worktree.gc.skipped", category: "local-daemon", durability: "durable", visibility: "detail", schemaVersion: 1 },
   { type: "auth.token.issued", category: "auth", durability: "durable", visibility: "detail", schemaVersion: 1 },

@@ -63,7 +63,8 @@ The system SHALL classify every event as either `durable`（落 events 表，永
 | `pending_turn.scheduled` | room/message | durable | main |
 | `pending_turn.consumed` | room/message | durable | main |
 | `room.created` / `room.opened` / `room.closed` | room | durable | both |
-| `agent.profile.loaded` / `agent.profile.updated` | agent | durable | detail |
+| `agent.profile.loaded` / `agent.profile.updated` / `agent.profile.removed` | agent | durable | detail |
+| `agent.profile.error` | agent | ephemeral | detail |
 | `agent.joined` / `agent.left` | agent | durable | both |
 | `agent.state.changed` | agent | durable | both |
 | `agent.blocked` | agent | durable | both |
@@ -87,12 +88,14 @@ The system SHALL classify every event as either `durable`（落 events 表，永
 | `intervention.requested` / `.approved` / `.ignored` / `.rejected` / `.snoozed` / `.injected` / `.resolved` / `.closed` | intervention | durable | both |
 | `intervention.invalid_transition` | intervention | durable | detail |
 | `artifact.diff.created` / `artifact.file.created` / `artifact.reviewing` / `artifact.accepted` / `artifact.applying` / `artifact.applied` / `artifact.rejected` / `artifact.failed` | artifact | durable | both |
+| `artifact.diff.detected` | artifact | ephemeral | detail |
 | `artifact.preview.started` / `.stopped` | artifact | durable | both |
 | `adapter.registered` / `adapter.session.created` / `.session.ended` / `.session.disposed` / `.crashed` | adapter | durable | detail |
 | `adapter.liveness.changed` | adapter | durable | detail |
 | `adapter.config.updated` | adapter | durable | both |
 | `adapter.raw.stdout` / `adapter.raw.stderr` | adapter | ephemeral | detail |
 | `mailbox.message.created` | mailbox | durable | detail |
+| `mailbox.delivery.failed` | mailbox | durable | both |
 | `worktree.gc.removed` / `worktree.gc.skipped` | local-daemon | durable | detail |
 | `auth.token.issued` / `auth.token.revoked` | auth | durable | detail |
 | `handler.stalled` | bus | durable | detail |
@@ -387,4 +390,3 @@ These run on every PR and on `bun run check:all` locally; `openspec validate --s
 
 - **WHEN** orchestrator 代码 dispatch `{ type: "WakeAgent", ... }` 但 `bus-runtime` 的 Command union 没有 WakeAgent
 - **THEN** `bun run command:check` 报错
-

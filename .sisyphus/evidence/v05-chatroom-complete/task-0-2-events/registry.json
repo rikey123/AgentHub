@@ -1,0 +1,73 @@
+{
+  "task": "0.2-events",
+  "status": "pass",
+  "registryFile": "packages/protocol/src/events/registry.ts",
+  "specFile": "openspec/specs/event-system/spec.md",
+  "events": [
+    {
+      "type": "agent.profile.removed",
+      "category": "agent",
+      "durability": "durable",
+      "visibility": "detail",
+      "schemaVersion": 1,
+      "payloadFields": {
+        "agentId": "string",
+        "workspaceId": "string|null"
+      }
+    },
+    {
+      "type": "agent.profile.error",
+      "category": "agent",
+      "durability": "ephemeral",
+      "visibility": "detail",
+      "schemaVersion": 1,
+      "payloadFields": {
+        "path": "string",
+        "reason": "string"
+      }
+    },
+    {
+      "type": "mailbox.delivery.failed",
+      "category": "mailbox",
+      "durability": "durable",
+      "visibility": "both",
+      "schemaVersion": 1,
+      "payloadFields": {
+        "mailboxMessageId": "string",
+        "roomId": "string",
+        "targetAgentId": "string",
+        "reason": "claim_conflict|max_retries|target_unavailable",
+        "attemptCount": "number",
+        "failedAt": "number"
+      }
+    },
+    {
+      "type": "artifact.diff.detected",
+      "category": "artifact",
+      "durability": "ephemeral",
+      "visibility": "detail",
+      "schemaVersion": 1,
+      "payloadFields": {
+        "runId": "string",
+        "path": "string"
+      }
+    }
+  ],
+  "checks": [
+    {
+      "command": "pnpm.cmd events:check",
+      "exitCode": 0,
+      "output": "events:check passed (97 registered event types, 86 referenced in source)"
+    },
+    {
+      "command": "pnpm.cmd visibility:check",
+      "exitCode": 0,
+      "output": "visibility:check passed (82 durable events with registered visibility)"
+    },
+    {
+      "command": "node --input-type=module -e <registry smoke test>",
+      "exitCode": 0,
+      "output": "{ ok: true, checked: [agent.profile.removed, agent.profile.error, mailbox.delivery.failed, artifact.diff.detected], registeredEventTypes: 97 }"
+    }
+  ]
+}
