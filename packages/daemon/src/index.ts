@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { URL } from "node:url";
 
 import { createCommandBus, createDurableHandlerRegistry, createEventBus, createOutboxDispatcher, type CommandBus, type CommandHandler, type CommandType, type DurableHandlerRegistry, type EventBus, type OutboxDispatcher, type ReplayView } from "@agenthub/bus";
+import { bootstrapBuiltInAgents, watchAgentProfiles, type AgentProfileWatcher } from "@agenthub/agents";
 import { ArtifactFSRunRegistry, ArtifactService, createArtifactCommandHandlers } from "@agenthub/artifacts";
 import { ContextLedger, createContextCommandHandlers } from "@agenthub/context";
 import { createDatabase, type AgentHubDatabase } from "@agenthub/db";
@@ -62,6 +63,7 @@ type DaemonRuntime = {
   outbox: OutboxDispatcher;
   handlers: DurableHandlerRegistry;
   runQueue: RunQueue;
+  agentProfiles: AgentProfileWatcher;
 };
 
 export function createDaemon(options: DaemonOptions): DaemonApp {
@@ -106,12 +108,15 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     const database = createDatabase({ path: options.databasePath, applyMigrations: true });
     seedDefaultData(database, options.now?.() ?? Date.now());
     seedBuiltInPermissionProfiles(database, options.now?.() ?? Date.now());
+    bootstrapBuiltInAgents();
 
     emitPhase("startup", PHASE_EVENT_STORE);
     database.sqlite.prepare("SELECT COALESCE(MAX(seq), 0) AS maxSeq FROM events").get();
 
     emitPhase("startup", PHASE_EVENT_BUS);
     const eventBus = createEventBus({ database });
+    const agentProfiles = watchAgentProfiles({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
+    await agentProfiles.ready;
     const contextLedger = new ContextLedger({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
     const permissionEngine = new PermissionEngine({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
     const interventionEngine = new InterventionEngine({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
@@ -168,7 +173,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     commandBusRef.current = commandBus;
     const roomMcpServer = new RoomMcpServer({ commandBus, taskService });
     roomMcpServerRef.current = roomMcpServer;
-    runtime = { database, eventBus, commandBus, roomMcpServer, adapterRegistry, mockAdapter, artifactService, taskService, outbox, handlers, runQueue };
+    runtime = { database, eventBus, commandBus, roomMcpServer, adapterRegistry, mockAdapter, artifactService, taskService, outbox, handlers, runQueue, agentProfiles };
 
     emitPhase("startup", PHASE_HTTP);
     return await new Promise<Server>((resolve) => {
@@ -191,6 +196,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
       } else if (phase === PHASE_OUTBOX) {
         await runtime?.outbox.drainPending();
       } else if (phase === PHASE_EVENT_BUS) {
+        await runtime?.agentProfiles.close();
         runtime?.eventBus.close();
       } else if (phase === PHASE_SQLITE) {
         runtime?.database.sqlite.close();
