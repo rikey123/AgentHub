@@ -4,6 +4,7 @@ import { Effect } from "effect";
 
 import type { Command, CommandHandler, CommandMeta, CommandResult, EventBus, PublishInput } from "@agenthub/bus";
 import type { AgentHubDatabase } from "@agenthub/db";
+import type { EventEnvelope } from "@agenthub/protocol/events";
 
 export type ContextItemType = "fact" | "decision" | "constraint" | "issue" | "artifact" | "preference" | "summary";
 export type ContextScope = "conversation" | "task" | "workspace" | "user";
@@ -125,6 +126,7 @@ export class ContextLedger {
   constructor(private readonly options: { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly now?: () => number; readonly trustedToolKinds?: readonly string[] }) {
     this.now = options.now ?? Date.now;
     this.trustedTools = new Set([...(trustedSystemToolKinds as readonly string[]), ...(options.trustedToolKinds ?? [])]);
+    this.options.eventBus.subscribe("context.snapshot", (event) => this.handleSnapshotEvent(event));
   }
 
   propose(input: Omit<CreateContextItemInput, "status" | "confidence"> & { readonly confidence?: ContextConfidence }): ContextWriteResult {
@@ -232,6 +234,22 @@ export class ContextLedger {
     if (input.status !== "confirmed") return { status: input.status ?? "draft", downgraded: false };
     if (input.source.type === "tool" && input.confidence === "verified" && input.source.kind !== undefined && this.trustedTools.has(input.source.kind)) return { status: "confirmed", downgraded: false };
     return { status: "draft", downgraded: true, reason: input.source.type === "tool" ? "untrusted_tool_kind" : "agent_confirmed_write_forbidden" };
+  }
+
+  private handleSnapshotEvent(event: EventEnvelope): void {
+    const payload = isObject(event.payload) ? event.payload : {};
+    const snapshot = isObject(payload.snapshot) ? payload.snapshot : {};
+    const text = typeof snapshot.text === "string" ? snapshot.text : "";
+    const kind = typeof snapshot.kind === "string" ? snapshot.kind : "compact";
+    const idempotencyKey = typeof payload.idempotencyKey === "string" && payload.idempotencyKey.length > 0 ? payload.idempotencyKey : undefined;
+    if (text.length === 0) return;
+    if (idempotencyKey !== undefined && this.findSnapshotDraft(idempotencyKey) !== undefined) return;
+    this.propose({ workspaceId: event.workspaceId, ...(event.roomId !== undefined ? { roomId: event.roomId } : {}), ...(event.taskId !== undefined ? { taskId: event.taskId } : {}), ...(event.runId !== undefined ? { runId: event.runId } : {}), ...(idempotencyKey !== undefined ? { sourceMessageId: idempotencyKey } : {}), type: "summary", scope: "task", content: text, source: { type: "tool", id: snapshotSourceId(kind), kind }, visibility: {}, createdBy: "system", confidence: "inferred" });
+  }
+
+  private findSnapshotDraft(idempotencyKey: string): ContextItem | undefined {
+    const row = this.options.database.sqlite.prepare("SELECT * FROM context_items WHERE source_message_id = ? AND type = 'summary' AND status = 'draft' ORDER BY created_at ASC LIMIT 1").get(idempotencyKey) as ContextRow | undefined;
+    return row ? rowToItem(row) : undefined;
   }
 
   private insertItem(item: ContextItem): void {
@@ -409,3 +427,4 @@ function scopeField(value: unknown): ContextScope | undefined { return value ===
 function statusField(value: unknown): ContextStatus | undefined { return value === "draft" || value === "confirmed" || value === "deprecated" || value === "disputed" ? value : undefined; }
 function confidenceField(value: unknown): ContextConfidence | undefined { return value === "verified" || value === "inferred" || value === "unverified" ? value : undefined; }
 function injectionMode(command: Command): ContextInjectionMode { return command.mode === "immediate" || command.mode === "next_session" || command.mode === "next_turn" ? command.mode : "next_turn"; }
+function snapshotSourceId(kind: string): string { return kind === "claude_compact" ? "claude_code_compact" : kind; }

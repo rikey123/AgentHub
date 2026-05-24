@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { ACPAdapter, ACPAdapterError, AdapterHealthRegistry, AdapterRawLogger, classifyClaudeDetection, emitAdapterRegistered, permissionForTool, type AcpAdapterSession, type AcpProviderEvent, type AdapterRuntimeServices, type JsonRpcMessage } from "@agenthub/adapter-acp-base";
+import type { PublishInput } from "@agenthub/bus";
 import { AdapterBridge, type AdapterArtifactFSBoundary, type RoomMcpServer, type RunLifecycleService, type RunRow } from "@agenthub/orchestrator";
 import type { PermissionEngine } from "@agenthub/permissions";
 import type { AdapterError, AgentAdapterManifest, DetectedRuntime } from "@agenthub/protocol";
@@ -35,6 +36,7 @@ export class ClaudeCodeACPAdapter extends ACPAdapter {
   private readonly args: readonly string[];
   private readonly env: NodeJS.ProcessEnv | undefined;
   private readonly bridgeByRun = new Map<string, AdapterBridge>();
+  private readonly runById = new Map<string, RunRow>();
   private readonly workspaceByRun = new Map<string, string>();
   private readonly openedRuns = new Set<string>();
   private readonly pendingFailuresByRun = new Map<string, ACPAdapterError>();
@@ -71,6 +73,7 @@ export class ClaudeCodeACPAdapter extends ACPAdapter {
     const artifactFs = this.options.artifactFs ?? this.options.services.artifactFs;
     const bridge = new AdapterBridge({ runId: run.id, workspaceId: run.workspace_id, roomId: run.room_id, agentId: run.agent_id, lifecycle: this.options.lifecycle, eventBus: this.options.services.eventBus, ...(this.options.now !== undefined ? { now: this.options.now } : {}), ...(run.task_id !== null ? { taskId: run.task_id } : {}), messageId: `msg_${run.id}`, ...(run.workspace_mode !== null ? { workspaceMode: run.workspace_mode } : {}), terminalEnabled: false, ...(artifactFs !== undefined ? { artifactFs } : {}) });
     this.bridgeByRun.set(run.id, bridge);
+    this.runById.set(run.id, run);
     this.workspaceByRun.set(run.id, run.workspace_id);
     const session = Effect.runSync(this.createSession({ runId: run.id, roomId: run.room_id, agentId: run.agent_id, workDir, ...(this.options.mcpServer !== undefined ? { mcpServer: this.options.mcpServer } : {}) }));
     const acpSession = this.debugSession(session.id);
@@ -152,10 +155,40 @@ export class ClaudeCodeACPAdapter extends ACPAdapter {
       if (decision?.status === "deny") throw new ACPAdapterError("permission_denied", decision.reason);
       return;
     }
-    if (event.type === "tool/post_use") bridge.handle({ type: "tool.call.completed", toolCallId: stringField(payload, "toolCallId") ?? randomUUID(), output: payload.output ?? {}, ok: payload.ok !== false });
+    if (event.type === "tool/post_use") {
+      bridge.handle({ type: "tool.call.completed", toolCallId: stringField(payload, "toolCallId") ?? randomUUID(), output: payload.output ?? {}, ok: payload.ok !== false });
+      const changedPath = fileWritingToolPath(payload);
+      if (changedPath !== undefined) {
+        bridge.handle({ type: "file.changed", path: changedPath, change: "modified" });
+        this.publishRunEvent(runId, "artifact.diff.detected", { runId, path: changedPath });
+      }
+      return;
+    }
     if (event.type === "fs/write") bridge.handle({ type: "fs.writeTextFile", path: requiredString(payload, "path"), content: stringField(payload, "content") ?? "" });
     if (event.type === "fs/delete") bridge.handle({ type: "fs.deleteFile", path: requiredString(payload, "path") });
+    if (event.type === "pre_compact") {
+      const text = stringField(payload, "text") ?? stringField(payload, "summary") ?? "";
+      this.publishRunEvent(runId, "context.snapshot", { runId, snapshot: { kind: "claude_compact", text }, idempotencyKey: `claude_compact:${runId}` });
+      return;
+    }
+    if (event.type === "subagent_start") {
+      const subagentId = stringField(payload, "subagentId") ?? stringField(payload, "id") ?? randomUUID();
+      this.publishRunEvent(runId, "subagent.started", { runId, subagentId, role: stringField(payload, "role") ?? stringField(payload, "profileRef") ?? "subagent" });
+      return;
+    }
+    if (event.type === "subagent_stop") {
+      const subagentId = stringField(payload, "subagentId") ?? stringField(payload, "id") ?? randomUUID();
+      this.publishRunEvent(runId, "subagent.completed", { runId, subagentId, cost: costFromPayload(payload), durationMs: numberField(payload, "durationMs") ?? numberField(payload, "duration") ?? 0 });
+      return;
+    }
     if (event.type === "session/end") bridge.handle({ type: "session.ended", sessionId: stringField(payload, "sessionId") ?? `claude-${runId}`, reason: stringField(payload, "reason") ?? "completed", cost: { inputTokens: 0, outputTokens: 0, cachedTokens: 0, costUsd: 0, modelId: stringField(payload, "modelId") ?? "claude" } });
+  }
+
+  private publishRunEvent(runId: string, type: PublishInput["type"], payload: Record<string, unknown>): void {
+    const run = this.runById.get(runId);
+    const eventBus = this.options.services?.eventBus;
+    if (run === undefined || eventBus === undefined) return;
+    eventBus.publish({ id: randomUUID(), type, schemaVersion: 1, workspaceId: run.workspace_id, roomId: run.room_id, ...(run.task_id !== null ? { taskId: run.task_id } : {}), runId, agentId: run.agent_id, payload, createdAt: this.options.now?.() ?? Date.now() } satisfies PublishInput);
   }
 }
 
@@ -169,4 +202,21 @@ function promptFromRun(run: RunRow): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
 function stringField(value: Record<string, unknown>, key: string): string | undefined { const field = value[key]; return typeof field === "string" ? field : undefined; }
+function numberField(value: Record<string, unknown>, key: string): number | undefined { const field = value[key]; return typeof field === "number" && Number.isFinite(field) ? field : undefined; }
 function requiredString(value: Record<string, unknown>, key: string): string { const field = stringField(value, key); if (field === undefined) throw new ACPAdapterError("invalid_provider_event", `${key} is required`); return field; }
+
+function fileWritingToolPath(payload: Record<string, unknown>): string | undefined {
+  const name = stringField(payload, "name")?.toLowerCase();
+  if (name !== "write" && name !== "edit" && name !== "multiedit" && name !== "notebookedit") return undefined;
+  return stringField(payload, "path") ?? pathFromRecord(payload.input) ?? pathFromRecord(payload.output);
+}
+
+function pathFromRecord(value: unknown): string | undefined {
+  if (!isRecord(value)) return undefined;
+  return stringField(value, "path") ?? stringField(value, "file_path") ?? stringField(value, "filePath");
+}
+
+function costFromPayload(payload: Record<string, unknown>) {
+  const cost = isRecord(payload.cost) ? payload.cost : payload;
+  return { inputTokens: numberField(cost, "inputTokens") ?? 0, outputTokens: numberField(cost, "outputTokens") ?? 0, cachedTokens: numberField(cost, "cachedTokens") ?? 0, costUsd: numberField(cost, "costUsd") ?? 0, modelId: stringField(cost, "modelId") ?? "claude" };
+}
