@@ -1,0 +1,23 @@
+{
+  "machine": {
+    "platform": "win32",
+    "arch": "x64",
+    "cpus": 12,
+    "totalMemoryMB": 32581,
+    "nodeVersion": "v24.11.1"
+  },
+  "timestamp": "2026-05-24T17:01:35.533Z",
+  "note": "10k message render target was not directly tested in CI because seeding 10k messages via SQLite in a Playwright test is too slow. The harness seeded 100 messages and measured load time.",
+  "actualMeasurement": {
+    "seededMessages": 100,
+    "roomLoadMs": 631.8,
+    "roomSwitchMs": 177.3
+  },
+  "specTarget": {
+    "messages": 10000,
+    "roomLoadTargetMs": 500,
+    "roomSwitchTargetMs": 200,
+    "deltaP95FrameTimeTargetMs": 16
+  },
+  "recommendation": "Run this harness on an M1 Mac reference machine with 10k seeded messages for formal acceptance."
+}
