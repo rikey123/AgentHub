@@ -48,3 +48,5 @@
 - Mailbox delivery failures persist delivery_failure_reason and failed rows are excluded from future claimUnread selection; lifecycle fatal/configuration failures publish target_unavailable for claimed mailbox rows.
 - Terminal artifact previews are sourced from artifact metadata stdoutPreview/stderrPreview; cost panel consumes the daemon/spec CostSummaryResponse with groups plus total and epoch-ms query bounds.
 
+# 2026-05-25
+- For `TerminalCard` E2E coverage, the test must seed a real `artifacts` row with `type="terminal"` and enough stdout lines to expose the expand control; otherwise the modal path never renders.

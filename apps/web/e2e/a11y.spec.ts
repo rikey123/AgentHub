@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { createDaemon } from "@agenthub/daemon";
 import type { DaemonApp } from "@agenthub/daemon";
 import { startTestServer } from "./test-server.ts";
-import AxeBuilder from "@axe-core/playwright";
+import { AxeBuilder } from "@axe-core/playwright";
 
 test.describe("a11y axe-core compliance", () => {
   let daemon: DaemonApp;
@@ -74,8 +74,8 @@ test.describe("a11y axe-core compliance", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "A11y Settings Room", mode: "solo", primaryAgentId: "mock-builder" })
     });
-    const roomData = (await roomRes.json()) as { data: { roomId: string } };
-    const roomId = roomData.data.roomId;
+    const roomData2 = (await roomRes.json()) as { data: { roomId: string } };
+    void roomData2.data.roomId;
 
     await page.goto(testUrl);
     await page.waitForSelector("text=A11y Settings Room");
