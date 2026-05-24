@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 
 import { ArtifactFSRunRegistry, ArtifactService } from "@agenthub/artifacts";
 import { ACPAdapterError } from "@agenthub/adapter-acp-base";
@@ -83,6 +84,43 @@ describe("ClaudeCodeACPAdapter", () => {
     database.sqlite.close();
   });
 
+  it("maps Claude hook completions to snapshot, subagent, and diff marker events", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "agenthub-claude-hooks-"));
+    const database = createDatabase({ path: join(dir, "agenthub.sqlite"), applyMigrations: true });
+    database.sqlite.prepare("INSERT INTO workspaces (id, name, root_path, created_at, updated_at) VALUES ('w', 'w', ?, 1, 1)").run(dir);
+    database.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES ('r', 'w', 'r', 'solo', 'conversation', 'a', NULL, 1, 1)").run();
+    const eventBus = createEventBus({ database });
+    let diffDetected: unknown;
+    eventBus.subscribe("artifact.diff.detected", (event) => { diffDetected = event.payload; });
+    const lifecycle = new RunLifecycleService(database, eventBus);
+    lifecycle.create(null, { runId: "run", workspaceId: "w", roomId: "r", agentId: "a", wakeReason: "primary_turn", taskId: "task_1" });
+    lifecycle.markClaimed(null, "run");
+    lifecycle.markStarting(null, "run", 123);
+    const adapter = new ClaudeCodeACPAdapter({ command: "", services: { database, eventBus }, lifecycle, workspaceId: "w", now: () => 1234 });
+
+    await adapter.runManaged(lifecycle.read("run"));
+    adapter.mapToBridgeEvent("run", { type: "pre_compact", payload: { text: "compacted summary" } });
+    adapter.mapToBridgeEvent("run", { type: "subagent_start", payload: { subagentId: "sub_1", role: "reviewer" } });
+    adapter.mapToBridgeEvent("run", { type: "subagent_stop", payload: { subagentId: "sub_1", durationMs: 42, cost: { inputTokens: 1, outputTokens: 2, cachedTokens: 3, costUsd: 0.04, modelId: "claude-test" } } });
+    adapter.mapToBridgeEvent("run", { type: "tool/post_use", payload: { toolCallId: "tool_1", name: "Write", input: { file_path: "src/a.ts" }, output: { ok: true } } });
+
+    expect(eventPayload(database, "context.snapshot")).toMatchObject({ runId: "run", idempotencyKey: "claude_compact:run", snapshot: { kind: "claude_compact", text: "compacted summary" } });
+    expect(eventPayload(database, "subagent.started")).toMatchObject({ runId: "run", subagentId: "sub_1", role: "reviewer" });
+    expect(eventPayload(database, "subagent.completed")).toMatchObject({ runId: "run", subagentId: "sub_1", durationMs: 42, cost: { inputTokens: 1, outputTokens: 2, cachedTokens: 3, costUsd: 0.04, modelId: "claude-test" } });
+    expect(diffDetected).toMatchObject({ runId: "run", path: "src/a.ts" });
+    expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'artifact.diff.detected'").get()).toMatchObject({ count: 0 });
+    expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM artifacts WHERE run_id = 'run'").get()).toMatchObject({ count: 0 });
+    expect(database.sqlite.prepare("SELECT type FROM events WHERE type = 'file.changed' AND run_id = 'run'").get()).toMatchObject({ type: "file.changed" });
+    database.sqlite.close();
+  });
+
+  it("@integration:claude-code skips real claude smoke coverage when the binary is absent", () => {
+    const detected = spawnSync(process.platform === "win32" ? "where.exe" : "command", process.platform === "win32" ? ["claude"] : ["-v", "claude"], { stdio: "ignore", shell: false });
+    if (detected.status !== 0) return;
+    const adapter = new ClaudeCodeACPAdapter({ command: "claude" });
+    expect(() => Effect.runSync(adapter.detect())).not.toThrow();
+  });
+
   it("bridges managed ACP supervision failure to RunLifecycleService as session.crashed", async () => {
     const dir = mkdtempSync(join(tmpdir(), "agenthub-claude-crash-bridge-"));
     const database = createDatabase({ path: join(dir, "agenthub.sqlite"), applyMigrations: true });
@@ -163,6 +201,12 @@ class EarlyFailClaudeCodeACPAdapter extends ClaudeCodeACPAdapter {
     this.onSessionFailed(debug, new ACPAdapterError("process_exit", "early failure"));
     return session;
   }
+}
+
+function eventPayload(database: ReturnType<typeof createDatabase>, type: string): unknown {
+  const row = database.sqlite.prepare("SELECT payload FROM events WHERE type = ? ORDER BY seq DESC LIMIT 1").get(type) as { readonly payload: string } | undefined;
+  if (row !== undefined) return JSON.parse(row.payload) as unknown;
+  throw new Error(`Missing event '${type}'`);
 }
 
 async function waitFor<T>(read: () => T, done: (value: T) => boolean, options: { readonly timeoutMs?: number } = {}): Promise<T> {
