@@ -56,3 +56,5 @@
 ## 2026-05-25 - commandBus startup ordering race
 - Adapter terminal artifact dispatch must resolve commandBus through getCommandBus at dispatch time, not adapter construction time, because daemon startup catchUp/scheduleTick can lazily create adapters before commandBusRef.current is populated.
 - Verified fix with LSP diagnostics on changed files, pnpm.cmd test, and pnpm.cmd typecheck; bare pnpm is blocked by local PowerShell execution policy, so use pnpm.cmd on Windows.
+
+- 2026-05-25 final re-review: commandBus terminal artifact race fixed by passing a lazy getCommandBus callback through daemon registry/services into AdapterBridge; validation rerun with pnpm.cmd typecheck/lint/test/check:all/test:e2e and openspec strict all passing.
