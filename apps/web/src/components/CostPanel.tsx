@@ -3,16 +3,25 @@ import { useCsrfFetch } from "../hooks/useSdk.ts";
 
 type CostGroup = {
   readonly key: string;
-  readonly totalCostUsd: number;
-  readonly totalTokens: number;
+  readonly costUsd: number;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cachedTokens: number;
   readonly runCount: number;
 };
 
 type CostSummaryResponse = {
+  readonly groupBy: "agent" | "model" | "day";
+  readonly from: number;
+  readonly to: number;
   readonly groups: readonly CostGroup[];
-  readonly totalCostUsd: number;
-  readonly totalRuns: number;
-  readonly totalTokens: number;
+  readonly total: {
+    readonly costUsd: number;
+    readonly inputTokens: number;
+    readonly outputTokens: number;
+    readonly cachedTokens: number;
+    readonly runCount: number;
+  };
 };
 
 type TimeWindow = "today" | "7d" | "30d" | "custom";
@@ -30,6 +39,8 @@ export function CostPanel({ workspaceId }: CostPanelProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const csrfFetch = useCsrfFetch();
+
+  const totalTokens = (cost: Pick<CostGroup, "inputTokens" | "outputTokens" | "cachedTokens">) => cost.inputTokens + cost.outputTokens + cost.cachedTokens;
 
   const getDateRange = useCallback((window: TimeWindow): { from: string; to: string } => {
     const now = new Date();
@@ -80,7 +91,7 @@ export function CostPanel({ workspaceId }: CostPanelProps) {
 
   const maxCost = useMemo(() => {
     if (!data || data.groups.length === 0) return 0;
-    return Math.max(...data.groups.map((g) => g.totalCostUsd));
+    return Math.max(...data.groups.map((g) => g.costUsd));
   }, [data]);
 
   const handleRowClick = useCallback(
@@ -184,7 +195,7 @@ export function CostPanel({ workspaceId }: CostPanelProps) {
           <div style={{ marginBottom: "var(--ah-space-4)", padding: "var(--ah-space-3)", background: "var(--ah-bg-elevated)", borderRadius: "var(--ah-radius-lg)", border: "1px solid var(--ah-border)" }}>
             <div style={{ display: "flex", alignItems: "flex-end", gap: "var(--ah-space-1)", height: 120, paddingBottom: 20, position: "relative" }}>
               {data.groups.map((group) => {
-                const heightPercent = maxCost > 0 ? (group.totalCostUsd / maxCost) * 100 : 0;
+                const heightPercent = maxCost > 0 ? (group.costUsd / maxCost) * 100 : 0;
                 return (
                   <div
                     key={group.key}
@@ -198,7 +209,7 @@ export function CostPanel({ workspaceId }: CostPanelProps) {
                       cursor: "pointer"
                     }}
                     onClick={() => handleRowClick(group.key)}
-                    title={`${group.key}: $${group.totalCostUsd.toFixed(4)}`}
+                    title={`${group.key}: $${group.costUsd.toFixed(4)}`}
                   >
                     <div
                       style={{
@@ -253,8 +264,8 @@ export function CostPanel({ workspaceId }: CostPanelProps) {
                   {group.key}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: "var(--ah-space-3)", flexShrink: 0 }}>
-                  <span style={{ fontSize: "var(--ah-font-size-sm)", fontWeight: 600, color: "var(--ah-success)" }}>${group.totalCostUsd.toFixed(4)}</span>
-                  <span style={{ fontSize: "var(--ah-font-size-xs)", color: "var(--ah-text-muted)" }}>{group.totalTokens.toLocaleString()} tokens</span>
+                  <span style={{ fontSize: "var(--ah-font-size-sm)", fontWeight: 600, color: "var(--ah-success)" }}>${group.costUsd.toFixed(4)}</span>
+                  <span style={{ fontSize: "var(--ah-font-size-xs)", color: "var(--ah-text-muted)" }}>{totalTokens(group).toLocaleString()} tokens</span>
                   <span style={{ fontSize: "var(--ah-font-size-xs)", color: "var(--ah-text-muted)" }}>{group.runCount} runs</span>
                 </div>
               </div>
@@ -274,9 +285,9 @@ export function CostPanel({ workspaceId }: CostPanelProps) {
           >
             <span style={{ fontSize: "var(--ah-font-size-sm)", fontWeight: 600, color: "var(--ah-text-secondary)" }}>Total</span>
             <div style={{ display: "flex", alignItems: "center", gap: "var(--ah-space-3)" }}>
-              <span style={{ fontSize: "var(--ah-font-size-sm)", fontWeight: 600, color: "var(--ah-success)" }}>${data.totalCostUsd.toFixed(4)}</span>
-              <span style={{ fontSize: "var(--ah-font-size-xs)", color: "var(--ah-text-muted)" }}>{data.totalTokens.toLocaleString()} tokens</span>
-              <span style={{ fontSize: "var(--ah-font-size-xs)", color: "var(--ah-text-muted)" }}>{data.totalRuns} runs</span>
+              <span style={{ fontSize: "var(--ah-font-size-sm)", fontWeight: 600, color: "var(--ah-success)" }}>${data.total.costUsd.toFixed(4)}</span>
+              <span style={{ fontSize: "var(--ah-font-size-xs)", color: "var(--ah-text-muted)" }}>{totalTokens(data.total).toLocaleString()} tokens</span>
+              <span style={{ fontSize: "var(--ah-font-size-xs)", color: "var(--ah-text-muted)" }}>{data.total.runCount} runs</span>
             </div>
           </div>
         </>

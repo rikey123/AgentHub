@@ -204,6 +204,12 @@ importers:
       '@agenthub/adapter-acp-base':
         specifier: workspace:*
         version: link:../acp-base
+      '@agenthub/orchestrator':
+        specifier: workspace:*
+        version: link:../../orchestrator
+      '@agenthub/permissions':
+        specifier: workspace:*
+        version: link:../../permissions
       '@agenthub/protocol':
         specifier: workspace:*
         version: link:../../protocol
@@ -272,6 +278,9 @@ importers:
       '@agenthub/adapter-mock':
         specifier: workspace:*
         version: link:../adapters/mock
+      '@agenthub/adapter-opencode':
+        specifier: workspace:*
+        version: link:../adapters/opencode
       '@agenthub/agents':
         specifier: workspace:*
         version: link:../agents

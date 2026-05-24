@@ -1,5 +1,5 @@
 {
-  "name": "@agenthub/adapters-opencode",
+  "name": "@agenthub/adapter-opencode",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@agenthub/adapter-acp-base": "workspace:*",
+    "@agenthub/orchestrator": "workspace:*",
+    "@agenthub/permissions": "workspace:*",
     "@agenthub/protocol": "workspace:*",
     "effect": "^3.19.6"
   }
