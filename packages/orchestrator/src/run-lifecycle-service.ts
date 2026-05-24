@@ -242,7 +242,7 @@ export class RunLifecycleService {
     });
   }
 
-  complete(tx: SqliteTx | null, runId: string, cost: Cost): void {
+  complete(tx: SqliteTx | null, runId: string, cost: Cost, briefText?: string): void {
     this.withTransaction(tx, (db) => {
       const run = this.getRun(db, runId);
       this.requireStatus(run, ["starting", "running", "waiting_permission"], "complete");
@@ -256,11 +256,12 @@ export class RunLifecycleService {
         waiting_reason: null
       });
       this.publishRunEvent(db, "agent.run.completed", runId, run.workspace_id, run.room_id, run.agent_id, { runId, cost });
+      this.publishBriefEvent(db, runId, run.workspace_id, run.room_id, run.agent_id, briefText);
     });
     this.sideEffects.onTerminal?.(runId);
   }
 
-  fail(tx: SqliteTx | null, runId: string, reason: string, failureClass: RunFailureClass, error?: string): void {
+  fail(tx: SqliteTx | null, runId: string, reason: string, failureClass: RunFailureClass, error?: string, briefText?: string): void {
     if (!isFailureClass(failureClass)) {
       throw new RunLifecycleError("invalid_failure_class", `Invalid failureClass '${String(failureClass)}'`);
     }
@@ -274,16 +275,18 @@ export class RunLifecycleService {
       }
       this.sideEffects.finalizeNextTurns?.(db, runId, failureClass, now);
       this.publishRunEvent(db, "agent.run.failed", runId, run.workspace_id, run.room_id, run.agent_id, { runId, reason, failureClass, error });
+      this.publishBriefEvent(db, runId, run.workspace_id, run.room_id, run.agent_id, briefText);
     });
     this.sideEffects.onTerminal?.(runId);
   }
 
-  cancelFinalized(tx: SqliteTx | null, runId: string): void {
+  cancelFinalized(tx: SqliteTx | null, runId: string, briefText?: string): void {
     this.withTransaction(tx, (db) => {
       const run = this.getRun(db, runId);
       this.requireStatus(run, ["cancelling"], "cancelFinalized");
       this.updateStatus(db, runId, "cancelled", { ended_at: this.now(), failure_class: "user_cancelled", waiting_reason: null });
       this.publishRunEvent(db, "agent.run.cancelled", runId, run.workspace_id, run.room_id, run.agent_id, { runId });
+      this.publishBriefEvent(db, runId, run.workspace_id, run.room_id, run.agent_id, briefText);
     });
     this.sideEffects.onTerminal?.(runId);
   }
@@ -367,6 +370,24 @@ export class RunLifecycleService {
       createdAt: this.now()
     } satisfies PublishInput);
     void db;
+  }
+
+  private publishBriefEvent(db: SqliteTx, runId: string, workspaceId: string, roomId: string, agentId: string, briefText?: string): void {
+    this.eventBus.publish({
+      id: randomUUID(),
+      type: "message.brief.published",
+      schemaVersion: 1,
+      workspaceId,
+      roomId,
+      runId,
+      agentId,
+      payload: { text: briefText ?? "" },
+      createdAt: this.now()
+    } satisfies PublishInput);
+    db.prepare(
+      `UPDATE messages SET brief_published_at = :now
+       WHERE run_id = :runId AND role = 'assistant' AND status = 'completed'`
+    ).run({ now: this.now(), runId });
   }
 }
 
