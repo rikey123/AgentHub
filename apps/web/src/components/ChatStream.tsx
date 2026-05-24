@@ -669,6 +669,7 @@ function BriefItem({
 
   return (
     <div
+      data-testid="brief-card"
       style={{
         marginTop: "var(--ah-space-3)",
         padding: "var(--ah-space-3) var(--ah-space-4)",

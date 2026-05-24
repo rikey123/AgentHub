@@ -272,10 +272,10 @@ class Projector {
         if (payload) {
           const brief: BriefViewModel = {
             kind: (typeof payload.kind === "string" ? payload.kind : "run_completed") as BriefViewModel["kind"],
-            runId: typeof payload.runId === "string" ? payload.runId : "",
+            runId: typeof event.runId === "string" ? event.runId : typeof payload.runId === "string" ? payload.runId : "",
             agentId: event.agentId ?? "",
             agentName: this.agentName(room, event.agentId ?? "") ?? "Agent",
-            summary: typeof payload.summary === "string" ? payload.summary : "",
+            summary: typeof payload.text === "string" ? payload.text : typeof payload.summary === "string" ? payload.summary : "",
             artifactCount: typeof payload.artifactCount === "number" ? payload.artifactCount : undefined,
             cost: typeof payload.cost === "object" && payload.cost !== null ? (payload.cost as { tokens: number; usd?: number | undefined }) : undefined,
             failureReason: typeof payload.failureReason === "string" ? payload.failureReason : undefined,
