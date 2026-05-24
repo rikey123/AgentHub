@@ -33,6 +33,7 @@ export type DaemonOptions = { readonly databasePath: string; readonly host?: str
 export type DaemonCloseOptions = { readonly forceCancelAfterMs?: number };
 export type DaemonCloseResult = { readonly forced: boolean; readonly cancelledRunIds: readonly string[] };
 export type DaemonApp = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly roomMcpServer: RoomMcpServer; readonly adapterRegistry: AdapterRegistry; readonly mockAdapter: MockAdapterManager; readonly handle: (req: IncomingMessage, res: ServerResponse) => void; readonly inFlightRunIds: () => readonly string[]; start(): Promise<Server>; close(options?: DaemonCloseOptions): Promise<DaemonCloseResult> };
+type StatusLineEventBus = EventBus & { flushStatusLines?: () => void };
 const PHASE_SQLITE: DaemonStartupPhase = "SQLite open + pragma + migrate";
 const PHASE_EVENT_STORE: DaemonStartupPhase = "EventStore readiness check";
 const PHASE_EVENT_BUS: DaemonStartupPhase = "EventBus (PubSub + per-type)";
@@ -56,7 +57,7 @@ const DAEMON_SHUTDOWN_PHASES: readonly DaemonStartupPhase[] = [
 
 type DaemonRuntime = {
   database: AgentHubDatabase;
-  eventBus: EventBus;
+  eventBus: StatusLineEventBus;
   commandBus: CommandBus;
   roomMcpServer: RoomMcpServer;
   adapterRegistry: AdapterRegistry;
@@ -254,8 +255,6 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     close
   };
 }
-
-type StatusLineEventBus = EventBus & { flushStatusLines?: () => void };
 
 function withStatusLineCoalescing(eventBus: EventBus): StatusLineEventBus {
   const basePublish = eventBus.publish.bind(eventBus);

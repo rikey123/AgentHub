@@ -372,7 +372,7 @@
 
 ### Wave W1 — OpenCode, Claude Hooks, Agent Templates (`§1.*`, `§2.*`, `§3.*`)
 
-- [ ] §1.1 Research OpenCode ACP bridge package and record decision
+- [x] §1.1 Research OpenCode ACP bridge package and record decision
   - **Spec refs**: `design/V05-D1`.
   - **What to do**: Consume PF.2 result, update `openspec/changes/add-v05-chatroom-complete/design.md` V05-1 with selected package/version/spawn mode and docs link.
   - **Must NOT do**: Do not start adapter implementation if PF.2 is unresolved.
@@ -397,7 +397,7 @@
     ```
   - **Commit**: YES | Message: `docs(spec): record opencode acp bridge decision` | Files: `design.md`, notepad if committed.
 
-- [ ] §1.2 Implement `OpenCodeACPAdapter extends ACPAdapter`
+- [x] §1.2 Implement `OpenCodeACPAdapter extends ACPAdapter`
   - **Spec refs**: `adapter-framework/OpenCodeACPAdapter 真实现`.
   - **What to do**: Replace stub with `OpenCodeACPAdapter` that overrides only `spawnArgs()`, `detect()`, `mapProviderEvent()`, `mapProviderError()` and inherits state machine, pending table, line splitter, supervision, liveness, cancel/dispose, and `wrapExternalContent` integration.
   - **Must NOT do**: Do not copy `ACPAdapter` base internals; do not change `AgentRuntimeAdapter`/`AdapterManifest`/`ACPAdapter` interfaces.
@@ -423,7 +423,7 @@
     ```
   - **Commit**: YES | Message: `feat(adapter): implement opencode acp adapter` | Files: `packages/adapters/opencode/**` only unless manifest registry requires update.
 
-- [ ] §1.3 Implement `OpenCodeACPAdapter.detect()`
+- [x] §1.3 Implement `OpenCodeACPAdapter.detect()`
   - **Spec refs**: `adapter-framework/OpenCodeACPAdapter 真实现`.
   - **What to do**: Detect `opencode` via Windows `where opencode` and macOS/Linux `bash -lc 'command -v opencode'`; return binary/version list or `[]` without blocking daemon.
   - **Must NOT do**: Do not throw when binary is missing; do not require OpenCode for daemon startup.
@@ -448,7 +448,7 @@
     ```
   - **Commit**: YES | Message: `feat(adapter): detect opencode cli` | Files: opencode adapter/tests.
 
-- [ ] §1.4 Implement `attachSession(input)` for resumable OpenCode
+- [x] §1.4 Implement `attachSession(input)` for resumable OpenCode
   - **Spec refs**: `adapter-framework/OpenCodeACPAdapter 真实现`.
   - **What to do**: Implement resumable attach path consistent with `crashRecovery: "resumable"` so ReclaimStaleClaimedRun can restore session by `adapterSessionId`.
   - **Must NOT do**: Do not restart OpenCode subprocess when attach is possible; do not mark crashRecovery resumable without implementation.
@@ -474,7 +474,7 @@
     ```
   - **Commit**: YES | Message: `feat(adapter): attach opencode sessions` | Files: opencode adapter/recovery tests.
 
-- [ ] §1.5 Map OpenCode native events to `AcpProviderEvent`
+- [x] §1.5 Map OpenCode native events to `AcpProviderEvent`
   - **Spec refs**: `adapter-framework/OpenCodeACPAdapter 真实现`.
   - **What to do**: Implement provider event/error mapping using PF.2 docs and Claude adapter mapping as pattern; include prompt/tool/permission/subagent/context snapshot/cancel/error paths supported by OpenCode.
   - **Must NOT do**: Do not fabricate capabilities OpenCode does not expose; manifest must be honest.
@@ -499,7 +499,7 @@
     ```
   - **Commit**: YES | Message: `feat(adapter): map opencode acp events` | Files: opencode adapter/tests.
 
-- [ ] §1.6 Confirm builder-opencode default model and feed template content
+- [x] §1.6 Confirm builder-opencode default model and feed template content
   - **Spec refs**: `agents/内置 Agent（MVP 必带）`; `design/V05-5`.
   - **What to do**: Consume PF.3 model decision and provide exact frontmatter values to `§3.1`; if model is CLI-default implicit, document whether `model` is omitted or set.
   - **Must NOT do**: Do not write template in adapter package; `§3.1` owns final template files.
@@ -524,7 +524,7 @@
     ```
   - **Commit**: YES if design/notepad tracked | Message: `docs(spec): record opencode default model` | Files: `design.md`/notepad.
 
-- [ ] §1.7 Integration tests for OpenCodeACPAdapter detect/startRun/cancel
+- [x] §1.7 Integration tests for OpenCodeACPAdapter detect/startRun/cancel
   - **Spec refs**: `adapter-framework/OpenCodeACPAdapter 真实现`.
   - **What to do**: Add integration tests that run with `OPENCODE_BIN` or detected binary and skip cleanly otherwise; cover detect, startRun, cooperative cancel.
   - **Must NOT do**: Do not fail CI on machines without OpenCode binary; do not hide failures when `OPENCODE_BIN` is set.
@@ -549,7 +549,7 @@
     ```
   - **Commit**: YES | Message: `test(adapter): cover opencode integration smoke` | Files: opencode tests.
 
-- [ ] §2.1 Emit `context.snapshot` for Claude `pre_compact`
+- [x] §2.1 Emit `context.snapshot` for Claude `pre_compact`
   - **Spec refs**: `adapter-framework/ClaudeCodeAdapter 事件映射`; `context-ledger/长会话压缩 → ContextItem.summary`.
   - **What to do**: Map Claude `pre_compact` provider event to adapter event `context.snapshot` with `{kind:"claude_compact", text}` and `idempotencyKey="claude_compact:<runId>"`.
   - **Must NOT do**: Do not confirm context automatically; generated ContextItem remains draft.
@@ -574,7 +574,7 @@
     ```
   - **Commit**: YES | Message: `feat(adapter): map claude precompact snapshots` | Files: claude adapter/tests.
 
-- [ ] §2.2 Emit `subagent.started` / `subagent.completed` for Claude
+- [x] §2.2 Emit `subagent.started` / `subagent.completed` for Claude
   - **Spec refs**: `adapter-framework/ClaudeCodeAdapter 事件映射`.
   - **What to do**: Map `subagent_start` and `subagent_stop` provider events to durable detail events including runId/subagentId/role and cost/duration on completion.
   - **Must NOT do**: Do not expose subagent events to main timeline.
@@ -599,7 +599,7 @@
     ```
   - **Commit**: YES | Message: `feat(adapter): emit claude subagent events` | Files: claude adapter/tests.
 
-- [ ] §2.3 Emit `artifact.diff.detected` marker for Claude post tool use
+- [x] §2.3 Emit `artifact.diff.detected` marker for Claude post tool use
   - **Spec refs**: `adapter-framework/ClaudeCodeAdapter 事件映射`; `event-system/事件分级`.
   - **What to do**: On file-writing `tool/post_use`, emit `artifact.diff.detected {runId,path}` in addition to existing `tool.call.completed`/`file.changed`.
   - **Must NOT do**: Do not create artifact rows; do not emit `artifact.diff.created`; do not show marker in main timeline.
@@ -625,7 +625,7 @@
     ```
   - **Commit**: YES | Message: `feat(adapter): emit diff detected markers` | Files: claude adapter/tests.
 
-- [ ] §2.4 ContextLedger proposes draft summary from `context.snapshot`
+- [x] §2.4 ContextLedger proposes draft summary from `context.snapshot`
   - **Spec refs**: `context-ledger/长会话压缩 → ContextItem.summary`.
   - **What to do**: Add consumer/handler so `context.snapshot` creates idempotent draft `ContextItem.summary` with `source.kind="tool"` and adapter-specific source id.
   - **Must NOT do**: Do not mark item confirmed; do not duplicate drafts for same idempotencyKey.
@@ -650,7 +650,7 @@
     ```
   - **Commit**: YES | Message: `feat(context): propose compact summaries` | Files: context/event handler tests.
 
-- [ ] §2.5 Real Claude integration tests for tool/ask/diff/cancel
+- [x] §2.5 Real Claude integration tests for tool/ask/diff/cancel
   - **Spec refs**: `adapter-framework/ClaudeCodeAdapter 事件映射`.
   - **What to do**: Add `@integration:claude-code` tests that skip when `claude` binary is unavailable; cover single run with Read/Write/Bash, ask allow, diff apply, cancel interrupt.
   - **Must NOT do**: Do not require real Claude binary in normal CI; do not skip when env explicitly opts in.
@@ -675,7 +675,7 @@
     ```
   - **Commit**: YES | Message: `test(adapter): cover claude integration hooks` | Files: claude integration tests.
 
-- [ ] §3.1 Write seven built-in agent markdown templates
+- [x] §3.1 Write seven built-in agent markdown templates
   - **Spec refs**: `agents/内置 Agent（MVP 必带）`.
   - **What to do**: Create source templates for `mock-builder`, `mock-reviewer`, `claude-code-builder`, `claude-code-reviewer`, `builder-opencode`, `reviewer`, `archivist`, all with `version: 1.0.0` frontmatter and spec capabilities/defaultPresence.
   - **Must NOT do**: Do not overwrite user files during template definition; do not create only 4 templates.
@@ -700,7 +700,7 @@
     ```
   - **Commit**: YES | Message: `feat(agents): add builtin agent templates` | Files: agents package/template tests.
 
-- [ ] §3.2 Implement first-launch template write/update-warning logic
+- [x] §3.2 Implement first-launch template write/update-warning logic
   - **Spec refs**: `agents/内置 Agent（MVP 必带）`.
   - **What to do**: On daemon startup, ensure `~/.agenthub/agents/`; per-template if file missing write it; if existing version older, stderr warning only; never overwrite user-edited files.
   - **Must NOT do**: Do not use a global first-launch flag; behavior is per-file existence/version.
@@ -725,7 +725,7 @@
     ```
   - **Commit**: YES | Message: `feat(agents): seed builtin templates on startup` | Files: agents/daemon bootstrap tests.
 
-- [ ] §3.3 Implement AgentProfile chokidar hot reload
+- [x] §3.3 Implement AgentProfile chokidar hot reload
   - **Spec refs**: `agents/AgentProfile 数据模型`; `event-system/事件分级`.
   - **What to do**: Upgrade stub to watch user/workspace agents dirs; parse markdown with gray-matter; upsert V0.5 DB columns; emit `agent.profile.updated`, `agent.profile.removed`, `agent.profile.error`; preserve running Run snapshots.
   - **Must NOT do**: Do not delete old DB row on parse failure; do not affect in-flight Runs.
@@ -751,7 +751,7 @@
     ```
   - **Commit**: YES | Message: `feat(agents): hot reload agent profiles` | Files: agents/daemon/db tests.
 
-- [ ] §3.4 Implement `agenthub agents reset --id=<agentId>`
+- [x] §3.4 Implement `agenthub agents reset --id=<agentId>`
   - **Spec refs**: `local-daemon/daemon CLI 子命令`; `agents/内置 Agent（MVP 必带）`.
   - **What to do**: Add CLI reset subcommand that overwrites one built-in template from source templates to `~/.agenthub/agents/<id>.md`, with validation for unknown id.
   - **Must NOT do**: Do not reset all agents unless explicitly requested by future spec; do not touch daemon auth commands in this task except shared CLI module setup from PF.7.
@@ -776,7 +776,7 @@
     ```
   - **Commit**: YES | Message: `feat(cli): reset builtin agent templates` | Files: CLI/agents template export tests.
 
-- [ ] §3.5 Unit tests for templates and hot reload
+- [x] §3.5 Unit tests for templates and hot reload
   - **Spec refs**: `agents/内置 Agent（MVP 必带）`; `agents/AgentProfile 数据模型`.
   - **What to do**: Ensure focused tests exist for first-launch write, same-name skip, version warning, chokidar add/change/unlink, parse failure preserving old row.
   - **Must NOT do**: Do not rely only on manual filesystem testing.
