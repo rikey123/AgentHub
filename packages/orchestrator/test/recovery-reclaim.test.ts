@@ -50,6 +50,22 @@ describe("ReclaimStaleClaimedRun", () => {
       error: "claim_aborted"
     });
   });
+
+  test("attaches a resumable running run from a previous daemon pid", async () => {
+    currentLifecycle().markStarting(null, "run_stuck", 456);
+    currentLifecycle().markRunning(null, "run_stuck", "ses_abc");
+    const attachSession = vi.fn();
+    const reclaim = new ReclaimStaleClaimedRun(currentDatabase(), currentLifecycle(), () => ({ crashRecovery: "resumable", attachSession }), () => now, 123);
+
+    await reclaim.scan();
+
+    expect(attachSession).toHaveBeenCalledWith({ runId: "run_stuck", adapterSessionId: "ses_abc" });
+    expect(currentDatabase().sqlite.prepare("SELECT status, adapter_session_id, pid_at_start FROM runs WHERE id = 'run_stuck'").get()).toMatchObject({
+      status: "running",
+      adapter_session_id: "ses_abc",
+      pid_at_start: 123
+    });
+  });
 });
 
 function currentDatabase(): AgentHubDatabase {

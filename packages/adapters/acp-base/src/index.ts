@@ -10,7 +10,7 @@ import type { AdapterArtifactFSBoundary } from "@agenthub/orchestrator";
 import type { PermissionEngine, PermissionResource } from "@agenthub/permissions";
 import type { AdapterError, AdapterMessage, AdapterRunInput, AgentAdapterManifest, AttachSessionInput, ContextInjectionResult, ContextProjection, CreateSessionInput, DetectedRuntime, ExternalContextSnapshot, ExternalSession } from "@agenthub/protocol";
 import type { EventType } from "@agenthub/protocol/events";
-import { redactAndTruncate } from "@agenthub/security";
+import { redactAndTruncate, wrapExternalContent } from "@agenthub/security";
 import { Effect, Stream } from "effect";
 
 export type AcpSessionState = "disconnected" | "connecting" | "initializing" | "ready" | "prompting" | "cancelling" | "failed" | "disposed";
@@ -295,7 +295,7 @@ export abstract class ACPAdapter {
         session.pendingRequests.delete(requestId);
         if (message.error !== undefined) pending.reject(this.mapProviderError(message.error));
         else {
-          pending.resolve(message.result);
+          pending.resolve(wrapFileReadResult(pending, message.result));
           if (pending.method === "protocol/ping") session.consecutivePingMisses = 0;
         }
         if (session.inflightPromptRequestId === requestId) {
@@ -532,6 +532,28 @@ export function permissionForTool(toolName: string, input: unknown): PermissionR
 
 function clearPending(pending: AcpPendingRequest): void {
   if (pending.timer !== undefined) clearTimeout(pending.timer);
+}
+
+function wrapFileReadResult(pending: AcpPendingRequest, result: unknown): unknown {
+  if (!isFileReadMethod(pending.method)) return result;
+  if (typeof result === "string") return wrapExternalContent("unknown", result);
+  if (!isRecord(result)) return result;
+
+  const path = stringField(result, "path") ?? stringField(result, "filePath") ?? stringField(result, "uri") ?? "unknown";
+  for (const key of ["content", "text", "data"] as const) {
+    const value = result[key];
+    if (typeof value === "string") return { ...result, [key]: wrapExternalContent(path, value) };
+  }
+  return result;
+}
+
+function isFileReadMethod(method: string): boolean {
+  return method === "fs/read" || method === "fs.read" || method === "fs.readTextFile" || method.endsWith("/readTextFile") || method.endsWith(".readTextFile");
+}
+
+function stringField(value: Record<string, unknown>, key: string): string | undefined {
+  const field = value[key];
+  return typeof field === "string" && field.length > 0 ? field : undefined;
 }
 
 function providerAllowsConcurrentPrompt(manifest: AgentAdapterManifest): boolean {

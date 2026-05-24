@@ -503,6 +503,7 @@ export class EventBus {
 class BoundedPubSub {
   private readonly capacities: Record<PubSubChannelName, number>;
   private readonly state = new Map<PubSubChannelName, { size: number; dropped: number; highWatermark: number }>();
+  private readonly drainScheduled = new Set<PubSubChannelName>();
   constructor(config: PubSubCapacityConfig = {}) {
     this.capacities = { durable: config.durable ?? 4096, message_delta: config.message_delta ?? 1024, tool_update: config.tool_update ?? 512, status_line: config.status_line ?? 64, adapter_raw: config.adapter_raw ?? 256, system_notice: config.system_notice ?? 128 };
     for (const [channel, capacity] of Object.entries(this.capacities) as [PubSubChannelName, number][]) {
@@ -520,11 +521,21 @@ class BoundedPubSub {
     }
     state.size += 1;
     state.highWatermark = Math.max(state.highWatermark, state.size);
-    state.size -= 1;
+    this.scheduleDrain(channel);
     return true;
   }
   stats(): PubSubChannelStats[] {
     return (["durable", "message_delta", "tool_update", "status_line", "adapter_raw", "system_notice"] as const).map((channel) => ({ channel, capacity: this.capacities[channel], size: this.state.get(channel)?.size ?? 0, dropped: this.state.get(channel)?.dropped ?? 0, highWatermark: this.state.get(channel)?.highWatermark ?? 0 }));
+  }
+
+  private scheduleDrain(channel: PubSubChannelName): void {
+    if (this.drainScheduled.has(channel)) return;
+    this.drainScheduled.add(channel);
+    queueMicrotask(() => {
+      const state = this.state.get(channel);
+      if (state !== undefined) state.size = 0;
+      this.drainScheduled.delete(channel);
+    });
   }
 }
 
