@@ -19,7 +19,7 @@ await runCheck("subscriptions:check", async function checkSubscriptions() {
     }
   }
 
-  const busSpec = await readText("openspec/changes/add-agenthub-mvp/specs/bus-runtime/spec.md");
+  const busSpec = await readText("openspec/specs/bus-runtime/spec.md");
   for (const required of ["subscribes.ts", "DurableHandler", "handler_cursors", "last_seq", "agent.run.queued"]) {
     if (!busSpec.includes(required)) errors.push(`bus-runtime spec no longer exposes expected subscription contract marker '${required}'`);
   }

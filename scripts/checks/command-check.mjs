@@ -27,8 +27,8 @@ function extractCommandTypes(spec) {
 
 await runCheck("command:check", async function checkCommands() {
   const errors = [];
-  const busSpec = await readText("openspec/changes/add-agenthub-mvp/specs/bus-runtime/spec.md");
-  const orchestratorSpec = await readText("openspec/changes/add-agenthub-mvp/specs/orchestrator/spec.md");
+  const busSpec = await readText("openspec/specs/bus-runtime/spec.md");
+  const orchestratorSpec = await readText("openspec/specs/orchestrator/spec.md");
   const commandTypes = new Set(extractCommandTypes(busSpec));
 
   for (const command of forbiddenCommands) {

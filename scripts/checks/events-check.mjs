@@ -68,8 +68,8 @@ await runCheck("events:check", async function checkEvents() {
     if (entry.schemaVersion !== 1) errors.push(`event '${entry.type}' must stay on schemaVersion 1 until a v2 type is introduced`);
   }
 
-  const eventSystemSpec = await readText("openspec/changes/add-agenthub-mvp/specs/event-system/spec.md");
-  const adapterFrameworkSpec = await readText("openspec/changes/add-agenthub-mvp/specs/adapter-framework/spec.md");
+  const eventSystemSpec = await readText("openspec/specs/event-system/spec.md");
+  const adapterFrameworkSpec = await readText("openspec/specs/adapter-framework/spec.md");
   const specRows = [...eventSystemSpec.matchAll(/^\|\s*([^|`]*(?:`[^`]+`[^|`]*)+)\|\s*[^|]+\|\s*(durable|ephemeral)\s*\|\s*(main|detail|both)\s*\|/gm)];
   const specTypes = unique([
     ...specRows.flatMap((match) => expandSpecEventCell(match[1])),
