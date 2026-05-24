@@ -133,6 +133,24 @@ describe("ContextLedger", () => {
     expect(result).toEqual({ ok: true, data: { mode: "next_turn", applied: false, effectiveAt: "next_turn", reason: "pending_inject" }, emittedEvents: [] });
   });
 
+  it("converts context.snapshot events into idempotent summary drafts", () => {
+    currentDb().sqlite.prepare("INSERT INTO tasks (id, workspace_id, room_id, title, status, created_at, updated_at) VALUES ('task_1', 'ws_1', 'room_1', 'Task', 'open', 1, 1)").run();
+
+    currentDb().sqlite.transaction(() => {
+      currentDb().sqlite.prepare("INSERT INTO runs (id, workspace_id, task_id, room_id, agent_id, parent_run_id, status, wake_reason, workspace_mode, target_files, mailbox_claim_count, created_at, updated_at) VALUES ('run_1', 'ws_1', 'task_1', 'room_1', 'builder', NULL, 'running', 'primary_turn', NULL, '[]', 0, 1, 1)").run();
+    })();
+    currentLedger();
+    currentDb();
+    const first = eventBus?.publish({ id: "evt_snapshot_1", type: "context.snapshot", schemaVersion: 1, workspaceId: "ws_1", roomId: "room_1", taskId: "task_1", runId: "run_1", agentId: "builder", payload: { snapshot: { kind: "claude_compact", text: "compact summary" }, idempotencyKey: "claude_compact:run_1" }, createdAt: now });
+    if (first?.durability === "durable") eventBus?.deliverPersisted(first.event);
+    const second = eventBus?.publish({ id: "evt_snapshot_2", type: "context.snapshot", schemaVersion: 1, workspaceId: "ws_1", roomId: "room_1", taskId: "task_1", runId: "run_1", agentId: "builder", payload: { snapshot: { kind: "claude_compact", text: "new compact summary" }, idempotencyKey: "claude_compact:run_1" }, createdAt: now + 1 });
+    if (second?.durability === "durable") eventBus?.deliverPersisted(second.event);
+
+    const items = currentLedger().list({ workspaceId: "ws_1", taskId: "task_1", status: "draft" });
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ type: "summary", scope: "task", status: "draft", confidence: "inferred", content: "compact summary", sourceMessageId: "claude_compact:run_1", source: { type: "tool", id: "claude_code_compact", kind: "claude_compact" } });
+  });
+
   it("provides a no-op vector index for future vector search", async () => {
     const index = new NoopVectorIndex();
     await expect(index.search("auth.ts changes", 8, { workspaceId: "ws_1" })).resolves.toEqual([]);

@@ -226,6 +226,9 @@ importers:
       '@agenthub/db':
         specifier: workspace:*
         version: link:../db
+      '@agenthub/protocol':
+        specifier: workspace:*
+        version: link:../protocol
       effect:
         specifier: ^3.19.6
         version: 3.21.2
