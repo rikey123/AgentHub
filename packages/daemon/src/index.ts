@@ -147,7 +147,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     };
     const lifecycle = new RunLifecycleService(database, eventBus, lifecycleOptions);
     const roomMcpServerRef: { current?: RoomMcpServer } = {};
-    const adapterRegistry = new AdapterRegistry({ database, eventBus, lifecycle, permissionEngine, artifactFs, getRoomMcpServer: () => currentRoomMcpServer(roomMcpServerRef), ...(options.now !== undefined ? { now: options.now } : {}) });
+    const adapterRegistry = new AdapterRegistry({ database, eventBus, lifecycle, permissionEngine, artifactFs, getRoomMcpServer: () => currentRoomMcpServer(roomMcpServerRef), getCommandBus: () => commandBusRef.current, ...(options.now !== undefined ? { now: options.now } : {}) });
 
     emitPhase("startup", PHASE_OUTBOX);
     const handlers = createDurableHandlerRegistry({ database, retryDelaysMs: [0] });

@@ -4,7 +4,7 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-import type { EventBus, PublishInput } from "@agenthub/bus";
+import type { CommandBus, EventBus, PublishInput } from "@agenthub/bus";
 import type { AgentHubDatabase } from "@agenthub/db";
 import type { AdapterArtifactFSBoundary } from "@agenthub/orchestrator";
 import type { PermissionEngine, PermissionResource } from "@agenthub/permissions";
@@ -479,7 +479,7 @@ export class AdapterRawLogger {
   }
 }
 
-export type AdapterRuntimeServices = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly permissionEngine?: PermissionEngine; readonly artifactFs?: AdapterArtifactFSBoundary; readonly now?: () => number };
+export type AdapterRuntimeServices = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus?: CommandBus; readonly permissionEngine?: PermissionEngine; readonly artifactFs?: AdapterArtifactFSBoundary; readonly now?: () => number };
 
 export function emitAdapterRegistered(eventBus: EventBus, workspaceId: string, manifest: AgentAdapterManifest, now = Date.now()): void {
   eventBus.publish(adapterEvent("adapter.registered", workspaceId, manifest.id, { adapterId: manifest.id, manifest }, now));
