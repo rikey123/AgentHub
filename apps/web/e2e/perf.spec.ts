@@ -222,9 +222,9 @@ test.describe("performance verification harness", () => {
     };
     writeFileSync(join(evidenceDir, "10k.json"), JSON.stringify(evidence10k, null, 2));
 
-    // ── Assertions: always pass, just document ──
-    expect(roomLoadMs).toBeGreaterThan(0);
-    expect(roomSwitchMs).toBeGreaterThan(0);
+    // Targets are 10x relaxed from M1 Mac spec for Windows CI
+    expect(roomLoadMs).toBeLessThan(5000);
+    expect(roomSwitchMs).toBeLessThan(2000);
   });
 
   test("delta frame timing performance", async ({ page }) => {
@@ -394,7 +394,7 @@ test.describe("performance verification harness", () => {
 
     writeFileSync(perfTracePath, JSON.stringify(evidence, null, 2));
 
-    // ── Assertions: always pass, just document ──
-    expect(frameTimes.length).toBeGreaterThan(0);
+    // Targets are 10x relaxed from M1 Mac spec for Windows CI
+    expect(p95FrameTimeMs).toBeLessThan(100);
   });
 });

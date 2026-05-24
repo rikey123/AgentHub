@@ -19,7 +19,7 @@
 
   --ah-text-primary: #111827;
   --ah-text-secondary: #374151;
-  --ah-text-muted: #6b7280;
+  --ah-text-muted: #4b5563;
   --ah-text-inverse: #f9fafb;
   --ah-text-danger: #991b1b;
   --ah-text-warning: #92400e;
@@ -30,21 +30,21 @@
   --ah-border-light: #f3f4f6;
   --ah-border-strong: #d1d5db;
 
-  --ah-accent: #3b82f6;
-  --ah-accent-hover: #2563eb;
+  --ah-accent: #1d4ed8;
+  --ah-accent-hover: #1e40af;
   --ah-accent-light: #dbeafe;
-  --ah-accent-text: #1d4ed8;
+  --ah-accent-text: #1e3a8a;
 
-  --ah-danger: #ef4444;
-  --ah-danger-hover: #dc2626;
+  --ah-danger: #c53030;
+  --ah-danger-hover: #b91c1c;
   --ah-danger-light: #fee2e2;
 
-  --ah-success: #10b981;
-  --ah-success-hover: #059669;
+  --ah-success: #047857;
+  --ah-success-hover: #065f46;
   --ah-success-light: #d1fae5;
 
-  --ah-warning: #d97706;
-  --ah-warning-hover: #b45309;
+  --ah-warning: #b45309;
+  --ah-warning-hover: #92400e;
   --ah-warning-light: #fef3c7;
 
   /* --- Spacing (cozy default, 4px base) --- */

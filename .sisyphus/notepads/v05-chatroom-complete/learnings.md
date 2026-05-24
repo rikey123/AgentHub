@@ -50,3 +50,5 @@
 
 # 2026-05-25
 - For `TerminalCard` E2E coverage, the test must seed a real `artifacts` row with `type="terminal"` and enough stdout lines to expose the expand control; otherwise the modal path never renders.
+
+- 2026-05-25: Real ACP adapters need the daemon command bus propagated through AdapterRegistry services for AdapterBridge terminal tool completions to create terminal artifacts. Use lazy getCommandBus: () => commandBusRef.current to avoid daemon startup circularity, and conditionally spread optional commandBus values for exact optional property compatibility.

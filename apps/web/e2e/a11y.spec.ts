@@ -51,7 +51,6 @@ test.describe("a11y axe-core compliance", () => {
 
     const results = await new AxeBuilder({ page })
       .disableRules([
-        "color-contrast",
         "aria-required-parent",
         "landmark-one-main",
         "nested-interactive",
@@ -87,7 +86,44 @@ test.describe("a11y axe-core compliance", () => {
 
     const results = await new AxeBuilder({ page })
       .disableRules([
-        "color-contrast",
+        "aria-required-parent",
+        "landmark-one-main",
+        "nested-interactive",
+        "page-has-heading-one",
+        "region"
+      ])
+      .analyze();
+
+    expect(results.violations).toEqual([]);
+  });
+
+  test("Run Detail has zero axe violations", async ({ page }) => {
+    const roomRes = await fetch(`${testUrl}/rooms`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "A11y Run Detail Room", mode: "solo", primaryAgentId: "mock-builder" })
+    });
+    const roomData = (await roomRes.json()) as { data: { roomId: string } };
+    const roomId = roomData.data.roomId;
+
+    await fetch(`${testUrl}/rooms/${roomId}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "trigger run for a11y", idempotencyKey: "a11y-run-1" })
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await page.goto(testUrl);
+    await page.waitForSelector("text=A11y Run Detail Room");
+    await page.click("text=A11y Run Detail Room");
+    await page.waitForSelector("text=trigger run for a11y");
+
+    // Open Run Detail from the brief card
+    await page.locator('[data-testid="brief-card"]').first().click();
+    await page.waitForSelector('[data-testid="run-detail-tab-transcript"]', { timeout: 5000 });
+
+    const results = await new AxeBuilder({ page })
+      .disableRules([
         "aria-required-parent",
         "landmark-one-main",
         "nested-interactive",

@@ -13,13 +13,10 @@
     "orientationAngle": 0,
     "orientationType": "landscape-primary"
   },
-  "timestamp": "2026-05-24T17:13:55.697Z",
-  "url": "http://127.0.0.1:49549/",
+  "timestamp": "2026-05-24T17:41:45.376Z",
+  "url": "http://127.0.0.1:48068/",
   "toolOptions": {
     "rules": {
-      "color-contrast": {
-        "enabled": false
-      },
       "aria-required-parent": {
         "enabled": false
       },
@@ -1140,7 +1137,7 @@
             }
           ],
           "impact": null,
-          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-7c8be04...\" style=\"background: none; bo...\">",
+          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-409ec32...\" style=\"background: none; bo...\">",
           "target": [
             ".ah-message-enter[role=\"button\"]:nth-child(1) > div:nth-child(1) > div > button[aria-label=\"Message actions\"]"
           ]
@@ -1173,7 +1170,7 @@
             }
           ],
           "impact": null,
-          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-8fa79d9...\" style=\"background: none; bo...\">",
+          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-7f4e719...\" style=\"background: none; bo...\">",
           "target": [
             ".ah-message-enter[role=\"button\"]:nth-child(2) > div:nth-child(1) > div > button[aria-label=\"Message actions\"]"
           ]
@@ -1792,7 +1789,7 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-7c8be04...\" style=\"background: none; bo...\">",
+          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-409ec32...\" style=\"background: none; bo...\">",
           "target": [
             ".ah-message-enter[role=\"button\"]:nth-child(1) > div:nth-child(1) > div > button[aria-label=\"Message actions\"]"
           ]
@@ -1810,7 +1807,7 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-8fa79d9...\" style=\"background: none; bo...\">",
+          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-7f4e719...\" style=\"background: none; bo...\">",
           "target": [
             ".ah-message-enter[role=\"button\"]:nth-child(2) > div:nth-child(1) > div > button[aria-label=\"Message actions\"]"
           ]
@@ -2244,7 +2241,7 @@
             }
           ],
           "impact": null,
-          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-7c8be04...\" style=\"background: none; bo...\">",
+          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-409ec32...\" style=\"background: none; bo...\">",
           "target": [
             ".ah-message-enter[role=\"button\"]:nth-child(1) > div:nth-child(1) > div > button[aria-label=\"Message actions\"]"
           ]
@@ -2262,7 +2259,7 @@
             }
           ],
           "impact": null,
-          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-8fa79d9...\" style=\"background: none; bo...\">",
+          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-7f4e719...\" style=\"background: none; bo...\">",
           "target": [
             ".ah-message-enter[role=\"button\"]:nth-child(2) > div:nth-child(1) > div > button[aria-label=\"Message actions\"]"
           ]
@@ -2992,7 +2989,7 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-7c8be04...\" style=\"background: none; bo...\">",
+          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-409ec32...\" style=\"background: none; bo...\">",
           "target": [
             ".ah-message-enter[role=\"button\"]:nth-child(1) > div:nth-child(1) > div > button[aria-label=\"Message actions\"]"
           ]
@@ -3024,7 +3021,7 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-8fa79d9...\" style=\"background: none; bo...\">",
+          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-7f4e719...\" style=\"background: none; bo...\">",
           "target": [
             ".ah-message-enter[role=\"button\"]:nth-child(2) > div:nth-child(1) > div > button[aria-label=\"Message actions\"]"
           ]
@@ -3366,7 +3363,7 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-7c8be04...\" style=\"background: none; bo...\">",
+          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-409ec32...\" style=\"background: none; bo...\">",
           "target": [
             ".ah-message-enter[role=\"button\"]:nth-child(1) > div:nth-child(1) > div > button[aria-label=\"Message actions\"]"
           ]
@@ -3384,7 +3381,7 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-8fa79d9...\" style=\"background: none; bo...\">",
+          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-7f4e719...\" style=\"background: none; bo...\">",
           "target": [
             ".ah-message-enter[role=\"button\"]:nth-child(2) > div:nth-child(1) > div > button[aria-label=\"Message actions\"]"
           ]
@@ -5126,7 +5123,7 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-7c8be04...\" style=\"background: none; bo...\">",
+          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-409ec32...\" style=\"background: none; bo...\">",
           "target": [
             ".ah-message-enter[role=\"button\"]:nth-child(1) > div:nth-child(1) > div > button[aria-label=\"Message actions\"]"
           ]
@@ -5151,7 +5148,7 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-8fa79d9...\" style=\"background: none; bo...\">",
+          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-7f4e719...\" style=\"background: none; bo...\">",
           "target": [
             ".ah-message-enter[role=\"button\"]:nth-child(2) > div:nth-child(1) > div > button[aria-label=\"Message actions\"]"
           ]
@@ -5354,6 +5351,427 @@
           "html": "<button data-testid=\"side-panel-tab-cost\" aria-label=\"Cost tab\" aria-selected=\"false\" role=\"tab\" style=\"flex: 1 1 0%; paddin...\">",
           "target": [
             "button[data-testid=\"side-panel-tab-cost\"]"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "color-contrast",
+      "impact": null,
+      "tags": [
+        "cat.color",
+        "wcag2aa",
+        "wcag143",
+        "TTv5",
+        "TT13.c",
+        "EN-301-549",
+        "EN-9.1.4.3",
+        "ACT",
+        "RGAAv4",
+        "RGAA-3.2.1"
+      ],
+      "description": "Ensure the contrast between foreground and background colors meets WCAG 2 AA minimum contrast ratio thresholds",
+      "help": "Elements must meet minimum color contrast ratio thresholds",
+      "helpUrl": "https://dequeuniversity.com/rules/axe/4.11/color-contrast?application=playwright",
+      "nodes": [
+        {
+          "any": [
+            {
+              "id": "color-contrast",
+              "data": {
+                "fgColor": "#111827",
+                "bgColor": "#f9fafb",
+                "contrastRatio": 16.97,
+                "fontSize": "10.5pt (14px)",
+                "fontWeight": "normal",
+                "expectedContrastRatio": "4.5:1"
+              },
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "Element has sufficient color contrast of 16.97"
+            }
+          ],
+          "all": [],
+          "none": [],
+          "impact": null,
+          "html": "<span style=\"font-weight: 600; font-size: var(--ah-font-size-base); color: var(--ah-text-primary);\">Rooms</span>",
+          "target": [
+            "#root > div > div:nth-child(1) > div:nth-child(1) > span"
+          ]
+        },
+        {
+          "any": [
+            {
+              "id": "color-contrast",
+              "data": {
+                "fgColor": "#374151",
+                "bgColor": "#ffffff",
+                "contrastRatio": 10.3,
+                "fontSize": "9.8pt (13px)",
+                "fontWeight": "normal",
+                "expectedContrastRatio": "4.5:1"
+              },
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "Element has sufficient color contrast of 10.3"
+            }
+          ],
+          "all": [],
+          "none": [],
+          "impact": null,
+          "html": "<button style=\"width: 100%; padding: var(--ah-space-2) var(--ah-space-3); border-radius: var(--ah-radius-md); border: 1px solid var(--ah-border-strong); background: var(--ah-bg-primary); cursor: pointer; font-size: var(--ah-font-size-md); font-weight: 500; color: var(--ah-text-secondary);\">",
+          "target": [
+            "div:nth-child(1) > div:nth-child(2) > div > div:nth-child(1) > button"
+          ]
+        },
+        {
+          "any": [
+            {
+              "id": "color-contrast",
+              "data": {
+                "fgColor": "#111827",
+                "bgColor": "#dbeafe",
+                "contrastRatio": 14.54,
+                "fontSize": "9.8pt (13px)",
+                "fontWeight": "normal",
+                "expectedContrastRatio": "4.5:1"
+              },
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "Element has sufficient color contrast of 14.54"
+            }
+          ],
+          "all": [],
+          "none": [],
+          "impact": null,
+          "html": "<div style=\"font-size: var(--ah-font-size-md); font-weight: 500; color: var(--ah-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;\">A11y Room</div>",
+          "target": [
+            "div:nth-child(2) > div[role=\"button\"] > div > div:nth-child(1)"
+          ]
+        },
+        {
+          "any": [
+            {
+              "id": "color-contrast",
+              "data": {
+                "fgColor": "#4b5563",
+                "bgColor": "#dbeafe",
+                "contrastRatio": 6.19,
+                "fontSize": "8.3pt (11px)",
+                "fontWeight": "normal",
+                "expectedContrastRatio": "4.5:1"
+              },
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "Element has sufficient color contrast of 6.19"
+            }
+          ],
+          "all": [],
+          "none": [],
+          "impact": null,
+          "html": "<div style=\"font-size: var(--ah-font-size-xs); color: var(--ah-text-muted); margin-top: 2px;\">solo</div>",
+          "target": [
+            "div[role=\"button\"] > div > div:nth-child(2)"
+          ]
+        },
+        {
+          "any": [
+            {
+              "id": "color-contrast",
+              "data": {
+                "fgColor": "#111827",
+                "bgColor": "#f3f4f6",
+                "contrastRatio": 16.11,
+                "fontSize": "10.5pt (14px)",
+                "fontWeight": "normal",
+                "expectedContrastRatio": "4.5:1"
+              },
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "Element has sufficient color contrast of 16.11"
+            }
+          ],
+          "all": [],
+          "none": [],
+          "impact": null,
+          "html": "<div style=\"max-width: 80%; padding: var(--ah-space-3) var(--ah-space-4); border-radius: var(--ah-radius-xl); background: var(--ah-bg-secondary); color: var(--ah-text-primary); font-size: var(--ah-font-size-base); line-height: var(--ah-line-height-normal); word-break: break-word;\">",
+          "target": [
+            ".ah-message-enter[role=\"button\"]:nth-child(2) > div:nth-child(2)"
+          ]
+        },
+        {
+          "any": [
+            {
+              "id": "color-contrast",
+              "data": {
+                "fgColor": "#f9fafb",
+                "bgColor": "#047857",
+                "contrastRatio": 5.24,
+                "fontSize": "9.0pt (12px)",
+                "fontWeight": "normal",
+                "expectedContrastRatio": "4.5:1"
+              },
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "Element has sufficient color contrast of 5.24"
+            }
+          ],
+          "all": [],
+          "none": [],
+          "impact": null,
+          "html": "<div style=\"width: 32px; height: 32px; border-radius: var(--ah-radius-full); background: var(--ah-success); color: var(--ah-text-inverse); display: flex; align-items: center; justify-content: center; font-size: var(--ah-font-size-sm); font-weight: 600; flex-shrink: 0;\">A</div>",
+          "target": [
+            "div[data-testid=\"brief-card\"] > div:nth-child(1)"
+          ]
+        },
+        {
+          "any": [
+            {
+              "id": "color-contrast",
+              "data": {
+                "fgColor": "#111827",
+                "bgColor": "#f9fafb",
+                "contrastRatio": 16.97,
+                "fontSize": "9.8pt (13px)",
+                "fontWeight": "normal",
+                "expectedContrastRatio": "4.5:1"
+              },
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "Element has sufficient color contrast of 16.97"
+            }
+          ],
+          "all": [],
+          "none": [],
+          "impact": null,
+          "html": "<div style=\"font-size: var(--ah-font-size-md); font-weight: 500; color: var(--ah-text-primary);\">Agent </div>",
+          "target": [
+            "div[data-testid=\"brief-card\"] > div:nth-child(2) > div"
+          ]
+        },
+        {
+          "any": [
+            {
+              "id": "color-contrast",
+              "data": {
+                "fgColor": "#1d4ed8",
+                "bgColor": "#f9fafb",
+                "contrastRatio": 6.41,
+                "fontSize": "9.0pt (12px)",
+                "fontWeight": "normal",
+                "expectedContrastRatio": "4.5:1"
+              },
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "Element has sufficient color contrast of 6.41"
+            }
+          ],
+          "all": [],
+          "none": [],
+          "impact": null,
+          "html": "<div data-testid=\"brief-open-detail\" style=\"font-size: var(--ah-font-size-sm); color: var(--ah-accent); font-weight: 500; flex-shrink: 0;\">Open Detail</div>",
+          "target": [
+            "div[data-testid=\"brief-open-detail\"]"
+          ]
+        },
+        {
+          "any": [
+            {
+              "id": "color-contrast",
+              "data": {
+                "fgColor": "#111827",
+                "bgColor": "#ffffff",
+                "contrastRatio": 17.73,
+                "fontSize": "10.5pt (14px)",
+                "fontWeight": "normal",
+                "expectedContrastRatio": "4.5:1"
+              },
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "Element has sufficient color contrast of 17.73"
+            }
+          ],
+          "all": [],
+          "none": [],
+          "impact": null,
+          "html": "<textarea placeholder=\"Type a message...\" rows=\"2\" data-testid=\"message-input\" aria-label=\"Message input\" style=\"width: 100%; padding...\">",
+          "target": [
+            "textarea"
+          ]
+        },
+        {
+          "any": [
+            {
+              "id": "color-contrast",
+              "data": {
+                "fgColor": "#111827",
+                "bgColor": "#f9fafb",
+                "contrastRatio": 16.97,
+                "fontSize": "10.5pt (14px)",
+                "fontWeight": "normal",
+                "expectedContrastRatio": "4.5:1"
+              },
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "Element has sufficient color contrast of 16.97"
+            }
+          ],
+          "all": [],
+          "none": [],
+          "impact": null,
+          "html": "<span style=\"font-weight: 600; font-size: var(--ah-font-size-base); color: var(--ah-text-primary);\">Panel</span>",
+          "target": [
+            "div:nth-child(3) > div:nth-child(1) > span"
+          ]
+        },
+        {
+          "any": [
+            {
+              "id": "color-contrast",
+              "data": {
+                "fgColor": "#1d4ed8",
+                "bgColor": "#f9fafb",
+                "contrastRatio": 6.41,
+                "fontSize": "9.0pt (12px)",
+                "fontWeight": "normal",
+                "expectedContrastRatio": "4.5:1"
+              },
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "Element has sufficient color contrast of 6.41"
+            }
+          ],
+          "all": [],
+          "none": [],
+          "impact": null,
+          "html": "<button data-testid=\"side-panel-tab-conte...\" aria-label=\"Context tab\" aria-selected=\"true\" role=\"tab\" style=\"flex: 1 1 0%; paddin...\">",
+          "target": [
+            "button[data-testid=\"side-panel-tab-context\"]"
+          ]
+        },
+        {
+          "any": [
+            {
+              "id": "color-contrast",
+              "data": {
+                "fgColor": "#4b5563",
+                "bgColor": "#f9fafb",
+                "contrastRatio": 7.23,
+                "fontSize": "9.0pt (12px)",
+                "fontWeight": "normal",
+                "expectedContrastRatio": "4.5:1"
+              },
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "Element has sufficient color contrast of 7.23"
+            }
+          ],
+          "all": [],
+          "none": [],
+          "impact": null,
+          "html": "<button data-testid=\"side-panel-tab-tasks\" aria-label=\"Tasks tab\" aria-selected=\"false\" role=\"tab\" style=\"flex: 1 1 0%; paddin...\">",
+          "target": [
+            "button[data-testid=\"side-panel-tab-tasks\"]"
+          ]
+        },
+        {
+          "any": [
+            {
+              "id": "color-contrast",
+              "data": {
+                "fgColor": "#4b5563",
+                "bgColor": "#f9fafb",
+                "contrastRatio": 7.23,
+                "fontSize": "9.0pt (12px)",
+                "fontWeight": "normal",
+                "expectedContrastRatio": "4.5:1"
+              },
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "Element has sufficient color contrast of 7.23"
+            }
+          ],
+          "all": [],
+          "none": [],
+          "impact": null,
+          "html": "<button data-testid=\"side-panel-tab-membe...\" aria-label=\"Members tab\" aria-selected=\"false\" role=\"tab\" style=\"flex: 1 1 0%; paddin...\">",
+          "target": [
+            "button[data-testid=\"side-panel-tab-members\"]"
+          ]
+        },
+        {
+          "any": [
+            {
+              "id": "color-contrast",
+              "data": {
+                "fgColor": "#4b5563",
+                "bgColor": "#f9fafb",
+                "contrastRatio": 7.23,
+                "fontSize": "9.0pt (12px)",
+                "fontWeight": "normal",
+                "expectedContrastRatio": "4.5:1"
+              },
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "Element has sufficient color contrast of 7.23"
+            }
+          ],
+          "all": [],
+          "none": [],
+          "impact": null,
+          "html": "<button data-testid=\"side-panel-tab-debug\" aria-label=\"Debug tab\" aria-selected=\"false\" role=\"tab\" style=\"flex: 1 1 0%; paddin...\">",
+          "target": [
+            "button[data-testid=\"side-panel-tab-debug\"]"
+          ]
+        },
+        {
+          "any": [
+            {
+              "id": "color-contrast",
+              "data": {
+                "fgColor": "#4b5563",
+                "bgColor": "#f9fafb",
+                "contrastRatio": 7.23,
+                "fontSize": "9.0pt (12px)",
+                "fontWeight": "normal",
+                "expectedContrastRatio": "4.5:1"
+              },
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "Element has sufficient color contrast of 7.23"
+            }
+          ],
+          "all": [],
+          "none": [],
+          "impact": null,
+          "html": "<button data-testid=\"side-panel-tab-cost\" aria-label=\"Cost tab\" aria-selected=\"false\" role=\"tab\" style=\"flex: 1 1 0%; paddin...\">",
+          "target": [
+            "button[data-testid=\"side-panel-tab-cost\"]"
+          ]
+        },
+        {
+          "any": [
+            {
+              "id": "color-contrast",
+              "data": {
+                "fgColor": "#4b5563",
+                "bgColor": "#f9fafb",
+                "contrastRatio": 7.23,
+                "fontSize": "9.8pt (13px)",
+                "fontWeight": "normal",
+                "expectedContrastRatio": "4.5:1"
+              },
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "Element has sufficient color contrast of 7.23"
+            }
+          ],
+          "all": [],
+          "none": [],
+          "impact": null,
+          "html": "<div style=\"font-size: var(--ah-font-size-md); color: var(--ah-text-muted);\">No context items</div>",
+          "target": [
+            "div:nth-child(3) > div:nth-child(2) > div > div:nth-child(2) > div > div"
           ]
         }
       ]
