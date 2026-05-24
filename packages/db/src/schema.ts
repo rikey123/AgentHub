@@ -39,6 +39,11 @@ export const agentProfiles = sqliteTable("agent_profiles", {
   id: text("id").primaryKey(),
   workspaceId: text("workspace_id"),
   name: text("name").notNull(),
+  description: text("description"),
+  avatar: text("avatar"),
+  version: text("version"),
+  provider: text("provider"),
+  defaultPresence: text("default_presence"),
   adapterId: text("adapter_id").notNull(),
   model: text("model"),
   rolePrompt: text("role_prompt").notNull(),
@@ -77,7 +82,8 @@ export const messages = sqliteTable("messages", {
   pendingTurnId: text("pending_turn_id"),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
-  deletedAt: integer("deleted_at")
+  deletedAt: integer("deleted_at"),
+  briefPublishedAt: integer("brief_published_at")
 });
 
 export const messageParts = sqliteTable(
@@ -328,6 +334,8 @@ export const mailboxMessages = sqliteTable("mailbox_messages", {
   claimedRunId: text("claimed_run_id"),
   claimedAt: integer("claimed_at"),
   deliveryBatchId: text("delivery_batch_id"),
+  deliveryFailureReason: text("delivery_failure_reason"),
+  attemptCount: integer("attempt_count").notNull().default(0),
   createdAt: integer("created_at").notNull(),
   consumedAt: integer("consumed_at")
 });
