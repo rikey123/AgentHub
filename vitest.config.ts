@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     environment: "node",
     globals: true,
+    testTimeout: 10_000,
     maxWorkers: 2,
     include: [
       "apps/**/*.{test,spec}.{ts,tsx}",

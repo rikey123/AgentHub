@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { AgentHubClient } from "@agenthub/sdk";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { createDaemon, type DaemonApp, type DaemonStartupPhase } from "../src/index.ts";
+import { createDaemon, loadAgentHubConfig, type DaemonApp, type DaemonStartupPhase } from "../src/index.ts";
 
 let currentDaemon: DaemonApp | undefined;
 
@@ -387,6 +387,80 @@ describe("daemon M1.4 composition", () => {
     const listedPayload = await listed.json() as { readonly tasks: readonly { readonly id: string; readonly status: string }[] };
     expect(listedPayload.tasks).toEqual([expect.objectContaining({ id: payload.data.taskId, status: "completed" })]);
   });
+
+  it("aggregates workspace cost by agent, model, and day with empty totals", async () => {
+    const now = Date.UTC(2026, 0, 8, 12);
+    seedCostRun({ id: "cost_agent_a", workspaceId: "default-workspace", agentId: "mock-builder", endedAt: now - 1_000, inputTokens: 10, outputTokens: 20, cachedTokens: 3, costUsd: 0.5, modelId: "m1" });
+    seedCostRun({ id: "cost_agent_b", workspaceId: "default-workspace", agentId: "mock-reviewer", endedAt: now - 2_000, inputTokens: 5, outputTokens: 7, cachedTokens: 1, costUsd: 0.25, modelId: "m2" });
+    seedCostRun({ id: "cost_other_workspace", workspaceId: "other-workspace", agentId: "mock-builder", endedAt: now - 1_000, inputTokens: 999, outputTokens: 999, cachedTokens: 999, costUsd: 999, modelId: "m1" });
+
+    const agent = await fetch(`${baseUrl}/workspaces/default-workspace/cost-summary?from=${now - 10_000}&to=${now}`);
+    const agentPayload = await agent.json() as { readonly groupBy: string; readonly groups: readonly { readonly key: string; readonly inputTokens: number }[]; readonly total: { readonly runCount: number; readonly costUsd: number } };
+    expect(agent.status).toBe(200);
+    expect(agentPayload.groupBy).toBe("agent");
+    expect(agentPayload.groups.map((group) => group.key)).toEqual(["mock-builder", "mock-reviewer"]);
+    expect(agentPayload.total).toMatchObject({ runCount: 2, costUsd: 0.75 });
+
+    const model = await (await fetch(`${baseUrl}/workspaces/default-workspace/cost-summary?groupBy=model&from=${now - 10_000}&to=${now}`)).json() as { readonly groups: readonly { readonly key: string }[] };
+    expect(model.groups.map((group) => group.key)).toEqual(["m1", "m2"]);
+
+    const day = await (await fetch(`${baseUrl}/workspaces/default-workspace/cost-summary?groupBy=day&from=${now - 10_000}&to=${now}`)).json() as { readonly groups: readonly { readonly key: string }[] };
+    expect(day.groups).toEqual([{ key: "2026-01-08", inputTokens: 15, outputTokens: 27, cachedTokens: 4, costUsd: 0.75, runCount: 2 }]);
+
+    const empty = await (await fetch(`${baseUrl}/workspaces/default-workspace/cost-summary?from=1&to=2`)).json() as { readonly groups: readonly unknown[]; readonly total: { readonly runCount: number; readonly costUsd: number } };
+    expect(empty.groups).toEqual([]);
+    expect(empty.total).toEqual({ inputTokens: 0, outputTokens: 0, cachedTokens: 0, costUsd: 0, runCount: 0 });
+  });
+
+  it("returns workspace 404 and budget 501 for cost APIs", async () => {
+    const missing = await fetch(`${baseUrl}/workspaces/missing/cost-summary`);
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toEqual({ error: "workspace_not_found" });
+
+    const budget = await fetch(`${baseUrl}/workspaces/default-workspace/cost-budget`, { method: "POST" });
+    expect(budget.status).toBe(501);
+    expect(await budget.json()).toEqual({ error: "budget alerts are V1.5 (permission-dsl)" });
+  });
+
+  it("issues, lists without secret, and revokes auth tokens", async () => {
+    const issued = await fetch(`${baseUrl}/auth/tokens`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ description: "ci", scopes: ["read"], expiresDays: 1 }) });
+    const issuedPayload = await issued.json() as { readonly id: string; readonly token: string; readonly fingerprint: string };
+    expect(issued.status).toBe(201);
+    expect(issuedPayload.token).toMatch(/^ah_/u);
+
+    const listed = await fetch(`${baseUrl}/auth/tokens`);
+    const listedPayload = await listed.json() as { readonly tokens: readonly { readonly id: string; readonly fingerprint: string; readonly token?: string }[] };
+    expect(listedPayload.tokens).toContainEqual(expect.objectContaining({ id: issuedPayload.id, fingerprint: issuedPayload.fingerprint }));
+    expect(JSON.stringify(listedPayload)).not.toContain(issuedPayload.token);
+
+    const revoked = await fetch(`${baseUrl}/auth/tokens/${issuedPayload.id}`, { method: "DELETE" });
+    expect(revoked.status).toBe(200);
+  });
+
+  it("loads config with CLI over env over toml and enforces remote token safety", () => {
+    const dir = mkdtempSync(join(tmpdir(), "agenthub-config-test-"));
+    const path = join(dir, "config.toml");
+    writeFileSync(path, "[server]\nbind = \"127.0.0.1\"\nport = 6800\n[auth]\ntoken = \"toml-token\"\n", "utf8");
+
+    const config = loadAgentHubConfig({ configPath: path, port: 7000 }, { AGENTHUB_PORT: "6900", AGENTHUB_TOKEN: "env-token" });
+    expect(config.server.port).toBe(7000);
+    expect(config.auth.token).toBe("env-token");
+
+    writeFileSync(path, "[server]\nbind = \"0.0.0.0\"\n", "utf8");
+    expect(() => loadAgentHubConfig({ configPath: path }, {})).toThrow("Refusing to bind 0.0.0.0 without auth.token");
+    writeFileSync(path, "[server]\nbind = \"0.0.0.0\"\n[auth]\ntoken = \"secret\"\n", "utf8");
+    expect(() => loadAgentHubConfig({ configPath: path }, {})).toThrow("[server.remote] enabled = true");
+  });
+
+  it("force cancels in-flight runs after shutdown timeout", async () => {
+    seedBusyRun("room_shutdown", "mock-builder", "run_shutdown");
+
+    const result = await daemon.close({ forceCancelAfterMs: 1 });
+    currentDaemon = undefined;
+
+    expect(result).toEqual({ forced: true, cancelledRunIds: ["run_shutdown"] });
+    expect(daemon.inFlightRunIds()).toEqual([]);
+  });
 });
 
 function sha256(value: string): string {
@@ -408,6 +482,18 @@ function seedPendingMessage(roomId: string, agentId: string, messageId: string, 
   activeDaemon().database.sqlite.prepare("INSERT INTO messages (id, workspace_id, room_id, sender_type, sender_id, run_id, role, status, quoted_message_id, turn_dispatch_mode, pending_turn_id, created_at, updated_at, deleted_at) VALUES (?, 'default-workspace', ?, 'user', 'local', NULL, 'user', 'completed', NULL, 'pending', ?, ?, ?, NULL)").run(messageId, roomId, messageId, Date.now(), Date.now());
   activeDaemon().database.sqlite.prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, 1, 'text', ?, ?)").run(messageId, JSON.stringify({ text }), Date.now());
   activeDaemon().database.sqlite.prepare("INSERT INTO pending_turns (id, room_id, user_message_id, primary_agent_id, status, enqueued_at, scheduled_at, cancelled_at, notes) VALUES (?, ?, ?, ?, 'queued', ?, NULL, NULL, NULL)").run(messageId, roomId, messageId, agentId, Date.now());
+}
+
+function seedCostRun(input: { readonly id: string; readonly workspaceId: string; readonly agentId: string; readonly endedAt: number; readonly inputTokens: number; readonly outputTokens: number; readonly cachedTokens: number; readonly costUsd: number; readonly modelId: string }): void {
+  activeDaemon().database.sqlite.prepare("INSERT OR IGNORE INTO workspaces (id, name, root_path, created_at, updated_at) VALUES (?, ?, ?, 1, 1)").run(input.workspaceId, input.workspaceId, `/tmp/${input.workspaceId}`);
+  activeDaemon().database.sqlite.prepare(
+    `INSERT INTO runs (
+      id, workspace_id, task_id, room_id, agent_id, adapter_id, adapter_session_id, provider_conversation_id,
+      parent_run_id, status, wake_reason, waiting_reason, workspace_path, work_dir, workspace_mode, context_version,
+      target_files, mailbox_claim_count, pid_at_start, claimed_at, started_at, ended_at, input_tokens, output_tokens,
+      cached_tokens, cost_usd, model_id, failure_class, error, created_at, updated_at
+    ) VALUES (?, ?, NULL, 'room_cost', ?, NULL, NULL, NULL, NULL, 'completed', 'primary_turn', NULL, NULL, NULL, NULL, NULL, '[]', 0, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)`
+  ).run(input.id, input.workspaceId, input.agentId, input.endedAt - 100, input.endedAt, input.inputTokens, input.outputTokens, input.cachedTokens, input.costUsd, input.modelId, input.endedAt - 100, input.endedAt);
 }
 
 function activeDaemon(): DaemonApp {

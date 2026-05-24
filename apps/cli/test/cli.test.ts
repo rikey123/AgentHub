@@ -44,4 +44,19 @@ describe("agenthub cli", () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  it("runs doctor and prints five checks", async () => {
+    const originalWrite = process.stdout.write;
+    let output = "";
+    process.stdout.write = ((chunk: string | Uint8Array) => { output += String(chunk); return true; }) as typeof process.stdout.write;
+    try {
+      await expect(runCli(["doctor", "--port", "0"])).resolves.toBe(0);
+      expect(output.trim().split("\n")).toHaveLength(5);
+      expect(output).toContain("SQLite");
+      expect(output).toContain("Keychain");
+      expect(output).toContain("config");
+    } finally {
+      process.stdout.write = originalWrite;
+    }
+  });
 });
