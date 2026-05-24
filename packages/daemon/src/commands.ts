@@ -244,7 +244,7 @@ function roomMembers(database: AgentHubDatabase, roomId: string): { readonly age
 function wakeTargetsForMessage(room: RoomRow, mentions: readonly string[]): string[] {
   if (room.mode !== "assisted") return room.primary_agent_id ? [room.primary_agent_id] : [];
   if (mentions.length === 0) return room.primary_agent_id ? [room.primary_agent_id] : [];
-  return mentions;
+  return [...mentions];
 }
 
 function messageText(database: AgentHubDatabase, messageId: string): string {
