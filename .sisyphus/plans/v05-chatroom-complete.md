@@ -1869,7 +1869,7 @@
 
 ### Wave W5 — Spec Validation and Closeout (`§9.1`–`§9.7`)
 
-- [ ] §9.1 Apply/verify migration `0012_v05.sql` and schema consistency
+- [x] §9.1 Apply/verify migration `0012_v05.sql` and schema consistency
   - **Spec refs**: `design/Migration Plan`.
   - **What to do**: Run DB migration on fresh and existing test DB; verify schema matches spec. This is validation of `§0.1`, not creation of a second migration.
   - **Must NOT do**: Do not add late schema changes unless issue/Oracle decision exists.
@@ -1894,7 +1894,7 @@
     ```
   - **Commit**: YES only for validation script/evidence metadata if tracked | Message: `test(db): verify v05 migration`.
 
-- [ ] §9.2 Run full `pnpm test`, `pnpm typecheck`, `pnpm lint`
+- [x] §9.2 Run full `pnpm test`, `pnpm typecheck`, `pnpm lint`
   - **Spec refs**: `design/V05-D12`.
   - **What to do**: Run root test/typecheck/lint and fix in-scope failures only.
   - **Must NOT do**: Do not skip tests or relax lint/type rules to pass.
@@ -1919,7 +1919,7 @@
     ```
   - **Commit**: NO unless fixing in-scope validation failures.
 
-- [ ] §9.3 Run `pnpm check:all`
+- [x] §9.3 Run `pnpm check:all`
   - **Spec refs**: `event-system/events:check 与 visibility:check CI 校验`.
   - **What to do**: Run all custom checks including events, visibility, subscriptions, command, schema, run-state-machine, deps/Bun API.
   - **Must NOT do**: Do not bypass check scripts.
@@ -1944,7 +1944,7 @@
     ```
   - **Commit**: NO unless fixing check failures.
 
-- [ ] §9.4 Run OpenSpec strict validation
+- [x] §9.4 Run OpenSpec strict validation
   - **Spec refs**: `design/Goals G3`.
   - **What to do**: Run `openspec.cmd validate add-v05-chatroom-complete --strict` after implementation and task checkbox updates are staged appropriately.
   - **Must NOT do**: Do not edit spec to hide implementation gaps without review.
@@ -1969,7 +1969,7 @@
     ```
   - **Commit**: NO unless updating task checkboxes/spec status after implementation.
 
-- [ ] §9.5 Run Playwright E2E including V0.5 scenarios
+- [x] §9.5 Run Playwright E2E including V0.5 scenarios
   - **Spec refs**: `web-ui/测试基础设施`.
   - **What to do**: Run full Playwright suite with daemon/web bootstrap per `playwright.config.ts`; include V0.5 E2E from `§7.10`, keyboard/theme/perf critical paths where configured.
   - **Must NOT do**: Do not mark as passed with only unit tests.
@@ -1994,7 +1994,7 @@
     ```
   - **Commit**: NO unless fixing E2E failures.
 
-- [ ] §9.6 Update `tasks.md` checkboxes
+- [x] §9.6 Update `tasks.md` checkboxes
   - **Spec refs**: `design/Goals G3`.
   - **What to do**: After all validation passes, update `openspec/changes/add-v05-chatroom-complete/tasks.md` `[ ]` to `[x]` for completed items only.
   - **Must NOT do**: Do not check off failed/untested tasks; do not update before final validation evidence exists.
@@ -2019,7 +2019,7 @@
     ```
   - **Commit**: YES | Message: `docs(spec): mark v05 tasks complete` | Files: `tasks.md` only.
 
-- [ ] §9.7 Prepare V1.0 entry-criteria checklist
+- [x] §9.7 Prepare V1.0 entry-criteria checklist
   - **Spec refs**: `design/Roadmap Beyond MVP V1.0`.
   - **What to do**: Write `.sisyphus/notepads/v05-chatroom-complete/v1-entry-criteria.md` with checklist of whether V0.5 outcomes satisfy Squad Mode + Team Mode + deployment entry criteria.
   - **Must NOT do**: Do not create V1.0 plan/design; do not implement Squad/Team/Deployment.
