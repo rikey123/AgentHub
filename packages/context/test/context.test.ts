@@ -2,11 +2,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { Effect } from "effect";
 import { EventBus } from "@agenthub/bus";
 import { createDatabase, type AgentHubDatabase } from "@agenthub/db";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { ContextLedger, createContextCommandHandlers, isVisible, MemoryError, NoopHybridMemoryRouter, NoopMemoryAdapter, NoopVectorIndex, roomSearchMemoryTool, type ContextItem } from "../src/index.ts";
+import { ContextLedger, createContextCommandHandlers, HeuristicBriefGenerator, isVisible, MemoryError, NoopHybridMemoryRouter, NoopMemoryAdapter, NoopVectorIndex, roomSearchMemoryTool, type BriefGeneratorInput, type ContextItem } from "../src/index.ts";
 
 let dir: string | undefined;
 let database: AgentHubDatabase | undefined;
@@ -152,6 +153,41 @@ describe("ContextLedger", () => {
   });
 });
 
+describe("HeuristicBriefGenerator", () => {
+  it("first sentence truncation", () => {
+    const longSentence = "a".repeat(121);
+
+    expect(generateBrief({ finalAssistantText: `${longSentence}. Second sentence.`, artifactCounts: { diff: 1, file: 0, tool: 3 } })).toBe(`${"a".repeat(120)}…（artifacts: 1 diff / 0 files / 3 tools）`);
+  });
+
+  it("Chinese punctuation", () => {
+    expect(generateBrief({ finalAssistantText: "我已添加 OAuth 校验逻辑到 src/auth.ts，并修复了 cookie 过期处理。第二句不应出现。", artifactCounts: { diff: 1, file: 0, tool: 3 } })).toBe("我已添加 OAuth 校验逻辑到 src/auth.ts，并修复了 cookie 过期处理（artifacts: 1 diff / 0 files / 3 tools）");
+  });
+
+  it("code block skip", () => {
+    expect(generateBrief({ finalAssistantText: "```ts\nconst value = 1;\n```\n\nImplemented the feature. Extra details.", artifactCounts: { diff: 0, file: 0, tool: 0 } })).toBe("Implemented the feature");
+  });
+
+  it("failure template", () => {
+    expect(generateBrief({ artifactCounts: { diff: 0, file: 0, tool: 2 }, failureClass: "transient", failureReason: "lock_timeout" })).toBe("Lock timed out, retrying（artifacts: 0 diff / 0 files / 2 tools）");
+  });
+
+  it("cancel template", () => {
+    expect(generateBrief({ artifactCounts: { diff: 0, file: 0, tool: 0 }, cancelled: true })).toBe("User cancelled this run");
+  });
+
+  it("parse failure fallback", () => {
+    const text = "x".repeat(200);
+
+    expect(generateBrief({ finalAssistantText: text, artifactCounts: { diff: 0, file: 0, tool: 0 } })).toBe(`${"x".repeat(120)}…`);
+  });
+
+  it("artifact suffix only when nonzero", () => {
+    expect(generateBrief({ finalAssistantText: "Completed work.", artifactCounts: { diff: 0, file: 0, tool: 0 } })).toBe("Completed work");
+    expect(generateBrief({ finalAssistantText: "Completed work.", artifactCounts: { diff: 0, file: 1, tool: 0 } })).toBe("Completed work（artifacts: 0 diff / 1 files / 0 tools）");
+  });
+});
+
 function currentDb(): AgentHubDatabase {
   expect(database).toBeDefined();
   return database as AgentHubDatabase;
@@ -181,4 +217,8 @@ function versionRows(contextId: string): number[] {
 function lastPayload(): unknown {
   const row = currentDb().sqlite.prepare("SELECT payload FROM events WHERE type LIKE 'context.%' ORDER BY seq DESC LIMIT 1").get() as { payload: string };
   return JSON.parse(row.payload) as unknown;
+}
+
+function generateBrief(overrides: Partial<BriefGeneratorInput>): string {
+  return Effect.runSync(new HeuristicBriefGenerator().generate({ runId: "run_1", artifactCounts: { diff: 0, file: 0, tool: 0 }, ...overrides }));
 }
