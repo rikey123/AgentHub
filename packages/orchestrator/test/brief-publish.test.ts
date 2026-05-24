@@ -131,7 +131,7 @@ function seedAssistantMessage(messageId: string, runId: string): void {
       `INSERT INTO messages (
         id, workspace_id, room_id, sender_type, sender_id, run_id, role, status,
         quoted_message_id, turn_dispatch_mode, pending_turn_id, created_at, updated_at, deleted_at
-      ) VALUES (?, 'ws_1', 'room_1', 'agent', 'agent_1', ?, 'assistant', 'completed', NULL, 'none', NULL, ?, ?, NULL)`
+      ) VALUES (?, 'ws_1', 'room_1', 'agent', 'agent_1', ?, 'assistant', 'completed', NULL, 'immediate', NULL, ?, ?, NULL)`
     )
     .run(messageId, runId, now, now);
 }
