@@ -41,3 +41,10 @@
 - RoomMembersPopover needed explicit VirtualItem and Floating UI middleware parameter types to satisfy TypeScript under noImplicitAny.
 - pnpm.cmd install was required in this Windows worktree before typecheck could resolve @floating-ui/react, @tanstack/react-virtual, and ansi-to-html from the lockfile.
 - Repository lint clean-up was mostly unused bindings/imports in apps/web and one console warning guard in the OpenCode adapter smoke test.
+
+## Oracle F1 remediation - 2026-05-24
+- AdapterRegistry routes both opencode and opencode-default to OpenCodeACPAdapter, matching builder-opencode profiles.
+- SendMessage persistence keeps quotedMessageId in messages.quoted_message_id, stores mentions in text part payloads, and associates uploaded attachments by file_id.
+- Mailbox delivery failures persist delivery_failure_reason and failed rows are excluded from future claimUnread selection; lifecycle fatal/configuration failures publish target_unavailable for claimed mailbox rows.
+- Terminal artifact previews are sourced from artifact metadata stdoutPreview/stderrPreview; cost panel consumes the daemon/spec CostSummaryResponse with groups plus total and epoch-ms query bounds.
+
