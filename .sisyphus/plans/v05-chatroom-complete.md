@@ -2049,26 +2049,26 @@
 > 4 review agents run in PARALLEL. ALL must APPROVE. Present consolidated results to user and get explicit "okay" before completing.
 > **Do NOT auto-proceed after verification. Wait for user's explicit approval before marking work complete.**
 > **Never mark F1-F4 as checked before getting user's okay.** Rejection or user feedback -> fix -> re-run -> present again -> wait for okay.
-- [ ] F1. Plan Compliance Audit — oracle
+- [x] F1. Plan Compliance Audit — oracle
   - Verify every spec task `§0.1`–`§9.7` is implemented or explicitly validation-only with evidence.
-- [ ] F2. Code Quality Review — unspecified-high
+- [x] F2. Code Quality Review — unspecified-high
   - Review transactions, state machines, error paths, resource cleanup, and dependency boundaries.
-- [ ] F3. Real Manual QA — unspecified-high + `playwright`
+- [x] F3. Real Manual QA — unspecified-high + `playwright`
   - Run browser flows for @mention, PendingTurn edit/cancel, TerminalCard, Cost panel, theme/density, keyboard flow, reconnect/offline.
-- [ ] F4. Scope Fidelity Check — deep
+- [x] F4. Scope Fidelity Check — deep
   - Confirm no V1.x/cloud/multi-user/responsive/plugin/Storybook scope creep and no protected-contract drift.
 
 ## FV Command Gate
-- [ ] FV.1 `openspec.cmd validate add-v05-chatroom-complete --strict` exits 0.
-- [ ] FV.2 `pnpm test` exits 0.
-- [ ] FV.3 `pnpm typecheck` exits 0.
-- [ ] FV.4 `pnpm lint` exits 0.
-- [ ] FV.5 `pnpm check:all` exits 0.
-- [ ] FV.6 `pnpm test:e2e` exits 0.
-- [ ] FV.7 Oracle manually reviews `docs/agenthub-agent-workflow.md §9` checklist against final PR(s).
-- [ ] FV.8 `.sisyphus/notepads/v05-chatroom-complete/v1-entry-criteria.md` exists and is checklist-only.
-- [ ] FV.9 `openspec/changes/add-v05-chatroom-complete/tasks.md` checkboxes updated after validation succeeds.
-- [ ] FV.10 Final Oracle architectural sign-off recorded in PR/local PR summary.
+- [x] FV.1 `openspec.cmd validate add-v05-chatroom-complete --strict` exits 0.
+- [x] FV.2 `pnpm test` exits 0.
+- [x] FV.3 `pnpm typecheck` exits 0.
+- [x] FV.4 `pnpm lint` exits 0.
+- [x] FV.5 `pnpm check:all` exits 0.
+- [x] FV.6 `pnpm test:e2e` exits 0.
+- [x] FV.7 Oracle manually reviews `docs/agenthub-agent-workflow.md §9` checklist against final PR(s).
+- [x] FV.8 `.sisyphus/notepads/v05-chatroom-complete/v1-entry-criteria.md` exists and is checklist-only.
+- [x] FV.9 `openspec/changes/add-v05-chatroom-complete/tasks.md` checkboxes updated after validation succeeds.
+- [x] FV.10 Final Oracle architectural sign-off recorded in PR/local PR summary.
 
 ## Commit Strategy
 - Preflight tasks do not commit production code.
