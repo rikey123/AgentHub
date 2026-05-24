@@ -1,19 +1,22 @@
+import { useState } from "react";
 import type { RoomViewModel } from "../types.ts";
+import { CostPanel } from "./CostPanel.tsx";
 
 type SidePanelProps = {
   readonly room: RoomViewModel;
-  readonly activeTab: "context" | "tasks" | "members" | "runs" | "debug";
-  readonly onChangeTab: (tab: "context" | "tasks" | "members" | "runs" | "debug") => void;
+  readonly activeTab: "context" | "tasks" | "members" | "debug" | "cost";
+  readonly onChangeTab: (tab: "context" | "tasks" | "members" | "debug" | "cost") => void;
   readonly onOpenRunDetail?: (runId: string) => void;
+  readonly workspaceId?: string;
 };
 
-export function SidePanel({ room, activeTab, onChangeTab, onOpenRunDetail }: SidePanelProps) {
+export function SidePanel({ room, activeTab, onChangeTab, onOpenRunDetail, workspaceId }: SidePanelProps) {
   const tabs: { key: SidePanelProps["activeTab"]; label: string }[] = [
     { key: "context", label: "Context" },
     { key: "tasks", label: "Tasks" },
     { key: "members", label: "Members" },
-    { key: "runs", label: "Runs" },
-    { key: "debug", label: "Debug" }
+    { key: "debug", label: "Debug" },
+    { key: "cost", label: "Cost" }
   ];
 
   return (
@@ -34,6 +37,7 @@ export function SidePanel({ room, activeTab, onChangeTab, onOpenRunDetail }: Sid
               fontWeight: activeTab === tab.key ? 600 : 400,
               color: activeTab === tab.key ? "#3b82f6" : "#6b7280"
             }}
+            data-testid={`side-panel-tab-${tab.key}`}
           >
             {tab.label}
           </button>
@@ -43,8 +47,8 @@ export function SidePanel({ room, activeTab, onChangeTab, onOpenRunDetail }: Sid
         {activeTab === "context" && <ContextTab room={room} />}
         {activeTab === "tasks" && <TasksTab room={room} />}
         {activeTab === "members" && <MembersTab room={room} />}
-        {activeTab === "runs" && <RunsTab room={room} onOpenRunDetail={onOpenRunDetail} />}
         {activeTab === "debug" && <DebugTab room={room} />}
+        {activeTab === "cost" && <CostPanel workspaceId={workspaceId ?? "default-workspace"} />}
       </div>
     </div>
   );
@@ -156,60 +160,6 @@ function MembersTab({ room }: { readonly room: RoomViewModel }) {
         </div>
       ))}
       {room.participants.length === 0 && <div style={{ fontSize: 13, color: "#9ca3af" }}>No participants</div>}
-    </div>
-  );
-}
-
-function RunsTab({ room, onOpenRunDetail }: { readonly room: RoomViewModel; readonly onOpenRunDetail: ((runId: string) => void) | undefined }) {
-  const statusColor: Record<string, string> = {
-    queued: "#6b7280",
-    starting: "#3b82f6",
-    running: "#3b82f6",
-    waiting_permission: "#d97706",
-    completed: "#10b981",
-    failed: "#ef4444",
-    cancelled: "#6b7280"
-  };
-
-  return (
-    <div>
-      {room.runs.map((run) => (
-        <div
-          key={run.id}
-          onClick={() => onOpenRunDetail?.(run.id)}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") onOpenRunDetail?.(run.id);
-          }}
-          style={{
-            padding: "10px 12px",
-            borderRadius: 6,
-            background: "#ffffff",
-            border: "1px solid #e5e7eb",
-            marginBottom: 8,
-            cursor: onOpenRunDetail ? "pointer" : "default"
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: "#111827" }}>{run.agentName}</div>
-            <span
-              style={{
-                fontSize: 10,
-                fontWeight: 600,
-                color: "#ffffff",
-                background: statusColor[run.status] ?? "#6b7280",
-                padding: "2px 8px",
-                borderRadius: 10
-              }}
-            >
-              {run.status}
-            </span>
-          </div>
-          <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>{run.id.slice(0, 8)}</div>
-        </div>
-      ))}
-      {room.runs.length === 0 && <div style={{ fontSize: 13, color: "#9ca3af" }}>No runs</div>}
     </div>
   );
 }

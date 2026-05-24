@@ -30,3 +30,9 @@
 - RoomMcpServer cannot import @agenthub/security without adding an orchestrator package dependency; audit-shaped observer sends are published through the injected EventBus using registered event type server.connected.
 - command:check derives canonical commands from openspec/specs/bus-runtime/spec.md, so PinMessage was implemented as a self-contained command handler rather than nested WriteContextItem dispatch.
 - Windows worktrees may need pnpm.cmd install before package test scripts can find node_modules/.bin/vitest.cmd.
+
+## W3 web UI completion - 2026-05-24
+- Committed W3 web UI work in six semantic commits on task/v05-w3-web-features.
+- Final verification: cmd /c pnpm --filter @agenthub/web build exits 0; LSP diagnostics for apps/web reports 0 errors.
+- Root cmd /c pnpm typecheck is blocked by existing packages/adapters/claude-code/test/claude-code-adapter.test.ts constructor fixture error outside the W3 web scope.
+- packages/daemon/src/commands.ts still has an uncommitted out-of-scope change and was intentionally not included because the task constrained commits to apps/web/** and pnpm-lock.yaml.

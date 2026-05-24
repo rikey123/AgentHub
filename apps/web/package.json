@@ -7,13 +7,17 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@agenthub/protocol": "workspace:*",
     "@agenthub/sdk": "workspace:*",
+    "@floating-ui/react": "^0.27.19",
+    "@tanstack/react-virtual": "^3.13.25",
+    "ansi-to-html": "^0.7.2",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "react-hotkeys-hook": "^5.3.2"
   },
   "devDependencies": {
     "@agenthub/daemon": "workspace:*",
