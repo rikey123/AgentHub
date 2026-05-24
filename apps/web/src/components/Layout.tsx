@@ -26,26 +26,26 @@ export function Layout({
       {/* Left sidebar */}
       <div
         style={{
-          width: leftCollapsed ? 48 : 240,
-          minWidth: leftCollapsed ? 48 : 240,
-          borderRight: "1px solid #e5e7eb",
+          width: leftCollapsed ? "var(--ah-sidebar-left-collapsed)" : "var(--ah-sidebar-left-width)",
+          minWidth: leftCollapsed ? "var(--ah-sidebar-left-collapsed)" : "var(--ah-sidebar-left-width)",
+          borderRight: "1px solid var(--ah-border)",
           display: "flex",
           flexDirection: "column",
-          background: "#f9fafb",
-          transition: "width 0.2s ease"
+          background: "var(--ah-bg-elevated)",
+          transition: "width var(--ah-transition-normal)"
         }}
       >
-        <div style={{ padding: 12, borderBottom: "1px solid #e5e7eb", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          {!leftCollapsed && <span style={{ fontWeight: 600, fontSize: 14, color: "#111827" }}>Rooms</span>}
+        <div style={{ padding: "var(--ah-space-3)", borderBottom: "1px solid var(--ah-border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          {!leftCollapsed && <span style={{ fontWeight: 600, fontSize: "var(--ah-font-size-base)", color: "var(--ah-text-primary)" }}>Rooms</span>}
           <button
             onClick={onToggleLeft}
             style={{
               background: "none",
               border: "none",
               cursor: "pointer",
-              padding: 4,
-              borderRadius: 4,
-              color: "#6b7280"
+              padding: "var(--ah-space-1)",
+              borderRadius: "var(--ah-radius-sm)",
+              color: "var(--ah-text-muted)"
             }}
             aria-label={leftCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
@@ -56,33 +56,33 @@ export function Layout({
       </div>
 
       {/* Center chat area */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, background: "#ffffff" }}>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, background: "var(--ah-bg-primary)" }}>
         <div style={{ flex: 1, overflow: "auto", position: "relative" }}>{centerPanel}</div>
       </div>
 
       {/* Right side panel */}
       <div
         style={{
-          width: rightCollapsed ? 48 : 280,
-          minWidth: rightCollapsed ? 48 : 280,
-          borderLeft: "1px solid #e5e7eb",
+          width: rightCollapsed ? "var(--ah-sidebar-right-collapsed)" : "var(--ah-sidebar-right-width)",
+          minWidth: rightCollapsed ? "var(--ah-sidebar-right-collapsed)" : "var(--ah-sidebar-right-width)",
+          borderLeft: "1px solid var(--ah-border)",
           display: "flex",
           flexDirection: "column",
-          background: "#f9fafb",
-          transition: "width 0.2s ease"
+          background: "var(--ah-bg-elevated)",
+          transition: "width var(--ah-transition-normal)"
         }}
       >
-        <div style={{ padding: 12, borderBottom: "1px solid #e5e7eb", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          {!rightCollapsed && <span style={{ fontWeight: 600, fontSize: 14, color: "#111827" }}>Panel</span>}
+        <div style={{ padding: "var(--ah-space-3)", borderBottom: "1px solid var(--ah-border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          {!rightCollapsed && <span style={{ fontWeight: 600, fontSize: "var(--ah-font-size-base)", color: "var(--ah-text-primary)" }}>Panel</span>}
           <button
             onClick={onToggleRight}
             style={{
               background: "none",
               border: "none",
               cursor: "pointer",
-              padding: 4,
-              borderRadius: 4,
-              color: "#6b7280"
+              padding: "var(--ah-space-1)",
+              borderRadius: "var(--ah-radius-sm)",
+              color: "var(--ah-text-muted)"
             }}
             aria-label={rightCollapsed ? "Expand panel" : "Collapse panel"}
           >
@@ -95,16 +95,17 @@ export function Layout({
       {/* Overlay for Run Detail */}
       {overlay && (
         <div
+          className="ah-slide-over-enter"
           style={{
             position: "fixed",
             top: 0,
             right: 0,
             width: "60%",
             height: "100%",
-            background: "#ffffff",
-            borderLeft: "1px solid #e5e7eb",
-            boxShadow: "-4px 0 24px rgba(0,0,0,0.08)",
-            zIndex: 100,
+            background: "var(--ah-bg-primary)",
+            borderLeft: "1px solid var(--ah-border)",
+            boxShadow: "var(--ah-shadow-overlay)",
+            zIndex: "var(--ah-z-overlay)",
             display: "flex",
             flexDirection: "column"
           }}

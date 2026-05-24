@@ -256,7 +256,7 @@ export function InputBox({ onSend, disabled, room, pendingTurnCount, editingPend
 
   return (
     <div
-      style={{ borderTop: "1px solid #e5e7eb", padding: "12px 16px", background: "#ffffff" }}
+      style={{ borderTop: "1px solid var(--ah-border)", padding: "var(--ah-space-3) var(--ah-space-4)", background: "var(--ah-bg-primary)" }}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -264,12 +264,12 @@ export function InputBox({ onSend, disabled, room, pendingTurnCount, editingPend
       {editingPendingTurn && (
         <div
           style={{
-            background: "#eff6ff",
-            color: "#1d4ed8",
-            padding: "6px 10px",
-            borderRadius: 6,
-            fontSize: 12,
-            marginBottom: 8,
+            background: "var(--ah-accent-light)",
+            color: "var(--ah-accent-text)",
+            padding: "var(--ah-space-2) var(--ah-space-3)",
+            borderRadius: "var(--ah-radius-md)",
+            fontSize: "var(--ah-font-size-sm)",
+            marginBottom: "var(--ah-space-2)",
             fontWeight: 500,
             display: "flex",
             alignItems: "center",
@@ -279,7 +279,7 @@ export function InputBox({ onSend, disabled, room, pendingTurnCount, editingPend
           <span>Editing pending turn {editingPendingTurn.messageId.slice(0, 8)}</span>
           <button
             onClick={onClearEdit}
-            style={{ background: "none", border: "none", cursor: "pointer", fontSize: 14, color: "#1d4ed8" }}
+            style={{ background: "none", border: "none", cursor: "pointer", fontSize: "var(--ah-font-size-base)", color: "var(--ah-accent-text)" }}
             aria-label="Cancel editing"
           >
             x
@@ -289,14 +289,15 @@ export function InputBox({ onSend, disabled, room, pendingTurnCount, editingPend
       {editError && (
         <div
           style={{
-            background: "#fee2e2",
-            color: "#991b1b",
-            padding: "6px 10px",
-            borderRadius: 6,
-            fontSize: 12,
-            marginBottom: 8,
+            background: "var(--ah-danger-light)",
+            color: "var(--ah-text-danger)",
+            padding: "var(--ah-space-2) var(--ah-space-3)",
+            borderRadius: "var(--ah-radius-md)",
+            fontSize: "var(--ah-font-size-sm)",
+            marginBottom: "var(--ah-space-2)",
             fontWeight: 500
           }}
+          role="alert"
         >
           {editError}
         </div>
@@ -304,14 +305,16 @@ export function InputBox({ onSend, disabled, room, pendingTurnCount, editingPend
       {nearLimit && !atLimit && (
         <div
           style={{
-            background: "#fef3c7",
-            color: "#92400e",
-            padding: "6px 10px",
-            borderRadius: 6,
-            fontSize: 12,
-            marginBottom: 8,
+            background: "var(--ah-warning-light)",
+            color: "var(--ah-text-warning)",
+            padding: "var(--ah-space-2) var(--ah-space-3)",
+            borderRadius: "var(--ah-radius-md)",
+            fontSize: "var(--ah-font-size-sm)",
+            marginBottom: "var(--ah-space-2)",
             fontWeight: 500
           }}
+          role="status"
+          aria-live="polite"
         >
           {pendingTurnCount} messages queued. Consider cancelling old messages or waiting for the agent.
         </div>
@@ -319,14 +322,16 @@ export function InputBox({ onSend, disabled, room, pendingTurnCount, editingPend
       {atLimit && (
         <div
           style={{
-            background: "#fee2e2",
-            color: "#991b1b",
-            padding: "6px 10px",
-            borderRadius: 6,
-            fontSize: 12,
-            marginBottom: 8,
+            background: "var(--ah-danger-light)",
+            color: "var(--ah-text-danger)",
+            padding: "var(--ah-space-2) var(--ah-space-3)",
+            borderRadius: "var(--ah-radius-md)",
+            fontSize: "var(--ah-font-size-sm)",
+            marginBottom: "var(--ah-space-2)",
             fontWeight: 500
           }}
+          role="alert"
+          aria-live="assertive"
         >
           Queue limit reached (20). Cancel old messages to send more.
         </div>
@@ -334,19 +339,20 @@ export function InputBox({ onSend, disabled, room, pendingTurnCount, editingPend
       {uploadError && (
         <div
           style={{
-            background: "#fee2e2",
-            color: "#991b1b",
-            padding: "6px 10px",
-            borderRadius: 6,
-            fontSize: 12,
-            marginBottom: 8,
+            background: "var(--ah-danger-light)",
+            color: "var(--ah-text-danger)",
+            padding: "var(--ah-space-2) var(--ah-space-3)",
+            borderRadius: "var(--ah-radius-md)",
+            fontSize: "var(--ah-font-size-sm)",
+            marginBottom: "var(--ah-space-2)",
             fontWeight: 500
           }}
+          role="alert"
         >
           {uploadError}
           <button
             onClick={() => setUploadError(undefined)}
-            style={{ marginLeft: 8, background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#991b1b" }}
+            style={{ marginLeft: "var(--ah-space-2)", background: "none", border: "none", cursor: "pointer", fontSize: "var(--ah-font-size-sm)", color: "var(--ah-text-danger)" }}
             aria-label="Dismiss error"
           >
             Dismiss
@@ -356,13 +362,13 @@ export function InputBox({ onSend, disabled, room, pendingTurnCount, editingPend
       {quote && (
         <div
           style={{
-            background: "#f9fafb",
-            borderLeft: "3px solid #3b82f6",
-            padding: "8px 12px",
-            borderRadius: "0 6px 6px 0",
-            fontSize: 12,
-            color: "#4b5563",
-            marginBottom: 8,
+            background: "var(--ah-bg-elevated)",
+            borderLeft: "3px solid var(--ah-accent)",
+            padding: "var(--ah-space-2) var(--ah-space-3)",
+            borderRadius: "0 var(--ah-radius-md) var(--ah-radius-md) 0",
+            fontSize: "var(--ah-font-size-sm)",
+            color: "var(--ah-text-secondary)",
+            marginBottom: "var(--ah-space-2)",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between"
@@ -373,7 +379,7 @@ export function InputBox({ onSend, disabled, room, pendingTurnCount, editingPend
           </span>
           <button
             onClick={removeQuote}
-            style={{ background: "none", border: "none", cursor: "pointer", fontSize: 14, color: "#6b7280" }}
+            style={{ background: "none", border: "none", cursor: "pointer", fontSize: "var(--ah-font-size-base)", color: "var(--ah-text-muted)" }}
             aria-label="Remove quote"
           >
             x
@@ -381,26 +387,26 @@ export function InputBox({ onSend, disabled, room, pendingTurnCount, editingPend
         </div>
       )}
       {attachments.length > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--ah-space-2)", marginBottom: "var(--ah-space-2)" }}>
           {attachments.map((att) => (
             <div
               key={att.fileId}
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: 6,
-                padding: "4px 10px",
-                background: "#f3f4f6",
-                borderRadius: 6,
-                fontSize: 12,
-                color: "#374151"
+                gap: "var(--ah-space-1)",
+                padding: "var(--ah-space-1) var(--ah-space-3)",
+                background: "var(--ah-bg-secondary)",
+                borderRadius: "var(--ah-radius-md)",
+                fontSize: "var(--ah-font-size-sm)",
+                color: "var(--ah-text-secondary)"
               }}
             >
               <span>{att.name}</span>
-              <span style={{ color: "#9ca3af" }}>({(att.sizeBytes / 1024).toFixed(1)} KB)</span>
+              <span style={{ color: "var(--ah-text-muted)" }}>({(att.sizeBytes / 1024).toFixed(1)} KB)</span>
               <button
                 onClick={() => removeAttachment(att.fileId)}
-                style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#6b7280" }}
+                style={{ background: "none", border: "none", cursor: "pointer", fontSize: "var(--ah-font-size-sm)", color: "var(--ah-text-muted)" }}
                 aria-label={`Remove ${att.name}`}
               >
                 x
@@ -412,12 +418,12 @@ export function InputBox({ onSend, disabled, room, pendingTurnCount, editingPend
       <div
         style={{
           display: "flex",
-          gap: 8,
+          gap: "var(--ah-space-2)",
           alignItems: "flex-end",
-          border: dragOver ? "2px dashed #3b82f6" : "2px dashed transparent",
-          borderRadius: 8,
-          padding: dragOver ? 6 : 8,
-          transition: "border 0.2s, padding 0.2s"
+          border: dragOver ? "2px dashed var(--ah-accent)" : "2px dashed transparent",
+          borderRadius: "var(--ah-radius-lg)",
+          padding: dragOver ? "var(--ah-space-2)" : "var(--ah-space-2)",
+          transition: "border var(--ah-transition-normal), padding var(--ah-transition-normal)"
         }}
       >
         <div style={{ flex: 1, position: "relative" }}>
@@ -431,17 +437,18 @@ export function InputBox({ onSend, disabled, room, pendingTurnCount, editingPend
             rows={2}
             style={{
               width: "100%",
-              padding: "10px 12px",
-              borderRadius: 8,
-              border: "1px solid #d1d5db",
-              fontSize: 14,
+              padding: "var(--ah-space-3)",
+              borderRadius: "var(--ah-radius-lg)",
+              border: "1px solid var(--ah-border-strong)",
+              fontSize: "var(--ah-font-size-base)",
               resize: "vertical",
               minHeight: 44,
               maxHeight: 120,
-              background: disabled || atLimit ? "#f3f4f6" : "#ffffff",
-              color: "#111827"
+              background: disabled || atLimit ? "var(--ah-bg-secondary)" : "var(--ah-bg-primary)",
+              color: "var(--ah-text-primary)"
             }}
             data-testid="message-input"
+            aria-label="Message input"
           />
           {showPreview && (
             <div
@@ -450,19 +457,19 @@ export function InputBox({ onSend, disabled, room, pendingTurnCount, editingPend
                 bottom: "100%",
                 left: 0,
                 right: 0,
-                background: "#ffffff",
-                border: "1px solid #d1d5db",
-                borderRadius: 8,
-                padding: 12,
-                marginBottom: 4,
+                background: "var(--ah-bg-primary)",
+                border: "1px solid var(--ah-border-strong)",
+                borderRadius: "var(--ah-radius-lg)",
+                padding: "var(--ah-space-3)",
+                marginBottom: "var(--ah-space-1)",
                 maxHeight: 200,
                 overflow: "auto",
-                fontSize: 14,
-                boxShadow: "0 4px 12px rgba(0,0,0,0.1)"
+                fontSize: "var(--ah-font-size-base)",
+                boxShadow: "var(--ah-shadow-md)"
               }}
             >
               <strong>Preview</strong>
-              <div style={{ marginTop: 8, whiteSpace: "pre-wrap" }}>{text}</div>
+              <div style={{ marginTop: "var(--ah-space-2)", whiteSpace: "pre-wrap" }}>{text}</div>
             </div>
           )}
           {showMentions && (
@@ -475,19 +482,20 @@ export function InputBox({ onSend, disabled, room, pendingTurnCount, editingPend
             />
           )}
         </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "var(--ah-space-2)" }}>
           <button
             onClick={() => setShowPreview((v) => !v)}
             disabled={!text}
             style={{
-              padding: "6px 10px",
-              borderRadius: 6,
-              border: "1px solid #d1d5db",
-              background: "#ffffff",
+              padding: "var(--ah-space-2) var(--ah-space-3)",
+              borderRadius: "var(--ah-radius-md)",
+              border: "1px solid var(--ah-border-strong)",
+              background: "var(--ah-bg-primary)",
               cursor: "pointer",
-              fontSize: 12,
-              color: "#374151"
+              fontSize: "var(--ah-font-size-sm)",
+              color: "var(--ah-text-secondary)"
             }}
+            aria-label={showPreview ? "Hide preview" : "Show preview"}
           >
             {showPreview ? "Hide" : "Preview"}
           </button>
@@ -495,16 +503,17 @@ export function InputBox({ onSend, disabled, room, pendingTurnCount, editingPend
             onClick={handleSend}
             disabled={disabled || atLimit || !text.trim()}
             style={{
-              padding: "10px 18px",
-              borderRadius: 8,
+              padding: "var(--ah-space-3) var(--ah-space-4)",
+              borderRadius: "var(--ah-radius-lg)",
               border: "none",
-              background: disabled || atLimit ? "#d1d5db" : "#3b82f6",
-              color: "#ffffff",
+              background: disabled || atLimit ? "var(--ah-border-strong)" : "var(--ah-accent)",
+              color: "var(--ah-text-inverse)",
               cursor: disabled || atLimit ? "not-allowed" : "pointer",
-              fontSize: 14,
+              fontSize: "var(--ah-font-size-base)",
               fontWeight: 600
             }}
             data-testid="send-button"
+            aria-label="Send message"
           >
             Send
           </button>

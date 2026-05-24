@@ -94,65 +94,69 @@ export function CostPanel({ workspaceId }: CostPanelProps) {
 
   return (
     <div>
-      <div style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", marginBottom: 6, textTransform: "uppercase" }}>Time Window</div>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      <div style={{ marginBottom: "var(--ah-space-3)" }}>
+        <div style={{ fontSize: "var(--ah-font-size-xs)", fontWeight: 600, color: "var(--ah-text-muted)", marginBottom: "var(--ah-space-2)", textTransform: "uppercase" }}>Time Window</div>
+        <div style={{ display: "flex", gap: "var(--ah-space-1)", flexWrap: "wrap" }}>
           {(["today", "7d", "30d", "custom"] as TimeWindow[]).map((w) => (
             <button
               key={w}
               onClick={() => setTimeWindow(w)}
               style={{
-                padding: "4px 10px",
-                borderRadius: 4,
-                border: "1px solid #d1d5db",
-                background: timeWindow === w ? "#3b82f6" : "#ffffff",
-                color: timeWindow === w ? "#ffffff" : "#374151",
+                padding: "var(--ah-space-1) var(--ah-space-3)",
+                borderRadius: "var(--ah-radius-sm)",
+                border: "1px solid var(--ah-border-strong)",
+                background: timeWindow === w ? "var(--ah-accent)" : "var(--ah-bg-primary)",
+                color: timeWindow === w ? "var(--ah-text-inverse)" : "var(--ah-text-secondary)",
                 cursor: "pointer",
-                fontSize: 12,
+                fontSize: "var(--ah-font-size-sm)",
                 fontWeight: timeWindow === w ? 600 : 400
               }}
               data-testid={`cost-time-${w}`}
+              aria-pressed={timeWindow === w}
             >
               {w === "today" ? "Today" : w === "7d" ? "7 Days" : w === "30d" ? "30 Days" : "Custom"}
             </button>
           ))}
         </div>
         {timeWindow === "custom" && (
-          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <div style={{ display: "flex", gap: "var(--ah-space-2)", marginTop: "var(--ah-space-2)" }}>
             <input
               type="datetime-local"
               value={customFrom}
               onChange={(e) => setCustomFrom(e.target.value)}
-              style={{ padding: "4px 8px", borderRadius: 4, border: "1px solid #d1d5db", fontSize: 12 }}
+              style={{ padding: "var(--ah-space-1) var(--ah-space-2)", borderRadius: "var(--ah-radius-sm)", border: "1px solid var(--ah-border-strong)", fontSize: "var(--ah-font-size-sm)" }}
+              aria-label="Custom from date"
             />
             <input
               type="datetime-local"
               value={customTo}
               onChange={(e) => setCustomTo(e.target.value)}
-              style={{ padding: "4px 8px", borderRadius: 4, border: "1px solid #d1d5db", fontSize: 12 }}
+              style={{ padding: "var(--ah-space-1) var(--ah-space-2)", borderRadius: "var(--ah-radius-sm)", border: "1px solid var(--ah-border-strong)", fontSize: "var(--ah-font-size-sm)" }}
+              aria-label="Custom to date"
             />
           </div>
         )}
       </div>
 
-      <div style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", marginBottom: 6, textTransform: "uppercase" }}>Group By</div>
-        <div style={{ display: "flex", gap: 6 }}>
+      <div style={{ marginBottom: "var(--ah-space-3)" }}>
+        <div style={{ fontSize: "var(--ah-font-size-xs)", fontWeight: 600, color: "var(--ah-text-muted)", marginBottom: "var(--ah-space-2)", textTransform: "uppercase" }}>Group By</div>
+        <div style={{ display: "flex", gap: "var(--ah-space-1)" }}>
           {(["agent", "model", "day"] as const).map((g) => (
             <button
               key={g}
               onClick={() => setGroupBy(g)}
               style={{
-                padding: "4px 10px",
-                borderRadius: 4,
-                border: "1px solid #d1d5db",
-                background: groupBy === g ? "#3b82f6" : "#ffffff",
-                color: groupBy === g ? "#ffffff" : "#374151",
+                padding: "var(--ah-space-1) var(--ah-space-3)",
+                borderRadius: "var(--ah-radius-sm)",
+                border: "1px solid var(--ah-border-strong)",
+                background: groupBy === g ? "var(--ah-accent)" : "var(--ah-bg-primary)",
+                color: groupBy === g ? "var(--ah-text-inverse)" : "var(--ah-text-secondary)",
                 cursor: "pointer",
-                fontSize: 12,
+                fontSize: "var(--ah-font-size-sm)",
                 fontWeight: groupBy === g ? 600 : 400
               }}
               data-testid={`cost-group-${g}`}
+              aria-pressed={groupBy === g}
             >
               {g.charAt(0).toUpperCase() + g.slice(1)}
             </button>
@@ -160,25 +164,25 @@ export function CostPanel({ workspaceId }: CostPanelProps) {
         </div>
       </div>
 
-      {loading && <div style={{ fontSize: 13, color: "#6b7280", padding: "20px 0", textAlign: "center" }}>Loading...</div>}
+      {loading && <div style={{ fontSize: "var(--ah-font-size-md)", color: "var(--ah-text-muted)", padding: "var(--ah-space-5) 0", textAlign: "center" }}>Loading...</div>}
       {error && (
-        <div style={{ background: "#fee2e2", color: "#991b1b", padding: "8px 12px", borderRadius: 6, fontSize: 12, marginBottom: 12 }}>
+        <div style={{ background: "var(--ah-danger-light)", color: "var(--ah-text-danger)", padding: "var(--ah-space-2) var(--ah-space-3)", borderRadius: "var(--ah-radius-md)", fontSize: "var(--ah-font-size-sm)", marginBottom: "var(--ah-space-3)" }} role="alert">
           {error}
         </div>
       )}
 
       {!loading && !error && data && data.groups.length === 0 && (
-        <div style={{ textAlign: "center", padding: "32px 16px" }}>
-          <div style={{ fontSize: 14, color: "#6b7280", marginBottom: 8 }}>No cost data</div>
-          <div style={{ fontSize: 12, color: "#9ca3af" }}>Try creating a run to generate cost data</div>
+        <div style={{ textAlign: "center", padding: "var(--ah-space-7) var(--ah-space-4)" }}>
+          <div style={{ fontSize: "var(--ah-font-size-base)", color: "var(--ah-text-muted)", marginBottom: "var(--ah-space-2)" }}>No cost data</div>
+          <div style={{ fontSize: "var(--ah-font-size-sm)", color: "var(--ah-text-muted)" }}>Try creating a run to generate cost data</div>
         </div>
       )}
 
       {!loading && !error && data && data.groups.length > 0 && (
         <>
           {/* Stacked bar chart */}
-          <div style={{ marginBottom: 16, padding: "12px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
-            <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: 120, paddingBottom: 20, position: "relative" }}>
+          <div style={{ marginBottom: "var(--ah-space-4)", padding: "var(--ah-space-3)", background: "var(--ah-bg-elevated)", borderRadius: "var(--ah-radius-lg)", border: "1px solid var(--ah-border)" }}>
+            <div style={{ display: "flex", alignItems: "flex-end", gap: "var(--ah-space-1)", height: 120, paddingBottom: 20, position: "relative" }}>
               {data.groups.map((group) => {
                 const heightPercent = maxCost > 0 ? (group.totalCostUsd / maxCost) * 100 : 0;
                 return (
@@ -200,17 +204,17 @@ export function CostPanel({ workspaceId }: CostPanelProps) {
                       style={{
                         width: "100%",
                         height: `${heightPercent}%`,
-                        background: "#3b82f6",
-                        borderRadius: "4px 4px 0 0",
+                        background: "var(--ah-accent)",
+                        borderRadius: "var(--ah-radius-sm) var(--ah-radius-sm) 0 0",
                         minHeight: 4,
                         opacity: 0.85
                       }}
                     />
                     <div
                       style={{
-                        fontSize: 10,
-                        color: "#6b7280",
-                        marginTop: 4,
+                        fontSize: "var(--ah-font-size-xs)",
+                        color: "var(--ah-text-muted)",
+                        marginTop: "var(--ah-space-1)",
                         textAlign: "center",
                         overflow: "hidden",
                         textOverflow: "ellipsis",
@@ -227,7 +231,7 @@ export function CostPanel({ workspaceId }: CostPanelProps) {
           </div>
 
           {/* List */}
-          <div style={{ marginBottom: 16 }}>
+          <div style={{ marginBottom: "var(--ah-space-4)" }}>
             {data.groups.map((group) => (
               <div
                 key={group.key}
@@ -236,22 +240,22 @@ export function CostPanel({ workspaceId }: CostPanelProps) {
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "space-between",
-                  padding: "8px 10px",
-                  borderRadius: 6,
-                  background: "#ffffff",
-                  border: "1px solid #e5e7eb",
-                  marginBottom: 6,
+                  padding: "var(--ah-space-2) var(--ah-space-3)",
+                  borderRadius: "var(--ah-radius-md)",
+                  background: "var(--ah-bg-primary)",
+                  border: "1px solid var(--ah-border)",
+                  marginBottom: "var(--ah-space-1)",
                   cursor: "pointer"
                 }}
                 data-testid={`cost-row-${group.key}`}
               >
-                <div style={{ fontSize: 12, fontWeight: 500, color: "#111827", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+                <div style={{ fontSize: "var(--ah-font-size-sm)", fontWeight: 500, color: "var(--ah-text-primary)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
                   {group.key}
                 </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: "#059669" }}>${group.totalCostUsd.toFixed(4)}</span>
-                  <span style={{ fontSize: 11, color: "#6b7280" }}>{group.totalTokens.toLocaleString()} tokens</span>
-                  <span style={{ fontSize: 11, color: "#9ca3af" }}>{group.runCount} runs</span>
+                <div style={{ display: "flex", alignItems: "center", gap: "var(--ah-space-3)", flexShrink: 0 }}>
+                  <span style={{ fontSize: "var(--ah-font-size-sm)", fontWeight: 600, color: "var(--ah-success)" }}>${group.totalCostUsd.toFixed(4)}</span>
+                  <span style={{ fontSize: "var(--ah-font-size-xs)", color: "var(--ah-text-muted)" }}>{group.totalTokens.toLocaleString()} tokens</span>
+                  <span style={{ fontSize: "var(--ah-font-size-xs)", color: "var(--ah-text-muted)" }}>{group.runCount} runs</span>
                 </div>
               </div>
             ))}
@@ -260,30 +264,30 @@ export function CostPanel({ workspaceId }: CostPanelProps) {
           {/* Totals */}
           <div
             style={{
-              padding: "10px 12px",
-              borderRadius: 6,
-              background: "#f3f4f6",
+              padding: "var(--ah-space-3)",
+              borderRadius: "var(--ah-radius-md)",
+              background: "var(--ah-bg-secondary)",
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between"
             }}
           >
-            <span style={{ fontSize: 12, fontWeight: 600, color: "#374151" }}>Total</span>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <span style={{ fontSize: 12, fontWeight: 600, color: "#059669" }}>${data.totalCostUsd.toFixed(4)}</span>
-              <span style={{ fontSize: 11, color: "#6b7280" }}>{data.totalTokens.toLocaleString()} tokens</span>
-              <span style={{ fontSize: 11, color: "#9ca3af" }}>{data.totalRuns} runs</span>
+            <span style={{ fontSize: "var(--ah-font-size-sm)", fontWeight: 600, color: "var(--ah-text-secondary)" }}>Total</span>
+            <div style={{ display: "flex", alignItems: "center", gap: "var(--ah-space-3)" }}>
+              <span style={{ fontSize: "var(--ah-font-size-sm)", fontWeight: 600, color: "var(--ah-success)" }}>${data.totalCostUsd.toFixed(4)}</span>
+              <span style={{ fontSize: "var(--ah-font-size-xs)", color: "var(--ah-text-muted)" }}>{data.totalTokens.toLocaleString()} tokens</span>
+              <span style={{ fontSize: "var(--ah-font-size-xs)", color: "var(--ah-text-muted)" }}>{data.totalRuns} runs</span>
             </div>
           </div>
         </>
       )}
 
-      <div style={{ marginTop: 12, textAlign: "center" }}>
+      <div style={{ marginTop: "var(--ah-space-3)", textAlign: "center" }}>
         <a
           href={`/debug/events?type=agent.run.completed`}
           target="_blank"
           rel="noopener noreferrer"
-          style={{ fontSize: 11, color: "#3b82f6", textDecoration: "none" }}
+          style={{ fontSize: "var(--ah-font-size-xs)", color: "var(--ah-accent)", textDecoration: "none" }}
         >
           Open Debug Panel
         </a>

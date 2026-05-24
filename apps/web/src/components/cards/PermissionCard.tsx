@@ -29,58 +29,60 @@ export function PermissionCard({ card }: PermissionCardProps) {
   return (
     <div
       style={{
-        marginTop: 8,
-        padding: "12px 14px",
-        borderRadius: 8,
-        background: "#fef3c7",
-        border: "1px solid #fcd34d"
+        marginTop: "var(--ah-space-2)",
+        padding: "var(--ah-space-3) var(--ah-space-4)",
+        borderRadius: "var(--ah-radius-lg)",
+        background: "var(--ah-warning-light)",
+        border: "1px solid var(--ah-warning)"
       }}
     >
-      <div style={{ fontSize: 12, fontWeight: 600, color: "#92400e", marginBottom: 6 }}>Permission Request</div>
-      <div style={{ fontSize: 13, color: "#78350f", marginBottom: 4 }}>
+      <div style={{ fontSize: "var(--ah-font-size-xs)", fontWeight: 600, color: "var(--ah-text-warning)", marginBottom: "var(--ah-space-2)" }}>Permission Request</div>
+      <div style={{ fontSize: "var(--ah-font-size-md)", color: "var(--ah-text-warning)", marginBottom: "var(--ah-space-1)" }}>
         <strong>Agent:</strong> {card.agentId}
       </div>
-      <div style={{ fontSize: 13, color: "#78350f", marginBottom: 4 }}>
+      <div style={{ fontSize: "var(--ah-font-size-md)", color: "var(--ah-text-warning)", marginBottom: "var(--ah-space-1)" }}>
         <strong>Resource:</strong> {card.resource.type}
       </div>
       {card.reason && (
-        <div style={{ fontSize: 12, color: "#92400e", marginBottom: 8 }}>{card.reason}</div>
+        <div style={{ fontSize: "var(--ah-font-size-sm)", color: "var(--ah-warning)", marginBottom: "var(--ah-space-2)" }}>{card.reason}</div>
       )}
 
       {!isResolved && (
         <>
-          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#78350f", marginBottom: 10, cursor: "pointer" }}>
-            <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+          <label style={{ display: "flex", alignItems: "center", gap: "var(--ah-space-1)", fontSize: "var(--ah-font-size-sm)", color: "var(--ah-text-warning)", marginBottom: "var(--ah-space-3)", cursor: "pointer" }}>
+            <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} aria-label="Always allow for this project" />
             Always allow for this project
           </label>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: "var(--ah-space-2)" }}>
             <button
               onClick={() => handleResolve("allow")}
               style={{
-                padding: "6px 14px",
-                borderRadius: 6,
+                padding: "var(--ah-space-2) var(--ah-space-4)",
+                borderRadius: "var(--ah-radius-md)",
                 border: "none",
-                background: "#10b981",
-                color: "#ffffff",
+                background: "var(--ah-success)",
+                color: "var(--ah-text-inverse)",
                 cursor: "pointer",
-                fontSize: 13,
+                fontSize: "var(--ah-font-size-md)",
                 fontWeight: 600
               }}
+              aria-label="Allow permission"
             >
               Allow
             </button>
             <button
               onClick={() => handleResolve("deny")}
               style={{
-                padding: "6px 14px",
-                borderRadius: 6,
+                padding: "var(--ah-space-2) var(--ah-space-4)",
+                borderRadius: "var(--ah-radius-md)",
                 border: "none",
-                background: "#ef4444",
-                color: "#ffffff",
+                background: "var(--ah-danger)",
+                color: "var(--ah-text-inverse)",
                 cursor: "pointer",
-                fontSize: 13,
+                fontSize: "var(--ah-font-size-md)",
                 fontWeight: 600
               }}
+              aria-label="Deny permission"
             >
               Deny
             </button>
@@ -91,10 +93,10 @@ export function PermissionCard({ card }: PermissionCardProps) {
       {isResolved && (
         <div
           style={{
-            fontSize: 12,
+            fontSize: "var(--ah-font-size-sm)",
             fontWeight: 600,
-            color: resolvedStatus === "allowed" ? "#059669" : "#dc2626",
-            marginTop: 4
+            color: resolvedStatus === "allowed" ? "var(--ah-success)" : "var(--ah-danger)",
+            marginTop: "var(--ah-space-1)"
           }}
         >
           {resolvedStatus === "allowed" ? "Allowed" : resolvedStatus === "denied" ? "Denied" : resolvedStatus}
