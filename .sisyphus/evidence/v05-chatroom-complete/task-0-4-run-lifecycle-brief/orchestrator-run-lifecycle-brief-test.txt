@@ -1,0 +1,13 @@
+
+> @agenthub/orchestrator@0.0.0 test C:\project\AgentHub\packages\orchestrator
+> node scripts/run-tests.mjs "--run" "run-lifecycle-brief"
+
+
+ RUN  v4.1.7 C:/project/AgentHub
+
+
+ Test Files  1 passed (1)
+      Tests  21 passed (21)
+   Start at  18:47:08
+   Duration  2.62s (transform 224ms, setup 0ms, import 1.18s, tests 1.19s, environment 0ms)
+

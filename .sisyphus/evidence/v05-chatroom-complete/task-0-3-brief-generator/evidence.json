@@ -1,0 +1,47 @@
+{
+  "task": "0.3-brief-generator",
+  "implemented": {
+    "interface": "BriefGenerator.generate(input: BriefGeneratorInput): Effect.Effect<string, never>",
+    "implementation": "HeuristicBriefGenerator",
+    "files": [
+      "packages/context/src/index.ts",
+      "packages/context/test/context.test.ts",
+      "packages/context/package.json"
+    ]
+  },
+  "testNames": [
+    "first sentence truncation",
+    "Chinese punctuation",
+    "code block skip",
+    "failure template",
+    "cancel template",
+    "parse failure fallback",
+    "artifact suffix only when nonzero"
+  ],
+  "verification": [
+    {
+      "command": "lsp_diagnostics packages/context/src/index.ts",
+      "result": "No diagnostics found"
+    },
+    {
+      "command": "lsp_diagnostics packages/context/test/context.test.ts",
+      "result": "No diagnostics found"
+    },
+    {
+      "command": "pnpm.cmd --filter @agenthub/context test --run brief-generator",
+      "result": "PASS: 1 file passed, 19 tests passed"
+    },
+    {
+      "command": "pnpm.cmd exec tsc -p packages/context/tsconfig.json --noEmit",
+      "result": "PASS"
+    },
+    {
+      "command": "pnpm.cmd build --filter @agenthub/context",
+      "result": "PASS: turbo completed; no build tasks were defined for @agenthub/context"
+    }
+  ],
+  "notes": [
+    "PowerShell blocked pnpm.ps1, so verification used the pnpm.cmd shim for the same pnpm commands.",
+    "packages/protocol/src/domains.ts does not currently define RunFailureClass; the context package defines a local compatible union to keep this task within packages/context/**."
+  ]
+}

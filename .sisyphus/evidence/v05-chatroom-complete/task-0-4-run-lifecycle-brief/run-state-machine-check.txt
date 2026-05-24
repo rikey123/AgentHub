@@ -1,0 +1,5 @@
+
+> agenthub@0.0.0 run-state-machine:check C:\project\AgentHub
+> node scripts/checks/run-state-machine-check.mjs
+
+run-state-machine:check passed (1 lifecycle implementation files)

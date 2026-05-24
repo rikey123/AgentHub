@@ -259,7 +259,8 @@ function applyAllMigrations(): void {
     "0008_artifacts.sql",
     "0009_mailbox.sql",
     "0010_auth.sql",
-    "0011_bus_runtime.sql"
+    "0011_bus_runtime.sql",
+    "0012_v05.sql"
   ]);
 }
 
@@ -337,7 +338,7 @@ describe("SQLite pragmas and migrations", () => {
 
   test("applies all migrations once and records them", () => {
     applyAllMigrations();
-    expect(countRows("__agenthub_migrations")).toBe(11);
+    expect(countRows("__agenthub_migrations")).toBe(12);
     expect(applyMigrations(currentDb())).toEqual([]);
 
     expect(tableNames()).toEqual([
@@ -393,7 +394,10 @@ describe("SQLite pragmas and migrations", () => {
       ])
     );
 
-    expect(indexNames("messages")).toEqual(expect.arrayContaining(["idx_messages_room_created", "idx_messages_pending"]));
+    expect(indexNames("messages")).toEqual(
+      expect.arrayContaining(["idx_messages_room_created", "idx_messages_room_created_desc", "idx_messages_pending"])
+    );
+    expect(indexNames("runs")).toContain("idx_runs_workspace_ended");
     expect(indexNames("run_next_turns")).toEqual(
       expect.arrayContaining(["idx_next_turns_run_unconsumed", "idx_next_turns_room_agent"])
     );
