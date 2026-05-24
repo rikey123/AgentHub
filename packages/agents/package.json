@@ -3,5 +3,16 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "scripts": {}
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run --root ../.. packages/agents/test/agents.test.ts"
+  },
+  "dependencies": {
+    "@agenthub/bus": "workspace:*",
+    "@agenthub/db": "workspace:*",
+    "chokidar": "^4.0.3",
+    "gray-matter": "^4.0.3"
+  }
 }
