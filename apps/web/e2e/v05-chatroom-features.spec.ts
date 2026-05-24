@@ -216,6 +216,38 @@ test.describe("v05 chatroom features", () => {
       createdAt: Date.now()
     });
 
+    daemon.database.sqlite
+      .prepare(
+        `INSERT INTO artifacts (id, workspace_id, room_id, run_id, type, title, status, metadata, created_at, updated_at)
+         VALUES (?, 'default-workspace', ?, ?, 'terminal', ?, 'completed', ?, ?, ?)`
+      )
+      .run(
+        `artifact-${runId}`,
+        roomId,
+        runId,
+        "Terminal Output",
+        JSON.stringify({
+          stdout: [
+            "PASS: test 1",
+            "PASS: test 2",
+            "FAIL: test 3",
+            "PASS: test 4",
+            "PASS: test 5",
+            "PASS: test 6",
+            "PASS: test 7",
+            "PASS: test 8",
+            "PASS: test 9",
+            "PASS: test 10",
+            "PASS: test 11",
+            "PASS: test 12"
+          ].join("\n"),
+          stderr: "",
+          exitCode: 0
+        }),
+        Date.now(),
+        Date.now()
+      );
+
     await page.goto(testUrl);
     await page.waitForSelector("text=Terminal Room");
     await page.click("text=Terminal Room");
