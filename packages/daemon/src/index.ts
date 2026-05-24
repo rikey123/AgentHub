@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { URL } from "node:url";
 
@@ -16,6 +16,7 @@ import { authenticateBrowserRequest, issueBrowserSession, redactAndTruncate, typ
 
 import { AdapterRegistry } from "./adapters/registry.ts";
 import { createDaemonCommandHandlers, seedDefaultData } from "./commands.ts";
+export { daemonPidPath, defaultConfigPath, ensureAgentHubHome, ensureParentDirectory, loadAgentHubConfig, redactConfig, type AgentHubConfig, type ConfigOverrides } from "./config.ts";
 import { openApiDocument } from "./openapi.ts";
 
 export type DaemonStartupPhase =
@@ -29,7 +30,9 @@ export type DaemonStartupPhase =
   | "CommandBus open"
   | "HTTP server bind + SSE accept";
 export type DaemonOptions = { readonly databasePath: string; readonly host?: string; readonly port?: number; readonly token?: string; readonly allowRemote?: boolean; readonly allowedOrigins?: readonly string[]; readonly now?: () => number; readonly onLifecyclePhase?: (event: { readonly direction: "startup" | "shutdown"; readonly phase: DaemonStartupPhase }) => void };
-export type DaemonApp = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly roomMcpServer: RoomMcpServer; readonly adapterRegistry: AdapterRegistry; readonly mockAdapter: MockAdapterManager; readonly handle: (req: IncomingMessage, res: ServerResponse) => void; start(): Promise<Server>; close(): Promise<void> };
+export type DaemonCloseOptions = { readonly forceCancelAfterMs?: number };
+export type DaemonCloseResult = { readonly forced: boolean; readonly cancelledRunIds: readonly string[] };
+export type DaemonApp = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly roomMcpServer: RoomMcpServer; readonly adapterRegistry: AdapterRegistry; readonly mockAdapter: MockAdapterManager; readonly handle: (req: IncomingMessage, res: ServerResponse) => void; readonly inFlightRunIds: () => readonly string[]; start(): Promise<Server>; close(options?: DaemonCloseOptions): Promise<DaemonCloseResult> };
 const PHASE_SQLITE: DaemonStartupPhase = "SQLite open + pragma + migrate";
 const PHASE_EVENT_STORE: DaemonStartupPhase = "EventStore readiness check";
 const PHASE_EVENT_BUS: DaemonStartupPhase = "EventBus (PubSub + per-type)";
@@ -64,7 +67,10 @@ type DaemonRuntime = {
   handlers: DurableHandlerRegistry;
   runQueue: RunQueue;
   agentProfiles: AgentProfileWatcher;
+  lifecycle: RunLifecycleService;
 };
+
+type SseClient = { readonly res: ServerResponse; readonly close: () => void };
 
 export function createDaemon(options: DaemonOptions): DaemonApp {
   let runtime: DaemonRuntime | undefined;
@@ -72,6 +78,8 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
   let ready = false;
   let starting: Promise<Server> | undefined;
   let closed = false;
+  let stopping = false;
+  const sseClients = new Set<SseClient>();
 
   const emitPhase = (direction: "startup" | "shutdown", phase: DaemonStartupPhase): void => {
     options.onLifecyclePhase?.({ direction, phase });
@@ -84,10 +92,11 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
 
   const handle = (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
-    if (req.method === "GET" && url.pathname === "/healthz") return json(res, 200, { ok: true });
+    if (req.method === "GET" && url.pathname === "/healthz") return json(res, 200, stopping ? { status: "shutting_down" } : { ok: true });
+    if (stopping) return json(res, 503, { error: "service_stopping" });
     if (!ready) return json(res, 503, { error: "service_starting", retryAfterMs: 500 });
     const app = requireRuntime();
-    void route({ req, res, database: app.database, eventBus: app.eventBus, commandBus: app.commandBus, artifactService: app.artifactService, taskService: app.taskService, outbox: app.outbox, ...(options.token !== undefined ? { token: options.token } : {}), ...(options.allowedOrigins !== undefined ? { allowedOrigins: options.allowedOrigins } : {}), host: `${options.host ?? "127.0.0.1"}:${options.port ?? 6677}`, ...(options.now !== undefined ? { now: options.now } : {}) });
+    void route({ req, res, database: app.database, eventBus: app.eventBus, commandBus: app.commandBus, artifactService: app.artifactService, taskService: app.taskService, outbox: app.outbox, registerSseClient: (client) => { sseClients.add(client); return () => sseClients.delete(client); }, ...(options.token !== undefined ? { token: options.token } : {}), ...(options.allowedOrigins !== undefined ? { allowedOrigins: options.allowedOrigins } : {}), host: `${options.host ?? "127.0.0.1"}:${options.port ?? 6677}`, ...(options.now !== undefined ? { now: options.now } : {}) });
   };
 
   const start = async (): Promise<Server> => {
@@ -173,7 +182,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     commandBusRef.current = commandBus;
     const roomMcpServer = new RoomMcpServer({ commandBus, taskService, database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
     roomMcpServerRef.current = roomMcpServer;
-    runtime = { database, eventBus, commandBus, roomMcpServer, adapterRegistry, mockAdapter, artifactService, taskService, outbox, handlers, runQueue, agentProfiles };
+    runtime = { database, eventBus, commandBus, roomMcpServer, adapterRegistry, mockAdapter, artifactService, taskService, outbox, handlers, runQueue, agentProfiles, lifecycle };
 
     emitPhase("startup", PHASE_HTTP);
     return await new Promise<Server>((resolve) => {
@@ -184,10 +193,13 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     });
   };
 
-  const close = async (): Promise<void> => {
-    if (closed) return;
+  const close = async (closeOptions: DaemonCloseOptions = {}): Promise<DaemonCloseResult> => {
+    if (closed) return { forced: false, cancelledRunIds: [] };
     closed = true;
+    stopping = true;
     ready = false;
+    for (const client of sseClients) client.close();
+    const shutdownRuns = await waitForInFlightRuns(closeOptions.forceCancelAfterMs ?? 0);
     for (const phase of DAEMON_SHUTDOWN_PHASES) {
       emitPhase("shutdown", phase);
       if (phase === PHASE_HTTP && server !== undefined) {
@@ -203,6 +215,30 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
         runtime?.database.sqlite.close();
       }
     }
+    runtime = undefined;
+    return shutdownRuns;
+  };
+
+  const waitForInFlightRuns = async (timeoutMs: number): Promise<DaemonCloseResult> => {
+    if (runtime === undefined || inFlightRunIds().length === 0) return { forced: false, cancelledRunIds: [] };
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (inFlightRunIds().length === 0) return { forced: false, cancelledRunIds: [] };
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    const runIds = inFlightRunIds();
+    for (const runId of runIds) {
+      runtime.lifecycle.markCancelling(null, runId);
+      runtime.lifecycle.cancelFinalized(null, runId, "daemon_shutdown");
+    }
+    await runtime.outbox.drainPending();
+    return { forced: runIds.length > 0, cancelledRunIds: runIds };
+  };
+
+  const inFlightRunIds = (): string[] => {
+    if (runtime === undefined) return [];
+    const rows = runtime.database.sqlite.prepare("SELECT id FROM runs WHERE status IN ('queued','claimed','starting','running','waiting_permission','cancelling') ORDER BY created_at ASC").all() as { readonly id: string }[];
+    return rows.map((row) => row.id);
   };
 
   return {
@@ -213,6 +249,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     get adapterRegistry() { return requireRuntime().adapterRegistry; },
     get mockAdapter() { return requireRuntime().mockAdapter; },
     handle,
+    inFlightRunIds,
     start,
     close
   };
@@ -252,19 +289,22 @@ function withStatusLineCoalescing(eventBus: EventBus): StatusLineEventBus {
   return wrapped;
 }
 
-type RouteContext = { readonly req: IncomingMessage; readonly res: ServerResponse; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly artifactService: ArtifactService; readonly taskService: TaskService; readonly outbox: { drainPending(): Promise<void> }; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly host: string; readonly now?: () => number };
+type RouteContext = { readonly req: IncomingMessage; readonly res: ServerResponse; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly artifactService: ArtifactService; readonly taskService: TaskService; readonly outbox: { drainPending(): Promise<void> }; readonly registerSseClient: (client: SseClient) => () => void; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly host: string; readonly now?: () => number };
 
 async function route(ctx: RouteContext): Promise<void> {
   const url = new URL(ctx.req.url ?? "/", "http://127.0.0.1");
   const auth = authenticate(ctx, url);
   if (!auth.ok) return json(ctx.res, auth.status, { error: auth.error });
   if (ctx.req.method === "POST" && url.pathname === "/auth/session") return authSession(ctx);
+  if (ctx.req.method === "POST" && url.pathname === "/auth/tokens") { if (!requireScope(auth, "write", ctx.res)) return; return issueAuthToken(ctx, await body(ctx)); }
+  if (ctx.req.method === "GET" && url.pathname === "/auth/tokens") { if (!requireScope(auth, "read", ctx.res)) return; return listAuthTokens(ctx); }
   if (ctx.req.method === "GET" && url.pathname === "/healthz") return json(ctx.res, 200, { ok: true });
   if (ctx.req.method === "GET" && url.pathname === "/openapi.json") return json(ctx.res, 200, openApiDocument);
   if (ctx.req.method === "GET" && url.pathname === "/event") return sse(ctx, url, auth.scopes);
   if (ctx.req.method === "GET" && url.pathname === "/rooms") return json(ctx.res, 200, { rooms: all(ctx.database, "SELECT * FROM rooms ORDER BY created_at ASC") });
   if (ctx.req.method === "POST" && url.pathname === "/rooms") return dispatch(ctx, await body(ctx), "CreateRoom");
   const parts = url.pathname.split("/").filter(Boolean);
+  if (ctx.req.method === "DELETE" && parts[0] === "auth" && parts[1] === "tokens" && parts[2]) { if (!requireScope(auth, "write", ctx.res)) return; return revokeToken(ctx, parts[2]); }
   if (ctx.req.method === "GET" && parts[0] === "rooms" && parts.length === 1) return json(ctx.res, 200, { rooms: all(ctx.database, "SELECT * FROM rooms ORDER BY created_at ASC") });
   if (ctx.req.method === "GET" && parts[0] === "rooms" && parts.length === 2) return json(ctx.res, 200, { room: get(ctx.database, "SELECT * FROM rooms WHERE id = ?", parts[1]) });
   if (ctx.req.method === "GET" && parts[0] === "rooms" && parts[2] === "tasks") return tasks(ctx, parts[1] as string, url);
@@ -316,7 +356,8 @@ async function route(ctx: RouteContext): Promise<void> {
   if (ctx.req.method === "GET" && parts[0] === "artifacts" && parts[2] === "files" && parts.length >= 4) return json(ctx.res, 200, { content: ctx.artifactService.fileContent(parts[1] as string, decodeURIComponent(parts.slice(3).join("/"))) ?? null });
   if (ctx.req.method === "GET" && url.pathname === "/debug/events") return debugEvents(ctx, url, auth);
   if (ctx.req.method === "GET" && url.pathname === "/debug/stats") return debugStats(ctx, auth);
-  if (ctx.req.method === "GET" && parts[0] === "workspaces" && parts[2] === "cost-summary") return json(ctx.res, 501, { error: "cost-panel-local is V0.5", capability: "v1-roadmap" });
+  if (ctx.req.method === "GET" && parts[0] === "workspaces" && parts[2] === "cost-summary") { if (!requireScope(auth, "read", ctx.res)) return; return costSummary(ctx, parts[1] as string, url); }
+  if (ctx.req.method === "POST" && parts[0] === "workspaces" && parts[2] === "cost-budget") return json(ctx.res, 501, { error: "budget alerts are V1.5 (permission-dsl)" });
   if (ctx.req.method === "GET" && (url.pathname === "/board" || url.pathname === "/timeline")) return json(ctx.res, 404, { error: "not_found", capability: "v1-roadmap" });
   return json(ctx.res, 404, { error: "not_found" });
 }
@@ -325,6 +366,49 @@ function authSession(ctx: RouteContext): void {
   const session = issueBrowserSession(ctx.database, ctx.now?.() ?? Date.now(), ctx.eventBus);
   ctx.res.setHeader("set-cookie", `agenthub_session=${session.sessionId}; HttpOnly; SameSite=Strict; Path=/; Max-Age=3600`);
   json(ctx.res, 200, { csrfToken: session.csrfToken, expiresAt: session.expiresAt });
+}
+
+function issueAuthToken(ctx: RouteContext, input: Record<string, unknown>): void {
+  const now = ctx.now?.() ?? Date.now();
+  const token = `ah_${randomBytes(32).toString("base64url")}`;
+  const id = randomUUID();
+  const scopes = parseScopes(input.scopes);
+  const expiresDays = typeof input.expiresDays === "number" && Number.isFinite(input.expiresDays) ? input.expiresDays : undefined;
+  const expiresAt = expiresDays === undefined ? null : now + expiresDays * 86_400_000;
+  const fingerprint = tokenFingerprint(token);
+  ctx.database.sqlite.prepare("INSERT INTO auth_tokens (id, fingerprint, hash, description, scopes, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(id, fingerprint, sha256(token), typeof input.description === "string" ? input.description : null, JSON.stringify(scopes), now, expiresAt);
+  ctx.eventBus.publish({ id: randomUUID(), type: "auth.token.issued", schemaVersion: 1, workspaceId: "default-workspace", payload: { tokenId: id, fingerprint, scopes }, createdAt: now });
+  json(ctx.res, 201, { id, token, fingerprint, scopes, expiresAt });
+}
+
+function listAuthTokens(ctx: RouteContext): void {
+  const tokens = all(ctx.database, "SELECT id, fingerprint, description, scopes, created_at, expires_at, last_used_at, revoked_at FROM auth_tokens ORDER BY created_at DESC").map((token) => {
+    const row = token as { readonly id: string; readonly fingerprint: string; readonly description: string | null; readonly scopes: string; readonly created_at: number; readonly expires_at: number | null; readonly last_used_at: number | null; readonly revoked_at: number | null };
+    return { id: row.id, fingerprint: row.fingerprint, description: row.description, scopes: JSON.parse(row.scopes) as unknown, createdAt: row.created_at, expiresAt: row.expires_at, lastUsedAt: row.last_used_at, revokedAt: row.revoked_at };
+  });
+  json(ctx.res, 200, { tokens });
+}
+
+function revokeToken(ctx: RouteContext, tokenId: string): void {
+  const now = ctx.now?.() ?? Date.now();
+  const existing = get(ctx.database, "SELECT id, fingerprint FROM auth_tokens WHERE id = ?", tokenId) as { readonly id: string; readonly fingerprint: string } | null;
+  if (existing === null) return json(ctx.res, 404, { error: "token_not_found" });
+  ctx.database.sqlite.prepare("UPDATE auth_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").run(now, tokenId);
+  ctx.eventBus.publish({ id: randomUUID(), type: "auth.token.revoked", schemaVersion: 1, workspaceId: "default-workspace", payload: { tokenId, fingerprint: existing.fingerprint }, createdAt: now });
+  json(ctx.res, 200, { ok: true });
+}
+
+function costSummary(ctx: RouteContext, workspaceId: string, url: URL): void {
+  if (get(ctx.database, "SELECT id FROM workspaces WHERE id = ?", workspaceId) === null) return json(ctx.res, 404, { error: "workspace_not_found" });
+  const groupBy = costGroupBy(url.searchParams.get("groupBy"));
+  const now = ctx.now?.() ?? Date.now();
+  const to = numberQuery(url, "to") ?? now;
+  const from = numberQuery(url, "from") ?? to - 7 * 86_400_000;
+  const groupExpression = groupBy === "agent" ? "agent_id" : groupBy === "model" ? "COALESCE(model_id, 'unknown')" : "strftime('%Y-%m-%d', ended_at / 1000, 'unixepoch', 'localtime')";
+  const rows = all(ctx.database, `SELECT ${groupExpression} AS key, COALESCE(SUM(input_tokens), 0) AS inputTokens, COALESCE(SUM(output_tokens), 0) AS outputTokens, COALESCE(SUM(cached_tokens), 0) AS cachedTokens, COALESCE(SUM(cost_usd), 0) AS costUsd, COUNT(*) AS runCount FROM runs WHERE workspace_id = ? AND ended_at BETWEEN ? AND ? GROUP BY ${groupExpression} ORDER BY key ASC`, workspaceId, from, to) as CostRow[];
+  const groups = rows.map(normalizeCostRow);
+  const total = groups.reduce((acc, row) => ({ inputTokens: acc.inputTokens + row.inputTokens, outputTokens: acc.outputTokens + row.outputTokens, cachedTokens: acc.cachedTokens + row.cachedTokens, costUsd: acc.costUsd + row.costUsd, runCount: acc.runCount + row.runCount }), zeroCost());
+  json(ctx.res, 200, { groupBy, from, to, groups, total });
 }
 
 function artifacts(ctx: RouteContext, url: URL): void {
@@ -402,6 +486,12 @@ function debugStats(ctx: RouteContext, auth: BrowserAuthResult & { readonly ok: 
     sseClientCount: 0,
     pubsub: ctx.eventBus.pubSubStats()
   });
+}
+
+function requireScope(auth: BrowserAuthResult & { readonly ok: true }, scope: "read" | "write" | "admin", res: ServerResponse): boolean {
+  if (auth.scopes.includes(scope) || (scope !== "admin" && auth.scopes.includes("admin"))) return true;
+  json(res, 403, { error: `requires_${scope}_scope` });
+  return false;
 }
 
 function permissionRequests(ctx: RouteContext, url: URL): void {
@@ -496,11 +586,13 @@ function sse(ctx: RouteContext, url: URL, scopes: readonly string[]): void {
   };
   ctx.res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
   ctx.res.write(": connected\n\n");
+  const client: SseClient = { res: ctx.res, close: () => { ctx.res.write(`event: server.shutting_down\ndata: {"status":"shutting_down"}\n\n`); ctx.res.end(); } };
+  const unregisterClient = ctx.registerSseClient(client);
   const cursor = Number(url.searchParams.get("cursor") ?? ctx.req.headers["last-event-id"] ?? 0);
   for (const event of ctx.eventBus.replayDurableSinceSeq(Number.isFinite(cursor) ? cursor : 0, filters)) send(event);
   const unsubscribe = ctx.eventBus.subscribeAll(send);
   const heartbeat = setInterval(() => ctx.res.write(": heartbeat\n\n"), 10_000);
-  ctx.req.on("close", () => { clearInterval(heartbeat); unsubscribe(); });
+  ctx.req.on("close", () => { clearInterval(heartbeat); unsubscribe(); unregisterClient(); });
 }
 
 function visible(event: EventEnvelope, view: ReplayView, roomId?: string, runId?: string): boolean {
@@ -524,3 +616,12 @@ function get(database: AgentHubDatabase, sql: string, ...params: unknown[]): unk
 function scalar(database: AgentHubDatabase, sql: string, ...params: unknown[]): number { const row = database.sqlite.prepare(sql).get(...params) as { readonly count: number } | undefined; return row?.count ?? 0; }
 function json(res: ServerResponse, status: number, value: unknown): void { res.writeHead(status, { "content-type": "application/json" }); res.end(redactAndTruncate(JSON.stringify(value), 64 * 1024)); }
 async function body(ctx: RouteContext): Promise<Record<string, unknown>> { const chunks: Buffer[] = []; for await (const chunk of ctx.req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)); if (chunks.length === 0) return {}; return JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>; }
+
+type CostRow = { readonly key: string | null; readonly inputTokens: number | null; readonly outputTokens: number | null; readonly cachedTokens: number | null; readonly costUsd: number | null; readonly runCount: number };
+type CostGroup = { readonly key: string; readonly inputTokens: number; readonly outputTokens: number; readonly cachedTokens: number; readonly costUsd: number; readonly runCount: number };
+function normalizeCostRow(row: CostRow): CostGroup { return { key: row.key ?? "unknown", inputTokens: row.inputTokens ?? 0, outputTokens: row.outputTokens ?? 0, cachedTokens: row.cachedTokens ?? 0, costUsd: row.costUsd ?? 0, runCount: row.runCount }; }
+function zeroCost(): Omit<CostGroup, "key"> { return { inputTokens: 0, outputTokens: 0, cachedTokens: 0, costUsd: 0, runCount: 0 }; }
+function costGroupBy(value: string | null): "agent" | "model" | "day" { return value === "model" || value === "day" ? value : "agent"; }
+function parseScopes(value: unknown): readonly string[] { const scopes = Array.isArray(value) ? value.filter((scope): scope is string => typeof scope === "string") : ["read", "write"]; const allowed = scopes.filter((scope) => scope === "read" || scope === "write" || scope === "admin"); return allowed.length > 0 ? [...new Set(allowed)] : ["read"]; }
+function tokenFingerprint(token: string): string { return sha256(token).slice(0, 12); }
+function sha256(value: string): string { return createHash("sha256").update(value).digest("hex"); }
