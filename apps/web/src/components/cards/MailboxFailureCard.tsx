@@ -10,45 +10,48 @@ export function MailboxFailureCard({ reason, targetAgentId, timestamp, onRetry, 
   return (
     <div
       style={{
-        marginTop: 12,
-        padding: "12px 16px",
-        borderRadius: 8,
-        background: "#fef2f2",
-        border: "1px solid #fecaca",
+        marginTop: "var(--ah-space-3)",
+        padding: "var(--ah-space-3) var(--ah-space-4)",
+        borderRadius: "var(--ah-radius-lg)",
+        background: "var(--ah-danger-light)",
+        border: "1px solid var(--ah-danger)",
         display: "flex",
         flexDirection: "column",
-        gap: 8
+        gap: "var(--ah-space-2)"
       }}
       data-testid="mailbox-failure-card"
+      role="alert"
+      aria-live="assertive"
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ fontSize: 16 }}>&#x26A0;</span>
-        <span style={{ fontSize: 13, fontWeight: 600, color: "#991b1b" }}>Delivery Failed</span>
+      <div style={{ display: "flex", alignItems: "center", gap: "var(--ah-space-2)" }}>
+        <span style={{ fontSize: "var(--ah-font-size-base)" }}>&#x26A0;</span>
+        <span style={{ fontSize: "var(--ah-font-size-md)", fontWeight: 600, color: "var(--ah-text-danger)" }}>Delivery Failed</span>
       </div>
-      <div style={{ fontSize: 12, color: "#7f1d1d" }}>
+      <div style={{ fontSize: "var(--ah-font-size-sm)", color: "var(--ah-text-danger)" }}>
         <strong>Reason:</strong> {reason}
       </div>
-      <div style={{ fontSize: 12, color: "#7f1d1d" }}>
+      <div style={{ fontSize: "var(--ah-font-size-sm)", color: "var(--ah-text-danger)" }}>
         <strong>Target:</strong> {targetAgentId}
       </div>
-      <div style={{ fontSize: 11, color: "#9ca3af" }}>
+      <div style={{ fontSize: "var(--ah-font-size-xs)", color: "var(--ah-text-muted)" }}>
         {new Date(timestamp).toLocaleString()}
       </div>
-      <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+      <div style={{ display: "flex", gap: "var(--ah-space-2)", marginTop: "var(--ah-space-1)" }}>
         {onRetry && (
           <button
             onClick={onRetry}
             style={{
-              padding: "4px 12px",
-              borderRadius: 4,
-              border: "1px solid #ef4444",
-              background: "#ffffff",
+              padding: "var(--ah-space-1) var(--ah-space-3)",
+              borderRadius: "var(--ah-radius-sm)",
+              border: "1px solid var(--ah-danger)",
+              background: "var(--ah-bg-primary)",
               cursor: "pointer",
-              fontSize: 12,
-              color: "#ef4444",
+              fontSize: "var(--ah-font-size-sm)",
+              color: "var(--ah-danger)",
               fontWeight: 500
             }}
             data-testid="mailbox-failure-retry"
+            aria-label="Retry delivery"
           >
             Retry
           </button>
@@ -57,15 +60,16 @@ export function MailboxFailureCard({ reason, targetAgentId, timestamp, onRetry, 
           <button
             onClick={onDebug}
             style={{
-              padding: "4px 12px",
-              borderRadius: 4,
-              border: "1px solid #d1d5db",
+              padding: "var(--ah-space-1) var(--ah-space-3)",
+              borderRadius: "var(--ah-radius-sm)",
+              border: "1px solid var(--ah-border-strong)",
               background: "transparent",
               cursor: "pointer",
-              fontSize: 12,
-              color: "#6b7280"
+              fontSize: "var(--ah-font-size-sm)",
+              color: "var(--ah-text-muted)"
             }}
             data-testid="mailbox-failure-debug"
+            aria-label="Debug delivery failure"
           >
             Debug
           </button>

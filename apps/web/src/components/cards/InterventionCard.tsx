@@ -25,30 +25,30 @@ export function InterventionCard({ card }: InterventionCardProps) {
   };
 
   const isResolved = status !== "pending_user_decision";
-  const priorityColor = card.priority === "high" ? "#ef4444" : card.priority === "medium" ? "#d97706" : "#6b7280";
+  const priorityColor = card.priority === "high" ? "var(--ah-danger)" : card.priority === "medium" ? "var(--ah-warning)" : "var(--ah-text-muted)";
 
   return (
     <div
       style={{
-        marginTop: 8,
-        padding: "12px 14px",
-        borderRadius: 8,
-        background: "#eff6ff",
-        border: "1px solid #bfdbfe"
+        marginTop: "var(--ah-space-2)",
+        padding: "var(--ah-space-3) var(--ah-space-4)",
+        borderRadius: "var(--ah-radius-lg)",
+        background: "var(--ah-accent-light)",
+        border: "1px solid var(--ah-accent)"
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-        <span style={{ fontSize: 12, fontWeight: 600, color: "#1e40af" }}>Intervention</span>
-        <span style={{ fontSize: 10, fontWeight: 600, color: "#ffffff", background: priorityColor, padding: "2px 8px", borderRadius: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "var(--ah-space-2)", marginBottom: "var(--ah-space-2)" }}>
+        <span style={{ fontSize: "var(--ah-font-size-xs)", fontWeight: 600, color: "var(--ah-accent-text)" }}>Intervention</span>
+        <span style={{ fontSize: "var(--ah-font-size-xs)", fontWeight: 600, color: "var(--ah-text-inverse)", background: priorityColor, padding: "2px var(--ah-space-2)", borderRadius: "var(--ah-radius-full)" }}>
           {card.priority}
         </span>
       </div>
-      <div style={{ fontSize: 13, color: "#1e3a8a", marginBottom: 4 }}>
+      <div style={{ fontSize: "var(--ah-font-size-md)", color: "var(--ah-accent-text)", marginBottom: "var(--ah-space-1)" }}>
         <strong>Agent:</strong> {card.agentId}
       </div>
-      <div style={{ fontSize: 13, color: "#1e3a8a", marginBottom: 4 }}>{card.reason}</div>
+      <div style={{ fontSize: "var(--ah-font-size-md)", color: "var(--ah-accent-text)", marginBottom: "var(--ah-space-1)" }}>{card.reason}</div>
       {card.preview && (
-        <div style={{ fontSize: 12, color: "#3b82f6", marginBottom: 8, fontStyle: "italic" }}>{card.preview}</div>
+        <div style={{ fontSize: "var(--ah-font-size-sm)", color: "var(--ah-accent)", marginBottom: "var(--ah-space-2)", fontStyle: "italic" }}>{card.preview}</div>
       )}
 
       {!isResolved && (
@@ -60,70 +60,77 @@ export function InterventionCard({ card }: InterventionCardProps) {
             rows={2}
             style={{
               width: "100%",
-              padding: "8px 10px",
-              borderRadius: 6,
-              border: "1px solid #bfdbfe",
-              fontSize: 12,
-              marginBottom: 8,
-              resize: "vertical"
+              padding: "var(--ah-space-2)",
+              borderRadius: "var(--ah-radius-md)",
+              border: "1px solid var(--ah-accent)",
+              fontSize: "var(--ah-font-size-sm)",
+              marginBottom: "var(--ah-space-2)",
+              resize: "vertical",
+              background: "var(--ah-bg-primary)",
+              color: "var(--ah-text-primary)"
             }}
+            aria-label="Edit effective text"
           />
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: "var(--ah-space-1)", flexWrap: "wrap" }}>
             <button
               onClick={() => handleAction("approve")}
               style={{
-                padding: "6px 12px",
-                borderRadius: 6,
+                padding: "var(--ah-space-2) var(--ah-space-3)",
+                borderRadius: "var(--ah-radius-md)",
                 border: "none",
-                background: "#10b981",
-                color: "#ffffff",
+                background: "var(--ah-success)",
+                color: "var(--ah-text-inverse)",
                 cursor: "pointer",
-                fontSize: 12,
+                fontSize: "var(--ah-font-size-sm)",
                 fontWeight: 600
               }}
+              aria-label="Approve intervention"
             >
               Approve
             </button>
             <button
               onClick={() => handleAction("later")}
               style={{
-                padding: "6px 12px",
-                borderRadius: 6,
-                border: "1px solid #d1d5db",
-                background: "#ffffff",
+                padding: "var(--ah-space-2) var(--ah-space-3)",
+                borderRadius: "var(--ah-radius-md)",
+                border: "1px solid var(--ah-border-strong)",
+                background: "var(--ah-bg-primary)",
                 cursor: "pointer",
-                fontSize: 12,
-                color: "#374151"
+                fontSize: "var(--ah-font-size-sm)",
+                color: "var(--ah-text-secondary)"
               }}
+              aria-label="Snooze intervention"
             >
               Later
             </button>
             <button
               onClick={() => handleAction("ignore")}
               style={{
-                padding: "6px 12px",
-                borderRadius: 6,
-                border: "1px solid #d1d5db",
-                background: "#ffffff",
+                padding: "var(--ah-space-2) var(--ah-space-3)",
+                borderRadius: "var(--ah-radius-md)",
+                border: "1px solid var(--ah-border-strong)",
+                background: "var(--ah-bg-primary)",
                 cursor: "pointer",
-                fontSize: 12,
-                color: "#374151"
+                fontSize: "var(--ah-font-size-sm)",
+                color: "var(--ah-text-secondary)"
               }}
+              aria-label="Ignore intervention"
             >
               Ignore
             </button>
             <button
               onClick={() => handleAction("reject")}
               style={{
-                padding: "6px 12px",
-                borderRadius: 6,
+                padding: "var(--ah-space-2) var(--ah-space-3)",
+                borderRadius: "var(--ah-radius-md)",
                 border: "none",
-                background: "#ef4444",
-                color: "#ffffff",
+                background: "var(--ah-danger)",
+                color: "var(--ah-text-inverse)",
                 cursor: "pointer",
-                fontSize: 12,
+                fontSize: "var(--ah-font-size-sm)",
                 fontWeight: 600
               }}
+              aria-label="Reject intervention"
             >
               Reject
             </button>
@@ -132,7 +139,7 @@ export function InterventionCard({ card }: InterventionCardProps) {
       )}
 
       {isResolved && (
-        <div style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", marginTop: 4 }}>Status: {status}</div>
+        <div style={{ fontSize: "var(--ah-font-size-sm)", fontWeight: 600, color: "var(--ah-text-muted)", marginTop: "var(--ah-space-1)" }}>Status: {status}</div>
       )}
     </div>
   );

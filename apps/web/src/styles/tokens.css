@@ -1,0 +1,439 @@
+/* AgentHub Design Tokens — vanilla CSS only */
+/* §8.1 CSS tokenization: all spacing/radius/font-size/line-height/color */
+
+/* ============================================
+   BASE VARIABLES (light + cozy defaults)
+   ============================================ */
+
+:root {
+  /* --- Colors (light theme) --- */
+  --ah-bg-primary: #ffffff;
+  --ah-bg-elevated: #f9fafb;
+  --ah-bg-secondary: #f3f4f6;
+  --ah-bg-tertiary: #e5e7eb;
+  --ah-bg-inverse: #111827;
+  --ah-bg-danger: #fee2e2;
+  --ah-bg-warning: #fef3c7;
+  --ah-bg-success: #d1fae5;
+  --ah-bg-info: #dbeafe;
+
+  --ah-text-primary: #111827;
+  --ah-text-secondary: #374151;
+  --ah-text-muted: #6b7280;
+  --ah-text-inverse: #f9fafb;
+  --ah-text-danger: #991b1b;
+  --ah-text-warning: #92400e;
+  --ah-text-success: #065f46;
+  --ah-text-info: #1e40af;
+
+  --ah-border: #e5e7eb;
+  --ah-border-light: #f3f4f6;
+  --ah-border-strong: #d1d5db;
+
+  --ah-accent: #3b82f6;
+  --ah-accent-hover: #2563eb;
+  --ah-accent-light: #dbeafe;
+  --ah-accent-text: #1d4ed8;
+
+  --ah-danger: #ef4444;
+  --ah-danger-hover: #dc2626;
+  --ah-danger-light: #fee2e2;
+
+  --ah-success: #10b981;
+  --ah-success-hover: #059669;
+  --ah-success-light: #d1fae5;
+
+  --ah-warning: #d97706;
+  --ah-warning-hover: #b45309;
+  --ah-warning-light: #fef3c7;
+
+  /* --- Spacing (cozy default, 4px base) --- */
+  --ah-space-1: 4px;
+  --ah-space-2: 8px;
+  --ah-space-3: 12px;
+  --ah-space-4: 16px;
+  --ah-space-5: 20px;
+  --ah-space-6: 24px;
+  --ah-space-7: 32px;
+  --ah-space-8: 48px;
+
+  /* --- Typography --- */
+  --ah-font-size-xs: 11px;
+  --ah-font-size-sm: 12px;
+  --ah-font-size-md: 13px;
+  --ah-font-size-base: 14px;
+  --ah-font-size-lg: 16px;
+  --ah-font-size-xl: 18px;
+
+  --ah-line-height-tight: 1.25;
+  --ah-line-height-normal: 1.5;
+  --ah-line-height-loose: 1.75;
+
+  /* --- Radius --- */
+  --ah-radius-sm: 4px;
+  --ah-radius-md: 6px;
+  --ah-radius-lg: 8px;
+  --ah-radius-xl: 12px;
+  --ah-radius-full: 9999px;
+
+  /* --- Shadows --- */
+  --ah-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --ah-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --ah-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --ah-shadow-overlay: -4px 0 24px rgba(0, 0, 0, 0.08);
+
+  /* --- Transitions --- */
+  --ah-transition-fast: 0.1s ease;
+  --ah-transition-normal: 0.2s ease;
+  --ah-transition-slow: 0.3s ease;
+
+  /* --- Focus ring --- */
+  --ah-focus-ring: 0 0 0 2px var(--ah-accent-light), 0 0 0 4px var(--ah-accent);
+
+  /* --- Sidebar widths --- */
+  --ah-sidebar-left-width: 240px;
+  --ah-sidebar-left-collapsed: 48px;
+  --ah-sidebar-right-width: 280px;
+  --ah-sidebar-right-collapsed: 48px;
+
+  /* --- Z-index scale --- */
+  --ah-z-dropdown: 100;
+  --ah-z-overlay: 200;
+  --ah-z-modal: 1000;
+  --ah-z-toast: 2000;
+}
+
+/* ============================================
+   DARK THEME
+   ============================================ */
+html[data-theme="dark"] {
+  --ah-bg-primary: #111827;
+  --ah-bg-elevated: #1f2937;
+  --ah-bg-secondary: #374151;
+  --ah-bg-tertiary: #4b5563;
+  --ah-bg-inverse: #f9fafb;
+  --ah-bg-danger: #450a0a;
+  --ah-bg-warning: #451a03;
+  --ah-bg-success: #064e3b;
+  --ah-bg-info: #1e3a8a;
+
+  --ah-text-primary: #f9fafb;
+  --ah-text-secondary: #e5e7eb;
+  --ah-text-muted: #9ca3af;
+  --ah-text-inverse: #111827;
+  --ah-text-danger: #fca5a5;
+  --ah-text-warning: #fcd34d;
+  --ah-text-success: #6ee7b7;
+  --ah-text-info: #93c5fd;
+
+  --ah-border: #374151;
+  --ah-border-light: #1f2937;
+  --ah-border-strong: #4b5563;
+
+  --ah-accent: #60a5fa;
+  --ah-accent-hover: #3b82f6;
+  --ah-accent-light: #1e3a8a;
+  --ah-accent-text: #93c5fd;
+
+  --ah-danger: #f87171;
+  --ah-danger-hover: #ef4444;
+  --ah-danger-light: #450a0a;
+
+  --ah-success: #34d399;
+  --ah-success-hover: #10b981;
+  --ah-success-light: #064e3b;
+
+  --ah-warning: #fbbf24;
+  --ah-warning-hover: #f59e0b;
+  --ah-warning-light: #451a03;
+
+  --ah-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --ah-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --ah-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --ah-shadow-overlay: -4px 0 24px rgba(0, 0, 0, 0.3);
+
+  --ah-focus-ring: 0 0 0 2px var(--ah-accent-light), 0 0 0 4px var(--ah-accent);
+}
+
+/* ============================================
+   COMPACT DENSITY (~0.75x spacing, font sizes unchanged)
+   ============================================ */
+html[data-density="compact"] {
+  --ah-space-1: 3px;
+  --ah-space-2: 6px;
+  --ah-space-3: 9px;
+  --ah-space-4: 12px;
+  --ah-space-5: 15px;
+  --ah-space-6: 18px;
+  --ah-space-7: 24px;
+  --ah-space-8: 36px;
+
+  --ah-sidebar-left-width: 200px;
+  --ah-sidebar-right-width: 240px;
+}
+
+/* ============================================
+   REDUCED MOTION
+   ============================================ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ============================================
+   GLOBAL FOCUS STYLES
+   ============================================ */
+*:focus-visible {
+  outline: none;
+  box-shadow: var(--ah-focus-ring);
+  border-radius: var(--ah-radius-sm);
+}
+
+/* ============================================
+   SCROLLBAR STYLING
+   ============================================ */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--ah-border-strong);
+  border-radius: var(--ah-radius-full);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ah-text-muted);
+}
+
+/* ============================================
+   SKELETON ANIMATION
+   ============================================ */
+@keyframes ah-skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.ah-skeleton {
+  background: linear-gradient(90deg, var(--ah-bg-secondary) 25%, var(--ah-bg-tertiary) 50%, var(--ah-bg-secondary) 75%);
+  background-size: 200% 100%;
+  animation: ah-skeleton-pulse 1.5s ease-in-out infinite;
+  border-radius: var(--ah-radius-md);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ah-skeleton {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+
+/* ============================================
+   MESSAGE FADE-IN
+   ============================================ */
+@keyframes ah-message-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.ah-message-enter {
+  animation: ah-message-fade-in var(--ah-transition-normal) ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ah-message-enter {
+    animation: none;
+  }
+}
+
+/* ============================================
+   SLIDE-OVER TRANSITION
+   ============================================ */
+@keyframes ah-slide-in-right {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+.ah-slide-over-enter {
+  animation: ah-slide-in-right var(--ah-transition-slow) cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ah-slide-over-enter {
+    animation: none;
+  }
+}
+
+/* ============================================
+   BANNER STYLES
+   ============================================ */
+.ah-banner {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ah-space-2);
+  font-size: var(--ah-font-size-sm);
+  font-weight: 500;
+  text-align: center;
+  transition: opacity var(--ah-transition-normal);
+}
+
+.ah-banner--reconnecting {
+  background: var(--ah-bg-warning);
+  color: var(--ah-text-warning);
+  border-bottom: 1px solid var(--ah-warning);
+}
+
+.ah-banner--offline {
+  background: var(--ah-bg-danger);
+  color: var(--ah-text-danger);
+  border-bottom: 1px solid var(--ah-danger);
+}
+
+.ah-banner--connected {
+  background: var(--ah-bg-success);
+  color: var(--ah-text-success);
+  border-bottom: 1px solid var(--ah-success);
+}
+
+/* ============================================
+   COMMAND PALETTE
+   ============================================ */
+.ah-cmd-palette-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: var(--ah-z-modal);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 15vh;
+}
+
+.ah-cmd-palette {
+  width: 100%;
+  max-width: 560px;
+  background: var(--ah-bg-primary);
+  border-radius: var(--ah-radius-xl);
+  box-shadow: var(--ah-shadow-lg);
+  border: 1px solid var(--ah-border);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  max-height: 60vh;
+}
+
+.ah-cmd-palette-input {
+  width: 100%;
+  padding: var(--ah-space-4);
+  border: none;
+  border-bottom: 1px solid var(--ah-border);
+  background: var(--ah-bg-primary);
+  color: var(--ah-text-primary);
+  font-size: var(--ah-font-size-base);
+  outline: none;
+}
+
+.ah-cmd-palette-list {
+  overflow-y: auto;
+  flex: 1;
+}
+
+.ah-cmd-palette-item {
+  padding: var(--ah-space-3) var(--ah-space-4);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: var(--ah-space-3);
+  font-size: var(--ah-font-size-sm);
+  color: var(--ah-text-secondary);
+  transition: background var(--ah-transition-fast);
+}
+
+.ah-cmd-palette-item:hover,
+.ah-cmd-palette-item--selected {
+  background: var(--ah-bg-elevated);
+}
+
+.ah-cmd-palette-item--selected {
+  color: var(--ah-text-primary);
+}
+
+.ah-cmd-palette-item kbd {
+  margin-left: auto;
+  font-size: var(--ah-font-size-xs);
+  padding: 2px 6px;
+  border-radius: var(--ah-radius-sm);
+  background: var(--ah-bg-secondary);
+  color: var(--ah-text-muted);
+  border: 1px solid var(--ah-border);
+}
+
+/* ============================================
+   KEYMAP MODAL
+   ============================================ */
+.ah-keymap-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: var(--ah-z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--ah-space-4);
+}
+
+.ah-keymap-modal {
+  width: 100%;
+  max-width: 480px;
+  background: var(--ah-bg-primary);
+  border-radius: var(--ah-radius-xl);
+  box-shadow: var(--ah-shadow-lg);
+  border: 1px solid var(--ah-border);
+  padding: var(--ah-space-5);
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.ah-keymap-section {
+  margin-bottom: var(--ah-space-4);
+}
+
+.ah-keymap-section-title {
+  font-size: var(--ah-font-size-xs);
+  font-weight: 600;
+  color: var(--ah-text-muted);
+  text-transform: uppercase;
+  margin-bottom: var(--ah-space-2);
+  letter-spacing: 0.05em;
+}
+
+.ah-keymap-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--ah-space-2) 0;
+  font-size: var(--ah-font-size-sm);
+  color: var(--ah-text-secondary);
+  border-bottom: 1px solid var(--ah-border-light);
+}
+
+.ah-keymap-row kbd {
+  font-family: inherit;
+  font-size: var(--ah-font-size-xs);
+  padding: 2px 8px;
+  border-radius: var(--ah-radius-sm);
+  background: var(--ah-bg-secondary);
+  color: var(--ah-text-muted);
+  border: 1px solid var(--ah-border);
+  min-width: 24px;
+  text-align: center;
+}

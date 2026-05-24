@@ -11,23 +11,25 @@ export function PendingTurnList({ pendingTurns, onCancel, onEdit, disabled }: Pe
   const showWarning = pendingTurns.length >= 15;
 
   return (
-    <div style={{ borderTop: "1px solid #e5e7eb", padding: "8px 16px", background: "#fafafa" }}>
+    <div style={{ borderTop: "1px solid var(--ah-border)", padding: "var(--ah-space-2) var(--ah-space-4)", background: "var(--ah-bg-elevated)" }}>
       {showWarning && (
         <div
           style={{
-            background: "#fef3c7",
-            color: "#92400e",
-            padding: "4px 8px",
-            borderRadius: 4,
-            fontSize: 11,
-            marginBottom: 6,
+            background: "var(--ah-warning-light)",
+            color: "var(--ah-text-warning)",
+            padding: "var(--ah-space-1) var(--ah-space-2)",
+            borderRadius: "var(--ah-radius-sm)",
+            fontSize: "var(--ah-font-size-xs)",
+            marginBottom: "var(--ah-space-2)",
             fontWeight: 500
           }}
+          role="alert"
+          aria-live="polite"
         >
           Queue approaching limit ({pendingTurns.length}/20)
         </div>
       )}
-      <div style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", marginBottom: 6, textTransform: "uppercase" }}>
+      <div style={{ fontSize: "var(--ah-font-size-xs)", fontWeight: 600, color: "var(--ah-text-muted)", marginBottom: "var(--ah-space-2)", textTransform: "uppercase" }}>
         Pending ({pendingTurns.length})
       </div>
       {pendingTurns.map((turn, index) => (
@@ -36,20 +38,20 @@ export function PendingTurnList({ pendingTurns, onCancel, onEdit, disabled }: Pe
           style={{
             display: "flex",
             alignItems: "center",
-            gap: 8,
-            padding: "6px 8px",
-            borderRadius: 6,
-            background: "#ffffff",
-            border: "1px solid #e5e7eb",
-            marginBottom: 6,
-            fontSize: 12
+            gap: "var(--ah-space-2)",
+            padding: "var(--ah-space-2)",
+            borderRadius: "var(--ah-radius-md)",
+            background: "var(--ah-bg-primary)",
+            border: "1px solid var(--ah-border)",
+            marginBottom: "var(--ah-space-2)",
+            fontSize: "var(--ah-font-size-sm)"
           }}
         >
-          <span style={{ color: "#9ca3af", fontWeight: 500, minWidth: 20 }}>#{index + 1}</span>
-          <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#374151" }}>
+          <span style={{ color: "var(--ah-text-muted)", fontWeight: 500, minWidth: 20 }}>#{index + 1}</span>
+          <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--ah-text-secondary)" }}>
             "{turn.text.slice(0, 60)}{turn.text.length > 60 ? "..." : ""}"
           </span>
-          <span style={{ color: "#9ca3af", fontSize: 11, whiteSpace: "nowrap" }}>
+          <span style={{ color: "var(--ah-text-muted)", fontSize: "var(--ah-font-size-xs)", whiteSpace: "nowrap" }}>
             {turn.createdAt ? new Date(turn.createdAt).toLocaleTimeString() : ""}
           </span>
           <button
@@ -57,15 +59,16 @@ export function PendingTurnList({ pendingTurns, onCancel, onEdit, disabled }: Pe
             disabled={disabled}
             title={disabled ? "Needs online connection" : "Edit"}
             style={{
-              padding: "2px 8px",
-              borderRadius: 4,
-              border: "1px solid #d1d5db",
-              background: "#ffffff",
+              padding: "2px var(--ah-space-2)",
+              borderRadius: "var(--ah-radius-sm)",
+              border: "1px solid var(--ah-border-strong)",
+              background: "var(--ah-bg-primary)",
               cursor: disabled ? "not-allowed" : "pointer",
-              fontSize: 11,
-              color: disabled ? "#9ca3af" : "#374151"
+              fontSize: "var(--ah-font-size-xs)",
+              color: disabled ? "var(--ah-text-muted)" : "var(--ah-text-secondary)"
             }}
             data-testid={`pending-turn-edit-${turn.pendingTurnId ?? turn.id}`}
+            aria-label="Edit pending turn"
           >
             Edit
           </button>
@@ -78,15 +81,16 @@ export function PendingTurnList({ pendingTurns, onCancel, onEdit, disabled }: Pe
             disabled={disabled}
             title={disabled ? "Needs online connection" : "Cancel"}
             style={{
-              padding: "2px 8px",
-              borderRadius: 4,
-              border: "1px solid #d1d5db",
-              background: "#ffffff",
+              padding: "2px var(--ah-space-2)",
+              borderRadius: "var(--ah-radius-sm)",
+              border: "1px solid var(--ah-border-strong)",
+              background: "var(--ah-bg-primary)",
               cursor: disabled ? "not-allowed" : "pointer",
-              fontSize: 11,
-              color: disabled ? "#9ca3af" : "#ef4444"
+              fontSize: "var(--ah-font-size-xs)",
+              color: disabled ? "var(--ah-text-muted)" : "var(--ah-danger)"
             }}
             data-testid={`pending-turn-cancel-${turn.pendingTurnId ?? turn.id}`}
+            aria-label="Cancel pending turn"
           >
             Cancel
           </button>

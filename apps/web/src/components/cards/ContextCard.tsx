@@ -41,45 +41,47 @@ export function ContextCard({ card }: ContextCardProps) {
   return (
     <div
       style={{
-        marginTop: 8,
-        padding: "12px 14px",
-        borderRadius: 8,
-        background: "#eff6ff",
-        border: "1px solid #bfdbfe"
+        marginTop: "var(--ah-space-2)",
+        padding: "var(--ah-space-3) var(--ah-space-4)",
+        borderRadius: "var(--ah-radius-lg)",
+        background: "var(--ah-accent-light)",
+        border: "1px solid var(--ah-accent)"
       }}
     >
-      <div style={{ fontSize: 12, fontWeight: 600, color: "#1e40af", marginBottom: 6 }}>Context</div>
-      <div style={{ fontSize: 13, fontWeight: 600, color: "#1e3a8a", marginBottom: 4 }}>{card.title}</div>
-      <div style={{ fontSize: 12, color: "#3b82f6", marginBottom: 8 }}>{card.summary}</div>
+      <div style={{ fontSize: "var(--ah-font-size-xs)", fontWeight: 600, color: "var(--ah-accent-text)", marginBottom: "var(--ah-space-2)" }}>Context</div>
+      <div style={{ fontSize: "var(--ah-font-size-md)", fontWeight: 600, color: "var(--ah-accent-text)", marginBottom: "var(--ah-space-1)" }}>{card.title}</div>
+      <div style={{ fontSize: "var(--ah-font-size-sm)", color: "var(--ah-accent)", marginBottom: "var(--ah-space-2)" }}>{card.summary}</div>
 
       {isDraft && (
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: "var(--ah-space-2)" }}>
           <button
             onClick={handleConfirm}
             style={{
-              padding: "6px 12px",
-              borderRadius: 6,
+              padding: "var(--ah-space-2) var(--ah-space-3)",
+              borderRadius: "var(--ah-radius-md)",
               border: "none",
-              background: "#3b82f6",
-              color: "#ffffff",
+              background: "var(--ah-accent)",
+              color: "var(--ah-text-inverse)",
               cursor: "pointer",
-              fontSize: 12,
+              fontSize: "var(--ah-font-size-sm)",
               fontWeight: 600
             }}
+            aria-label="Confirm context"
           >
             Confirm
           </button>
           <button
             onClick={handleDiscard}
             style={{
-              padding: "6px 12px",
-              borderRadius: 6,
-              border: "1px solid #d1d5db",
-              background: "#ffffff",
+              padding: "var(--ah-space-2) var(--ah-space-3)",
+              borderRadius: "var(--ah-radius-md)",
+              border: "1px solid var(--ah-border-strong)",
+              background: "var(--ah-bg-primary)",
               cursor: "pointer",
-              fontSize: 12,
-              color: "#374151"
+              fontSize: "var(--ah-font-size-sm)",
+              color: "var(--ah-text-secondary)"
             }}
+            aria-label="Discard context"
           >
             Discard
           </button>
@@ -87,7 +89,7 @@ export function ContextCard({ card }: ContextCardProps) {
       )}
 
       {!isDraft && (
-        <div style={{ fontSize: 12, fontWeight: 600, color: status === "confirmed" ? "#059669" : "#6b7280" }}>
+        <div style={{ fontSize: "var(--ah-font-size-sm)", fontWeight: 600, color: status === "confirmed" ? "var(--ah-success)" : "var(--ah-text-muted)" }}>
           {status === "confirmed" ? "Confirmed" : status === "deprecated" ? "Discarded" : status}
         </div>
       )}

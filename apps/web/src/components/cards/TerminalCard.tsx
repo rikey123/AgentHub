@@ -3,8 +3,8 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import AnsiToHtml from "ansi-to-html";
 
 const ansiConverter = new AnsiToHtml({
-  fg: "#e5e7eb",
-  bg: "#1f2937",
+  fg: "var(--ah-text-inverse)",
+  bg: "var(--ah-bg-inverse)",
   newline: true,
   escapeXML: true,
   stream: false
@@ -37,23 +37,23 @@ export function TerminalCard({ lines, exitCode, collapsed = true }: TerminalCard
   return (
     <div
       style={{
-        marginTop: 8,
-        borderRadius: 6,
-        border: hasError ? "1px solid #ef4444" : "1px solid #e5e7eb",
+        marginTop: "var(--ah-space-2)",
+        borderRadius: "var(--ah-radius-md)",
+        border: hasError ? "1px solid var(--ah-danger)" : "1px solid var(--ah-border)",
         overflow: "hidden",
-        background: "#1f2937"
+        background: "var(--ah-bg-inverse)"
       }}
       data-testid="terminal-card"
     >
-      <div style={{ padding: "8px 12px", background: "#111827", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span style={{ fontSize: 11, fontWeight: 600, color: "#9ca3af", fontFamily: "monospace" }}>Terminal</span>
-        {hasError && <span style={{ fontSize: 11, color: "#ef4444", fontWeight: 600 }}>Exit {exitCode}</span>}
+      <div style={{ padding: "var(--ah-space-2) var(--ah-space-3)", background: "var(--ah-bg-primary)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <span style={{ fontSize: "var(--ah-font-size-xs)", fontWeight: 600, color: "var(--ah-text-muted)", fontFamily: "monospace" }}>Terminal</span>
+        {hasError && <span style={{ fontSize: "var(--ah-font-size-xs)", color: "var(--ah-danger)", fontWeight: 600 }}>Exit {exitCode}</span>}
       </div>
-      <div style={{ padding: "8px 12px", fontFamily: "monospace", fontSize: 12, lineHeight: 1.5, color: "#e5e7eb" }}>
+      <div style={{ padding: "var(--ah-space-2) var(--ah-space-3)", fontFamily: "monospace", fontSize: "var(--ah-font-size-sm)", lineHeight: "var(--ah-line-height-normal)", color: "var(--ah-text-inverse)" }}>
         {previewLines.map((line, idx) => (
           <div
             key={idx}
-            style={{ color: line.stream === "stderr" ? "#fca5a5" : "#e5e7eb" }}
+            style={{ color: line.stream === "stderr" ? "var(--ah-danger)" : "var(--ah-text-inverse)" }}
             dangerouslySetInnerHTML={{ __html: ansiConverter.toHtml(line.text) }}
           />
         ))}
@@ -63,16 +63,17 @@ export function TerminalCard({ lines, exitCode, collapsed = true }: TerminalCard
           onClick={() => setExpanded(true)}
           style={{
             width: "100%",
-            padding: "6px 12px",
-            background: "#374151",
+            padding: "var(--ah-space-2) var(--ah-space-3)",
+            background: "var(--ah-bg-secondary)",
             border: "none",
-            borderTop: "1px solid #4b5563",
+            borderTop: "1px solid var(--ah-border)",
             cursor: "pointer",
-            fontSize: 12,
-            color: "#d1d5db",
+            fontSize: "var(--ah-font-size-sm)",
+            color: "var(--ah-text-secondary)",
             fontFamily: "monospace"
           }}
           data-testid="terminal-expand"
+          aria-label={`Show ${remaining} more lines`}
         >
           Show {remaining} more lines ({stdoutCount} stdout, {stderrCount} stderr)
         </button>
@@ -160,22 +161,25 @@ function TerminalExpanded({
         position: "fixed",
         inset: 0,
         background: "rgba(0,0,0,0.7)",
-        zIndex: 2000,
+        zIndex: "var(--ah-z-modal)",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        padding: 24
+        padding: "var(--ah-space-6)"
       }}
       onClick={onClose}
       data-testid="terminal-modal"
+      role="dialog"
+      aria-label="Terminal output"
+      aria-modal="true"
     >
       <div
         style={{
           width: "100%",
           maxWidth: 900,
           height: "80vh",
-          background: "#1f2937",
-          borderRadius: 12,
+          background: "var(--ah-bg-inverse)",
+          borderRadius: "var(--ah-radius-xl)",
           display: "flex",
           flexDirection: "column",
           overflow: "hidden"
@@ -184,35 +188,36 @@ function TerminalExpanded({
       >
         <div
           style={{
-            padding: "12px 16px",
-            background: "#111827",
+            padding: "var(--ah-space-3) var(--ah-space-4)",
+            background: "var(--ah-bg-primary)",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            borderBottom: "1px solid #374151"
+            borderBottom: "1px solid var(--ah-border)"
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <span style={{ fontSize: 14, fontWeight: 600, color: "#e5e7eb", fontFamily: "monospace" }}>Terminal Output</span>
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--ah-space-3)" }}>
+            <span style={{ fontSize: "var(--ah-font-size-base)", fontWeight: 600, color: "var(--ah-text-inverse)", fontFamily: "monospace" }}>Terminal Output</span>
             {exitCode !== undefined && (
-              <span style={{ fontSize: 11, color: exitCode === 0 ? "#10b981" : "#ef4444", fontWeight: 600 }}>
+              <span style={{ fontSize: "var(--ah-font-size-xs)", color: exitCode === 0 ? "var(--ah-success)" : "var(--ah-danger)", fontWeight: 600 }}>
                 Exit {exitCode}
               </span>
             )}
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--ah-space-2)" }}>
             <button
               onClick={handleCopy}
               style={{
-                padding: "4px 10px",
-                borderRadius: 4,
-                border: "1px solid #4b5563",
-                background: "#374151",
+                padding: "var(--ah-space-1) var(--ah-space-3)",
+                borderRadius: "var(--ah-radius-sm)",
+                border: "1px solid var(--ah-border-strong)",
+                background: "var(--ah-bg-secondary)",
                 cursor: "pointer",
-                fontSize: 12,
-                color: "#d1d5db"
+                fontSize: "var(--ah-font-size-sm)",
+                color: "var(--ah-text-secondary)"
               }}
               data-testid="terminal-copy"
+              aria-label="Copy terminal output"
             >
               Copy
             </button>
@@ -222,8 +227,8 @@ function TerminalExpanded({
                 background: "none",
                 border: "none",
                 cursor: "pointer",
-                fontSize: 18,
-                color: "#9ca3af"
+                fontSize: "var(--ah-font-size-lg)",
+                color: "var(--ah-text-muted)"
               }}
               aria-label="Close terminal"
             >
@@ -231,7 +236,7 @@ function TerminalExpanded({
             </button>
           </div>
         </div>
-        <div style={{ padding: "8px 16px", background: "#1f2937", borderBottom: "1px solid #374151", display: "flex", gap: 8 }}>
+        <div style={{ padding: "var(--ah-space-2) var(--ah-space-4)", background: "var(--ah-bg-inverse)", borderBottom: "1px solid var(--ah-border)", display: "flex", gap: "var(--ah-space-2)" }}>
           <input
             ref={searchInputRef}
             value={searchQuery}
@@ -242,32 +247,34 @@ function TerminalExpanded({
             placeholder="Search (regex supported)"
             style={{
               flex: 1,
-              padding: "6px 10px",
-              borderRadius: 4,
-              border: "1px solid #4b5563",
-              background: "#111827",
-              color: "#e5e7eb",
-              fontSize: 12,
+              padding: "var(--ah-space-2)",
+              borderRadius: "var(--ah-radius-sm)",
+              border: "1px solid var(--ah-border-strong)",
+              background: "var(--ah-bg-primary)",
+              color: "var(--ah-text-inverse)",
+              fontSize: "var(--ah-font-size-sm)",
               fontFamily: "monospace"
             }}
             data-testid="terminal-search"
+            aria-label="Search terminal output"
           />
           <button
             onClick={handleSearch}
             style={{
-              padding: "6px 12px",
-              borderRadius: 4,
-              border: "1px solid #4b5563",
-              background: "#374151",
+              padding: "var(--ah-space-2) var(--ah-space-3)",
+              borderRadius: "var(--ah-radius-sm)",
+              border: "1px solid var(--ah-border-strong)",
+              background: "var(--ah-bg-secondary)",
               cursor: "pointer",
-              fontSize: 12,
-              color: "#d1d5db"
+              fontSize: "var(--ah-font-size-sm)",
+              color: "var(--ah-text-secondary)"
             }}
+            aria-label="Search"
           >
             Search
           </button>
         </div>
-        <div ref={listRef} style={{ flex: 1, overflow: "auto", padding: "8px 16px", fontFamily: "monospace", fontSize: 12, lineHeight: 1.5 }}>
+        <div ref={listRef} style={{ flex: 1, overflow: "auto", padding: "var(--ah-space-2) var(--ah-space-4)", fontFamily: "monospace", fontSize: "var(--ah-font-size-sm)", lineHeight: "var(--ah-line-height-normal)" }}>
           <div style={{ height: virtualizer.getTotalSize(), position: "relative", width: "100%" }}>
             {virtualItems.map((virtualItem) => {
               const line = filteredLines[virtualItem.index];
@@ -284,7 +291,7 @@ function TerminalExpanded({
                     width: "100%",
                     height: virtualItem.size,
                     transform: `translateY(${virtualItem.start}px)`,
-                    color: line.stream === "stderr" ? "#fca5a5" : "#e5e7eb",
+                    color: line.stream === "stderr" ? "var(--ah-danger)" : "var(--ah-text-inverse)",
                     whiteSpace: "pre-wrap",
                     wordBreak: "break-word"
                   }}
@@ -296,11 +303,11 @@ function TerminalExpanded({
         </div>
         <div
           style={{
-            padding: "8px 16px",
-            background: "#111827",
-            borderTop: "1px solid #374151",
-            fontSize: 11,
-            color: "#9ca3af",
+            padding: "var(--ah-space-2) var(--ah-space-4)",
+            background: "var(--ah-bg-primary)",
+            borderTop: "1px solid var(--ah-border)",
+            fontSize: "var(--ah-font-size-xs)",
+            color: "var(--ah-text-muted)",
             fontFamily: "monospace",
             display: "flex",
             justifyContent: "space-between"

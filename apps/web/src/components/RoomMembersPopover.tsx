@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useFloating, offset, flip, shift, size, autoUpdate } from "@floating-ui/react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import type { ParticipantViewModel } from "../types.ts";
 
 export type MentionCandidate = {
   readonly agentId: string;
@@ -109,11 +108,11 @@ export function RoomMembersPopover({ candidates, query, onSelect, onClose, ancho
       ref={refs.setFloating}
       style={{
         ...floatingStyles,
-        background: "#ffffff",
-        border: "1px solid #e5e7eb",
-        borderRadius: 8,
-        boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-        zIndex: 1000,
+        background: "var(--ah-bg-primary)",
+        border: "1px solid var(--ah-border)",
+        borderRadius: "var(--ah-radius-lg)",
+        boxShadow: "var(--ah-shadow-md)",
+        zIndex: "var(--ah-z-modal)",
         overflow: "hidden",
         width: 280,
         display: "flex",
@@ -148,35 +147,35 @@ export function RoomMembersPopover({ candidates, query, onSelect, onClose, ancho
                   width: "100%",
                   height: virtualItem.size,
                   transform: `translateY(${virtualItem.start}px)`,
-                  padding: "8px 12px",
+                  padding: "var(--ah-space-2) var(--ah-space-3)",
                   display: "flex",
                   alignItems: "center",
-                  gap: 10,
+                  gap: "var(--ah-space-3)",
                   cursor: "pointer",
-                  background: isSelected ? "#eff6ff" : "transparent",
-                  borderBottom: "1px solid #f3f4f6"
+                  background: isSelected ? "var(--ah-accent-light)" : "transparent",
+                  borderBottom: "1px solid var(--ah-border-light)"
                 }}
               >
                 <div
                   style={{
                     width: 24,
                     height: 24,
-                    borderRadius: 12,
-                    background: "#e5e7eb",
+                    borderRadius: "var(--ah-radius-full)",
+                    background: "var(--ah-bg-tertiary)",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    fontSize: 10,
+                    fontSize: "var(--ah-font-size-xs)",
                     fontWeight: 600,
-                    color: "#374151",
+                    color: "var(--ah-text-secondary)",
                     flexShrink: 0
                   }}
                 >
                   {candidate.displayName.charAt(0).toUpperCase()}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 500, color: "#111827" }}>{candidate.displayName}</div>
-                  <div style={{ fontSize: 11, color: "#6b7280" }}>
+                  <div style={{ fontSize: "var(--ah-font-size-md)", fontWeight: 500, color: "var(--ah-text-primary)" }}>{candidate.displayName}</div>
+                  <div style={{ fontSize: "var(--ah-font-size-xs)", color: "var(--ah-text-muted)" }}>
                     {candidate.agentId} · {candidate.role}
                   </div>
                 </div>
@@ -184,16 +183,17 @@ export function RoomMembersPopover({ candidates, query, onSelect, onClose, ancho
                   style={{
                     width: 8,
                     height: 8,
-                    borderRadius: 4,
+                    borderRadius: "var(--ah-radius-full)",
                     background:
                       candidate.presence === "active" || candidate.presence === "working"
-                        ? "#10b981"
+                        ? "var(--ah-success)"
                         : candidate.presence === "observing"
-                          ? "#3b82f6"
-                          : "#9ca3af",
+                          ? "var(--ah-accent)"
+                          : "var(--ah-text-muted)",
                     flexShrink: 0
                   }}
                   title={candidate.presence}
+                  aria-label={`Presence: ${candidate.presence}`}
                 />
               </div>
             );
