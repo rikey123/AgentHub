@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmSync, statSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, relative, resolve, sep } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -18,10 +18,16 @@ export type SafeUriResult = { readonly ok: true; readonly kind: "file"; readonly
 export type BrowserAuthResult = { readonly ok: true; readonly scopes: readonly AuthScope[]; readonly authKind: "session" | "bearer" | "local" } | { readonly ok: false; readonly status: 401 | 403 | 415; readonly error: string };
 export type BrowserAuthInput = { readonly method: string; readonly pathname: string; readonly headers: Readonly<Record<string, string | undefined>>; readonly now?: number; readonly token?: string; readonly host?: string; readonly allowedOrigins?: readonly string[]; readonly database: AgentHubDatabase };
 export type AuditActor = { readonly type: string; readonly id: string };
+export type AttachmentUploadInput = { readonly database: AgentHubDatabase; readonly workspaceRoot: string; readonly originalName: string; readonly mimeType: string | undefined; readonly bytes: Buffer; readonly now?: number; readonly fileId?: string };
+export type AttachmentUploadResult = { readonly ok: true; readonly fileId: string; readonly originalName: string; readonly sizeBytes: number; readonly sha256: string } | { readonly ok: false; readonly status: 413; readonly error: "attachment_too_large"; readonly maxBytes: number } | { readonly ok: false; readonly status: 415; readonly error: "attachment_mime_not_allowed"; readonly mime: string } | { readonly ok: false; readonly status: 400; readonly error: "attachment_path_invalid" | "attachment_svg_invalid" };
+export type AttachmentGcResult = { readonly removed: readonly string[]; readonly skipped: readonly { readonly fileId: string; readonly reason: string }[] };
 
 const defaultSensitiveGlobs = [".env", ".env.*", "*.pem", "*.key", "id_rsa", "id_ed25519", ".aws/**", ".gcp/**", ".ssh/**", ".netrc", "**/credentials.json", "**/service-account*.json"];
 const allowedDataMimes = new Set(["image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml", "text/plain", "text/markdown", "text/csv", "application/json"]);
 const oneMb = 1024 * 1024;
+export const attachmentMaxBytes = 50 * 1024 * 1024;
+export const orphanAttachmentMessageId = "__agenthub_orphan_attachment__";
+const blockedAttachmentMimes = new Set(["text/html", "application/javascript", "application/x-javascript", "text/javascript", "application/x-sh", "application/x-executable"]);
 
 export class SecretRedactor {
   private readonly patterns: readonly { readonly name: string; readonly regex: RegExp; readonly replacement?: (match: string, ...groups: string[]) => string }[];
@@ -154,6 +160,35 @@ export function sanitizeSvg(svg: string): string {
   return svg.replace(/<\s*(script|foreignObject)\b[\s\S]*?<\s*\/\s*\1\s*>/giu, "").replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*')/giu, "");
 }
 
+export function storeAttachment(input: AttachmentUploadInput): AttachmentUploadResult {
+  const sizeBytes = input.bytes.byteLength;
+  const mime = contentType(input.mimeType) ?? "";
+  if (sizeBytes > attachmentMaxBytes) return { ok: false, status: 413, error: "attachment_too_large", maxBytes: attachmentMaxBytes };
+  if (!attachmentMimeAllowed(mime) || !attachmentMagicAllowed(mime, input.bytes.subarray(0, 512))) return { ok: false, status: 415, error: "attachment_mime_not_allowed", mime };
+  const fileId = input.fileId ?? randomUUID();
+  if (!isUuid(fileId)) return { ok: false, status: 400, error: "attachment_path_invalid" };
+  const now = input.now ?? Date.now();
+  const date = new Date(now);
+  const year = String(date.getUTCFullYear());
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const relativeStoragePath = `.agenthub/attachments/${year}/${month}/${fileId}`;
+  const resolved = resolveWorkspacePath(input.workspaceRoot, relativeStoragePath);
+  if (!resolved.ok || resolved.classification !== "internal") return { ok: false, status: 400, error: "attachment_path_invalid" };
+  let bytes = input.bytes;
+  if (mime === "image/svg+xml") {
+    try {
+      bytes = Buffer.from(sanitizeSvg(input.bytes.toString("utf8")), "utf8");
+    } catch {
+      return { ok: false, status: 400, error: "attachment_svg_invalid" };
+    }
+  }
+  mkdirSync(dirname(resolved.abs), { recursive: true });
+  writeFileSync(resolved.abs, bytes, { flag: "wx" });
+  const digest = sha256Buffer(bytes);
+  input.database.sqlite.prepare("INSERT INTO attachments (id, message_id, file_id, file_name, mime_type, byte_size, sha256, storage_path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run(randomUUID(), orphanAttachmentMessageId, fileId, input.originalName, mime, bytes.byteLength, digest, resolved.relativePath, now);
+  return { ok: true, fileId, originalName: input.originalName, sizeBytes: bytes.byteLength, sha256: digest };
+}
+
 export function issueBrowserSession(database: AgentHubDatabase, now = Date.now(), eventBus?: EventBus): { readonly sessionId: string; readonly csrfToken: string; readonly expiresAt: number } {
   const sessionId = randomBytes(32).toString("base64url");
   const csrfToken = randomBytes(32).toString("base64url");
@@ -208,7 +243,7 @@ export function authenticateBrowserRequest(input: BrowserAuthInput): BrowserAuth
     return { ok: false, status: 401, error: "unauthorized" };
   }
   if (!hasOrigin) return input.token === undefined ? { ok: true, scopes: ["read", "write"], authKind: "local" } : { ok: false, status: 401, error: "unauthorized" };
-  if (method !== "GET" && contentType(input.headers["content-type"]) !== "application/json") return { ok: false, status: 415, error: "content_type_not_json" };
+  if (method !== "GET" && input.pathname !== "/attachments" && contentType(input.headers["content-type"]) !== "application/json") return { ok: false, status: 415, error: "content_type_not_json" };
   if (method === "POST" && input.pathname === "/auth/session") return { ok: true, scopes: ["read"], authKind: "session" };
   const session = sessionFromCookie(input.headers.cookie);
   if (session === undefined) return { ok: false, status: 401, error: "missing_session" };
@@ -220,9 +255,9 @@ export function authenticateBrowserRequest(input: BrowserAuthInput): BrowserAuth
   return { ok: true, scopes: ["read", "write"], authKind: "session" };
 }
 
-export type WorktreeGcResult = { readonly removed: readonly string[]; readonly skipped: readonly { readonly runId: string; readonly reason: string }[] };
+export type WorktreeGcResult = { readonly removed: readonly string[]; readonly skipped: readonly { readonly runId: string; readonly reason: string }[]; readonly attachments: AttachmentGcResult };
 export class ManagedRunGarbageCollector {
-  constructor(private readonly options: { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly agenthubRoot: string; readonly retentionDays?: number; readonly maxTotalSizeGb?: number; readonly now?: () => number; readonly execGit?: (args: readonly string[], cwd: string) => { readonly ok: boolean } }) {}
+  constructor(private readonly options: { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly agenthubRoot: string; readonly workspaceRoot?: string; readonly retentionDays?: number; readonly maxTotalSizeGb?: number; readonly now?: () => number; readonly execGit?: (args: readonly string[], cwd: string) => { readonly ok: boolean } }) {}
   collect(): WorktreeGcResult {
     const removed: string[] = [];
     const skipped: { runId: string; reason: string }[] = [];
@@ -239,6 +274,25 @@ export class ManagedRunGarbageCollector {
         removed.push(runId);
         this.publishRemoved(runId, rootName === "worktrees" ? "isolated_worktree" : "isolated_copy", decision.sizeBytes, decision.retainedDays);
       }
+    }
+    return { removed, skipped, attachments: this.collectAttachments() };
+  }
+  private collectAttachments(): AttachmentGcResult {
+    const removed: string[] = [];
+    const skipped: { fileId: string; reason: string }[] = [];
+    const workspaceRoot = this.options.workspaceRoot ?? dirname(this.options.agenthubRoot);
+    const now = this.options.now?.() ?? Date.now();
+    const rows = this.options.database.sqlite.prepare("SELECT a.id, a.message_id AS messageId, a.file_id AS fileId, a.storage_path AS storagePath, a.created_at AS createdAt, m.id AS joinedMessageId, m.deleted_at AS deletedAt FROM attachments a LEFT JOIN messages m ON m.id = a.message_id").all() as { readonly id: string; readonly messageId: string; readonly fileId: string; readonly storagePath: string; readonly createdAt: number; readonly joinedMessageId: string | null; readonly deletedAt: number | null }[];
+    for (const row of rows) {
+      const orphan = row.messageId === orphanAttachmentMessageId || row.joinedMessageId === null;
+      const expired = orphan ? now - row.createdAt >= 86_400_000 : row.deletedAt !== null && now - row.deletedAt >= 30 * 86_400_000;
+      if (!expired) continue;
+      const resolved = resolveWorkspacePath(workspaceRoot, row.storagePath);
+      if (!resolved.ok || resolved.classification !== "internal") { skipped.push({ fileId: row.fileId, reason: "path_invalid" }); continue; }
+      rmSync(resolved.abs, { force: true });
+      this.options.database.sqlite.prepare("DELETE FROM attachments WHERE id = ?").run(row.id);
+      removed.push(row.fileId);
+      this.publishAttachmentRemoved(row.fileId, orphan ? "orphan" : "soft_deleted_message");
     }
     return { removed, skipped };
   }
@@ -264,6 +318,7 @@ export class ManagedRunGarbageCollector {
     if (!result.ok) rmSync(path, { recursive: true, force: true });
   }
   private publishRemoved(runId: string, mode: string, sizeBytes: number, retainedDays: number): void { this.options.eventBus.publish({ id: randomUUID(), type: "worktree.gc.removed", schemaVersion: 1, workspaceId: "default-workspace", runId, payload: { runId, mode, sizeBytes, retainedDays }, createdAt: this.options.now?.() ?? Date.now() }); }
+  private publishAttachmentRemoved(fileId: string, reason: string): void { this.options.eventBus.publish({ id: randomUUID(), type: "worktree.gc.removed", schemaVersion: 1, workspaceId: "default-workspace", payload: { fileId, mode: "attachment", reason }, createdAt: this.options.now?.() ?? Date.now() }); }
   private publishSkipped(runId: string, reason: string): void { this.options.eventBus.publish({ id: randomUUID(), type: "worktree.gc.skipped", schemaVersion: 1, workspaceId: "default-workspace", runId, payload: { runId, reason }, createdAt: this.options.now?.() ?? Date.now() }); }
 }
 
@@ -283,6 +338,22 @@ function validateStoredBearer(database: AgentHubDatabase, token: string, now: nu
 function originAllowed(origin: string, configured?: readonly string[]): boolean { if (configured?.includes(origin) === true) return true; try { const url = new URL(origin); return (url.protocol === "tauri:" && url.hostname === "localhost") || ((url.protocol === "http:" || url.protocol === "https:") && (url.hostname === "127.0.0.1" || url.hostname === "localhost")); } catch { return false; } }
 function hostAllowed(header: string | undefined, publicHost?: string): boolean { if (header === undefined) return false; const host = header.split(":")[0]?.toLowerCase(); if (publicHost !== undefined && header === publicHost) return true; return host === "127.0.0.1" || host === "localhost"; }
 function contentType(value: string | undefined): string | undefined { return value?.split(";")[0]?.trim().toLowerCase(); }
+function attachmentMimeAllowed(mime: string): boolean { return mime.length > 0 && !blockedAttachmentMimes.has(mime) && (mime.startsWith("text/") || mime.startsWith("image/") || mime === "application/json" || mime === "application/pdf" || mime === "application/zip" || mime === "application/octet-stream"); }
+function attachmentMagicAllowed(mime: string, header: Buffer): boolean {
+  if (header.length === 0) return true;
+  if (mime === "application/pdf") return header.subarray(0, 5).equals(Buffer.from("%PDF-"));
+  if (mime === "application/zip") return header.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04])) || header.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x05, 0x06])) || header.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x07, 0x08]));
+  if (mime === "image/png") return header.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  if (mime === "image/jpeg") return header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff;
+  if (mime === "image/gif") return header.subarray(0, 6).toString("ascii") === "GIF87a" || header.subarray(0, 6).toString("ascii") === "GIF89a";
+  if (mime === "image/webp") return header.subarray(0, 4).toString("ascii") === "RIFF" && header.subarray(8, 12).toString("ascii") === "WEBP";
+  if (mime === "image/svg+xml") return /^\s*<svg[\s>]/iu.test(header.toString("utf8"));
+  if (mime.startsWith("text/") || mime === "application/json") return !hasExecutableMagic(header);
+  if (mime === "application/octet-stream") return !hasExecutableMagic(header) && !looksLikeHtmlOrScript(header);
+  return true;
+}
+function hasExecutableMagic(header: Buffer): boolean { return header.subarray(0, 2).equals(Buffer.from([0x4d, 0x5a])) || header.subarray(0, 4).equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46])) || header.subarray(0, 2).toString("ascii") === "#!"; }
+function looksLikeHtmlOrScript(header: Buffer): boolean { return /^\s*<(?:!doctype\s+html|html|script)\b/iu.test(header.toString("utf8")); }
 function sessionFromCookie(cookie: string | undefined): string | undefined { return cookie?.split(";").map((part) => part.trim()).find((part) => part.startsWith("agenthub_session="))?.slice("agenthub_session=".length); }
 function realpathOrResolve(path: string): string { return existsSync(path) ? realpathSync(path) : resolve(path); }
 function escapes(root: string, path: string): boolean { const rel = relative(root, path); return rel.startsWith("..") || rel.split(sep).includes(".."); }
@@ -290,6 +361,8 @@ function matchesAny(globs: readonly string[], path: string): boolean { return gl
 function globMatch(glob: string, path: string): boolean { return new RegExp(`^${globToRegExp(glob.replaceAll("\\", "/"))}$`).test(path.replaceAll("\\", "/")); }
 function globToRegExp(glob: string): string { let pattern = ""; for (let i = 0; i < glob.length; i += 1) { const char = glob[i]; const next = glob[i + 1]; if (char === "*" && next === "*") { pattern += ".*"; i += 1; } else if (char === "*") pattern += "[^/]*"; else pattern += (char ?? "").replace(/[.+?^${}()|[\]\\]/gu, "\\$&"); } return pattern; }
 function sha256(value: string): string { return createHash("sha256").update(value).digest("hex"); }
+function sha256Buffer(value: Buffer): string { return createHash("sha256").update(value).digest("hex"); }
 function isUlidLike(value: string): boolean { return /^[0-9A-HJKMNP-TV-Z]{26}$/u.test(value); }
+function isUuid(value: string): boolean { return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value); }
 function safeEntries(path: string): string[] { try { return existsSync(path) ? readdirSync(path) : []; } catch { return []; } }
 function directorySize(path: string): number { const stat = statSync(path); if (stat.isFile()) return stat.size; if (!stat.isDirectory()) return 0; let total = 0; for (const entry of readdirSync(path)) total += directorySize(resolve(path, entry)); return total; }
