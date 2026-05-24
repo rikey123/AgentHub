@@ -23,6 +23,7 @@
     "@agenthub/permissions": "workspace:*",
     "@agenthub/protocol": "workspace:*",
     "@agenthub/security": "workspace:*",
-    "@agenthub/sdk": "workspace:*"
+    "@agenthub/sdk": "workspace:*",
+    "smol-toml": "^1.4.2"
   }
 }
