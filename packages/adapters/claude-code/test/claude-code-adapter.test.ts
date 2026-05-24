@@ -47,7 +47,7 @@ describe("ClaudeCodeACPAdapter", () => {
     lifecycle.markClaimed(null, "run");
     lifecycle.markStarting(null, "run", 123);
     const taskService = new TaskService({ database, eventBus });
-    const mcpServer = new RoomMcpServer({ commandBus: new CommandBus({ database }), taskService });
+    const mcpServer = new RoomMcpServer({ commandBus: new CommandBus({ database }), taskService, database, eventBus });
     const adapter = new ClaudeCodeACPAdapter({ command: "", services: { database, eventBus, permissionEngine: permissions, artifactFs }, lifecycle, workspaceId: "w", permissionEngine: permissions, mcpServer });
 
     await adapter.runManaged(lifecycle.read("run"));
