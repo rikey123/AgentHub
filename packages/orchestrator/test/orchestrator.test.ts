@@ -25,6 +25,7 @@ import {
   createCreateTaskHandler,
   createUpdateTaskHandler,
   createWakeAgentHandler,
+  parseMentions,
 } from "../src/index.ts";
 
 let tempDir: string | undefined;
@@ -338,7 +339,7 @@ describe("TaskService and RoomMcpServer", () => {
     seedRoom("room_2", "agent_2");
     const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
     const commandBus = new CommandBus({ database: currentDatabase(), handlers: { CreateTask: createCreateTaskHandler(service), UpdateTask: createUpdateTaskHandler(service) } });
-    const mcp = new RoomMcpServer({ commandBus, taskService: service });
+    const mcp = new RoomMcpServer({ commandBus, taskService: service, database: currentDatabase(), eventBus: currentBus(), now: () => now });
     const rejectedEvents: unknown[] = [];
     const unsubscribe = currentBus().subscribe("task.status.changed.rejected", (event) => {
       rejectedEvents.push(event);
@@ -363,6 +364,29 @@ describe("TaskService and RoomMcpServer", () => {
     expect(await mcp.callTool("room.read_mailbox", {}, { roomId: "room_1", runId: "run_1", agentId: "agent_1" })).toMatchObject({ ok: false, error: { code: "tool_not_found" } });
     expect(await mcp.callTool("room.update_task", { taskId: created.data.taskId, status: "in_progress" }, { roomId: "room_1", runId: "run_1", agentId: "agent_1" })).toMatchObject({ ok: false, error: { code: "conflict" } });
     unsubscribe();
+  });
+
+  test("mention parser validates membership and dedupes in first order", () => {
+    expect(parseMentions("hi @agent-1 and @missing and @agent-2 then @agent-1", [{ agentId: "agent-1" }, { agentId: "agent-2" }])).toEqual(["agent-1", "agent-2"]);
+  });
+
+  test("room MCP send_message degrades inactive observers to mailbox and audits active observers", async () => {
+    seedRoom("room_mcp_send", "primary_agent");
+    currentDatabase().sqlite.prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, default_presence, joined_at) VALUES ('room_mcp_send', 'observer_agent', 'agent', 'observer', 'mock', NULL, 'observing', ?)").run(now);
+    currentDatabase().sqlite.prepare("INSERT OR REPLACE INTO agent_presence (room_id, agent_id, state, reason, status_line, updated_at) VALUES ('room_mcp_send', 'observer_agent', 'observing', NULL, NULL, ?)").run(now);
+    const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const sendMessage = vi.fn<CommandHandler>(() => ({ ok: true, data: { messageId: "msg_mcp" }, emittedEvents: [] }));
+    const commandBus = new CommandBus({ database: currentDatabase(), handlers: { SendMessage: sendMessage } });
+    const mcp = new RoomMcpServer({ commandBus, taskService: service, database: currentDatabase(), eventBus: currentBus(), now: () => now });
+
+    await expect(mcp.callTool("room.send_message", { text: "passive" }, { roomId: "room_mcp_send", runId: "run_mcp", agentId: "observer_agent" })).resolves.toMatchObject({ ok: true, data: { degraded: true } });
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(currentDatabase().sqlite.prepare("SELECT to_agent_id FROM mailbox_messages WHERE room_id = 'room_mcp_send'").get()).toMatchObject({ to_agent_id: "primary_agent" });
+
+    currentDatabase().sqlite.prepare("UPDATE agent_presence SET state = 'active' WHERE room_id = 'room_mcp_send' AND agent_id = 'observer_agent'").run();
+    await expect(mcp.callTool("room.send_message", { text: "active" }, { roomId: "room_mcp_send", runId: "run_mcp", agentId: "observer_agent" })).resolves.toMatchObject({ ok: true });
+    expect(sendMessage).toHaveBeenCalledOnce();
+    expect(currentDatabase().sqlite.prepare("SELECT payload FROM events WHERE type = 'server.connected' ORDER BY seq DESC LIMIT 1").get()).toBeDefined();
   });
 });
 
@@ -581,8 +605,8 @@ function seedMailbox(id: string, roomId: string, agentId: string): void {
   currentDatabase().sqlite
     .prepare(
       `INSERT INTO mailbox_messages (
-        id, workspace_id, room_id, from_type, from_id, to_agent_id, kind, content, files, read, claimed_run_id, claimed_at, delivery_batch_id, created_at, consumed_at
-      ) VALUES (?, 'ws_1', ?, 'user', 'u_1', ?, 'message', 'hello', '[]', 0, NULL, NULL, NULL, ?, NULL)`
+        id, workspace_id, room_id, from_type, from_id, to_agent_id, kind, content, files, read, claimed_run_id, claimed_at, delivery_batch_id, delivery_failure_reason, attempt_count, created_at, consumed_at
+      ) VALUES (?, 'ws_1', ?, 'user', 'u_1', ?, 'message', 'hello', '[]', 0, NULL, NULL, NULL, NULL, 0, ?, NULL)`
     )
     .run(id, roomId, agentId, now);
 }

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import type { Command, CommandBus, CommandErrorCode, CommandHandler, CommandMeta, CommandResult, EventBus, PublishInput } from "@agenthub/bus";
 import type { AgentHubDatabase } from "@agenthub/db";
-import type { PendingTurnService } from "@agenthub/orchestrator";
+import { parseMentions, type PendingTurnService } from "@agenthub/orchestrator";
 
 export type DaemonCommandHandlersOptions = {
   readonly database: AgentHubDatabase;
@@ -20,8 +20,8 @@ export function createDaemonCommandHandlers(options: DaemonCommandHandlersOption
     SendMessage: (command, meta) => sendMessage(options, command, meta),
     CancelPendingTurn: (command) => cancelPendingTurn(options, command),
     DeleteMessage: (command) => deleteMessage(options, command),
-    PinMessage: () => notImplemented("PinMessage is reserved for the context-ledger slice"),
-    RegenerateMessage: () => notImplemented("RegenerateMessage is reserved for a later messaging slice"),
+    PinMessage: (command, meta) => pinMessage(options, command, meta),
+    RegenerateMessage: (command, meta) => regenerateMessage(options, command, meta),
     EditMessage: (command, meta) => editMessage(options, command, meta),
     ReloadAgentProfile: () => notImplemented("Agent profile hot reload is not implemented in M1.4")
   };
@@ -91,7 +91,11 @@ function sendMessage(options: DaemonCommandHandlersOptions, command: Command, me
   if (!room) return failed("not_found", `Room '${roomId}' not found`);
   const now = options.now?.() ?? Date.now();
   const messageId = randomUUID();
-  const busy = room.primary_agent_id !== null && primaryBusy(options.database, roomId, room.primary_agent_id);
+  const members = roomMembers(options.database, roomId);
+  const mentions = room.mode === "assisted" ? parseMentions(text, members) : [];
+  const wakeTargets = wakeTargetsForMessage(room, mentions);
+  const primaryTargeted = room.primary_agent_id !== null && wakeTargets.includes(room.primary_agent_id);
+  const busy = primaryTargeted && room.primary_agent_id !== null && primaryBusy(options.database, roomId, room.primary_agent_id);
   const pendingTurnId = busy ? messageId : undefined;
 
   if (busy && queuedPendingCount(options.database, roomId) >= 20) {
@@ -116,27 +120,28 @@ function sendMessage(options: DaemonCommandHandlersOptions, command: Command, me
     }
   })();
 
-  if (room.primary_agent_id && !busy) {
-    const wake = options.getCommandBus().dispatch(
-      {
-        type: "WakeAgent",
-        roomId,
-        agentId: room.primary_agent_id,
-        workspaceId: room.workspace_id,
-        reason: "primary_turn",
-        messageId,
-        promptDelta: { kind: "delta_only", instructions: text },
-        idempotencyKey: `message:${messageId}`
-      },
-      { actor: { type: "system" }, traceId: meta.traceId, idempotencyKey: `wake:${messageId}`, origin: "internal" }
-    );
-    if (isPromiseLike(wake)) {
-      return wake.then((result) => (result.ok ? successMessage(options, roomId, messageId) : result));
-    }
-    if (!wake.ok) return wake;
-  }
+  const wakeResult = wakeAgents(options, meta, room, roomId, messageId, text, wakeTargets.filter((agentId) => !(busy && agentId === room.primary_agent_id)), mentions.length > 0 ? "user_mention" : "primary_turn");
+  if (isPromiseLike(wakeResult)) return wakeResult.then((result) => (result.ok ? successMessage(options, roomId, messageId) : result));
+  if (!wakeResult.ok) return wakeResult;
 
   return successMessage(options, roomId, messageId);
+}
+
+function wakeAgents(options: DaemonCommandHandlersOptions, meta: CommandMeta, room: RoomRow, roomId: string, messageId: string, text: string, agentIds: readonly string[], reason: "primary_turn" | "user_mention"): CommandResult | Promise<CommandResult> {
+  let chain: Promise<CommandResult> | undefined;
+  for (const agentId of agentIds) {
+    const dispatchWake = () => options.getCommandBus().dispatch(
+      { type: "WakeAgent", roomId, agentId, workspaceId: room.workspace_id, reason: agentId === room.primary_agent_id && reason === "primary_turn" ? "primary_turn" : reason, messageId, promptDelta: { kind: "delta_only", instructions: text }, idempotencyKey: `wake:${messageId}:${agentId}` },
+      { actor: { type: "system" }, traceId: meta.traceId, idempotencyKey: `wake:${messageId}:${agentId}`, origin: "internal" }
+    );
+    if (chain) chain = chain.then((result) => result.ok ? Promise.resolve(dispatchWake()) : result);
+    else {
+      const result = dispatchWake();
+      if (isPromiseLike(result)) chain = result;
+      else if (!result.ok) return result;
+    }
+  }
+  return chain ?? { ok: true, data: {}, emittedEvents: [] };
 }
 
 function cancelPendingTurn(options: DaemonCommandHandlersOptions, command: Command): CommandResult {
@@ -160,6 +165,38 @@ function editMessage(options: DaemonCommandHandlersOptions, command: Command, me
     options.eventBus.publish(messageEvent("message.updated", row.workspace_id, row.room_id, messageId, { text, replacement: true }, now));
   })();
   return sendMessage(options, { type: "SendMessage", roomId: row.room_id, text, idempotencyKey: `edit:${messageId}:${now}` }, meta);
+}
+
+function regenerateMessage(options: DaemonCommandHandlersOptions, command: Command, meta: CommandMeta): CommandResult | Promise<CommandResult> {
+  const messageId = stringField(command, "messageId");
+  if (!messageId) return failed("validation_failed", "messageId is required");
+  const row = options.database.sqlite.prepare("SELECT m.workspace_id, m.room_id, m.run_id, r.agent_id FROM messages m LEFT JOIN runs r ON r.id = m.run_id WHERE m.id = ? AND m.role = 'assistant'").get(messageId) as { readonly workspace_id: string; readonly room_id: string; readonly run_id: string | null; readonly agent_id: string | null } | undefined;
+  if (!row) return failed("not_found", `Assistant message '${messageId}' not found`);
+  if (row.run_id) options.getCommandBus().dispatch({ type: "CancelRun", runId: row.run_id, idempotencyKey: `cancel-regenerate:${messageId}` }, { actor: { type: "system" }, traceId: meta.traceId, origin: "internal" });
+  const agentId = row.agent_id ?? getRoom(options.database, row.room_id)?.primary_agent_id;
+  if (!agentId) return failed("validation_failed", "regenerate target agent not found");
+  return options.getCommandBus().dispatch({ type: "WakeAgent", roomId: row.room_id, agentId, workspaceId: row.workspace_id, reason: "primary_turn", messageId, idempotencyKey: `wake:${messageId}:${agentId}` }, { actor: { type: "system" }, traceId: meta.traceId, idempotencyKey: `wake:${messageId}:${agentId}`, origin: "internal" });
+}
+
+function pinMessage(options: DaemonCommandHandlersOptions, command: Command, meta: CommandMeta): CommandResult | Promise<CommandResult> {
+  const messageId = stringField(command, "messageId");
+  if (!messageId) return failed("validation_failed", "messageId is required");
+  const row = options.database.sqlite.prepare("SELECT workspace_id, room_id FROM messages WHERE id = ? AND deleted_at IS NULL").get(messageId) as { readonly workspace_id: string; readonly room_id: string } | undefined;
+  if (!row) return failed("not_found", `Message '${messageId}' not found`);
+  const text = messageText(options.database, messageId);
+  const now = options.now?.() ?? Date.now();
+  const contextId = randomUUID();
+  const source = JSON.stringify({ type: "user", id: actorId(meta) });
+  const visibility = JSON.stringify({});
+  const item = { id: contextId, workspaceId: row.workspace_id, roomId: row.room_id, sourceMessageId: messageId, type: "fact", scope: "workspace", content: text, source: JSON.parse(source), visibility: {}, status: "confirmed", confidence: "verified", version: 1, createdBy: actorId(meta), pinned: true, createdAt: now, updatedAt: now };
+  options.database.sqlite.transaction(() => {
+    options.database.sqlite.prepare("INSERT INTO context_items (id, workspace_id, room_id, task_id, run_id, source_message_id, type, scope, content, source, visibility, status, confidence, version, owner_id, owner_type, created_by, pinned, created_at, updated_at, deprecated_at) VALUES (?, ?, ?, NULL, NULL, ?, 'fact', 'workspace', ?, ?, ?, 'confirmed', 'verified', 1, NULL, NULL, ?, 1, ?, ?, NULL)").run(contextId, row.workspace_id, row.room_id, messageId, text, source, visibility, actorId(meta), now, now);
+    options.database.sqlite.prepare("INSERT INTO context_versions (context_id, version, payload, changed_by, changed_at) VALUES (?, 1, ?, ?, ?)").run(contextId, JSON.stringify(item), actorId(meta), now);
+    options.eventBus.publish({ id: randomUUID(), type: "context.item.created", schemaVersion: 1, workspaceId: row.workspace_id, roomId: row.room_id, payload: { contextId, status: "confirmed", source: item.source }, createdAt: now });
+    options.eventBus.publish({ id: randomUUID(), type: "context.item.confirmed", schemaVersion: 1, workspaceId: row.workspace_id, roomId: row.room_id, payload: { contextId, byUserId: null, source: "user", downgraded: false }, createdAt: now });
+    options.eventBus.publish({ id: randomUUID(), type: "context.item.visibility.changed", schemaVersion: 1, workspaceId: row.workspace_id, roomId: row.room_id, payload: { contextId, scope: "workspace", pinned: true, visibility: {} }, createdAt: now });
+  })();
+  return { ok: true, data: item, emittedEvents: latestContextEvents(options.database, contextId) };
 }
 
 function deleteMessage(options: DaemonCommandHandlersOptions, command: Command): CommandResult {
@@ -194,8 +231,27 @@ function ensureWorkspace(database: AgentHubDatabase, workspaceId: string, now: n
   database.sqlite.prepare("INSERT OR IGNORE INTO workspaces (id, name, root_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run(workspaceId, "Default Workspace", process.cwd(), now, now);
 }
 
-function getRoom(database: AgentHubDatabase, roomId: string): { readonly id: string; readonly workspace_id: string; readonly primary_agent_id: string | null } | undefined {
-  return database.sqlite.prepare("SELECT id, workspace_id, primary_agent_id FROM rooms WHERE id = ? AND archived_at IS NULL").get(roomId) as { readonly id: string; readonly workspace_id: string; readonly primary_agent_id: string | null } | undefined;
+type RoomRow = { readonly id: string; readonly workspace_id: string; readonly primary_agent_id: string | null; readonly mode: string };
+
+function getRoom(database: AgentHubDatabase, roomId: string): RoomRow | undefined {
+  return database.sqlite.prepare("SELECT id, workspace_id, primary_agent_id, mode FROM rooms WHERE id = ? AND archived_at IS NULL").get(roomId) as RoomRow | undefined;
+}
+
+function roomMembers(database: AgentHubDatabase, roomId: string): { readonly agentId: string }[] {
+  return (database.sqlite.prepare("SELECT participant_id FROM room_participants WHERE room_id = ? AND participant_type = 'agent' ORDER BY joined_at ASC").all(roomId) as { readonly participant_id: string }[]).map((row) => ({ agentId: row.participant_id }));
+}
+
+function wakeTargetsForMessage(room: RoomRow, mentions: readonly string[]): string[] {
+  if (room.mode !== "assisted") return room.primary_agent_id ? [room.primary_agent_id] : [];
+  if (mentions.length === 0) return room.primary_agent_id ? [room.primary_agent_id] : [];
+  return mentions;
+}
+
+function messageText(database: AgentHubDatabase, messageId: string): string {
+  const rows = database.sqlite.prepare("SELECT payload FROM message_parts WHERE message_id = ? ORDER BY seq ASC").all(messageId) as { readonly payload: string }[];
+  return rows.map((row) => {
+    try { const parsed = JSON.parse(row.payload) as { readonly text?: unknown }; return typeof parsed.text === "string" ? parsed.text : ""; } catch { return ""; }
+  }).filter((text) => text.length > 0).join("\n");
 }
 
 function roomEvent(type: "room.created" | "room.opened" | "room.closed", workspaceId: string, roomId: string, payload: Record<string, unknown>, createdAt: number): PublishInput {
@@ -216,6 +272,10 @@ function latestEvents(database: AgentHubDatabase, roomId: string): { readonly se
 
 function successMessage(options: DaemonCommandHandlersOptions, roomId: string, messageId: string): CommandResult {
   return { ok: true, data: { messageId }, emittedEvents: latestEvents(options.database, roomId) };
+}
+
+function latestContextEvents(database: AgentHubDatabase, contextId: string): { readonly seq: number; readonly type: string }[] {
+  return database.sqlite.prepare("SELECT seq, type FROM events WHERE type LIKE 'context.%' AND payload LIKE ? ORDER BY seq ASC").all(`%${contextId}%`) as { readonly seq: number; readonly type: string }[];
 }
 
 function actorId(meta: CommandMeta): string {

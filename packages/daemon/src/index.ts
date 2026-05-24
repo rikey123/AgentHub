@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { URL } from "node:url";
 
-import { createCommandBus, createDurableHandlerRegistry, createEventBus, createOutboxDispatcher, type CommandBus, type CommandHandler, type CommandType, type DurableHandlerRegistry, type EventBus, type OutboxDispatcher, type ReplayView } from "@agenthub/bus";
+import { createCommandBus, createDurableHandlerRegistry, createEventBus, createOutboxDispatcher, type CommandBus, type CommandHandler, type CommandType, type DurableHandlerRegistry, type EventBus, type EventBusSubscriber, type OutboxDispatcher, type PublishInput, type ReplayView } from "@agenthub/bus";
 import { bootstrapBuiltInAgents, watchAgentProfiles, type AgentProfileWatcher } from "@agenthub/agents";
 import { ArtifactFSRunRegistry, ArtifactService, createArtifactCommandHandlers } from "@agenthub/artifacts";
 import { ContextLedger, createContextCommandHandlers } from "@agenthub/context";
@@ -114,7 +114,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     database.sqlite.prepare("SELECT COALESCE(MAX(seq), 0) AS maxSeq FROM events").get();
 
     emitPhase("startup", PHASE_EVENT_BUS);
-    const eventBus = createEventBus({ database });
+    const eventBus = withStatusLineCoalescing(createEventBus({ database }));
     const agentProfiles = watchAgentProfiles({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
     await agentProfiles.ready;
     const contextLedger = new ContextLedger({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
@@ -124,7 +124,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     const taskService = new TaskService({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
     const artifactFs = new ArtifactFSRunRegistry({ database, service: artifactService, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
     const activeWakes = new ActiveWakesRegistry();
-    const mailbox = new MailboxService(database, options.now);
+    const mailbox = new MailboxService(database, options.now, eventBus);
     const commandBusRef: { current?: CommandBus } = {};
     const pendingTurns = new PendingTurnService({ database, eventBus, getCommandBus: () => currentCommandBus(commandBusRef), ...(options.now !== undefined ? { now: options.now } : {}) });
     const runQueueRef: { current?: RunQueue } = {};
@@ -171,7 +171,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
       }
     });
     commandBusRef.current = commandBus;
-    const roomMcpServer = new RoomMcpServer({ commandBus, taskService });
+    const roomMcpServer = new RoomMcpServer({ commandBus, taskService, database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
     roomMcpServerRef.current = roomMcpServer;
     runtime = { database, eventBus, commandBus, roomMcpServer, adapterRegistry, mockAdapter, artifactService, taskService, outbox, handlers, runQueue, agentProfiles };
 
@@ -196,6 +196,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
       } else if (phase === PHASE_OUTBOX) {
         await runtime?.outbox.drainPending();
       } else if (phase === PHASE_EVENT_BUS) {
+        runtime?.eventBus.flushStatusLines?.();
         await runtime?.agentProfiles.close();
         runtime?.eventBus.close();
       } else if (phase === PHASE_SQLITE) {
@@ -215,6 +216,40 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     start,
     close
   };
+}
+
+type StatusLineEventBus = EventBus & { flushStatusLines?: () => void };
+
+function withStatusLineCoalescing(eventBus: EventBus): StatusLineEventBus {
+  const basePublish = eventBus.publish.bind(eventBus);
+  const buffers = new Map<string, { input: PublishInput; timer: ReturnType<typeof setTimeout> }>();
+  const wrapped = eventBus as StatusLineEventBus;
+  wrapped.publish = ((input: PublishInput) => {
+    if (input.type !== "agent.status_line.updated") return basePublish(input);
+    const key = `${input.agentId ?? ""}:${input.roomId ?? ""}`;
+    const existing = buffers.get(key);
+    if (existing) {
+      existing.input = input;
+      return { durability: "ephemeral", event: { ...input, durability: "ephemeral", visibility: "main" } as ReturnType<EventBus["publish"]>["event"] } as ReturnType<EventBus["publish"]>;
+    }
+    const timer = setTimeout(() => flushStatusLine(key), 30_000);
+    timer.unref?.();
+    buffers.set(key, { input, timer });
+    return { durability: "ephemeral", event: { ...input, durability: "ephemeral", visibility: "main" } as ReturnType<EventBus["publish"]>["event"] } as ReturnType<EventBus["publish"]>;
+  }) as EventBus["publish"];
+  wrapped.flushStatusLines = () => {
+    for (const key of [...buffers.keys()]) flushStatusLine(key);
+  };
+  const baseSubscribeAll = eventBus.subscribeAll.bind(eventBus);
+  wrapped.subscribeAll = ((subscriber: EventBusSubscriber) => baseSubscribeAll(subscriber)) as EventBus["subscribeAll"];
+  function flushStatusLine(key: string): void {
+    const buffer = buffers.get(key);
+    if (!buffer) return;
+    clearTimeout(buffer.timer);
+    buffers.delete(key);
+    basePublish(buffer.input);
+  }
+  return wrapped;
 }
 
 type RouteContext = { readonly req: IncomingMessage; readonly res: ServerResponse; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly artifactService: ArtifactService; readonly taskService: TaskService; readonly outbox: { drainPending(): Promise<void> }; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly host: string; readonly now?: () => number };
@@ -237,10 +272,13 @@ async function route(ctx: RouteContext): Promise<void> {
   if (ctx.req.method === "POST" && parts[0] === "tasks" && parts[2] === "complete") return dispatch(ctx, { taskId: parts[1] }, "CompleteTask");
   if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "archive") return dispatch(ctx, { roomId: parts[1] }, "ArchiveRoom");
   if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "unarchive") return dispatch(ctx, { roomId: parts[1] }, "UnarchiveRoom");
-  if (ctx.req.method === "GET" && parts[0] === "rooms" && parts[2] === "messages") return json(ctx.res, 200, { messages: all(ctx.database, "SELECT * FROM messages WHERE room_id = ? ORDER BY created_at ASC", parts[1]) });
+  if (ctx.req.method === "GET" && url.pathname === "/messages") return messages(ctx, url);
+  if (ctx.req.method === "GET" && parts[0] === "rooms" && parts[2] === "messages") return messages(ctx, url, parts[1] as string);
   if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "messages") return dispatch(ctx, { ...(await body(ctx)), roomId: parts[1] }, "SendMessage");
   if (ctx.req.method === "DELETE" && parts[0] === "pending-turns" && parts[1]) return dispatch(ctx, { pendingTurnId: parts[1] }, "CancelPendingTurn");
   if (ctx.req.method === "PATCH" && parts[0] === "messages" && parts[1]) return dispatch(ctx, { ...(await body(ctx)), messageId: parts[1] }, "EditMessage");
+  if (ctx.req.method === "POST" && parts[0] === "messages" && parts[1] && parts[2] === "regenerate") return dispatch(ctx, { ...(await body(ctx)), messageId: parts[1] }, "RegenerateMessage");
+  if (ctx.req.method === "POST" && parts[0] === "messages" && parts[1] && parts[2] === "pin") return dispatch(ctx, { ...(await body(ctx)), messageId: parts[1] }, "PinMessage");
   if (ctx.req.method === "DELETE" && parts[0] === "messages" && parts[1]) return dispatch(ctx, { messageId: parts[1] }, "DeleteMessage");
   if (ctx.req.method === "GET" && url.pathname === "/agents") return json(ctx.res, 200, { agents: all(ctx.database, "SELECT * FROM agent_profiles ORDER BY name ASC") });
   if (ctx.req.method === "GET" && parts[0] === "agents" && parts[1]) return json(ctx.res, 200, { agent: get(ctx.database, "SELECT * FROM agent_profiles WHERE id = ?", parts[1]) });
@@ -392,6 +430,36 @@ function contextItems(ctx: RouteContext, url: URL): void {
   }
   const where = clauses.length > 0 ? ` WHERE ${clauses.join(" AND ")}` : "";
   json(ctx.res, 200, { items: all(ctx.database, `SELECT * FROM context_items${where} ORDER BY updated_at DESC, id ASC`, ...params) });
+}
+
+function messages(ctx: RouteContext, url: URL, roomIdOverride?: string): void {
+  const roomId = roomIdOverride ?? url.searchParams.get("roomId") ?? undefined;
+  if (roomId === undefined) return json(ctx.res, 400, { error: "roomId is required" });
+  const limit = Math.min(Math.max(numberQuery(url, "limit") ?? 50, 1), 100);
+  const includeDeleted = url.searchParams.get("includeDeleted") === "true";
+  const before = cursorParam(url.searchParams.get("before"));
+  const after = cursorParam(url.searchParams.get("after"));
+  const clauses = ["room_id = ?"];
+  const params: unknown[] = [roomId];
+  if (!includeDeleted) clauses.push("deleted_at IS NULL");
+  if (before !== undefined) { clauses.push("(created_at < ? OR (created_at = ? AND id < ?))"); params.push(before.createdAt, before.createdAt, before.id); }
+  if (after !== undefined) { clauses.push("(created_at > ? OR (created_at = ? AND id > ?))"); params.push(after.createdAt, after.createdAt, after.id); }
+  const rows = all(ctx.database, `SELECT * FROM messages WHERE ${clauses.join(" AND ")} ORDER BY created_at ASC, id ASC LIMIT ?`, ...params, limit) as { readonly id: string; readonly created_at: number }[];
+  json(ctx.res, 200, { messages: rows, nextCursor: rows.length === limit ? encodeCursor(rows[rows.length - 1] as { readonly id: string; readonly created_at: number }) : null });
+}
+
+function cursorParam(value: string | null): { readonly createdAt: number; readonly id: string } | undefined {
+  if (value === null || value.length === 0) return undefined;
+  try {
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as { readonly createdAt?: unknown; readonly id?: unknown };
+    return typeof parsed.createdAt === "number" && typeof parsed.id === "string" ? { createdAt: parsed.createdAt, id: parsed.id } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function encodeCursor(row: { readonly created_at: number; readonly id: string }): string {
+  return Buffer.from(JSON.stringify({ createdAt: row.created_at, id: row.id }), "utf8").toString("base64url");
 }
 
 function permissionRules(ctx: RouteContext, url: URL): void {

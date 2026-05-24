@@ -24,3 +24,9 @@
 - Added @agenthub/agents as the owner for built-in markdown templates, first-launch bootstrap, gray-matter parsing, DB upsert/removal, explicit reset, and chokidar hot reload.
 - Vitest package scripts run from the package cwd; for @agenthub/agents the script uses '--root ../.. packages/agents/test/agents.test.ts' so the repo-level include discovers the test file on Windows.
 - Durable agent.profile.updated/removed events are persisted to the events table; package tests assert the events table rather than in-memory subscriber delivery for those durable events.
+
+## W2A chat backend implementation
+- Assisted room mention routing now uses packages/orchestrator/src/mention-parser.ts and WakeAgent idempotency keys wake:<messageId>:<agentId>. Mentions that omit the primary intentionally wake only mentioned agents.
+- RoomMcpServer cannot import @agenthub/security without adding an orchestrator package dependency; audit-shaped observer sends are published through the injected EventBus using registered event type server.connected.
+- command:check derives canonical commands from openspec/specs/bus-runtime/spec.md, so PinMessage was implemented as a self-contained command handler rather than nested WriteContextItem dispatch.
+- Windows worktrees may need pnpm.cmd install before package test scripts can find node_modules/.bin/vitest.cmd.
