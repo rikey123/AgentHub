@@ -66,9 +66,8 @@ export class AdapterRegistry {
   }
 
   private claude(): ClaudeCodeACPAdapter {
-    const commandBus = this.options.getCommandBus?.();
     this.claudeAdapter ??= new ClaudeCodeACPAdapter({
-      services: { database: this.options.database, eventBus: this.options.eventBus, ...(commandBus !== undefined ? { commandBus } : {}), ...(this.options.permissionEngine !== undefined ? { permissionEngine: this.options.permissionEngine } : {}), ...(this.options.artifactFs !== undefined ? { artifactFs: this.options.artifactFs } : {}) },
+      services: { database: this.options.database, eventBus: this.options.eventBus, ...(this.options.getCommandBus !== undefined ? { getCommandBus: this.options.getCommandBus } : {}), ...(this.options.permissionEngine !== undefined ? { permissionEngine: this.options.permissionEngine } : {}), ...(this.options.artifactFs !== undefined ? { artifactFs: this.options.artifactFs } : {}) },
       lifecycle: this.options.lifecycle,
       workspaceId: "default-workspace",
       ...(this.options.permissionEngine !== undefined ? { permissionEngine: this.options.permissionEngine } : {}),
@@ -79,9 +78,8 @@ export class AdapterRegistry {
   }
 
   private opencode(): OpenCodeACPAdapter {
-    const commandBus = this.options.getCommandBus?.();
     this.opencodeAdapter ??= new OpenCodeACPAdapter({
-      services: { database: this.options.database, eventBus: this.options.eventBus, ...(commandBus !== undefined ? { commandBus } : {}), ...(this.options.permissionEngine !== undefined ? { permissionEngine: this.options.permissionEngine } : {}), ...(this.options.artifactFs !== undefined ? { artifactFs: this.options.artifactFs } : {}) },
+      services: { database: this.options.database, eventBus: this.options.eventBus, ...(this.options.getCommandBus !== undefined ? { getCommandBus: this.options.getCommandBus } : {}), ...(this.options.permissionEngine !== undefined ? { permissionEngine: this.options.permissionEngine } : {}), ...(this.options.artifactFs !== undefined ? { artifactFs: this.options.artifactFs } : {}) },
       lifecycle: this.options.lifecycle,
       workspaceId: "default-workspace",
       ...(this.options.permissionEngine !== undefined ? { permissionEngine: this.options.permissionEngine } : {}),

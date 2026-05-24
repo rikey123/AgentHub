@@ -71,8 +71,8 @@ export class ClaudeCodeACPAdapter extends ACPAdapter {
     this.health?.update({ adapterId: this.id, workspaceId: run.workspace_id, liveness: "starting", pendingRunIds: [run.id] });
     emitAdapterRegistered(this.options.services.eventBus, run.workspace_id, claudeCodeManifest, this.options.now?.() ?? Date.now());
     const artifactFs = this.options.artifactFs ?? this.options.services.artifactFs;
-    const commandBus = this.options.services.commandBus;
-    const bridge = new AdapterBridge({ runId: run.id, workspaceId: run.workspace_id, roomId: run.room_id, agentId: run.agent_id, lifecycle: this.options.lifecycle, eventBus: this.options.services.eventBus, ...(commandBus !== undefined ? { commandBus } : {}), ...(this.options.now !== undefined ? { now: this.options.now } : {}), ...(run.task_id !== null ? { taskId: run.task_id } : {}), messageId: `msg_${run.id}`, ...(run.workspace_mode !== null ? { workspaceMode: run.workspace_mode } : {}), terminalEnabled: false, ...(artifactFs !== undefined ? { artifactFs } : {}) });
+    const getCommandBus = this.options.services.getCommandBus;
+    const bridge = new AdapterBridge({ runId: run.id, workspaceId: run.workspace_id, roomId: run.room_id, agentId: run.agent_id, lifecycle: this.options.lifecycle, eventBus: this.options.services.eventBus, ...(getCommandBus !== undefined ? { getCommandBus } : {}), ...(this.options.now !== undefined ? { now: this.options.now } : {}), ...(run.task_id !== null ? { taskId: run.task_id } : {}), messageId: `msg_${run.id}`, ...(run.workspace_mode !== null ? { workspaceMode: run.workspace_mode } : {}), terminalEnabled: false, ...(artifactFs !== undefined ? { artifactFs } : {}) });
     this.bridgeByRun.set(run.id, bridge);
     this.runById.set(run.id, run);
     this.workspaceByRun.set(run.id, run.workspace_id);

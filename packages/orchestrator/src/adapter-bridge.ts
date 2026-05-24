@@ -43,7 +43,7 @@ export class AdapterBridge {
       readonly workspaceMode?: string;
       readonly terminalEnabled?: boolean;
       readonly artifactFs?: AdapterArtifactFSBoundary;
-      readonly commandBus?: CommandBus;
+      readonly getCommandBus?: () => CommandBus | undefined;
     }
   ) {}
 
@@ -96,7 +96,7 @@ export class AdapterBridge {
     const stderr = typeof output.stderr === "string" ? output.stderr : "";
     const idempotencyKey = `terminal-artifact:${this.input.runId}:${event.toolCallId}`;
     const command: Command = { type: "CreateArtifact", workspaceId: this.input.workspaceId, roomId: this.input.roomId, ...(this.input.taskId !== undefined ? { taskId: this.input.taskId } : {}), runId: this.input.runId, ...(this.input.messageId !== undefined ? { messageId: this.input.messageId } : {}), artifactType: "terminal", title: `${toolName} output`, metadata: { toolCallId: event.toolCallId, toolName, ok: event.ok, stdout, stderr }, idempotencyKey };
-    void this.input.commandBus?.dispatch(command, { actor: { type: "agent", id: this.input.agentId }, traceId: `terminal:${this.input.runId}:${event.toolCallId}`, idempotencyKey, origin: "internal" });
+    void this.input.getCommandBus?.()?.dispatch(command, { actor: { type: "agent", id: this.input.agentId }, traceId: `terminal:${this.input.runId}:${event.toolCallId}`, idempotencyKey, origin: "internal" });
   }
 
   private publishAdapterDomainEvent(event: Exclude<AdapterEvent, { readonly type: "session.opened" | "provider.conversation.updated" | "session.ended" | "session.crashed" | "fs.writeTextFile" | "fs.deleteFile" }>): void {

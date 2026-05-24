@@ -479,7 +479,7 @@ export class AdapterRawLogger {
   }
 }
 
-export type AdapterRuntimeServices = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus?: CommandBus; readonly permissionEngine?: PermissionEngine; readonly artifactFs?: AdapterArtifactFSBoundary; readonly now?: () => number };
+export type AdapterRuntimeServices = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly getCommandBus?: () => CommandBus | undefined; readonly permissionEngine?: PermissionEngine; readonly artifactFs?: AdapterArtifactFSBoundary; readonly now?: () => number };
 
 export function emitAdapterRegistered(eventBus: EventBus, workspaceId: string, manifest: AgentAdapterManifest, now = Date.now()): void {
   eventBus.publish(adapterEvent("adapter.registered", workspaceId, manifest.id, { adapterId: manifest.id, manifest }, now));
