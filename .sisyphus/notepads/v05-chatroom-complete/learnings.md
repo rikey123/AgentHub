@@ -19,3 +19,8 @@
 - ¡ì0.4 publishes message.brief.published after terminal agent.run.* event inside RunLifecycleService.withTransaction(); EventBus nested better-sqlite3 transaction/savepoint keeps events/outbox and messages.brief_published_at atomic when lifecycle and bus share the same AgentHubDatabase instance.
 - WHERE clause for brief timestamp matches spec exactly: run_id + role='assistant' + status='completed'; no dependency on runs.message_id.
 
+
+## W1C agent templates implementation
+- Added @agenthub/agents as the owner for built-in markdown templates, first-launch bootstrap, gray-matter parsing, DB upsert/removal, explicit reset, and chokidar hot reload.
+- Vitest package scripts run from the package cwd; for @agenthub/agents the script uses '--root ../.. packages/agents/test/agents.test.ts' so the repo-level include discovers the test file on Windows.
+- Durable agent.profile.updated/removed events are persisted to the events table; package tests assert the events table rather than in-memory subscriber delivery for those durable events.

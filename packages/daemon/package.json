@@ -13,6 +13,7 @@
   "dependencies": {
     "@agenthub/adapter-claude-code": "workspace:*",
     "@agenthub/adapter-mock": "workspace:*",
+    "@agenthub/agents": "workspace:*",
     "@agenthub/artifacts": "workspace:*",
     "@agenthub/bus": "workspace:*",
     "@agenthub/context": "workspace:*",
