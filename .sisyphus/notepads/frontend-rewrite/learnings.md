@@ -35,3 +35,19 @@
 
 - 2026-05-25: Redesigned SidePanel and RunDetail into denser enterprise workbench panels using existing AgentHub tokens (Fira Code/Fira Sans, semantic accent/success/warning tokens, 4px spacing). Kept all existing tab keys, data-testid selectors, and the terminal artifact path untouched so search/copy/modal behavior stayed in TerminalCard.
 - 2026-05-25: Right-side overlay still uses the Layout z-index contract (overlay below modal). Build verification passed after reinstalling workspace deps in the worktree; typecheck, lint, and @agenthub/web build all succeeded.
+
+## [2026-05-25] Task 10: Command Palette + Keymap Modal
+
+### Command palette
+- Kept the existing shortcut semantics intact: Ctrl/Cmd+K, ?, room/run actions, and theme/density actions still resolve to the same callbacks.
+- Reworked the dialog into a denser mission-control layout with search summary chips, section-like result rows, and stronger selection contrast.
+- Preserved virtualization with @tanstack/react-virtual for the command list and kept keyboard navigation on the list itself.
+- Added focus restoration on close, plus a more explicit keyboard loop for Tab, Shift+Tab, Escape, Home, End, and Enter.
+
+### Keymap modal
+- Added focus restoration and a lightweight focus trap so Escape and Tab stay inside the modal.
+- Reframed the shortcut table into card-like sections with clearer hierarchy while keeping every shortcut label and meaning unchanged.
+- Kept the modal close affordance keyboard accessible with a real button and stable aria-labelledby / aria-describedby wiring.
+
+### Verification note
+- Repo-wide typecheck/lint/build initially failed because the worktree was missing installed dependencies; installing the workspace is required before those checks can pass.
