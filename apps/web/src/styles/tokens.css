@@ -91,10 +91,15 @@
   --ah-focus-ring: 0 0 0 2px var(--ah-accent-light), 0 0 0 4px var(--ah-accent);
 
   /* --- Sidebar widths --- */
+  --ah-app-header-height: 48px;
   --ah-sidebar-left-width: 240px;
   --ah-sidebar-left-collapsed: 48px;
   --ah-sidebar-right-width: 280px;
   --ah-sidebar-right-collapsed: 48px;
+  --ah-home-card-min-width: 240px;
+  --ah-home-card-min-height: 160px;
+  --ah-home-empty-max-width: 512px;
+  --ah-letter-spacing-wide: 0.08em;
 
   /* --- Z-index scale --- */
   --ah-z-dropdown: 100;
@@ -247,8 +252,18 @@ html[data-density="compact"] {
   animation: ah-message-fade-in var(--ah-transition-normal) ease-out;
 }
 
+@keyframes ah-pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(1.2); }
+}
+
+.ah-pulse-dot {
+  animation: ah-pulse-dot var(--ah-transition-slow) ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .ah-message-enter {
+  .ah-message-enter,
+  .ah-pulse-dot {
     animation: none;
   }
 }

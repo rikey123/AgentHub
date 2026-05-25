@@ -9,6 +9,7 @@ import { PendingTurnList } from "./components/PendingTurnList.tsx";
 import { CommandPalette } from "./components/CommandPalette.tsx";
 import { KeymapModal } from "./components/KeymapModal.tsx";
 import { ChatStreamSkeleton } from "./components/Skeleton.tsx";
+import { HomeView } from "./components/HomeView.tsx";
 import { useProjector } from "./hooks/useProjector.ts";
 import { useCsrfFetch, useSdk } from "./hooks/useSdk.ts";
 import { useTheme } from "./hooks/useTheme.ts";
@@ -40,6 +41,18 @@ export function App() {
   const handleOpenRunDetail = useCallback((runId: string) => {
     setActiveRunId(runId);
   }, []);
+
+  const handleCreateRoom = useCallback(async () => {
+    try {
+      const result = (await sdk.createRoom({ title: "New Room", mode: "solo", primaryAgentId: "mock-builder" })) as {
+        data: { roomId: string };
+      };
+      setActiveRoomId(result.data.roomId);
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error("create room failed", error);
+    }
+  }, [sdk]);
 
   const handleCloseRunDetail = useCallback(() => {
     setActiveRunId(undefined);
@@ -164,22 +177,16 @@ export function App() {
       onToggleLeft={() => setLeftCollapsed((v) => !v)}
       rightCollapsed={rightCollapsed}
       onToggleRight={() => setRightCollapsed((v) => !v)}
+      connectionStatus={projector.connectionStatus}
+      onOpenCommandPalette={() => setCmdPaletteOpen(true)}
+      theme={theme}
+      onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
       leftPanel={
         <RoomList
           rooms={Array.from(projector.rooms.values())}
           activeRoomId={activeRoomId}
           onSelectRoom={handleSelectRoom}
-          onCreateRoom={async () => {
-            try {
-              const result = (await sdk.createRoom({ title: "New Room", mode: "solo", primaryAgentId: "mock-builder" })) as {
-                data: { roomId: string };
-              };
-              setActiveRoomId(result.data.roomId);
-            } catch (error) {
-              // eslint-disable-next-line no-console
-              console.error("create room failed", error);
-            }
-          }}
+          onCreateRoom={handleCreateRoom}
         />
       }
       centerPanel={
@@ -232,9 +239,7 @@ export function App() {
         ) : activeRoomId ? (
           <ChatStreamSkeleton count={5} />
         ) : (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--ah-text-muted)" }}>
-            Select or create a room to start
-          </div>
+          <HomeView rooms={Array.from(projector.rooms.values())} onSelectRoom={handleSelectRoom} onCreateRoom={handleCreateRoom} />
         )
       }
       rightPanel={
