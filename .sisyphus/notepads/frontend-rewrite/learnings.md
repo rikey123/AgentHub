@@ -32,7 +32,6 @@
 - Offline write-path disabling remains preserved by keeping the composer disabled whenever connectionStatus !== "connected".
 - Added a shared SR-only utility stylesheet in src/styles/a11y.css and imported it from main.tsx so live announcements can stay visually hidden but accessible.
 - The workspace required pnpm install before validation because node_modules was absent in the worktree; after install, typecheck, lint, and web build all passed.
-
 - 2026-05-25: Redesigned SidePanel and RunDetail into denser enterprise workbench panels using existing AgentHub tokens (Fira Code/Fira Sans, semantic accent/success/warning tokens, 4px spacing). Kept all existing tab keys, data-testid selectors, and the terminal artifact path untouched so search/copy/modal behavior stayed in TerminalCard.
 - 2026-05-25: Right-side overlay still uses the Layout z-index contract (overlay below modal). Build verification passed after reinstalling workspace deps in the worktree; typecheck, lint, and @agenthub/web build all succeeded.
 
@@ -51,3 +50,5 @@
 
 ### Verification note
 - Repo-wide typecheck/lint/build initially failed because the worktree was missing installed dependencies; installing the workspace is required before those checks can pass.
+
+- T11 cleanup: reverted .sisyphus/evidence/v05-chatroom-complete/task-8-10-a11y/axe.json because Playwright axe evidence is unrelated to the bounded polish task and should not be churned by this branch. Kept token contrast adjustments only for WCAG failures found by apps/web/e2e/a11y.spec.ts.

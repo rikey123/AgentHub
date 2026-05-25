@@ -85,6 +85,7 @@ export function Layout({
 
   return (
     <div
+      className="ah-layout"
       style={{
         display: "flex",
         flexDirection: "column",
@@ -100,14 +101,10 @@ export function Layout({
       </a>
 
       <header
+        className="ah-app-header"
         style={{
-          height: "var(--ah-app-header-height)",
-          minHeight: "var(--ah-app-header-height)",
           display: "grid",
-          gridTemplateColumns: "minmax(0, 1fr) auto minmax(0, 1fr)",
           alignItems: "center",
-          gap: "var(--ah-space-4)",
-          padding: "0 var(--ah-space-4)",
           borderBottom: "1px solid var(--ah-border)",
           background: "var(--ah-bg-elevated)",
           color: "var(--ah-text-primary)",
@@ -157,9 +154,10 @@ export function Layout({
           </div>
         </div>
 
-        <div style={{ display: "flex", justifyContent: "center" }}>
+        <div className="ah-header-status" style={{ display: "flex", justifyContent: "center", minWidth: 0 }}>
           <div
             role="status"
+            className="ah-connection-pill"
             aria-live="polite"
             aria-atomic="true"
             title={connectionError ?? statusHint}
@@ -203,16 +201,17 @@ export function Layout({
                 flexShrink: 0
               }}
             />
-            <span>{statusLabel}</span>
-            <span style={{ fontWeight: 500, color: "inherit", opacity: 0.85 }}>{statusHint}</span>
-            {connectionError ? <span aria-hidden="true" style={{ opacity: 0.7 }}>·</span> : null}
-            {connectionError ? <span style={{ fontWeight: 500, color: "inherit", opacity: 0.85 }}>{connectionError}</span> : null}
+            <span className="ah-connection-label">{statusLabel}</span>
+            <span className="ah-connection-hint" style={{ fontWeight: 500, color: "inherit", opacity: 0.85 }}>{statusHint}</span>
+            {connectionError ? <span className="ah-connection-separator" aria-hidden="true" style={{ opacity: 0.7 }}>·</span> : null}
+            {connectionError ? <span className="ah-connection-error" style={{ fontWeight: 500, color: "inherit", opacity: 0.85 }}>{connectionError}</span> : null}
           </div>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "var(--ah-space-2)" }}>
+        <div className="ah-header-actions" style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "var(--ah-space-2)", minWidth: 0 }}>
           <button
             type="button"
+            className="ah-header-action"
             onClick={onOpenCommandPalette}
             disabled={!onOpenCommandPalette}
             data-testid="layout-command-palette"
@@ -223,8 +222,6 @@ export function Layout({
               gap: "var(--ah-space-2)",
               border: "1px solid var(--ah-border)",
               borderRadius: "var(--ah-radius-full)",
-              background: "var(--ah-bg-primary)",
-              color: "var(--ah-text-muted)",
               cursor: onOpenCommandPalette ? "pointer" : "default",
               fontSize: "var(--ah-font-size-sm)",
               fontWeight: 600,
@@ -233,8 +230,9 @@ export function Layout({
             }}
           >
             <CommandGlyph />
-            <span>Command</span>
+            <span className="ah-header-action-label">Command</span>
             <kbd
+              className="ah-header-kbd"
               style={{
                 fontFamily: "var(--ah-font-mono)",
                 fontSize: "var(--ah-font-size-xs)",
@@ -252,6 +250,7 @@ export function Layout({
 
           <button
             type="button"
+            className="ah-header-action"
             onClick={onToggleTheme}
             disabled={!onToggleTheme}
             data-testid="layout-theme-toggle"
@@ -262,8 +261,6 @@ export function Layout({
               gap: "var(--ah-space-2)",
               border: "1px solid var(--ah-border)",
               borderRadius: "var(--ah-radius-full)",
-              background: "var(--ah-bg-primary)",
-              color: "var(--ah-text-secondary)",
               cursor: onToggleTheme ? "pointer" : "default",
               fontSize: "var(--ah-font-size-sm)",
               fontWeight: 600,
@@ -272,16 +269,18 @@ export function Layout({
             }}
           >
             {resolvedTheme === "dark" ? <SunGlyph /> : resolvedTheme === "light" ? <MoonGlyph /> : <AutoGlyph />}
-            <span>{themeLabel}</span>
+            <span className="ah-header-action-label">{themeLabel}</span>
           </button>
         </div>
       </header>
 
       <main
         id="agenthub-workbench-main"
+        className="ah-workbench-grid"
+        data-left-collapsed={leftCollapsed ? "true" : "false"}
+        data-right-collapsed={rightCollapsed ? "true" : "false"}
         style={{
           display: "grid",
-          gridTemplateColumns: `${leftCollapsed ? "var(--ah-sidebar-left-collapsed)" : "var(--ah-col-rooms-width)"} var(--ah-col-rail-expanded) minmax(0, 1fr) ${rightCollapsed ? "var(--ah-sidebar-right-collapsed)" : "var(--ah-col-right-width)"}`,
           minWidth: 0,
           minHeight: 0,
           flex: 1,
@@ -291,13 +290,12 @@ export function Layout({
       >
         <aside
           aria-label="Rooms and groups"
-          className="ah-workbench-panel"
+          className="ah-workbench-panel ah-rooms-column"
           style={{
             minWidth: 0,
             borderLeft: "none",
             borderRight: "1px solid var(--ah-border)",
-            background: "var(--ah-bg-elevated)",
-            width: leftCollapsed ? "var(--ah-sidebar-left-collapsed)" : "var(--ah-col-rooms-width)"
+            background: "var(--ah-bg-elevated)"
           }}
         >
           <div className="ah-workbench-panel-header" style={{ justifyContent: "space-between" }}>
@@ -342,21 +340,21 @@ export function Layout({
 
         <nav
           aria-label="Feature rail"
+          className="ah-feature-rail"
           style={{
             display: "flex",
             flexDirection: "column",
             minWidth: 0,
-            overflow: "hidden",
-            background: "var(--ah-bg-primary)",
-            borderRight: "1px solid var(--ah-border)"
+            background: "var(--ah-bg-primary)"
           }}
         >
           <div className="ah-workbench-panel-header" style={{ justifyContent: "space-between" }}>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: "var(--ah-space-2)" }}>
+            <span className="ah-feature-rail-title" style={{ display: "inline-flex", alignItems: "center", gap: "var(--ah-space-2)" }}>
               <RailGlyph />
               Feature rail
             </span>
             <span
+              className="ah-feature-rail-caption"
               style={{
                 fontSize: "var(--ah-font-size-xs)",
                 color: "var(--ah-text-muted)",
@@ -368,7 +366,7 @@ export function Layout({
             </span>
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: "var(--ah-space-1)", padding: "var(--ah-space-2)", minHeight: 0, overflow: "auto" }}>
+          <div className="ah-feature-rail-list" style={{ display: "flex", gap: "var(--ah-space-1)", minHeight: 0 }}>
             {FEATURE_RAIL_ITEMS.map((item) => (
               <div
                 key={item.id}
@@ -396,6 +394,7 @@ export function Layout({
 
         <section
           aria-label="Center chat canvas"
+          className="ah-center-panel"
           style={{
             display: "flex",
             flexDirection: "column",
@@ -406,12 +405,10 @@ export function Layout({
           }}
         >
           <div
+            className="ah-center-panel-header"
             style={{
               display: "flex",
-              alignItems: "center",
               justifyContent: "space-between",
-              gap: "var(--ah-space-4)",
-              padding: "var(--ah-space-3) var(--ah-space-4)",
               borderBottom: "1px solid var(--ah-border)",
               background: "linear-gradient(180deg, var(--ah-bg-elevated) 0%, var(--ah-bg-primary) 100%)",
               flexShrink: 0
@@ -459,11 +456,10 @@ export function Layout({
 
         <aside
           aria-label="Workbench"
-          className="ah-workbench-panel"
+          className="ah-workbench-panel ah-right-column"
           style={{
             minWidth: 0,
             borderRight: "none",
-            width: rightCollapsed ? "var(--ah-sidebar-right-collapsed)" : "var(--ah-col-right-width)",
             background: "var(--ah-bg-elevated)",
             overflow: "hidden"
           }}
@@ -511,13 +507,10 @@ export function Layout({
 
       {overlay ? (
         <div
-          className="ah-slide-over-enter"
+          className="ah-slide-over-enter ah-run-detail-overlay"
           style={{
             position: "fixed",
-            top: "var(--ah-app-header-height)",
             right: 0,
-            width: "min(720px, 60vw)",
-            height: "calc(100% - var(--ah-app-header-height))",
             background: "var(--ah-bg-primary)",
             borderLeft: "1px solid var(--ah-border)",
             boxShadow: "var(--ah-shadow-overlay)",
