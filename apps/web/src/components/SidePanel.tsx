@@ -169,12 +169,23 @@ function ContextItemRow({ item }: { readonly item: ContextItemViewModel }) {
 }
 
 function TasksTab({ room }: { readonly room: RoomViewModel }) {
-  const columns = ["todo", "running", "review", "done"] as const;
+  const columns: Array<{ readonly key: string; readonly label: string; readonly tone: "accent" | "success" | "warning" | "muted" }> = [
+    { key: "pending", label: "Pending", tone: "warning" },
+    { key: "in_progress", label: "In progress", tone: "accent" },
+    { key: "blocked", label: "Blocked", tone: "warning" },
+    { key: "review", label: "Review", tone: "accent" },
+    { key: "completed", label: "Completed", tone: "success" }
+  ];
   const byStatus: Record<string, TaskViewModel[]> = {};
+  const uncategorized: TaskViewModel[] = [];
   for (const task of room.tasks) {
-    const list = byStatus[task.status] ?? [];
-    byStatus[task.status] = list;
-    list.push(task);
+    if (columns.some((column) => column.key === task.status)) {
+      const list = byStatus[task.status] ?? [];
+      byStatus[task.status] = list;
+      list.push(task);
+    } else {
+      uncategorized.push(task);
+    }
   }
 
   return (
@@ -184,13 +195,19 @@ function TasksTab({ room }: { readonly room: RoomViewModel }) {
         <AffordancePill label="Kanban" detail="Planned" />
         <AffordancePill label="Workflow" detail="Planned" />
       </div>
-      {columns.map((status) => (
-        <section key={status} style={{ display: "flex", flexDirection: "column", gap: "var(--ah-space-2)" }}>
-          <SectionHeader title={status} count={(byStatus[status] ?? []).length} tone={status === "running" ? "accent" : status === "done" ? "success" : "muted"} />
-          {(byStatus[status] ?? []).map((task) => <TaskRow key={task.id} task={task} />)}
-          {(byStatus[status] ?? []).length === 0 && <div style={{ fontSize: "var(--ah-font-size-sm)", color: "var(--ah-text-muted)", padding: "0 var(--ah-space-1)" }}>No cards in this lane</div>}
+      {columns.map(({ key, label, tone }) => (
+        <section key={key} style={{ display: "flex", flexDirection: "column", gap: "var(--ah-space-2)" }}>
+          <SectionHeader title={label} count={(byStatus[key] ?? []).length} tone={tone} />
+          {(byStatus[key] ?? []).map((task) => <TaskRow key={task.id} task={task} />)}
+          {(byStatus[key] ?? []).length === 0 && <div style={{ fontSize: "var(--ah-font-size-sm)", color: "var(--ah-text-muted)", padding: "0 var(--ah-space-1)" }}>No cards in this lane</div>}
         </section>
       ))}
+      {uncategorized.length > 0 && (
+        <section style={{ display: "flex", flexDirection: "column", gap: "var(--ah-space-2)" }}>
+          <SectionHeader title="Other" count={uncategorized.length} tone="muted" />
+          {uncategorized.map((task) => <TaskRow key={task.id} task={task} />)}
+        </section>
+      )}
       {room.tasks.length === 0 && <EmptyState title="No tasks yet" body="Runs can create tasks automatically when work is decomposed." />}
     </div>
   );
@@ -344,3 +361,4 @@ function EmptyState({ title, body }: { readonly title: string; readonly body: st
     </div>
   );
 }
+
