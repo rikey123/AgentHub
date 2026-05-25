@@ -242,3 +242,10 @@ Correction: Missing Origin is no longer an admin signal. authenticateBrowserRequ
 - F4 scope fidelity check: CommandType excludes StartRun; Codex/LangGraph/A2A adapters are deterministic 501 stubs; daemon routes remain local-first with no cloud/multi-user routes. Background scan's tasks-schema Kanban concern appears to be core V0.5 task support rather than task-board UI scope creep.
 
 - Phase 2B frontend density work: RoomList and SidePanel use inline React styles with existing --ah-* tokens; active run pulse can reuse .ah-pulse-dot from apps/web/src/styles/tokens.css instead of adding another keyframe.
+
+## 2026-05-25 - Frontend visual polish
+- Web UI visual primitives are primarily inline React styles backed by \\--ah-*\\ tokens from \\pps/web/src/styles/tokens.css\\; reuse token colors/spacing/radii rather than adding one-off CSS.
+- \\CommandPalette.tsx\\ already models row keyboard hints with an optional \\shortcut\\ field rendered through \\.ah-cmd-palette-item kbd\\, so feature discoverability can be added by populating that field.
+- \\ChatStream.tsx\\ places connection banners before the scroll container; active-run visibility belongs after those banners and before the virtualized message list so it does not disrupt message virtualization.
+
+Correction: The 2026-05-25 frontend visual polish note refers to --ah-* tokens, apps/web/src/styles/tokens.css, CommandPalette.tsx, shortcut, .ah-cmd-palette-item kbd, and ChatStream.tsx; PowerShell escaping added stray backslashes in the first note.

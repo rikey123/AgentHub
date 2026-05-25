@@ -7,6 +7,9 @@ export default defineConfig({
     port: 5173,
     host: "127.0.0.1",
     proxy: {
+      "/auth": "http://127.0.0.1:6677",
+      "/workspaces": "http://127.0.0.1:6677",
+      "/attachments": "http://127.0.0.1:6677",
       "/event": "http://127.0.0.1:6677",
       "/rooms": "http://127.0.0.1:6677",
       "/agents": "http://127.0.0.1:6677",

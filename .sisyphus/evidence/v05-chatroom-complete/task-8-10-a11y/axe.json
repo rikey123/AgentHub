@@ -13,8 +13,8 @@
     "orientationAngle": 0,
     "orientationType": "landscape-primary"
   },
-  "timestamp": "2026-05-25T01:13:48.816Z",
-  "url": "http://127.0.0.1:2064/",
+  "timestamp": "2026-05-25T04:26:12.350Z",
+  "url": "http://127.0.0.1:45501/",
   "toolOptions": {
     "rules": {
       "aria-required-parent": {
@@ -97,25 +97,6 @@
       "description": "Ensure every ARIA dialog and alertdialog node has an accessible name",
       "help": "ARIA dialog and alertdialog nodes should have an accessible name",
       "helpUrl": "https://dequeuniversity.com/rules/axe/4.11/aria-dialog-name?application=playwright",
-      "nodes": []
-    },
-    {
-      "id": "aria-hidden-focus",
-      "impact": null,
-      "tags": [
-        "cat.name-role-value",
-        "wcag2a",
-        "wcag412",
-        "TTv5",
-        "TT6.a",
-        "EN-301-549",
-        "EN-9.4.1.2",
-        "RGAAv4",
-        "RGAA-10.8.1"
-      ],
-      "description": "Ensure aria-hidden elements are not focusable nor contain focusable elements",
-      "help": "ARIA hidden element must not be focusable or contain focusable elements",
-      "helpUrl": "https://dequeuniversity.com/rules/axe/4.11/aria-hidden-focus?application=playwright",
       "nodes": []
     },
     {
@@ -567,18 +548,6 @@
       "nodes": []
     },
     {
-      "id": "landmark-banner-is-top-level",
-      "impact": null,
-      "tags": [
-        "cat.semantics",
-        "best-practice"
-      ],
-      "description": "Ensure the banner landmark is at top level",
-      "help": "Banner landmark should not be contained in another landmark",
-      "helpUrl": "https://dequeuniversity.com/rules/axe/4.11/landmark-banner-is-top-level?application=playwright",
-      "nodes": []
-    },
-    {
       "id": "landmark-complementary-is-top-level",
       "impact": null,
       "tags": [
@@ -615,18 +584,6 @@
       "nodes": []
     },
     {
-      "id": "landmark-no-duplicate-banner",
-      "impact": null,
-      "tags": [
-        "cat.semantics",
-        "best-practice"
-      ],
-      "description": "Ensure the document has at most one banner landmark",
-      "help": "Document should not have more than one banner landmark",
-      "helpUrl": "https://dequeuniversity.com/rules/axe/4.11/landmark-no-duplicate-banner?application=playwright",
-      "nodes": []
-    },
-    {
       "id": "landmark-no-duplicate-contentinfo",
       "impact": null,
       "tags": [
@@ -648,18 +605,6 @@
       "description": "Ensure the document has at most one main landmark",
       "help": "Document should not have more than one main landmark",
       "helpUrl": "https://dequeuniversity.com/rules/axe/4.11/landmark-no-duplicate-main?application=playwright",
-      "nodes": []
-    },
-    {
-      "id": "landmark-unique",
-      "impact": null,
-      "tags": [
-        "cat.semantics",
-        "best-practice"
-      ],
-      "description": "Ensure landmarks are unique",
-      "help": "Landmarks should have a unique role or role/label/title (i.e. accessible name) combination",
-      "helpUrl": "https://dequeuniversity.com/rules/axe/4.11/landmark-unique?application=playwright",
       "nodes": []
     },
     {
@@ -1104,7 +1049,106 @@
             }
           ],
           "impact": null,
-          "html": "<button aria-label=\"Collapse sidebar\" style=\"background: none; border-width: medium; border-style: none; border-color: currentcolor; border-image: initial; cursor: pointer; padding: var(--ah-space-1); border-radius: var(--ah-radius-sm); color: var(--ah-text-muted);\">&lt;</button>",
+          "html": "<div role=\"status\" aria-live=\"polite\" style=\"display: flex; align-items: center; gap: var(--ah-space-2); color: var(--ah-text-muted); font-size: var(--ah-font-size-sm); font-weight: 600;\">",
+          "target": [
+            "div[role=\"status\"]"
+          ]
+        },
+        {
+          "any": [],
+          "all": [
+            {
+              "id": "aria-allowed-attr",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "critical",
+              "message": "ARIA attributes are used correctly for the defined role"
+            },
+            {
+              "id": "aria-allowed-attr-elm",
+              "data": null,
+              "relatedNodes": [],
+              "message": "ARIA attributes are allowed for this element",
+              "impact": "critical"
+            }
+          ],
+          "none": [
+            {
+              "id": "aria-unsupported-attr",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "critical",
+              "message": "ARIA attribute is supported"
+            }
+          ],
+          "impact": null,
+          "html": "<button aria-label=\"Open command palette\" style=\"display: flex; align...\">",
+          "target": [
+            "button[aria-label=\"Open command palette\"]"
+          ]
+        },
+        {
+          "any": [],
+          "all": [
+            {
+              "id": "aria-allowed-attr",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "critical",
+              "message": "ARIA attributes are used correctly for the defined role"
+            },
+            {
+              "id": "aria-allowed-attr-elm",
+              "data": null,
+              "relatedNodes": [],
+              "message": "ARIA attributes are allowed for this element",
+              "impact": "critical"
+            }
+          ],
+          "none": [
+            {
+              "id": "aria-unsupported-attr",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "critical",
+              "message": "ARIA attribute is supported"
+            }
+          ],
+          "impact": null,
+          "html": "<button aria-label=\"Toggle theme\" style=\"width: var(--ah-space-7); height: var(--ah-space-7); border: 1px solid var(--ah-border); border-radius: var(--ah-radius-full); background: var(--ah-bg-primary); color: var(--ah-text-secondary); cursor: pointer; font-size: var(--ah-font-size-base);\">",
+          "target": [
+            "button[aria-label=\"Toggle theme\"]"
+          ]
+        },
+        {
+          "any": [],
+          "all": [
+            {
+              "id": "aria-allowed-attr",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "critical",
+              "message": "ARIA attributes are used correctly for the defined role"
+            },
+            {
+              "id": "aria-allowed-attr-elm",
+              "data": null,
+              "relatedNodes": [],
+              "message": "ARIA attributes are allowed for this element",
+              "impact": "critical"
+            }
+          ],
+          "none": [
+            {
+              "id": "aria-unsupported-attr",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "critical",
+              "message": "ARIA attribute is supported"
+            }
+          ],
+          "impact": null,
+          "html": "<button aria-label=\"Collapse sidebar\" title=\"Collapse sidebar\" style=\"background: none; bo...\">",
           "target": [
             "button[aria-label=\"Collapse sidebar\"]"
           ]
@@ -1137,7 +1181,7 @@
             }
           ],
           "impact": null,
-          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-c1236f1...\" style=\"background: none; bo...\">",
+          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-a00d147...\" style=\"background: none; bo...\">",
           "target": [
             ".ah-message-enter[role=\"button\"]:nth-child(1) > div:nth-child(1) > div > button[aria-label=\"Message actions\"]"
           ]
@@ -1170,7 +1214,7 @@
             }
           ],
           "impact": null,
-          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-7cedf20...\" style=\"background: none; bo...\">",
+          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-d21bfb0...\" style=\"background: none; bo...\">",
           "target": [
             ".ah-message-enter[role=\"button\"]:nth-child(2) > div:nth-child(1) > div > button[aria-label=\"Message actions\"]"
           ]
@@ -1302,7 +1346,7 @@
             }
           ],
           "impact": null,
-          "html": "<button aria-label=\"Collapse panel\" style=\"background: none; border-width: medium; border-style: none; border-color: currentcolor; border-image: initial; cursor: pointer; padding: var(--ah-space-1); border-radius: var(--ah-radius-sm); color: var(--ah-text-muted);\">&gt;</button>",
+          "html": "<button aria-label=\"Collapse panel\" title=\"Collapse panel\" style=\"background: none; bo...\">",
           "target": [
             "button[aria-label=\"Collapse panel\"]"
           ]
@@ -1485,6 +1529,24 @@
       "help": "ARIA role should be appropriate for the element",
       "helpUrl": "https://dequeuniversity.com/rules/axe/4.11/aria-allowed-role?application=playwright",
       "nodes": [
+        {
+          "any": [
+            {
+              "id": "aria-allowed-role",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "minor",
+              "message": "ARIA role is allowed for given element"
+            }
+          ],
+          "all": [],
+          "none": [],
+          "impact": null,
+          "html": "<div role=\"status\" aria-live=\"polite\" style=\"display: flex; align-items: center; gap: var(--ah-space-2); color: var(--ah-text-muted); font-size: var(--ah-font-size-sm); font-weight: 600;\">",
+          "target": [
+            "div[role=\"status\"]"
+          ]
+        },
         {
           "any": [
             {
@@ -1771,7 +1833,61 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<button aria-label=\"Collapse sidebar\" style=\"background: none; border-width: medium; border-style: none; border-color: currentcolor; border-image: initial; cursor: pointer; padding: var(--ah-space-1); border-radius: var(--ah-radius-sm); color: var(--ah-text-muted);\">&lt;</button>",
+          "html": "<div role=\"status\" aria-live=\"polite\" style=\"display: flex; align-items: center; gap: var(--ah-space-2); color: var(--ah-text-muted); font-size: var(--ah-font-size-sm); font-weight: 600;\">",
+          "target": [
+            "div[role=\"status\"]"
+          ]
+        },
+        {
+          "any": [],
+          "all": [
+            {
+              "id": "aria-conditional-attr",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "ARIA attribute is allowed"
+            }
+          ],
+          "none": [],
+          "impact": null,
+          "html": "<button aria-label=\"Open command palette\" style=\"display: flex; align...\">",
+          "target": [
+            "button[aria-label=\"Open command palette\"]"
+          ]
+        },
+        {
+          "any": [],
+          "all": [
+            {
+              "id": "aria-conditional-attr",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "ARIA attribute is allowed"
+            }
+          ],
+          "none": [],
+          "impact": null,
+          "html": "<button aria-label=\"Toggle theme\" style=\"width: var(--ah-space-7); height: var(--ah-space-7); border: 1px solid var(--ah-border); border-radius: var(--ah-radius-full); background: var(--ah-bg-primary); color: var(--ah-text-secondary); cursor: pointer; font-size: var(--ah-font-size-base);\">",
+          "target": [
+            "button[aria-label=\"Toggle theme\"]"
+          ]
+        },
+        {
+          "any": [],
+          "all": [
+            {
+              "id": "aria-conditional-attr",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "ARIA attribute is allowed"
+            }
+          ],
+          "none": [],
+          "impact": null,
+          "html": "<button aria-label=\"Collapse sidebar\" title=\"Collapse sidebar\" style=\"background: none; bo...\">",
           "target": [
             "button[aria-label=\"Collapse sidebar\"]"
           ]
@@ -1789,7 +1905,7 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-c1236f1...\" style=\"background: none; bo...\">",
+          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-a00d147...\" style=\"background: none; bo...\">",
           "target": [
             ".ah-message-enter[role=\"button\"]:nth-child(1) > div:nth-child(1) > div > button[aria-label=\"Message actions\"]"
           ]
@@ -1807,7 +1923,7 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-7cedf20...\" style=\"background: none; bo...\">",
+          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-d21bfb0...\" style=\"background: none; bo...\">",
           "target": [
             ".ah-message-enter[role=\"button\"]:nth-child(2) > div:nth-child(1) > div > button[aria-label=\"Message actions\"]"
           ]
@@ -1879,7 +1995,7 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<button aria-label=\"Collapse panel\" style=\"background: none; border-width: medium; border-style: none; border-color: currentcolor; border-image: initial; cursor: pointer; padding: var(--ah-space-1); border-radius: var(--ah-radius-sm); color: var(--ah-text-muted);\">&gt;</button>",
+          "html": "<button aria-label=\"Collapse panel\" title=\"Collapse panel\" style=\"background: none; bo...\">",
           "target": [
             "button[aria-label=\"Collapse panel\"]"
           ]
@@ -1992,6 +2108,24 @@
       "help": "Deprecated ARIA roles must not be used",
       "helpUrl": "https://dequeuniversity.com/rules/axe/4.11/aria-deprecated-role?application=playwright",
       "nodes": [
+        {
+          "any": [],
+          "all": [],
+          "none": [
+            {
+              "id": "deprecatedrole",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "minor",
+              "message": "ARIA role is not deprecated"
+            }
+          ],
+          "impact": null,
+          "html": "<div role=\"status\" aria-live=\"polite\" style=\"display: flex; align-items: center; gap: var(--ah-space-2); color: var(--ah-text-muted); font-size: var(--ah-font-size-sm); font-weight: 600;\">",
+          "target": [
+            "div[role=\"status\"]"
+          ]
+        },
         {
           "any": [],
           "all": [],
@@ -2195,6 +2329,58 @@
       ]
     },
     {
+      "id": "aria-hidden-focus",
+      "impact": null,
+      "tags": [
+        "cat.name-role-value",
+        "wcag2a",
+        "wcag412",
+        "TTv5",
+        "TT6.a",
+        "EN-301-549",
+        "EN-9.4.1.2",
+        "RGAAv4",
+        "RGAA-10.8.1"
+      ],
+      "description": "Ensure aria-hidden elements are not focusable nor contain focusable elements",
+      "help": "ARIA hidden element must not be focusable or contain focusable elements",
+      "helpUrl": "https://dequeuniversity.com/rules/axe/4.11/aria-hidden-focus?application=playwright",
+      "nodes": [
+        {
+          "any": [],
+          "all": [
+            {
+              "id": "focusable-modal-open",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "No focusable elements while a modal is open"
+            },
+            {
+              "id": "focusable-disabled",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "No focusable elements contained within element"
+            },
+            {
+              "id": "focusable-not-tabbable",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "No focusable elements contained within element"
+            }
+          ],
+          "none": [],
+          "impact": null,
+          "html": "<span aria-hidden=\"true\">⚡</span>",
+          "target": [
+            "span[aria-hidden=\"true\"]"
+          ]
+        }
+      ]
+    },
+    {
       "id": "aria-prohibited-attr",
       "impact": null,
       "tags": [
@@ -2223,7 +2409,61 @@
             }
           ],
           "impact": null,
-          "html": "<button aria-label=\"Collapse sidebar\" style=\"background: none; border-width: medium; border-style: none; border-color: currentcolor; border-image: initial; cursor: pointer; padding: var(--ah-space-1); border-radius: var(--ah-radius-sm); color: var(--ah-text-muted);\">&lt;</button>",
+          "html": "<div role=\"status\" aria-live=\"polite\" style=\"display: flex; align-items: center; gap: var(--ah-space-2); color: var(--ah-text-muted); font-size: var(--ah-font-size-sm); font-weight: 600;\">",
+          "target": [
+            "div[role=\"status\"]"
+          ]
+        },
+        {
+          "any": [],
+          "all": [],
+          "none": [
+            {
+              "id": "aria-prohibited-attr",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "ARIA attribute is allowed"
+            }
+          ],
+          "impact": null,
+          "html": "<button aria-label=\"Open command palette\" style=\"display: flex; align...\">",
+          "target": [
+            "button[aria-label=\"Open command palette\"]"
+          ]
+        },
+        {
+          "any": [],
+          "all": [],
+          "none": [
+            {
+              "id": "aria-prohibited-attr",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "ARIA attribute is allowed"
+            }
+          ],
+          "impact": null,
+          "html": "<button aria-label=\"Toggle theme\" style=\"width: var(--ah-space-7); height: var(--ah-space-7); border: 1px solid var(--ah-border); border-radius: var(--ah-radius-full); background: var(--ah-bg-primary); color: var(--ah-text-secondary); cursor: pointer; font-size: var(--ah-font-size-base);\">",
+          "target": [
+            "button[aria-label=\"Toggle theme\"]"
+          ]
+        },
+        {
+          "any": [],
+          "all": [],
+          "none": [
+            {
+              "id": "aria-prohibited-attr",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "ARIA attribute is allowed"
+            }
+          ],
+          "impact": null,
+          "html": "<button aria-label=\"Collapse sidebar\" title=\"Collapse sidebar\" style=\"background: none; bo...\">",
           "target": [
             "button[aria-label=\"Collapse sidebar\"]"
           ]
@@ -2241,7 +2481,7 @@
             }
           ],
           "impact": null,
-          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-c1236f1...\" style=\"background: none; bo...\">",
+          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-a00d147...\" style=\"background: none; bo...\">",
           "target": [
             ".ah-message-enter[role=\"button\"]:nth-child(1) > div:nth-child(1) > div > button[aria-label=\"Message actions\"]"
           ]
@@ -2259,7 +2499,7 @@
             }
           ],
           "impact": null,
-          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-7cedf20...\" style=\"background: none; bo...\">",
+          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-d21bfb0...\" style=\"background: none; bo...\">",
           "target": [
             ".ah-message-enter[role=\"button\"]:nth-child(2) > div:nth-child(1) > div > button[aria-label=\"Message actions\"]"
           ]
@@ -2331,7 +2571,7 @@
             }
           ],
           "impact": null,
-          "html": "<button aria-label=\"Collapse panel\" style=\"background: none; border-width: medium; border-style: none; border-color: currentcolor; border-image: initial; cursor: pointer; padding: var(--ah-space-1); border-radius: var(--ah-radius-sm); color: var(--ah-text-muted);\">&gt;</button>",
+          "html": "<button aria-label=\"Collapse panel\" title=\"Collapse panel\" style=\"background: none; bo...\">",
           "target": [
             "button[aria-label=\"Collapse panel\"]"
           ]
@@ -2444,6 +2684,24 @@
       "help": "Required ARIA attributes must be provided",
       "helpUrl": "https://dequeuniversity.com/rules/axe/4.11/aria-required-attr?application=playwright",
       "nodes": [
+        {
+          "any": [
+            {
+              "id": "aria-required-attr",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "critical",
+              "message": "All required ARIA attributes are present"
+            }
+          ],
+          "all": [],
+          "none": [],
+          "impact": null,
+          "html": "<div role=\"status\" aria-live=\"polite\" style=\"display: flex; align-items: center; gap: var(--ah-space-2); color: var(--ah-text-muted); font-size: var(--ah-font-size-sm); font-weight: 600;\">",
+          "target": [
+            "div[role=\"status\"]"
+          ]
+        },
         {
           "any": [
             {
@@ -2624,6 +2882,38 @@
       "help": "ARIA roles used must conform to valid values",
       "helpUrl": "https://dequeuniversity.com/rules/axe/4.11/aria-roles?application=playwright",
       "nodes": [
+        {
+          "any": [],
+          "all": [],
+          "none": [
+            {
+              "id": "invalidrole",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "critical",
+              "message": "ARIA role is valid"
+            },
+            {
+              "id": "abstractrole",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "critical",
+              "message": "Abstract roles are not used"
+            },
+            {
+              "id": "unsupportedrole",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "critical",
+              "message": "ARIA role is supported"
+            }
+          ],
+          "impact": null,
+          "html": "<div role=\"status\" aria-live=\"polite\" style=\"display: flex; align-items: center; gap: var(--ah-space-2); color: var(--ah-text-muted); font-size: var(--ah-font-size-sm); font-weight: 600;\">",
+          "target": [
+            "div[role=\"status\"]"
+          ]
+        },
         {
           "any": [],
           "all": [],
@@ -2957,7 +3247,103 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<button aria-label=\"Collapse sidebar\" style=\"background: none; border-width: medium; border-style: none; border-color: currentcolor; border-image: initial; cursor: pointer; padding: var(--ah-space-1); border-radius: var(--ah-radius-sm); color: var(--ah-text-muted);\">&lt;</button>",
+          "html": "<div role=\"status\" aria-live=\"polite\" style=\"display: flex; align-items: center; gap: var(--ah-space-2); color: var(--ah-text-muted); font-size: var(--ah-font-size-sm); font-weight: 600;\">",
+          "target": [
+            "div[role=\"status\"]"
+          ]
+        },
+        {
+          "any": [],
+          "all": [
+            {
+              "id": "aria-valid-attr-value",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "critical",
+              "message": "ARIA attribute values are valid"
+            },
+            {
+              "id": "aria-errormessage",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "critical",
+              "message": "aria-errormessage exists and references elements visible to screen readers that use a supported aria-errormessage technique"
+            },
+            {
+              "id": "aria-level",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "critical",
+              "message": "aria-level values are valid"
+            }
+          ],
+          "none": [],
+          "impact": null,
+          "html": "<button aria-label=\"Open command palette\" style=\"display: flex; align...\">",
+          "target": [
+            "button[aria-label=\"Open command palette\"]"
+          ]
+        },
+        {
+          "any": [],
+          "all": [
+            {
+              "id": "aria-valid-attr-value",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "critical",
+              "message": "ARIA attribute values are valid"
+            },
+            {
+              "id": "aria-errormessage",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "critical",
+              "message": "aria-errormessage exists and references elements visible to screen readers that use a supported aria-errormessage technique"
+            },
+            {
+              "id": "aria-level",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "critical",
+              "message": "aria-level values are valid"
+            }
+          ],
+          "none": [],
+          "impact": null,
+          "html": "<button aria-label=\"Toggle theme\" style=\"width: var(--ah-space-7); height: var(--ah-space-7); border: 1px solid var(--ah-border); border-radius: var(--ah-radius-full); background: var(--ah-bg-primary); color: var(--ah-text-secondary); cursor: pointer; font-size: var(--ah-font-size-base);\">",
+          "target": [
+            "button[aria-label=\"Toggle theme\"]"
+          ]
+        },
+        {
+          "any": [],
+          "all": [
+            {
+              "id": "aria-valid-attr-value",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "critical",
+              "message": "ARIA attribute values are valid"
+            },
+            {
+              "id": "aria-errormessage",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "critical",
+              "message": "aria-errormessage exists and references elements visible to screen readers that use a supported aria-errormessage technique"
+            },
+            {
+              "id": "aria-level",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "critical",
+              "message": "aria-level values are valid"
+            }
+          ],
+          "none": [],
+          "impact": null,
+          "html": "<button aria-label=\"Collapse sidebar\" title=\"Collapse sidebar\" style=\"background: none; bo...\">",
           "target": [
             "button[aria-label=\"Collapse sidebar\"]"
           ]
@@ -2989,7 +3375,7 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-c1236f1...\" style=\"background: none; bo...\">",
+          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-a00d147...\" style=\"background: none; bo...\">",
           "target": [
             ".ah-message-enter[role=\"button\"]:nth-child(1) > div:nth-child(1) > div > button[aria-label=\"Message actions\"]"
           ]
@@ -3021,7 +3407,7 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-7cedf20...\" style=\"background: none; bo...\">",
+          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-d21bfb0...\" style=\"background: none; bo...\">",
           "target": [
             ".ah-message-enter[role=\"button\"]:nth-child(2) > div:nth-child(1) > div > button[aria-label=\"Message actions\"]"
           ]
@@ -3149,7 +3535,7 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<button aria-label=\"Collapse panel\" style=\"background: none; border-width: medium; border-style: none; border-color: currentcolor; border-image: initial; cursor: pointer; padding: var(--ah-space-1); border-radius: var(--ah-radius-sm); color: var(--ah-text-muted);\">&gt;</button>",
+          "html": "<button aria-label=\"Collapse panel\" title=\"Collapse panel\" style=\"background: none; bo...\">",
           "target": [
             "button[aria-label=\"Collapse panel\"]"
           ]
@@ -3345,7 +3731,61 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button aria-label=\"Collapse sidebar\" style=\"background: none; border-width: medium; border-style: none; border-color: currentcolor; border-image: initial; cursor: pointer; padding: var(--ah-space-1); border-radius: var(--ah-radius-sm); color: var(--ah-text-muted);\">&lt;</button>",
+          "html": "<div role=\"status\" aria-live=\"polite\" style=\"display: flex; align-items: center; gap: var(--ah-space-2); color: var(--ah-text-muted); font-size: var(--ah-font-size-sm); font-weight: 600;\">",
+          "target": [
+            "div[role=\"status\"]"
+          ]
+        },
+        {
+          "any": [
+            {
+              "id": "aria-valid-attr",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "critical",
+              "message": "ARIA attribute name is valid"
+            }
+          ],
+          "all": [],
+          "none": [],
+          "impact": null,
+          "html": "<button aria-label=\"Open command palette\" style=\"display: flex; align...\">",
+          "target": [
+            "button[aria-label=\"Open command palette\"]"
+          ]
+        },
+        {
+          "any": [
+            {
+              "id": "aria-valid-attr",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "critical",
+              "message": "ARIA attribute name is valid"
+            }
+          ],
+          "all": [],
+          "none": [],
+          "impact": null,
+          "html": "<button aria-label=\"Toggle theme\" style=\"width: var(--ah-space-7); height: var(--ah-space-7); border: 1px solid var(--ah-border); border-radius: var(--ah-radius-full); background: var(--ah-bg-primary); color: var(--ah-text-secondary); cursor: pointer; font-size: var(--ah-font-size-base);\">",
+          "target": [
+            "button[aria-label=\"Toggle theme\"]"
+          ]
+        },
+        {
+          "any": [
+            {
+              "id": "aria-valid-attr",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "critical",
+              "message": "ARIA attribute name is valid"
+            }
+          ],
+          "all": [],
+          "none": [],
+          "impact": null,
+          "html": "<button aria-label=\"Collapse sidebar\" title=\"Collapse sidebar\" style=\"background: none; bo...\">",
           "target": [
             "button[aria-label=\"Collapse sidebar\"]"
           ]
@@ -3363,7 +3803,7 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-c1236f1...\" style=\"background: none; bo...\">",
+          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-a00d147...\" style=\"background: none; bo...\">",
           "target": [
             ".ah-message-enter[role=\"button\"]:nth-child(1) > div:nth-child(1) > div > button[aria-label=\"Message actions\"]"
           ]
@@ -3381,7 +3821,7 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-7cedf20...\" style=\"background: none; bo...\">",
+          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-d21bfb0...\" style=\"background: none; bo...\">",
           "target": [
             ".ah-message-enter[role=\"button\"]:nth-child(2) > div:nth-child(1) > div > button[aria-label=\"Message actions\"]"
           ]
@@ -3453,7 +3893,7 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button aria-label=\"Collapse panel\" style=\"background: none; border-width: medium; border-style: none; border-color: currentcolor; border-image: initial; cursor: pointer; padding: var(--ah-space-1); border-radius: var(--ah-radius-sm); color: var(--ah-text-muted);\">&gt;</button>",
+          "html": "<button aria-label=\"Collapse panel\" title=\"Collapse panel\" style=\"background: none; bo...\">",
           "target": [
             "button[aria-label=\"Collapse panel\"]"
           ]
@@ -3592,7 +4032,7 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<div style=\"display: flex; width: 100%; height: 100%; overflow: hidden;\">",
+          "html": "<div style=\"display: flex; flex-direction: column; width: 100%; height: 100%; overflow: hidden;\">",
           "target": [
             "#root > div"
           ]
@@ -3624,9 +4064,329 @@
           ],
           "none": [],
           "impact": null,
+          "html": "<header style=\"height: var(--ah-app...\">",
+          "target": [
+            "header"
+          ]
+        },
+        {
+          "any": [],
+          "all": [
+            {
+              "id": "important-letter-spacing",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "Letter-spacing in the style attribute is not set to !important, or meets the minimum"
+            },
+            {
+              "id": "important-word-spacing",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "word-spacing in the style attribute is not set to !important, or meets the minimum"
+            },
+            {
+              "id": "important-line-height",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "line-height in the style attribute is not set to !important, or meets the minimum"
+            }
+          ],
+          "none": [],
+          "impact": null,
+          "html": "<div style=\"display: flex; align-items: center; gap: var(--ah-space-2); min-width: 0px;\"><span aria-hidden=\"true\">⚡</span><span style=\"font-weight: 700; font-size: var(--ah-font-size-lg); color: var(--ah-text-primary);\">AgentHub</span></div>",
+          "target": [
+            "header > div:nth-child(1)"
+          ]
+        },
+        {
+          "any": [],
+          "all": [
+            {
+              "id": "important-letter-spacing",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "Letter-spacing in the style attribute is not set to !important, or meets the minimum"
+            },
+            {
+              "id": "important-word-spacing",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "word-spacing in the style attribute is not set to !important, or meets the minimum"
+            },
+            {
+              "id": "important-line-height",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "line-height in the style attribute is not set to !important, or meets the minimum"
+            }
+          ],
+          "none": [],
+          "impact": null,
+          "html": "<span style=\"font-weight: 700; font-size: var(--ah-font-size-lg); color: var(--ah-text-primary);\">AgentHub</span>",
+          "target": [
+            "header > div:nth-child(1) > span:nth-child(2)"
+          ]
+        },
+        {
+          "any": [],
+          "all": [
+            {
+              "id": "important-letter-spacing",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "Letter-spacing in the style attribute is not set to !important, or meets the minimum"
+            },
+            {
+              "id": "important-word-spacing",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "word-spacing in the style attribute is not set to !important, or meets the minimum"
+            },
+            {
+              "id": "important-line-height",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "line-height in the style attribute is not set to !important, or meets the minimum"
+            }
+          ],
+          "none": [],
+          "impact": null,
+          "html": "<div role=\"status\" aria-live=\"polite\" style=\"display: flex; align-items: center; gap: var(--ah-space-2); color: var(--ah-text-muted); font-size: var(--ah-font-size-sm); font-weight: 600;\">",
+          "target": [
+            "div[role=\"status\"]"
+          ]
+        },
+        {
+          "any": [],
+          "all": [
+            {
+              "id": "important-letter-spacing",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "Letter-spacing in the style attribute is not set to !important, or meets the minimum"
+            },
+            {
+              "id": "important-word-spacing",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "word-spacing in the style attribute is not set to !important, or meets the minimum"
+            },
+            {
+              "id": "important-line-height",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "line-height in the style attribute is not set to !important, or meets the minimum"
+            }
+          ],
+          "none": [],
+          "impact": null,
+          "html": "<span style=\"width: var(--ah-space-2); height: var(--ah-space-2); border-radius: var(--ah-radius-full); background: var(--ah-success);\"></span>",
+          "target": [
+            "div[role=\"status\"] > span"
+          ]
+        },
+        {
+          "any": [],
+          "all": [
+            {
+              "id": "important-letter-spacing",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "Letter-spacing in the style attribute is not set to !important, or meets the minimum"
+            },
+            {
+              "id": "important-word-spacing",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "word-spacing in the style attribute is not set to !important, or meets the minimum"
+            },
+            {
+              "id": "important-line-height",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "line-height in the style attribute is not set to !important, or meets the minimum"
+            }
+          ],
+          "none": [],
+          "impact": null,
+          "html": "<div style=\"display: flex; align-items: center; justify-content: flex-end; gap: var(--ah-space-2);\">",
+          "target": [
+            "header > div:nth-child(3)"
+          ]
+        },
+        {
+          "any": [],
+          "all": [
+            {
+              "id": "important-letter-spacing",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "Letter-spacing in the style attribute is not set to !important, or meets the minimum"
+            },
+            {
+              "id": "important-word-spacing",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "word-spacing in the style attribute is not set to !important, or meets the minimum"
+            },
+            {
+              "id": "important-line-height",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "line-height in the style attribute is not set to !important, or meets the minimum"
+            }
+          ],
+          "none": [],
+          "impact": null,
+          "html": "<button aria-label=\"Open command palette\" style=\"display: flex; align...\">",
+          "target": [
+            "button[aria-label=\"Open command palette\"]"
+          ]
+        },
+        {
+          "any": [],
+          "all": [
+            {
+              "id": "important-letter-spacing",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "Letter-spacing in the style attribute is not set to !important, or meets the minimum"
+            },
+            {
+              "id": "important-word-spacing",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "word-spacing in the style attribute is not set to !important, or meets the minimum"
+            },
+            {
+              "id": "important-line-height",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "line-height in the style attribute is not set to !important, or meets the minimum"
+            }
+          ],
+          "none": [],
+          "impact": null,
+          "html": "<kbd style=\"font-family: inherit; font-size: var(--ah-font-size-xs); font-weight: 700; border-radius: var(--ah-radius-sm); border: 1px solid var(--ah-border); background: var(--ah-bg-secondary); color: var(--ah-text-secondary); padding: var(--ah-space-1) var(--ah-space-2);\">⌘K</kbd>",
+          "target": [
+            "kbd"
+          ]
+        },
+        {
+          "any": [],
+          "all": [
+            {
+              "id": "important-letter-spacing",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "Letter-spacing in the style attribute is not set to !important, or meets the minimum"
+            },
+            {
+              "id": "important-word-spacing",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "word-spacing in the style attribute is not set to !important, or meets the minimum"
+            },
+            {
+              "id": "important-line-height",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "line-height in the style attribute is not set to !important, or meets the minimum"
+            }
+          ],
+          "none": [],
+          "impact": null,
+          "html": "<button aria-label=\"Toggle theme\" style=\"width: var(--ah-space-7); height: var(--ah-space-7); border: 1px solid var(--ah-border); border-radius: var(--ah-radius-full); background: var(--ah-bg-primary); color: var(--ah-text-secondary); cursor: pointer; font-size: var(--ah-font-size-base);\">",
+          "target": [
+            "button[aria-label=\"Toggle theme\"]"
+          ]
+        },
+        {
+          "any": [],
+          "all": [
+            {
+              "id": "important-letter-spacing",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "Letter-spacing in the style attribute is not set to !important, or meets the minimum"
+            },
+            {
+              "id": "important-word-spacing",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "word-spacing in the style attribute is not set to !important, or meets the minimum"
+            },
+            {
+              "id": "important-line-height",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "line-height in the style attribute is not set to !important, or meets the minimum"
+            }
+          ],
+          "none": [],
+          "impact": null,
+          "html": "<div style=\"display: flex; flex: 1 1 0%; min-height: 0px; overflow: hidden;\">",
+          "target": [
+            "#root > div > div"
+          ]
+        },
+        {
+          "any": [],
+          "all": [
+            {
+              "id": "important-letter-spacing",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "Letter-spacing in the style attribute is not set to !important, or meets the minimum"
+            },
+            {
+              "id": "important-word-spacing",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "word-spacing in the style attribute is not set to !important, or meets the minimum"
+            },
+            {
+              "id": "important-line-height",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "line-height in the style attribute is not set to !important, or meets the minimum"
+            }
+          ],
+          "none": [],
+          "impact": null,
           "html": "<div style=\"width: var(--ah-sidebar-left-width); min-width: var(--ah-sidebar-left-width); border-right: 1px solid var(--ah-border); display: flex; flex-direction: column; background: var(--ah-bg-elevated); transition: width var(--ah-transition-normal);\">",
           "target": [
-            "#root > div > div:nth-child(1)"
+            "#root > div > div > div:nth-child(1)"
           ]
         },
         {
@@ -3658,7 +4418,7 @@
           "impact": null,
           "html": "<div style=\"padding: var(--ah-space-3); border-bottom: 1px solid var(--ah-border); display: flex; align-items: center; justify-content: space-between;\">",
           "target": [
-            "#root > div > div:nth-child(1) > div:nth-child(1)"
+            "#root > div > div > div:nth-child(1) > div:nth-child(1)"
           ]
         },
         {
@@ -3690,7 +4450,7 @@
           "impact": null,
           "html": "<span style=\"font-weight: 600; font-size: var(--ah-font-size-base); color: var(--ah-text-primary);\">Rooms</span>",
           "target": [
-            "#root > div > div:nth-child(1) > div:nth-child(1) > span"
+            "#root > div > div > div:nth-child(1) > div:nth-child(1) > span"
           ]
         },
         {
@@ -3720,7 +4480,7 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<button aria-label=\"Collapse sidebar\" style=\"background: none; border-width: medium; border-style: none; border-color: currentcolor; border-image: initial; cursor: pointer; padding: var(--ah-space-1); border-radius: var(--ah-radius-sm); color: var(--ah-text-muted);\">&lt;</button>",
+          "html": "<button aria-label=\"Collapse sidebar\" title=\"Collapse sidebar\" style=\"background: none; bo...\">",
           "target": [
             "button[aria-label=\"Collapse sidebar\"]"
           ]
@@ -3754,7 +4514,7 @@
           "impact": null,
           "html": "<div style=\"flex: 1 1 0%; overflow: auto;\">",
           "target": [
-            "#root > div > div:nth-child(1) > div:nth-child(2)"
+            "#root > div > div > div:nth-child(1) > div:nth-child(2)"
           ]
         },
         {
@@ -3786,7 +4546,7 @@
           "impact": null,
           "html": "<div style=\"display: flex; flex-direction: column; height: 100%;\">",
           "target": [
-            "#root > div > div:nth-child(1) > div:nth-child(2) > div"
+            "#root > div > div > div:nth-child(1) > div:nth-child(2) > div"
           ]
         },
         {
@@ -3818,7 +4578,7 @@
           "impact": null,
           "html": "<div style=\"padding: var(--ah-space-3);\">",
           "target": [
-            "#root > div > div:nth-child(1) > div:nth-child(2) > div > div:nth-child(1)"
+            "#root > div > div > div:nth-child(1) > div:nth-child(2) > div > div:nth-child(1)"
           ]
         },
         {
@@ -3850,7 +4610,7 @@
           "impact": null,
           "html": "<button style=\"width: 100%; padding: var(--ah-space-2) var(--ah-space-3); border-radius: var(--ah-radius-md); border: 1px solid var(--ah-border-strong); background: var(--ah-bg-primary); cursor: pointer; font-size: var(--ah-font-size-md); font-weight: 500; color: var(--ah-text-secondary);\">",
           "target": [
-            "div:nth-child(1) > div:nth-child(2) > div > div:nth-child(1) > button"
+            "div > div > div:nth-child(1) > div:nth-child(2) > div > div:nth-child(1) > button"
           ]
         },
         {
@@ -3882,7 +4642,7 @@
           "impact": null,
           "html": "<div style=\"flex: 1 1 0%; overflow: auto;\">",
           "target": [
-            "#root > div > div:nth-child(1) > div:nth-child(2) > div > div:nth-child(2)"
+            "#root > div > div > div:nth-child(1) > div:nth-child(2) > div > div:nth-child(2)"
           ]
         },
         {
@@ -3944,9 +4704,41 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<div style=\"overflow: hidden;\">",
+          "html": "<div style=\"display: flex; align-items: flex-start; gap: var(--ah-space-2); min-width: 0px; flex: 1 1 0%;\">",
           "target": [
-            "div:nth-child(2) > div[role=\"button\"] > div"
+            "div:nth-child(2) > div[role=\"button\"] > div:nth-child(1)"
+          ]
+        },
+        {
+          "any": [],
+          "all": [
+            {
+              "id": "important-letter-spacing",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "Letter-spacing in the style attribute is not set to !important, or meets the minimum"
+            },
+            {
+              "id": "important-word-spacing",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "word-spacing in the style attribute is not set to !important, or meets the minimum"
+            },
+            {
+              "id": "important-line-height",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "line-height in the style attribute is not set to !important, or meets the minimum"
+            }
+          ],
+          "none": [],
+          "impact": null,
+          "html": "<div style=\"overflow: hidden; min-width: 0px;\">",
+          "target": [
+            "div:nth-child(2) > div[role=\"button\"] > div:nth-child(1) > div"
           ]
         },
         {
@@ -3978,7 +4770,7 @@
           "impact": null,
           "html": "<div style=\"font-size: var(--ah-font-size-md); font-weight: 500; color: var(--ah-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;\">A11y Room</div>",
           "target": [
-            "div:nth-child(2) > div[role=\"button\"] > div > div:nth-child(1)"
+            "div[role=\"button\"] > div:nth-child(1) > div > div:nth-child(1)"
           ]
         },
         {
@@ -4008,9 +4800,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<div style=\"font-size: var(--ah-font-size-xs); color: var(--ah-text-muted); margin-top: 2px;\">solo</div>",
+          "html": "<div style=\"display: flex; align-items: center; gap: var(--ah-space-1); flex-shrink: 0;\"></div>",
           "target": [
-            "div[role=\"button\"] > div > div:nth-child(2)"
+            "div:nth-child(2) > div[role=\"button\"] > div:nth-child(2)"
           ]
         },
         {
@@ -4042,7 +4834,7 @@
           "impact": null,
           "html": "<div style=\"flex: 1 1 0%; display: flex; flex-direction: column; min-width: 0px; background: var(--ah-bg-primary);\">",
           "target": [
-            "#root > div > div:nth-child(2)"
+            "#root > div > div > div:nth-child(2)"
           ]
         },
         {
@@ -4074,7 +4866,7 @@
           "impact": null,
           "html": "<div style=\"flex: 1 1 0%; overflow: auto; position: relative;\">",
           "target": [
-            "#root > div > div:nth-child(2) > div"
+            "#root > div > div > div:nth-child(2) > div"
           ]
         },
         {
@@ -4106,7 +4898,7 @@
           "impact": null,
           "html": "<div style=\"display: flex; flex-direction: column; height: 100%; padding: 0 var(--ah-space-4);\">",
           "target": [
-            "#root > div > div:nth-child(2) > div > div:nth-child(1)"
+            "#root > div > div > div:nth-child(2) > div > div:nth-child(1)"
           ]
         },
         {
@@ -4138,7 +4930,7 @@
           "impact": null,
           "html": "<div style=\"flex: 1 1 0%; overflow: auto; padding-bottom: var(--ah-space-4); position: relative;\">",
           "target": [
-            "#root > div > div:nth-child(2) > div > div:nth-child(1) > div"
+            "#root > div > div > div:nth-child(2) > div > div:nth-child(1) > div"
           ]
         },
         {
@@ -4394,7 +5186,7 @@
           "impact": null,
           "html": "<div style=\"border-top: 1px solid var(--ah-border); padding: var(--ah-space-3) var(--ah-space-4); background: var(--ah-bg-primary);\">",
           "target": [
-            "#root > div > div:nth-child(2) > div > div:nth-child(2)"
+            "#root > div > div > div:nth-child(2) > div > div:nth-child(2)"
           ]
         },
         {
@@ -4426,7 +5218,7 @@
           "impact": null,
           "html": "<div style=\"display: flex; gap: var(--ah-space-2); align-items: flex-end; border: 2px dashed transparent; border-radius: var(--ah-radius-lg); padding: var(--ah-space-2); transition: border var(--ah-transition-normal), padding var(--ah-transition-normal);\">",
           "target": [
-            "#root > div > div:nth-child(2) > div > div:nth-child(2) > div"
+            "#root > div > div > div:nth-child(2) > div > div:nth-child(2) > div"
           ]
         },
         {
@@ -4458,7 +5250,7 @@
           "impact": null,
           "html": "<div style=\"flex: 1 1 0%; position: relative;\">",
           "target": [
-            "#root > div > div:nth-child(2) > div > div:nth-child(2) > div > div:nth-child(1)"
+            "#root > div > div > div:nth-child(2) > div > div:nth-child(2) > div > div:nth-child(1)"
           ]
         },
         {
@@ -4522,7 +5314,7 @@
           "impact": null,
           "html": "<div style=\"display: flex; flex-direction: column; gap: var(--ah-space-2);\">",
           "target": [
-            "div:nth-child(2) > div > div:nth-child(2) > div > div:nth-child(2)"
+            "#root > div > div > div:nth-child(2) > div > div:nth-child(2) > div > div:nth-child(2)"
           ]
         },
         {
@@ -4618,7 +5410,7 @@
           "impact": null,
           "html": "<div style=\"width: var(--ah-sidebar-right-width); min-width: var(--ah-sidebar-right-width); border-left: 1px solid var(--ah-border); display: flex; flex-direction: column; background: var(--ah-bg-elevated); transition: width var(--ah-transition-normal);\">",
           "target": [
-            "#root > div > div:nth-child(3)"
+            "#root > div > div > div:nth-child(3)"
           ]
         },
         {
@@ -4650,7 +5442,7 @@
           "impact": null,
           "html": "<div style=\"padding: var(--ah-space-3); border-bottom: 1px solid var(--ah-border); display: flex; align-items: center; justify-content: space-between;\">",
           "target": [
-            "#root > div > div:nth-child(3) > div:nth-child(1)"
+            "#root > div > div > div:nth-child(3) > div:nth-child(1)"
           ]
         },
         {
@@ -4712,7 +5504,7 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<button aria-label=\"Collapse panel\" style=\"background: none; border-width: medium; border-style: none; border-color: currentcolor; border-image: initial; cursor: pointer; padding: var(--ah-space-1); border-radius: var(--ah-radius-sm); color: var(--ah-text-muted);\">&gt;</button>",
+          "html": "<button aria-label=\"Collapse panel\" title=\"Collapse panel\" style=\"background: none; bo...\">",
           "target": [
             "button[aria-label=\"Collapse panel\"]"
           ]
@@ -4746,7 +5538,7 @@
           "impact": null,
           "html": "<div style=\"flex: 1 1 0%; overflow: auto;\">",
           "target": [
-            "#root > div > div:nth-child(3) > div:nth-child(2)"
+            "#root > div > div > div:nth-child(3) > div:nth-child(2)"
           ]
         },
         {
@@ -4778,7 +5570,7 @@
           "impact": null,
           "html": "<div style=\"display: flex; flex-direction: column; height: 100%;\">",
           "target": [
-            "#root > div > div:nth-child(3) > div:nth-child(2) > div"
+            "#root > div > div > div:nth-child(3) > div:nth-child(2) > div"
           ]
         },
         {
@@ -5000,7 +5792,7 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<div style=\"flex: 1 1 0%; overflow: auto; padding: var(--ah-space-3);\"><div><div style=\"font-size: var(--ah-font-size-md); color: var(--ah-text-muted);\">No context items</div></div></div>",
+          "html": "<div style=\"flex: 1 1 0%; overflow: auto; padding: var(--ah-space-3);\"><div><div style=\"font-size: var(--ah-font-size-md); color: var(--ah-text-muted);\">No context items yet. Confirmed context from runs will appear here.</div></div></div>",
           "target": [
             "div:nth-child(3) > div:nth-child(2) > div > div:nth-child(2)"
           ]
@@ -5032,7 +5824,7 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<div style=\"font-size: var(--ah-font-size-md); color: var(--ah-text-muted);\">No context items</div>",
+          "html": "<div style=\"font-size: var(--ah-font-size-md); color: var(--ah-text-muted);\">No context items yet. Confirmed context from runs will appear here.</div>",
           "target": [
             "div:nth-child(3) > div:nth-child(2) > div > div:nth-child(2) > div > div"
           ]
@@ -5080,27 +5872,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button aria-label=\"Collapse sidebar\" style=\"background: none; border-width: medium; border-style: none; border-color: currentcolor; border-image: initial; cursor: pointer; padding: var(--ah-space-1); border-radius: var(--ah-radius-sm); color: var(--ah-text-muted);\">&lt;</button>",
+          "html": "<button aria-label=\"Open command palette\" style=\"display: flex; align...\">",
           "target": [
-            "button[aria-label=\"Collapse sidebar\"]"
-          ]
-        },
-        {
-          "any": [
-            {
-              "id": "button-has-visible-text",
-              "data": null,
-              "relatedNodes": [],
-              "impact": "critical",
-              "message": "Element has inner text that is visible to screen readers"
-            }
-          ],
-          "all": [],
-          "none": [],
-          "impact": null,
-          "html": "<button style=\"width: 100%; padding: var(--ah-space-2) var(--ah-space-3); border-radius: var(--ah-radius-md); border: 1px solid var(--ah-border-strong); background: var(--ah-bg-primary); cursor: pointer; font-size: var(--ah-font-size-md); font-weight: 500; color: var(--ah-text-secondary);\">",
-          "target": [
-            "div:nth-child(1) > div:nth-child(2) > div > div:nth-child(1) > button"
+            "button[aria-label=\"Open command palette\"]"
           ]
         },
         {
@@ -5123,7 +5897,82 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-c1236f1...\" style=\"background: none; bo...\">",
+          "html": "<button aria-label=\"Toggle theme\" style=\"width: var(--ah-space-7); height: var(--ah-space-7); border: 1px solid var(--ah-border); border-radius: var(--ah-radius-full); background: var(--ah-bg-primary); color: var(--ah-text-secondary); cursor: pointer; font-size: var(--ah-font-size-base);\">",
+          "target": [
+            "button[aria-label=\"Toggle theme\"]"
+          ]
+        },
+        {
+          "any": [
+            {
+              "id": "button-has-visible-text",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "critical",
+              "message": "Element has inner text that is visible to screen readers"
+            },
+            {
+              "id": "aria-label",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "critical",
+              "message": "aria-label attribute exists and is not empty"
+            },
+            {
+              "id": "non-empty-title",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "critical",
+              "message": "Element has a title attribute"
+            }
+          ],
+          "all": [],
+          "none": [],
+          "impact": null,
+          "html": "<button aria-label=\"Collapse sidebar\" title=\"Collapse sidebar\" style=\"background: none; bo...\">",
+          "target": [
+            "button[aria-label=\"Collapse sidebar\"]"
+          ]
+        },
+        {
+          "any": [
+            {
+              "id": "button-has-visible-text",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "critical",
+              "message": "Element has inner text that is visible to screen readers"
+            }
+          ],
+          "all": [],
+          "none": [],
+          "impact": null,
+          "html": "<button style=\"width: 100%; padding: var(--ah-space-2) var(--ah-space-3); border-radius: var(--ah-radius-md); border: 1px solid var(--ah-border-strong); background: var(--ah-bg-primary); cursor: pointer; font-size: var(--ah-font-size-md); font-weight: 500; color: var(--ah-text-secondary);\">",
+          "target": [
+            "div > div > div:nth-child(1) > div:nth-child(2) > div > div:nth-child(1) > button"
+          ]
+        },
+        {
+          "any": [
+            {
+              "id": "button-has-visible-text",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "critical",
+              "message": "Element has inner text that is visible to screen readers"
+            },
+            {
+              "id": "aria-label",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "critical",
+              "message": "aria-label attribute exists and is not empty"
+            }
+          ],
+          "all": [],
+          "none": [],
+          "impact": null,
+          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-a00d147...\" style=\"background: none; bo...\">",
           "target": [
             ".ah-message-enter[role=\"button\"]:nth-child(1) > div:nth-child(1) > div > button[aria-label=\"Message actions\"]"
           ]
@@ -5148,7 +5997,7 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-7cedf20...\" style=\"background: none; bo...\">",
+          "html": "<button aria-label=\"Message actions\" data-testid=\"message-menu-d21bfb0...\" style=\"background: none; bo...\">",
           "target": [
             ".ah-message-enter[role=\"button\"]:nth-child(2) > div:nth-child(1) > div > button[aria-label=\"Message actions\"]"
           ]
@@ -5218,12 +6067,19 @@
               "relatedNodes": [],
               "impact": "critical",
               "message": "aria-label attribute exists and is not empty"
+            },
+            {
+              "id": "non-empty-title",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "critical",
+              "message": "Element has a title attribute"
             }
           ],
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button aria-label=\"Collapse panel\" style=\"background: none; border-width: medium; border-style: none; border-color: currentcolor; border-image: initial; cursor: pointer; padding: var(--ah-space-1); border-radius: var(--ah-radius-sm); color: var(--ah-text-muted);\">&gt;</button>",
+          "html": "<button aria-label=\"Collapse panel\" title=\"Collapse panel\" style=\"background: none; bo...\">",
           "target": [
             "button[aria-label=\"Collapse panel\"]"
           ]
@@ -5382,6 +6238,81 @@
                 "fgColor": "#111827",
                 "bgColor": "#f9fafb",
                 "contrastRatio": 16.97,
+                "fontSize": "12.0pt (16px)",
+                "fontWeight": "bold",
+                "expectedContrastRatio": "4.5:1"
+              },
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "Element has sufficient color contrast of 16.97"
+            }
+          ],
+          "all": [],
+          "none": [],
+          "impact": null,
+          "html": "<span style=\"font-weight: 700; font-size: var(--ah-font-size-lg); color: var(--ah-text-primary);\">AgentHub</span>",
+          "target": [
+            "header > div:nth-child(1) > span:nth-child(2)"
+          ]
+        },
+        {
+          "any": [
+            {
+              "id": "color-contrast",
+              "data": {
+                "fgColor": "#4b5563",
+                "bgColor": "#f9fafb",
+                "contrastRatio": 7.23,
+                "fontSize": "9.0pt (12px)",
+                "fontWeight": "normal",
+                "expectedContrastRatio": "4.5:1"
+              },
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "Element has sufficient color contrast of 7.23"
+            }
+          ],
+          "all": [],
+          "none": [],
+          "impact": null,
+          "html": "<div role=\"status\" aria-live=\"polite\" style=\"display: flex; align-items: center; gap: var(--ah-space-2); color: var(--ah-text-muted); font-size: var(--ah-font-size-sm); font-weight: 600;\">",
+          "target": [
+            "div[role=\"status\"]"
+          ]
+        },
+        {
+          "any": [
+            {
+              "id": "color-contrast",
+              "data": {
+                "fgColor": "#374151",
+                "bgColor": "#f3f4f6",
+                "contrastRatio": 9.36,
+                "fontSize": "8.3pt (11px)",
+                "fontWeight": "bold",
+                "expectedContrastRatio": "4.5:1"
+              },
+              "relatedNodes": [],
+              "impact": "serious",
+              "message": "Element has sufficient color contrast of 9.36"
+            }
+          ],
+          "all": [],
+          "none": [],
+          "impact": null,
+          "html": "<kbd style=\"font-family: inherit; font-size: var(--ah-font-size-xs); font-weight: 700; border-radius: var(--ah-radius-sm); border: 1px solid var(--ah-border); background: var(--ah-bg-secondary); color: var(--ah-text-secondary); padding: var(--ah-space-1) var(--ah-space-2);\">⌘K</kbd>",
+          "target": [
+            "kbd"
+          ]
+        },
+        {
+          "any": [
+            {
+              "id": "color-contrast",
+              "data": {
+                "fgColor": "#111827",
+                "bgColor": "#f9fafb",
+                "contrastRatio": 16.97,
                 "fontSize": "10.5pt (14px)",
                 "fontWeight": "normal",
                 "expectedContrastRatio": "4.5:1"
@@ -5396,7 +6327,7 @@
           "impact": null,
           "html": "<span style=\"font-weight: 600; font-size: var(--ah-font-size-base); color: var(--ah-text-primary);\">Rooms</span>",
           "target": [
-            "#root > div > div:nth-child(1) > div:nth-child(1) > span"
+            "#root > div > div > div:nth-child(1) > div:nth-child(1) > span"
           ]
         },
         {
@@ -5421,7 +6352,7 @@
           "impact": null,
           "html": "<button style=\"width: 100%; padding: var(--ah-space-2) var(--ah-space-3); border-radius: var(--ah-radius-md); border: 1px solid var(--ah-border-strong); background: var(--ah-bg-primary); cursor: pointer; font-size: var(--ah-font-size-md); font-weight: 500; color: var(--ah-text-secondary);\">",
           "target": [
-            "div:nth-child(1) > div:nth-child(2) > div > div:nth-child(1) > button"
+            "div > div > div:nth-child(1) > div:nth-child(2) > div > div:nth-child(1) > button"
           ]
         },
         {
@@ -5446,32 +6377,7 @@
           "impact": null,
           "html": "<div style=\"font-size: var(--ah-font-size-md); font-weight: 500; color: var(--ah-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;\">A11y Room</div>",
           "target": [
-            "div:nth-child(2) > div[role=\"button\"] > div > div:nth-child(1)"
-          ]
-        },
-        {
-          "any": [
-            {
-              "id": "color-contrast",
-              "data": {
-                "fgColor": "#4b5563",
-                "bgColor": "#dbeafe",
-                "contrastRatio": 6.19,
-                "fontSize": "8.3pt (11px)",
-                "fontWeight": "normal",
-                "expectedContrastRatio": "4.5:1"
-              },
-              "relatedNodes": [],
-              "impact": "serious",
-              "message": "Element has sufficient color contrast of 6.19"
-            }
-          ],
-          "all": [],
-          "none": [],
-          "impact": null,
-          "html": "<div style=\"font-size: var(--ah-font-size-xs); color: var(--ah-text-muted); margin-top: 2px;\">solo</div>",
-          "target": [
-            "div[role=\"button\"] > div > div:nth-child(2)"
+            "div[role=\"button\"] > div:nth-child(1) > div > div:nth-child(1)"
           ]
         },
         {
@@ -5769,7 +6675,7 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div style=\"font-size: var(--ah-font-size-md); color: var(--ah-text-muted);\">No context items</div>",
+          "html": "<div style=\"font-size: var(--ah-font-size-md); color: var(--ah-text-muted);\">No context items yet. Confirmed context from runs will appear here.</div>",
           "target": [
             "div:nth-child(3) > div:nth-child(2) > div > div:nth-child(2) > div > div"
           ]
@@ -6019,6 +6925,104 @@
       ]
     },
     {
+      "id": "landmark-banner-is-top-level",
+      "impact": null,
+      "tags": [
+        "cat.semantics",
+        "best-practice"
+      ],
+      "description": "Ensure the banner landmark is at top level",
+      "help": "Banner landmark should not be contained in another landmark",
+      "helpUrl": "https://dequeuniversity.com/rules/axe/4.11/landmark-banner-is-top-level?application=playwright",
+      "nodes": [
+        {
+          "any": [
+            {
+              "id": "landmark-is-top-level",
+              "data": {
+                "role": "banner"
+              },
+              "relatedNodes": [],
+              "impact": "moderate",
+              "message": "The banner landmark is at the top level."
+            }
+          ],
+          "all": [],
+          "none": [],
+          "impact": null,
+          "html": "<header style=\"height: var(--ah-app...\">",
+          "target": [
+            "header"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "landmark-no-duplicate-banner",
+      "impact": null,
+      "tags": [
+        "cat.semantics",
+        "best-practice"
+      ],
+      "description": "Ensure the document has at most one banner landmark",
+      "help": "Document should not have more than one banner landmark",
+      "helpUrl": "https://dequeuniversity.com/rules/axe/4.11/landmark-no-duplicate-banner?application=playwright",
+      "nodes": [
+        {
+          "any": [
+            {
+              "id": "page-no-duplicate-banner",
+              "data": null,
+              "relatedNodes": [],
+              "impact": "moderate",
+              "message": "Document does not have more than one banner landmark"
+            }
+          ],
+          "all": [],
+          "none": [],
+          "impact": null,
+          "html": "<header style=\"height: var(--ah-app...\">",
+          "target": [
+            "header"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "landmark-unique",
+      "impact": null,
+      "tags": [
+        "cat.semantics",
+        "best-practice"
+      ],
+      "description": "Ensure landmarks are unique",
+      "help": "Landmarks should have a unique role or role/label/title (i.e. accessible name) combination",
+      "helpUrl": "https://dequeuniversity.com/rules/axe/4.11/landmark-unique?application=playwright",
+      "nodes": [
+        {
+          "any": [
+            {
+              "id": "landmark-is-unique",
+              "data": {
+                "role": "banner",
+                "accessibleText": null
+              },
+              "relatedNodes": [],
+              "impact": "moderate",
+              "message": "Landmarks must have a unique role or role/label/title (i.e. accessible name) combination"
+            }
+          ],
+          "all": [],
+          "none": [],
+          "impact": null,
+          "html": "<header style=\"height: var(--ah-app...\">",
+          "target": [
+            "header"
+          ]
+        }
+      ]
+    },
+    {
       "id": "meta-viewport-large",
       "impact": null,
       "tags": [
@@ -6121,7 +7125,7 @@
           "impact": null,
           "html": "<div style=\"flex: 1 1 0%; overflow: auto; position: relative;\">",
           "target": [
-            "#root > div > div:nth-child(2) > div"
+            "#root > div > div > div:nth-child(2) > div"
           ]
         }
       ]

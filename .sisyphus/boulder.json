@@ -9,7 +9,11 @@
     "ses_1a6891dc4ffeXWHi4bGP4Jt4cc",
     "ses_1a688f4caffegWumx2KL5ZF9d6",
     "ses_1a688cd69ffepArti7pYoc4kIL",
-    "ses_1a688a65affexT7gGtyfsx3Irh"
+    "ses_1a688a65affexT7gGtyfsx3Irh",
+    "ses_1a2ee8108ffefCrSpjr6r205kB",
+    "ses_1a2ee7351ffeOX2AlCJ97L517c",
+    "ses_1a2ee61f5ffeV19L247WUe2tG2",
+    "ses_1a2d1c88dffeTu4sLJix84p2kB"
   ],
   "session_origins": {
     "ses_1a6baca41ffepeBIWmVcU52ISH": "direct",
@@ -19,7 +23,11 @@
     "ses_1a6891dc4ffeXWHi4bGP4Jt4cc": "appended",
     "ses_1a688f4caffegWumx2KL5ZF9d6": "appended",
     "ses_1a688cd69ffepArti7pYoc4kIL": "appended",
-    "ses_1a688a65affexT7gGtyfsx3Irh": "appended"
+    "ses_1a688a65affexT7gGtyfsx3Irh": "appended",
+    "ses_1a2ee8108ffefCrSpjr6r205kB": "appended",
+    "ses_1a2ee7351ffeOX2AlCJ97L517c": "appended",
+    "ses_1a2ee61f5ffeV19L247WUe2tG2": "appended",
+    "ses_1a2d1c88dffeTu4sLJix84p2kB": "appended"
   },
   "plan_name": "v05-chatroom-complete",
   "agent": "atlas",

@@ -34,12 +34,15 @@
     "@types/node": "^22.19.1",
     "eslint": "^9.39.1",
     "prettier": "^3.6.2",
+    "tsx": "^4.22.3",
+    "turbo": "^2.5.4",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.48.0",
-    "turbo": "^2.5.4",
     "vitest": "^4.0.14"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["better-sqlite3"]
+    "onlyBuiltDependencies": [
+      "better-sqlite3"
+    ]
   }
 }
