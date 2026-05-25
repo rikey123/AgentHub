@@ -25,9 +25,10 @@ type InputBoxProps = {
   readonly editingPendingTurn?: { readonly messageId: string; readonly text: string } | undefined;
   readonly onClearEdit?: () => void;
   readonly editError?: string | undefined;
+  readonly connectionStatus?: "connected" | "connecting" | "reconnecting" | "offline" | "disconnected";
 };
 
-export function InputBox({ onSend, disabled, room, pendingTurnCount, editingPendingTurn, onClearEdit, editError }: InputBoxProps) {
+export function InputBox({ onSend, disabled, room, pendingTurnCount, editingPendingTurn, onClearEdit, editError, connectionStatus = "connected" }: InputBoxProps) {
   const [text, setText] = useState("");
   const [showPreview, setShowPreview] = useState(false);
   const [mentions, setMentions] = useState<string[]>([]);
@@ -253,6 +254,16 @@ export function InputBox({ onSend, disabled, room, pendingTurnCount, editingPend
 
   const atLimit = pendingTurnCount >= 20;
   const nearLimit = pendingTurnCount >= 15 && pendingTurnCount < 20;
+  const connectionCopy =
+    connectionStatus === "offline"
+      ? "Live projector is offline. You can keep editing drafts, but send actions stay disabled."
+      : connectionStatus === "reconnecting"
+        ? "Live projector is reconnecting. Send actions stay disabled until the stream returns."
+        : connectionStatus === "disconnected"
+          ? "Live projector is disconnected. Send actions stay disabled until it attaches."
+          : connectionStatus === "connecting"
+            ? "Connecting to live projector."
+            : undefined;
 
   return (
     <div
@@ -426,6 +437,11 @@ export function InputBox({ onSend, disabled, room, pendingTurnCount, editingPend
           transition: "border var(--ah-transition-normal), padding var(--ah-transition-normal)"
         }}
       >
+        {connectionCopy ? (
+          <div className="ah-sr-only" role={connectionStatus === "offline" ? "alert" : "status"} aria-live={connectionStatus === "offline" ? "assertive" : "polite"}>
+            {connectionCopy}
+          </div>
+        ) : null}
         <div style={{ flex: 1, position: "relative" }}>
           <textarea
             ref={textareaRef}

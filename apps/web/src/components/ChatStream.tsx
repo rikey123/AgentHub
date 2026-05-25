@@ -20,6 +20,7 @@ type ChatStreamProps = {
   readonly onEditPendingTurn: (messageId: string, text: string) => void;
   readonly onQuoteMessage: (messageId: string) => void;
   readonly connectionStatus: "connected" | "connecting" | "reconnecting" | "offline" | "disconnected";
+  readonly connectionAnnouncement?: string | undefined;
 };
 
 const VIRTUALIZATION_THRESHOLD = 50;
@@ -46,7 +47,7 @@ function estimateMessageHeight(message: MessageViewModel): number {
   return height;
 }
 
-export function ChatStream({ room, onOpenRunDetail, onCancelPendingTurn, onEditPendingTurn, onQuoteMessage, connectionStatus }: ChatStreamProps) {
+export function ChatStream({ room, onOpenRunDetail, onCancelPendingTurn, onEditPendingTurn, onQuoteMessage, connectionStatus, connectionAnnouncement }: ChatStreamProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [selectedMessageId, setSelectedMessageId] = useState<string | undefined>(undefined);
@@ -189,14 +190,65 @@ export function ChatStream({ room, onOpenRunDetail, onCancelPendingTurn, onEditP
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", padding: "0 var(--ah-space-4)" }}>
-      {connectionStatus === "reconnecting" && (
-        <div className="ah-banner ah-banner--reconnecting" role="status" aria-live="polite">
-          <span>Reconnecting...</span>
-        </div>
-      )}
-      {connectionStatus === "offline" && (
-        <div className="ah-banner ah-banner--offline" role="alert" aria-live="assertive">
-          <span>Offline - check daemon connection</span>
+      <div
+        className="ah-sr-only"
+        role={connectionStatus === "offline" ? "alert" : "status"}
+        aria-live={connectionStatus === "offline" ? "assertive" : "polite"}
+        aria-atomic="true"
+      >
+        {connectionAnnouncement}
+      </div>
+      {(connectionStatus === "reconnecting" || connectionStatus === "offline" || connectionStatus === "disconnected") && (
+        <div
+          style={{
+            marginBottom: "var(--ah-space-3)",
+            padding: "var(--ah-space-2) var(--ah-space-3)",
+            borderRadius: "var(--ah-radius-lg)",
+            border: `1px solid ${connectionStatus === "offline" ? "var(--ah-danger)" : connectionStatus === "reconnecting" ? "var(--ah-warning)" : "var(--ah-border)"}`,
+            background:
+              connectionStatus === "offline"
+                ? "var(--ah-bg-danger)"
+                : connectionStatus === "reconnecting"
+                  ? "var(--ah-bg-warning)"
+                  : "var(--ah-bg-elevated)",
+            color:
+              connectionStatus === "offline"
+                ? "var(--ah-text-danger)"
+                : connectionStatus === "reconnecting"
+                  ? "var(--ah-text-warning)"
+                  : "var(--ah-text-muted)",
+            display: "flex",
+            alignItems: "center",
+            gap: "var(--ah-space-2)",
+            fontSize: "var(--ah-font-size-sm)",
+            fontWeight: 600
+          }}
+          role={connectionStatus === "offline" ? "alert" : "status"}
+          aria-live={connectionStatus === "offline" ? "assertive" : "polite"}
+        >
+          <span
+            className={connectionStatus === "reconnecting" ? "ah-pulse-dot" : undefined}
+            aria-hidden="true"
+            style={{
+              width: "var(--ah-space-2)",
+              height: "var(--ah-space-2)",
+              borderRadius: "var(--ah-radius-full)",
+              background:
+                connectionStatus === "offline"
+                  ? "var(--ah-danger)"
+                  : connectionStatus === "reconnecting"
+                    ? "var(--ah-warning)"
+                    : "var(--ah-border-strong)",
+              flexShrink: 0
+            }}
+          />
+          <span>
+            {connectionStatus === "offline"
+              ? "Offline — live updates are unavailable"
+              : connectionStatus === "reconnecting"
+                ? "Reconnecting — live updates will resume automatically"
+                : "Disconnected — live updates are not attached"}
+          </span>
         </div>
       )}
       {hasActiveRun && (
@@ -225,7 +277,7 @@ export function ChatStream({ room, onOpenRunDetail, onCancelPendingTurn, onEditP
             }}
             aria-hidden="true"
           />
-          <span>⚡ {activeRunAgentName} is working...</span>
+          <span>{activeRunAgentName} is working...</span>
         </div>
       )}
       <div
