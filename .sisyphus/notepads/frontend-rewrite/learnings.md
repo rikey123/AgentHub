@@ -22,3 +22,8 @@
 - Replaced emoji UI icons with inline SVG glyphs to match the no-emoji policy in the visual system.
 - Theme handling now treats uto as a first-class state in the header toggle without assuming it can be flipped directly to another fixed theme.
 - The reserved rail items are visual placeholders only, so future feature wiring can happen without changing shell structure.
+- Unified live connection UX now flows through App -> Layout -> ChatStream -> InputBox using the existing projector status model only; no new statuses were introduced.
+- The shell header now acts as the primary status chip, while chat adds a secondary status callout and SR-only announcement for reconnect/offline/disconnected states.
+- Offline write-path disabling remains preserved by keeping the composer disabled whenever connectionStatus !== "connected".
+- Added a shared SR-only utility stylesheet in src/styles/a11y.css and imported it from main.tsx so live announcements can stay visually hidden but accessible.
+- The workspace required pnpm install before validation because node_modules was absent in the worktree; after install, typecheck, lint, and web build all passed.

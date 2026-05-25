@@ -10,6 +10,8 @@ type LayoutProps = {
   readonly rightPanel: ReactNode;
   readonly overlay?: ReactNode;
   readonly connectionStatus?: "connected" | "connecting" | "reconnecting" | "offline" | "disconnected";
+  readonly connectionError?: string | undefined;
+  readonly connectionAnnouncement?: string | undefined;
   readonly onOpenCommandPalette?: () => void;
   readonly theme?: string;
   readonly onToggleTheme?: () => void;
@@ -26,10 +28,18 @@ type RailItem = {
 
 const CONNECTION_LABELS: Record<NonNullable<LayoutProps["connectionStatus"]>, string> = {
   connected: "Connected",
-  connecting: "Connecting...",
-  reconnecting: "Reconnecting...",
+  connecting: "Connecting",
+  reconnecting: "Reconnecting",
   offline: "Offline",
-  disconnected: "Offline"
+  disconnected: "Disconnected"
+};
+
+const CONNECTION_HINTS: Record<NonNullable<LayoutProps["connectionStatus"]>, string> = {
+  connected: "Live updates are flowing.",
+  connecting: "Waiting for the event stream.",
+  reconnecting: "Trying to restore the stream.",
+  offline: "Live updates are unavailable.",
+  disconnected: "Live updates are not attached."
 };
 
 const CONNECTION_COLORS: Record<NonNullable<LayoutProps["connectionStatus"]>, string> = {
@@ -61,12 +71,15 @@ export function Layout({
   rightPanel,
   overlay,
   connectionStatus = "disconnected",
+  connectionError,
+  connectionAnnouncement,
   onOpenCommandPalette,
   theme,
   onToggleTheme
 }: LayoutProps) {
   const statusLabel = CONNECTION_LABELS[connectionStatus];
   const statusColor = CONNECTION_COLORS[connectionStatus];
+  const statusHint = CONNECTION_HINTS[connectionStatus];
   const resolvedTheme = theme === "dark" || theme === "light" || theme === "auto" ? theme : "auto";
   const themeLabel = resolvedTheme === "dark" ? "Dark" : resolvedTheme === "light" ? "Light" : "Auto";
 
@@ -144,31 +157,57 @@ export function Layout({
           </div>
         </div>
 
-        <div
-          role="status"
-          aria-live="polite"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "var(--ah-space-2)",
-            color: "var(--ah-text-muted)",
-            fontSize: "var(--ah-font-size-sm)",
-            fontWeight: 600,
-            whiteSpace: "nowrap"
-          }}
-        >
-          <span
-            className={connectionStatus === "connecting" || connectionStatus === "reconnecting" ? "ah-pulse-dot" : undefined}
-            aria-hidden="true"
+        <div style={{ display: "flex", justifyContent: "center" }}>
+          <div
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            title={connectionError ?? statusHint}
             style={{
-              width: "var(--ah-space-2)",
-              height: "var(--ah-space-2)",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "var(--ah-space-2)",
+              padding: "var(--ah-space-1) var(--ah-space-3)",
               borderRadius: "var(--ah-radius-full)",
-              background: statusColor,
-              flexShrink: 0
+              border: `1px solid ${statusColor}`,
+              background:
+                connectionStatus === "connected"
+                  ? "var(--ah-bg-success)"
+                  : connectionStatus === "offline"
+                    ? "var(--ah-bg-danger)"
+                    : connectionStatus === "reconnecting"
+                      ? "var(--ah-bg-warning)"
+                      : "var(--ah-bg-elevated)",
+              color:
+                connectionStatus === "connected"
+                  ? "var(--ah-text-success)"
+                  : connectionStatus === "offline"
+                    ? "var(--ah-text-danger)"
+                    : connectionStatus === "reconnecting"
+                      ? "var(--ah-text-warning)"
+                      : "var(--ah-text-muted)",
+              fontSize: "var(--ah-font-size-sm)",
+              fontWeight: 700,
+              whiteSpace: "nowrap",
+              boxShadow: "var(--ah-shadow-sm)"
             }}
-          />
-          <span>{statusLabel}</span>
+          >
+            <span
+              className={connectionStatus === "connecting" || connectionStatus === "reconnecting" ? "ah-pulse-dot" : undefined}
+              aria-hidden="true"
+              style={{
+                width: "var(--ah-space-2)",
+                height: "var(--ah-space-2)",
+                borderRadius: "var(--ah-radius-full)",
+                background: statusColor,
+                flexShrink: 0
+              }}
+            />
+            <span>{statusLabel}</span>
+            <span style={{ fontWeight: 500, color: "inherit", opacity: 0.85 }}>{statusHint}</span>
+            {connectionError ? <span aria-hidden="true" style={{ opacity: 0.7 }}>·</span> : null}
+            {connectionError ? <span style={{ fontWeight: 500, color: "inherit", opacity: 0.85 }}>{connectionError}</span> : null}
+          </div>
         </div>
 
         <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "var(--ah-space-2)" }}>
@@ -405,7 +444,17 @@ export function Layout({
             </div>
           </div>
 
-          <div style={{ flex: 1, minHeight: 0, overflow: "auto", position: "relative" }}>{centerPanel}</div>
+          <div style={{ flex: 1, minHeight: 0, overflow: "auto", position: "relative" }}>
+            <div
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+              className="ah-sr-only"
+            >
+              {connectionAnnouncement ?? statusHint}
+            </div>
+            {centerPanel}
+          </div>
         </section>
 
         <aside

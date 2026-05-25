@@ -4,6 +4,7 @@ import { App } from "./App.tsx";
 import { initThemeOnMount } from "./hooks/useTheme.ts";
 import "./styles/tokens.css";
 import "./styles/visual-system.css";
+import "./styles/a11y.css";
 
 initThemeOnMount();
 

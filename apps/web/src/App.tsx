@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { Layout } from "./components/Layout.tsx";
 import { RoomList } from "./components/RoomList.tsx";
 import { ChatStream } from "./components/ChatStream.tsx";
@@ -31,6 +31,23 @@ export function App() {
   const { theme, density, setTheme, setDensity } = useTheme();
 
   const room = activeRoomId ? projector.rooms.get(activeRoomId) : undefined;
+  const connectionStatus = projector.connectionStatus;
+  const connectionError = projector.connectionError;
+  const connectionAnnouncement = useMemo(() => {
+    switch (connectionStatus) {
+      case "connected":
+        return connectionError ? `Connected. ${connectionError}` : "Connected to live projector.";
+      case "connecting":
+        return "Connecting to live projector.";
+      case "reconnecting":
+        return connectionError ? `Reconnecting. ${connectionError}` : "Reconnecting to live projector.";
+      case "offline":
+        return connectionError ? `Offline. ${connectionError}` : "Offline. Live updates are unavailable.";
+      case "disconnected":
+      default:
+        return "Disconnected from live projector.";
+    }
+  }, [connectionError, connectionStatus]);
 
   const handleSelectRoom = useCallback((roomId: string) => {
     setActiveRoomId(roomId);
@@ -172,120 +189,125 @@ export function App() {
 
   return (
     <>
-    <Layout
-      leftCollapsed={leftCollapsed}
-      onToggleLeft={() => setLeftCollapsed((v) => !v)}
-      rightCollapsed={rightCollapsed}
-      onToggleRight={() => setRightCollapsed((v) => !v)}
-      connectionStatus={projector.connectionStatus}
-      onOpenCommandPalette={() => setCmdPaletteOpen(true)}
-      theme={theme}
-      onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
-      leftPanel={
-        <RoomList
+      <Layout
+        leftCollapsed={leftCollapsed}
+        onToggleLeft={() => setLeftCollapsed((v) => !v)}
+        rightCollapsed={rightCollapsed}
+        onToggleRight={() => setRightCollapsed((v) => !v)}
+        connectionStatus={connectionStatus}
+        connectionError={connectionError}
+        connectionAnnouncement={connectionAnnouncement}
+        onOpenCommandPalette={() => setCmdPaletteOpen(true)}
+        theme={theme}
+        onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
+        leftPanel={
+          <RoomList
+            rooms={Array.from(projector.rooms.values())}
+            activeRoomId={activeRoomId}
+            onSelectRoom={handleSelectRoom}
+            onCreateRoom={handleCreateRoom}
+          />
+        }
+        centerPanel={
+          room ? (
+            <>
+              <ChatStream
+                room={room}
+                onOpenRunDetail={handleOpenRunDetail}
+                onCancelPendingTurn={handleCancelPendingTurn}
+                onEditPendingTurn={handleEditPendingTurn}
+                onQuoteMessage={(messageId) => {
+                  const msg = room.messages.find((m) => m.id === messageId);
+                  if (!msg) return;
+                  const draftKey = `agenthub.draft.${room.id}`;
+                  const saved = sessionStorage.getItem(draftKey);
+                  let parsed: Record<string, unknown> = {};
+                  if (saved) {
+                    try {
+                      parsed = JSON.parse(saved);
+                    } catch {
+                      /* ignore */
+                    }
+                  }
+                  parsed.quotedMessageId = messageId;
+                  sessionStorage.setItem(draftKey, JSON.stringify(parsed));
+                  window.dispatchEvent(new StorageEvent("storage", { key: draftKey }));
+                }}
+                connectionStatus={connectionStatus}
+                connectionAnnouncement={connectionAnnouncement}
+              />
+              {room.pendingTurns.length > 0 && (
+                <PendingTurnList
+                  pendingTurns={room.pendingTurns}
+                  onCancel={handleCancelPendingTurn}
+                  onEdit={handleEditPendingTurn}
+                  disabled={isOffline}
+                />
+              )}
+              <InputBox
+                onSend={handleSend}
+                disabled={connectionStatus !== "connected"}
+                room={room}
+                pendingTurnCount={room.pendingTurns.length}
+                editingPendingTurn={editingPendingTurn}
+                onClearEdit={() => {
+                  setEditingPendingTurn(undefined);
+                  setEditError(undefined);
+                }}
+                editError={editError}
+                connectionStatus={connectionStatus}
+              />
+            </>
+          ) : activeRoomId ? (
+            <ChatStreamSkeleton count={5} />
+          ) : (
+            <HomeView rooms={Array.from(projector.rooms.values())} onSelectRoom={handleSelectRoom} onCreateRoom={handleCreateRoom} />
+          )
+        }
+        rightPanel={
+          room ? (
+            <SidePanel
+              room={room}
+              activeTab={sidePanelTab}
+              onChangeTab={setSidePanelTab}
+              workspaceId="default-workspace"
+            />
+          ) : (
+            <div style={{ padding: "var(--ah-space-4)", color: "var(--ah-text-muted)" }}>No room selected</div>
+          )
+        }
+        overlay={
+          activeRunId && activeRoomId ? (
+            <RunDetail
+              roomId={activeRoomId}
+              runId={activeRunId}
+              onClose={handleCloseRunDetail}
+            />
+          ) : undefined
+        }
+      />
+      {cmdPaletteOpen && (
+        <CommandPalette
           rooms={Array.from(projector.rooms.values())}
           activeRoomId={activeRoomId}
-          onSelectRoom={handleSelectRoom}
-          onCreateRoom={handleCreateRoom}
+          onSelectRoom={(roomId) => {
+            setActiveRoomId(roomId);
+            setActiveRunId(undefined);
+            setEditingPendingTurn(undefined);
+            setCmdPaletteOpen(false);
+          }}
+          onOpenRunDetail={(runId) => {
+            setActiveRunId(runId);
+            setCmdPaletteOpen(false);
+          }}
+          onClose={() => setCmdPaletteOpen(false)}
+          onSwitchTheme={setTheme}
+          onSwitchDensity={setDensity}
+          currentTheme={theme}
+          currentDensity={density}
         />
-      }
-      centerPanel={
-        room ? (
-          <>
-            <ChatStream
-              room={room}
-              onOpenRunDetail={handleOpenRunDetail}
-              onCancelPendingTurn={handleCancelPendingTurn}
-              onEditPendingTurn={handleEditPendingTurn}
-              onQuoteMessage={(messageId) => {
-                const msg = room.messages.find((m) => m.id === messageId);
-                if (!msg) return;
-                // InputBox will pick this up via its own state or we can pass it down
-                // For now, we'll use a custom event or sessionStorage approach
-                const draftKey = `agenthub.draft.${room.id}`;
-                const saved = sessionStorage.getItem(draftKey);
-                let parsed: Record<string, unknown> = {};
-                if (saved) {
-                  try { parsed = JSON.parse(saved); } catch { /* ignore */ }
-                }
-                parsed.quotedMessageId = messageId;
-                sessionStorage.setItem(draftKey, JSON.stringify(parsed));
-                // Force re-render by dispatching a storage event (InputBox listens to its own draftKey effect)
-                window.dispatchEvent(new StorageEvent("storage", { key: draftKey }));
-              }}
-              connectionStatus={projector.connectionStatus}
-            />
-            {room.pendingTurns.length > 0 && (
-              <PendingTurnList
-                pendingTurns={room.pendingTurns}
-                onCancel={handleCancelPendingTurn}
-                onEdit={handleEditPendingTurn}
-                disabled={isOffline}
-              />
-            )}
-            <InputBox
-              onSend={handleSend}
-              disabled={projector.connectionStatus !== "connected"}
-              room={room}
-              pendingTurnCount={room.pendingTurns.length}
-              editingPendingTurn={editingPendingTurn}
-              onClearEdit={() => {
-                setEditingPendingTurn(undefined);
-                setEditError(undefined);
-              }}
-              editError={editError}
-            />
-          </>
-        ) : activeRoomId ? (
-          <ChatStreamSkeleton count={5} />
-        ) : (
-          <HomeView rooms={Array.from(projector.rooms.values())} onSelectRoom={handleSelectRoom} onCreateRoom={handleCreateRoom} />
-        )
-      }
-      rightPanel={
-        room ? (
-          <SidePanel
-            room={room}
-            activeTab={sidePanelTab}
-            onChangeTab={setSidePanelTab}
-            workspaceId="default-workspace"
-          />
-        ) : (
-          <div style={{ padding: "var(--ah-space-4)", color: "var(--ah-text-muted)" }}>No room selected</div>
-        )
-      }
-      overlay={
-        activeRunId && activeRoomId ? (
-          <RunDetail
-            roomId={activeRoomId}
-            runId={activeRunId}
-            onClose={handleCloseRunDetail}
-          />
-        ) : undefined
-      }
-    />
-    {cmdPaletteOpen && (
-      <CommandPalette
-        rooms={Array.from(projector.rooms.values())}
-        activeRoomId={activeRoomId}
-        onSelectRoom={(roomId) => {
-          setActiveRoomId(roomId);
-          setActiveRunId(undefined);
-          setEditingPendingTurn(undefined);
-          setCmdPaletteOpen(false);
-        }}
-        onOpenRunDetail={(runId) => {
-          setActiveRunId(runId);
-          setCmdPaletteOpen(false);
-        }}
-        onClose={() => setCmdPaletteOpen(false)}
-        onSwitchTheme={setTheme}
-        onSwitchDensity={setDensity}
-        currentTheme={theme}
-        currentDensity={density}
-      />
-    )}
-    {keymapOpen && <KeymapModal onClose={() => setKeymapOpen(false)} />}
+      )}
+      {keymapOpen && <KeymapModal onClose={() => setKeymapOpen(false)} />}
     </>
   );
 }
