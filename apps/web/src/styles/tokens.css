@@ -21,7 +21,7 @@
 
   --ah-text-primary: #0f172a;
   --ah-text-secondary: #334155;
-  --ah-text-muted: #64748b;
+  --ah-text-muted: #475569;
   --ah-text-inverse: #f8fafc;
   --ah-text-danger: #991b1b;
   --ah-text-warning: #92400e;
@@ -32,7 +32,7 @@
   --ah-border-light: #f1f5f9;
   --ah-border-strong: #cbd5e1;
 
-  --ah-accent: #2563eb;
+  --ah-accent: #1d4ed8;
   --ah-accent-hover: #1d4ed8;
   --ah-accent-light: #dbeafe;
   --ah-accent-text: #1e3a8a;
@@ -41,7 +41,7 @@
   --ah-danger-hover: #b91c1c;
   --ah-danger-light: #fee2e2;
 
-  --ah-success: #059669;
+  --ah-success: #047857;
   --ah-success-hover: #047857;
   --ah-success-light: #dcfce7;
 

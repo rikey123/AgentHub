@@ -27,3 +27,5 @@
 - Offline write-path disabling remains preserved by keeping the composer disabled whenever connectionStatus !== "connected".
 - Added a shared SR-only utility stylesheet in src/styles/a11y.css and imported it from main.tsx so live announcements can stay visually hidden but accessible.
 - The workspace required pnpm install before validation because node_modules was absent in the worktree; after install, typecheck, lint, and web build all passed.
+
+- T11 cleanup: reverted .sisyphus/evidence/v05-chatroom-complete/task-8-10-a11y/axe.json because Playwright axe evidence is unrelated to the bounded polish task and should not be churned by this branch. Kept token contrast adjustments only for WCAG failures found by apps/web/e2e/a11y.spec.ts.
