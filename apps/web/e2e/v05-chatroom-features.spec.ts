@@ -44,7 +44,7 @@ test.describe("v05 chatroom features", () => {
 
     await page.goto(testUrl);
     await page.waitForSelector("text=Mention Room");
-    await page.click("text=Mention Room");
+    await page.locator(`[data-testid="room-list-item-${roomId}"]`).click();
 
     // Inject a participant directly into the projector state via exposed global
     await page.evaluate((roomId) => {
@@ -146,7 +146,7 @@ test.describe("v05 chatroom features", () => {
 
     await page.goto(testUrl);
     await page.waitForSelector("text=Pending Room");
-    await page.click("text=Pending Room");
+    await page.locator(`[data-testid="room-list-item-${roomId}"]`).click();
 
     // PendingTurnList should appear
     await page.waitForSelector("text=Pending (1)", { timeout: 5000 });
@@ -250,7 +250,7 @@ test.describe("v05 chatroom features", () => {
 
     await page.goto(testUrl);
     await page.waitForSelector("text=Terminal Room");
-    await page.click("text=Terminal Room");
+    await page.locator(`[data-testid="room-list-item-${roomId}"]`).click();
     await page.waitForSelector("text=trigger run");
 
     // Open Run Detail from the brief with "run completed" text
@@ -281,14 +281,16 @@ test.describe("v05 chatroom features", () => {
   });
 
   test("Cost tab loads in Side Panel", async ({ page }) => {
-    await fetch(`${testUrl}/rooms`, {
+    const roomRes = await fetch(`${testUrl}/rooms`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ title: "Cost Room", mode: "solo", primaryAgentId: "mock-builder" })
     });
+    const roomData = (await roomRes.json()) as { data: { roomId: string } };
+    const roomId = roomData.data.roomId;
     await page.goto(testUrl);
     await page.waitForSelector("text=Cost Room");
-    await page.click("text=Cost Room");
+    await page.locator(`[data-testid="room-list-item-${roomId}"]`).click();
 
     // Open Cost tab in side panel
     await page.click('[data-testid="side-panel-tab-cost"]');

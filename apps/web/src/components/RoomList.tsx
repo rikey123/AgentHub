@@ -15,28 +15,41 @@ type RoomListProps = {
 
 export function RoomList({ rooms, activeRoomId, onSelectRoom, onCreateRoom }: RoomListProps) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div style={{ padding: "var(--ah-space-3)" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--ah-bg-elevated)" }}>
+      <div
+        style={{
+          padding: "var(--ah-space-4)",
+          borderBottom: "1px solid var(--ah-border)",
+          background: "linear-gradient(180deg, var(--ah-bg-elevated), var(--ah-bg-primary))"
+        }}
+      >
         <button
           onClick={onCreateRoom}
+          data-testid="room-list-create-room"
           style={{
             width: "100%",
-            padding: "var(--ah-space-2) var(--ah-space-3)",
-            borderRadius: "var(--ah-radius-md)",
-            border: "1px solid var(--ah-border-strong)",
-            background: "var(--ah-bg-primary)",
+            padding: "var(--ah-space-3) var(--ah-space-4)",
+            borderRadius: "var(--ah-radius-lg)",
+            border: "1px solid var(--ah-accent)",
+            background: "var(--ah-accent)",
+            boxShadow: "var(--ah-shadow-sm)",
             cursor: "pointer",
-            fontSize: "var(--ah-font-size-md)",
-            fontWeight: 500,
-            color: "var(--ah-text-secondary)"
+            fontSize: "var(--ah-font-size-sm)",
+            fontWeight: 700,
+            color: "var(--ah-text-inverse)"
           }}
         >
-          + New Room
+          New room
         </button>
+        <div style={{ marginTop: "var(--ah-space-3)", fontSize: "var(--ah-font-size-xs)", fontWeight: 700, letterSpacing: "var(--ah-letter-spacing-wide)", textTransform: "uppercase", color: "var(--ah-text-muted)" }}>
+          Collaboration rooms
+        </div>
       </div>
-      <div style={{ flex: 1, overflow: "auto" }}>
+      <div style={{ flex: 1, overflow: "auto", padding: "var(--ah-space-2)" }}>
         {rooms.length === 0 && (
-          <div style={{ padding: "var(--ah-space-4)", fontSize: "var(--ah-font-size-md)", color: "var(--ah-text-muted)", textAlign: "center" }}>No rooms yet</div>
+          <div style={{ padding: "var(--ah-space-4)", fontSize: "var(--ah-font-size-sm)", lineHeight: "var(--ah-line-height-normal)", color: "var(--ah-text-muted)", textAlign: "center" }}>
+            No rooms yet. Create the first collaboration space to start a run.
+          </div>
         )}
         {rooms.map((room) => {
           const hasActiveRun = room.runs.some((run) => ACTIVE_RUN_STATUSES.has(run.status));
@@ -45,26 +58,26 @@ export function RoomList({ rooms, activeRoomId, onSelectRoom, onCreateRoom }: Ro
           const pendingTurnCount = room.pendingTurns.length;
 
           return (
-            <div
+            <button
               key={room.id}
               onClick={() => onSelectRoom(room.id)}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => {
-                if (e.key === "Enter" || e.key === " ") onSelectRoom(room.id);
-              }}
+              data-testid={`room-list-item-${room.id}`}
+              aria-current={room.id === activeRoomId ? "true" : undefined}
               style={{
+                width: "100%",
                 padding: "var(--ah-space-3)",
                 cursor: "pointer",
-                borderBottom: "1px solid var(--ah-border-light)",
-                background: room.id === activeRoomId ? "var(--ah-accent-light)" : "transparent",
+                border: "1px solid var(--ah-border)",
+                background: room.id === activeRoomId ? "var(--ah-accent-light)" : "var(--ah-bg-primary)",
                 display: "flex",
                 alignItems: "flex-start",
                 justifyContent: "space-between",
                 gap: "var(--ah-space-2)",
-                borderRadius: "var(--ah-radius-sm)",
-                margin: "0 var(--ah-space-2)",
-                transition: "background var(--ah-transition-fast)"
+                borderRadius: "var(--ah-radius-lg)",
+                marginBottom: "var(--ah-space-2)",
+                transition: "background var(--ah-transition-fast), border-color var(--ah-transition-fast), transform var(--ah-transition-fast)",
+                boxShadow: "var(--ah-shadow-sm)",
+                textAlign: "left"
               }}
             >
               <div style={{ display: "flex", alignItems: "flex-start", gap: "var(--ah-space-2)", minWidth: 0, flex: 1 }}>
@@ -86,8 +99,8 @@ export function RoomList({ rooms, activeRoomId, onSelectRoom, onCreateRoom }: Ro
                 <div style={{ overflow: "hidden", minWidth: 0 }}>
                   <div
                     style={{
-                      fontSize: "var(--ah-font-size-md)",
-                      fontWeight: 500,
+                      fontSize: "var(--ah-font-size-sm)",
+                      fontWeight: 700,
                       color: "var(--ah-text-primary)",
                       whiteSpace: "nowrap",
                       overflow: "hidden",
@@ -146,7 +159,7 @@ export function RoomList({ rooms, activeRoomId, onSelectRoom, onCreateRoom }: Ro
                   </span>
                 )}
               </div>
-            </div>
+            </button>
           );
         })}
       </div>

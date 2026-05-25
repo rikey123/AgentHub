@@ -22,3 +22,9 @@
 - Replaced emoji UI icons with inline SVG glyphs to match the no-emoji policy in the visual system.
 - Theme handling now treats uto as a first-class state in the header toggle without assuming it can be flipped directly to another fixed theme.
 - The reserved rail items are visual placeholders only, so future feature wiring can happen without changing shell structure.
+
+- Redesigned HomeView as a dashboard-style workbench entry with summary stats, guidance cards, and stable create-room selectors while preserving room selection flow.
+- Reworked RoomList into a persistent collaboration rail using room-item data-testid hooks so room selection tests no longer depend on label text.
+- Updated room-home E2E assertions to use stable selectors; one cost-tab test needed the roomId captured explicitly after room creation.
+- Initial typecheck failure was environment-related (@types/node/itest/globals missing before pnpm install), not a source issue.
+
