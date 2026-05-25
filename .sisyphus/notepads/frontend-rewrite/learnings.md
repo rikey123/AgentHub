@@ -27,3 +27,19 @@
 - Offline write-path disabling remains preserved by keeping the composer disabled whenever connectionStatus !== "connected".
 - Added a shared SR-only utility stylesheet in src/styles/a11y.css and imported it from main.tsx so live announcements can stay visually hidden but accessible.
 - The workspace required pnpm install before validation because node_modules was absent in the worktree; after install, typecheck, lint, and web build all passed.
+
+## [2026-05-25] Task 10: Command Palette + Keymap Modal
+
+### Command palette
+- Kept the existing shortcut semantics intact: Ctrl/Cmd+K, ?, room/run actions, and theme/density actions still resolve to the same callbacks.
+- Reworked the dialog into a denser mission-control layout with search summary chips, section-like result rows, and stronger selection contrast.
+- Preserved virtualization with @tanstack/react-virtual for the command list and kept keyboard navigation on the list itself.
+- Added focus restoration on close, plus a more explicit keyboard loop for Tab, Shift+Tab, Escape, Home, End, and Enter.
+
+### Keymap modal
+- Added focus restoration and a lightweight focus trap so Escape and Tab stay inside the modal.
+- Reframed the shortcut table into card-like sections with clearer hierarchy while keeping every shortcut label and meaning unchanged.
+- Kept the modal close affordance keyboard accessible with a real button and stable aria-labelledby / aria-describedby wiring.
+
+### Verification note
+- Repo-wide typecheck/lint/build initially failed because the worktree was missing installed dependencies; installing the workspace is required before those checks can pass.

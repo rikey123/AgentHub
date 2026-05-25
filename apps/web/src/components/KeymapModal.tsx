@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useCallback, type KeyboardEvent as ReactKeyboardEvent } from "react";
 
 type KeymapModalProps = {
   readonly onClose: () => void;
@@ -46,56 +46,216 @@ const KEYMAP_SECTIONS = [
   }
 ];
 
+function restoreFocus(previous: HTMLElement | null) {
+  if (previous && previous.isConnected) {
+    previous.focus({ preventScroll: true });
+  }
+}
+
 export function KeymapModal({ onClose }: KeymapModalProps) {
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
+    previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    closeButtonRef.current?.focus({ preventScroll: true });
+
+    return () => restoreFocus(previousFocusRef.current);
+  }, [onClose]);
+
+  const handleKeyDown = useCallback(
+    (e: ReactKeyboardEvent<HTMLDivElement>) => {
       if (e.key === "Escape") {
         e.preventDefault();
         onClose();
+        return;
       }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
+
+      if (e.key === "Tab") {
+        e.preventDefault();
+        closeButtonRef.current?.focus({ preventScroll: true });
+      }
+    },
+    [onClose]
+  );
 
   return (
-    <div className="ah-keymap-overlay" onClick={onClose} role="dialog" aria-label="Keyboard shortcuts" aria-modal="true">
-      <div className="ah-keymap-modal" onClick={(e) => e.stopPropagation()}>
+    <div
+      className="ah-keymap-overlay"
+      onClick={onClose}
+      role="presentation"
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: "var(--ah-z-modal)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "var(--ah-space-4)",
+        background: "rgba(15, 23, 42, 0.58)",
+        backdropFilter: "blur(12px)"
+      }}
+    >
+      <div
+        className="ah-keymap-modal"
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={handleKeyDown}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="keymap-title"
+        aria-describedby="keymap-description"
+        style={{
+          width: "min(920px, 100%)",
+          maxHeight: "min(84vh, 820px)",
+          overflow: "hidden",
+          borderRadius: "calc(var(--ah-radius-xl) + 4px)",
+          border: "1px solid var(--ah-border-strong)",
+          background: "linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, var(--ah-bg-elevated) 100%)",
+          boxShadow: "var(--ah-shadow-lg)",
+          color: "var(--ah-text-primary)"
+        }}
+      >
         <div
           style={{
             display: "flex",
-            alignItems: "center",
+            alignItems: "flex-start",
             justifyContent: "space-between",
-            marginBottom: "var(--ah-space-4)"
+            gap: "var(--ah-space-4)",
+            padding: "var(--ah-space-4) var(--ah-space-5) var(--ah-space-3)",
+            borderBottom: "1px solid var(--ah-border)",
+            background: "linear-gradient(180deg, var(--ah-bg-primary) 0%, var(--ah-bg-elevated) 100%)"
           }}
         >
-          <h2 style={{ margin: 0, fontSize: "var(--ah-font-size-lg)", color: "var(--ah-text-primary)" }}>Keyboard Shortcuts</h2>
+          <div>
+            <h2
+              id="keymap-title"
+              style={{
+                margin: 0,
+                fontFamily: "var(--ah-font-heading)",
+                fontSize: "var(--ah-font-size-xl)",
+                fontWeight: 700,
+                lineHeight: "var(--ah-line-height-tight)",
+                letterSpacing: "-0.02em"
+              }}
+            >
+              Keyboard Shortcuts
+            </h2>
+            <div id="keymap-description" style={{ marginTop: "var(--ah-space-1)", color: "var(--ah-text-muted)", fontSize: "var(--ah-font-size-sm)" }}>
+              Mission-control reference for the keyboard-first workflow.
+            </div>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--ah-space-2)", flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                padding: "var(--ah-space-1) var(--ah-space-2)",
+                borderRadius: "var(--ah-radius-full)",
+                background: "var(--ah-bg-secondary)",
+                color: "var(--ah-text-secondary)",
+                fontSize: "var(--ah-font-size-xs)",
+                fontWeight: 700,
+                whiteSpace: "nowrap"
+              }}
+            >
+              Global shortcuts
+            </span>
           <button
+            ref={closeButtonRef}
+            type="button"
             onClick={onClose}
             style={{
-              background: "none",
-              border: "none",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 36,
+              height: 36,
+              background: "var(--ah-bg-elevated)",
+              border: "1px solid var(--ah-border)",
+              borderRadius: "var(--ah-radius-full)",
               cursor: "pointer",
               fontSize: "var(--ah-font-size-lg)",
               color: "var(--ah-text-muted)",
-              padding: "var(--ah-space-1)"
+              boxShadow: "var(--ah-shadow-sm)"
             }}
             aria-label="Close keymap"
           >
-            x
+            ×
           </button>
-        </div>
-        {KEYMAP_SECTIONS.map((section) => (
-          <div key={section.title} className="ah-keymap-section">
-            <div className="ah-keymap-section-title">{section.title}</div>
-            {section.items.map((item) => (
-              <div key={item.key} className="ah-keymap-row">
-                <span>{item.description}</span>
-                <kbd>{item.key}</kbd>
-              </div>
-            ))}
           </div>
-        ))}
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            gap: "var(--ah-space-3)",
+            padding: "var(--ah-space-4) var(--ah-space-5)",
+            overflow: "auto"
+          }}
+        >
+          {KEYMAP_SECTIONS.map((section) => (
+            <section
+              key={section.title}
+              className="ah-keymap-section"
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "var(--ah-space-2)",
+                padding: "var(--ah-space-4)",
+                borderRadius: "var(--ah-radius-lg)",
+                border: "1px solid var(--ah-border)",
+                background: "var(--ah-bg-primary)",
+                boxShadow: "var(--ah-shadow-sm)"
+              }}
+            >
+              <div
+                className="ah-keymap-section-title"
+                style={{
+                  fontSize: "var(--ah-font-size-xs)",
+                  letterSpacing: "var(--ah-letter-spacing-wide)",
+                  textTransform: "uppercase",
+                  fontWeight: 700,
+                  color: "var(--ah-text-muted)"
+                }}
+              >
+                {section.title}
+              </div>
+              {section.items.map((item) => (
+                <div
+                  key={item.key}
+                  className="ah-keymap-row"
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    justifyContent: "space-between",
+                    gap: "var(--ah-space-3)",
+                    padding: "var(--ah-space-2) 0",
+                    borderTop: "1px solid var(--ah-border-light)"
+                  }}
+                >
+                  <span style={{ color: "var(--ah-text-primary)", fontSize: "var(--ah-font-size-sm)" }}>{item.description}</span>
+                  <kbd
+                    style={{
+                      fontFamily: "var(--ah-font-mono)",
+                      fontSize: "var(--ah-font-size-xs)",
+                      fontWeight: 700,
+                      whiteSpace: "nowrap",
+                      padding: "2px var(--ah-space-2)",
+                      borderRadius: "var(--ah-radius-sm)",
+                      border: "1px solid var(--ah-border)",
+                      background: "var(--ah-bg-secondary)",
+                      color: "var(--ah-text-secondary)"
+                    }}
+                  >
+                    {item.key}
+                  </kbd>
+                </div>
+              ))}
+            </section>
+          ))}
+        </div>
       </div>
     </div>
   );
