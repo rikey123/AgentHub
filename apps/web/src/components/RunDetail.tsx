@@ -317,7 +317,7 @@ function ArtifactsTab({ room, runId }: { readonly room: import("../types.ts").Ro
       {terminalCards.map(({ artifact, lines, exitCode }) => (
         <div key={artifact.id} style={{ marginTop: "var(--ah-space-3)" }}>
           <div style={{ fontSize: "var(--ah-font-size-xs)", fontWeight: 600, color: "var(--ah-text-muted)", marginBottom: "var(--ah-space-2)", textTransform: "uppercase" }}>{artifact.title}</div>
-          <TerminalCard lines={lines} exitCode={exitCode} collapsed={true} />
+          <TerminalCard lines={lines} exitCode={exitCode} collapsed={false} />
         </div>
       ))}
     </div>

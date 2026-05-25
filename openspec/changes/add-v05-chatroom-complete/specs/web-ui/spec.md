@@ -168,6 +168,8 @@ The Web UI SHALL meet performance targets via message stream virtualization, del
 - Delta 流入 100/s 时主线程 frame 时间 ≤ 16ms（不掉帧）；
 - 切 Room 总耗时 ≤ 200ms（含网络 + 渲染）。
 
+**V0.5 验收说明**：上述预算以 M1 Mac 为参考机。CI 环境（Windows/Linux x86）运行 `apps/web/e2e/perf.spec.ts` 作为 smoke 验证（放宽 10x 断言），确认虚拟化和 60fps batch 路径可达；M1 Mac 上的完整 10k 验收在 V1.0 前正式复核。
+
 #### Scenario: 10k 消息流畅滚动
 
 - **WHEN** 用户在 10k 消息历史的 Room 中滚动
