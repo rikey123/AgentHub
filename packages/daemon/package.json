@@ -11,7 +11,10 @@
     "test": "node scripts/run-tests.mjs"
   },
   "dependencies": {
+    "@agenthub/adapter-claude-code": "workspace:*",
     "@agenthub/adapter-mock": "workspace:*",
+    "@agenthub/adapter-opencode": "workspace:*",
+    "@agenthub/agents": "workspace:*",
     "@agenthub/artifacts": "workspace:*",
     "@agenthub/bus": "workspace:*",
     "@agenthub/context": "workspace:*",
@@ -21,6 +24,7 @@
     "@agenthub/permissions": "workspace:*",
     "@agenthub/protocol": "workspace:*",
     "@agenthub/security": "workspace:*",
-    "@agenthub/sdk": "workspace:*"
+    "@agenthub/sdk": "workspace:*",
+    "smol-toml": "^1.4.2"
   }
 }

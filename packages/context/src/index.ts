@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 
+import { Effect } from "effect";
+
 import type { Command, CommandHandler, CommandMeta, CommandResult, EventBus, PublishInput } from "@agenthub/bus";
 import type { AgentHubDatabase } from "@agenthub/db";
+import type { EventEnvelope } from "@agenthub/protocol/events";
 
 export type ContextItemType = "fact" | "decision" | "constraint" | "issue" | "artifact" | "preference" | "summary";
 export type ContextScope = "conversation" | "task" | "workspace" | "user";
@@ -48,6 +51,9 @@ export type ContextSection = { readonly kind: "pinned_confirmed" | "task_confirm
 export type AssembledContext = { readonly sections: readonly ContextSection[]; readonly text: string; readonly tokenEstimate: number; readonly truncated: boolean };
 export type ContextInjectionMode = "immediate" | "next_turn" | "next_session";
 export type ContextInjectionResult = { readonly mode: ContextInjectionMode; readonly applied: boolean; readonly effectiveAt?: "now" | "next_turn" | "next_session"; readonly reason?: string };
+export type RunFailureClass = "transient" | "user_error" | "adapter_error" | "permission_denied" | "system_error" | "unknown";
+export type BriefGeneratorInput = { readonly runId: string; readonly finalAssistantText?: string; readonly artifactCounts: { readonly diff: number; readonly file: number; readonly tool: number }; readonly failureClass?: RunFailureClass; readonly failureReason?: string; readonly cancelled?: boolean };
+export interface BriefGenerator { generate(input: BriefGeneratorInput): Effect.Effect<string, never>; }
 
 export const trustedSystemToolKinds = ["git-blame", "git-log", "filesystem-watch", "lsp-definition", "package-manifest-parse"] as const;
 
@@ -89,6 +95,12 @@ export class NoopVectorIndex implements VectorIndex {
   async remove(id: string): Promise<void> { void id; return undefined; }
 }
 
+export class HeuristicBriefGenerator implements BriefGenerator {
+  generate(input: BriefGeneratorInput): Effect.Effect<string, never> {
+    return Effect.succeed(generateBrief(input));
+  }
+}
+
 export class NoopMemoryAdapter implements MemoryAdapter {
   readonly id = "noop-memory";
   async upsert(entry: MemoryEntry): Promise<void> { void entry; return undefined; }
@@ -114,6 +126,7 @@ export class ContextLedger {
   constructor(private readonly options: { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly now?: () => number; readonly trustedToolKinds?: readonly string[] }) {
     this.now = options.now ?? Date.now;
     this.trustedTools = new Set([...(trustedSystemToolKinds as readonly string[]), ...(options.trustedToolKinds ?? [])]);
+    this.options.eventBus.subscribe("context.snapshot", (event) => this.handleSnapshotEvent(event));
   }
 
   propose(input: Omit<CreateContextItemInput, "status" | "confidence"> & { readonly confidence?: ContextConfidence }): ContextWriteResult {
@@ -221,6 +234,22 @@ export class ContextLedger {
     if (input.status !== "confirmed") return { status: input.status ?? "draft", downgraded: false };
     if (input.source.type === "tool" && input.confidence === "verified" && input.source.kind !== undefined && this.trustedTools.has(input.source.kind)) return { status: "confirmed", downgraded: false };
     return { status: "draft", downgraded: true, reason: input.source.type === "tool" ? "untrusted_tool_kind" : "agent_confirmed_write_forbidden" };
+  }
+
+  private handleSnapshotEvent(event: EventEnvelope): void {
+    const payload = isObject(event.payload) ? event.payload : {};
+    const snapshot = isObject(payload.snapshot) ? payload.snapshot : {};
+    const text = typeof snapshot.text === "string" ? snapshot.text : "";
+    const kind = typeof snapshot.kind === "string" ? snapshot.kind : "compact";
+    const idempotencyKey = typeof payload.idempotencyKey === "string" && payload.idempotencyKey.length > 0 ? payload.idempotencyKey : undefined;
+    if (text.length === 0) return;
+    if (idempotencyKey !== undefined && this.findSnapshotDraft(idempotencyKey) !== undefined) return;
+    this.propose({ workspaceId: event.workspaceId, ...(event.roomId !== undefined ? { roomId: event.roomId } : {}), ...(event.taskId !== undefined ? { taskId: event.taskId } : {}), ...(event.runId !== undefined ? { runId: event.runId } : {}), ...(idempotencyKey !== undefined ? { sourceMessageId: idempotencyKey } : {}), type: "summary", scope: "task", content: text, source: { type: "tool", id: snapshotSourceId(kind), kind }, visibility: {}, createdBy: "system", confidence: "inferred" });
+  }
+
+  private findSnapshotDraft(idempotencyKey: string): ContextItem | undefined {
+    const row = this.options.database.sqlite.prepare("SELECT * FROM context_items WHERE source_message_id = ? AND type = 'summary' AND status = 'draft' ORDER BY created_at ASC LIMIT 1").get(idempotencyKey) as ContextRow | undefined;
+    return row ? rowToItem(row) : undefined;
   }
 
   private insertItem(item: ContextItem): void {
@@ -331,6 +360,60 @@ function fitBudget(sections: ContextSection[], budget: Partial<ContextBudget> | 
   return { sections: fitted, text, tokenEstimate: estimateTokens(text), truncated };
 }
 
+function generateBrief(input: BriefGeneratorInput): string {
+  try {
+    const main = truncateBrief(extractFirstSentence(input.finalAssistantText ?? "") || fallbackBrief(input));
+    return `${main}${artifactSuffix(input.artifactCounts)}`;
+  } catch {
+    return `${truncateBrief(input.finalAssistantText ?? "")}${artifactSuffix(input.artifactCounts)}`;
+  }
+}
+
+function extractFirstSentence(text: string): string {
+  if (hasParseFailureSignal(text)) throw new Error("brief parse failure");
+  const candidate = text.split(/\r?\n\s*\r?\n/u).flatMap(splitSentences).map((part) => part.trim()).find((part) => part.length > 0 && !part.startsWith("```"));
+  return candidate ?? "";
+}
+
+function splitSentences(block: string): string[] {
+  const sentences: string[] = [];
+  let start = 0;
+  for (let index = 0; index < block.length; index += 1) {
+    const char = block[index];
+    const next = block[index + 1];
+    if (char === "。" || char === "？" || char === "！" || ((char === "." || char === "?" || char === "!") && (next === undefined || /\s/u.test(next)))) {
+      sentences.push(block.slice(start, index));
+      start = index + 1;
+    }
+  }
+  sentences.push(block.slice(start));
+  return sentences;
+}
+
+function fallbackBrief(input: BriefGeneratorInput): string {
+  if (input.cancelled === true) return "User cancelled this run";
+  if (input.failureClass !== undefined) return failureTemplate(input.failureClass, input.failureReason);
+  return "";
+}
+
+function failureTemplate(failureClass: RunFailureClass, reason: string | undefined): string {
+  if (failureClass === "transient" && reason === "lock_timeout") return "Lock timed out, retrying";
+  const humanClass = failureClass.split("_").map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`).join(" ");
+  return reason !== undefined && reason.length > 0 ? `${humanClass}: ${reason}` : humanClass;
+}
+
+function artifactSuffix(counts: BriefGeneratorInput["artifactCounts"]): string {
+  return counts.diff > 0 || counts.file > 0 || counts.tool > 0 ? `（artifacts: ${counts.diff} diff / ${counts.file} files / ${counts.tool} tools）` : "";
+}
+
+function truncateBrief(text: string): string {
+  return text.length > 120 ? `${text.slice(0, 120)}…` : text;
+}
+
+function hasParseFailureSignal(text: string): boolean {
+  return /[\u202A-\u202E\u2066-\u2069]/u.test(text) || (text.length > 120 && !/[\s。？！.?!]/u.test(text));
+}
+
 function latestContextEvents(database: AgentHubDatabase, contextId: string): { readonly seq: number; readonly type: string }[] { return database.sqlite.prepare("SELECT seq, type FROM events WHERE type LIKE 'context.%' AND payload LIKE ? ORDER BY seq ASC").all(`%${contextId}%`) as { readonly seq: number; readonly type: string }[]; }
 function ledgerDatabase(ledger: ContextLedger): AgentHubDatabase { return (ledger as unknown as { readonly options: { readonly database: AgentHubDatabase } }).options.database; }
 function actorId(meta: CommandMeta): string { return meta.actor.type === "system" ? "system" : meta.actor.id; }
@@ -344,3 +427,4 @@ function scopeField(value: unknown): ContextScope | undefined { return value ===
 function statusField(value: unknown): ContextStatus | undefined { return value === "draft" || value === "confirmed" || value === "deprecated" || value === "disputed" ? value : undefined; }
 function confidenceField(value: unknown): ContextConfidence | undefined { return value === "verified" || value === "inferred" || value === "unverified" ? value : undefined; }
 function injectionMode(command: Command): ContextInjectionMode { return command.mode === "immediate" || command.mode === "next_session" || command.mode === "next_turn" ? command.mode : "next_turn"; }
+function snapshotSourceId(kind: string): string { return kind === "claude_compact" ? "claude_code_compact" : kind; }

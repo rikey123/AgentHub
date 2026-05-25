@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@agenthub/bus": "workspace:*",
-    "@agenthub/db": "workspace:*"
+    "@agenthub/db": "workspace:*",
+    "@agenthub/protocol": "workspace:*",
+    "effect": "^3.19.6"
   }
 }

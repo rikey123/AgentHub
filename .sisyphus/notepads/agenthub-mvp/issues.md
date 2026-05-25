@@ -101,3 +101,57 @@
 
 - F4 raw-view blocker was fixed and F4 rerun returned APPROVE. F1/F2/F3 had already returned APPROVE.
 - The only remaining unchecked top-level items are F1-F4. The plan explicitly says to present consolidated results and wait for explicit user approval before marking them complete, so Atlas must not check them until the user says `okay`.
+
+## 2026-05-23 P0-3 ACP crash race
+
+- A fast ACP child exit can fire before `ClaudeCodeACPAdapter.runManaged()` handles `session.opened`, so the crash must be queued until AdapterBridge has moved the durable run to `running`; otherwise the run may remain running or the prompt path may throw against an already failed ACP session. ACP startup should also avoid overwriting a fast failed session back to ready.
+- The real child-exit regression should spawn `process.execPath` rather than a PATH-dependent `node` command on Windows, and ACP base should listen to both `exit` and `close` while avoiding stdin writes after `exitCode` / `signalCode` / stream teardown so a fast process termination cannot be missed or masked.
+- The stable real-exit regression should not exit immediately at process startup; waiting until the child reads the managed `session/prompt` JSON-RPC line proves the real child exit path after AdapterBridge has handled `session.opened`, while the separate early-crash test covers before-opened queueing.
+
+## 2026-05-23 P1-3 workspace audit and evidence synchronization
+
+### Dirty workspace report
+
+- `M .sisyphus/notepads/agenthub-mvp/learnings.md` — belongs to completed/in-progress remediation evidence notes for P1-2; append-only history was restored after a temporary overwrite and P1-2 learnings were appended.
+- `M .sisyphus/plans/agenthub-mvp-remediation.md` — belongs to remediation status synchronization for completed P0-3/P1-1/P1-2 and this audit lifecycle.
+- `M apps/web/e2e/main-detail-projection.spec.ts` — belongs to completed P1-2 raw stream live UI coverage; adds admin-authorized raw SSE header/no-token-leak assertions and stdout/stderr rendering assertions.
+- `M apps/web/src/components/RunDetail.tsx` — belongs to completed P1-2 raw stream UI; wires Raw Stream tab to the live raw hook and preserves non-admin/no-output placeholders.
+- `M packages/adapters/claude-code/test/claude-code-adapter.test.ts` — belongs to completed P0-3 stabilization; real child-exit regression now parses JSON-RPC `session/prompt` instead of brittle raw substring matching.
+- `?? apps/web/src/hooks/useRawStream.ts` — belongs to completed P1-2 raw stream UI; new fetch-based SSE reader that uses an Authorization header and parses live raw stdout/stderr events.
+
+### OpenSpec validation
+
+- `openspec.cmd validate add-agenthub-mvp --strict` passed: `Change 'add-agenthub-mvp' is valid`.
+
+### Evidence inventory
+
+- Existing evidence files under `.sisyphus/evidence/agenthub-mvp/`: `final/invariants.json`, `final/playwright-golden/summary.md`, `m0/index.md`, `m1/index.md`, `m2/index.md`, `m3/apply-rollback.json`, `m3/artifactfs-multi.json`, `m3/index.md`, `m4/main-detail/playwright-results.json`, `m4/pending-turn/playwright-results.json`, `m4/verification-summary.json`, `m5/acp-cancel.json`, `m5/claude-real-smoke.json`, `m6/csrf-origin-host.json`, `m6/index.md`, `m6/worktree-gc.json`.
+- Missing remediation-specific evidence files for the new补救 tasks: P0-1 PendingTurn backend, P0-2 Task API/MCP chain, P0-3 Claude adapter runtime, P1-1 CommandBus idempotency evidence-only closeout, P1-2 Raw Stream live UI, and P1-3 workspace audit. Their current evidence is in plan status text, notepad notes, tests, and git diff rather than dedicated `.sisyphus/evidence/agenthub-mvp/remediation/` files.
+
+### Constraints observed
+
+- No dirty files were committed, stashed, discarded, or otherwise cleaned during this audit.
+- No OpenSpec task checkboxes were modified.
+
+## 2026-05-23 Claude adapter full-suite crash bridge stabilization
+
+- The real child-exit crash regression can exceed Vitest's 5s default per-test timeout under the root suite even though the filtered package test passes. Keep the regression real, but wait for ACP session state, durable run failure, and agent.run.failed event together with an explicit per-test timeout and cleanup in finally.
+
+## 2026-05-23 MVP completion closeout
+
+- P0-1, P0-2, P0-3 and P1-1, P1-2, P1-3 are recorded as complete in `.sisyphus/plans/agenthub-mvp-remediation.md`.
+- P0-3 was merged into `task/remediation-implementation-plan` and the integration branch contains the final Oracle APPROVE / merge record.
+- The Orchestrator confirmed AgentHub MVP implementation completion on 2026-05-23 and requested git-based closeout.
+- Final integration verification was rerun after the merge:
+  - `pnpm.cmd test` passed: 21 files / 159 tests.
+  - `pnpm.cmd typecheck` passed.
+  - `pnpm.cmd lint` passed.
+  - `pnpm.cmd check:all` passed all 5 custom checks.
+  - `pnpm.cmd schema:check` passed with 93 event types.
+  - `pnpm.cmd build` passed.
+  - `openspec.cmd validate add-agenthub-mvp --strict` passed.
+  - `pnpm.cmd exec playwright test apps/web/e2e/main-detail-projection.spec.ts apps/web/e2e/pending-turn.spec.ts` passed: 5 tests.
+- During closeout verification, the Claude adapter crash bridge regression exposed an ACP stdin `EPIPE` supervision gap under root-suite load. The closeout branch fixes that runtime supervision path and records its own verification in `.sisyphus/plans/agenthub-mvp-remediation.md`.
+- Evidence caveat: P1-1 / P1-2 / P1-3 completion is recorded in plan status, issue notes, git history, and verification commands, but dedicated remediation evidence files are still absent. The closeout PR therefore requires independent review before merge.
+- Final status after closeout review: MVP code implementation and merge validation are complete. OpenSpec archival remains a separate, explicit follow-up operation.
+

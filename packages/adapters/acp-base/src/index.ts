@@ -4,13 +4,13 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-import type { EventBus, PublishInput } from "@agenthub/bus";
+import type { CommandBus, EventBus, PublishInput } from "@agenthub/bus";
 import type { AgentHubDatabase } from "@agenthub/db";
 import type { AdapterArtifactFSBoundary } from "@agenthub/orchestrator";
 import type { PermissionEngine, PermissionResource } from "@agenthub/permissions";
 import type { AdapterError, AdapterMessage, AdapterRunInput, AgentAdapterManifest, AttachSessionInput, ContextInjectionResult, ContextProjection, CreateSessionInput, DetectedRuntime, ExternalContextSnapshot, ExternalSession } from "@agenthub/protocol";
 import type { EventType } from "@agenthub/protocol/events";
-import { redactAndTruncate } from "@agenthub/security";
+import { redactAndTruncate, wrapExternalContent } from "@agenthub/security";
 import { Effect, Stream } from "effect";
 
 export type AcpSessionState = "disconnected" | "connecting" | "initializing" | "ready" | "prompting" | "cancelling" | "failed" | "disposed";
@@ -42,8 +42,13 @@ export type AcpAdapterSession = {
   pendingRequests: Map<string, AcpPendingRequest>;
   inflightPromptRequestId: string | undefined;
   clientCapabilities: AcpClientCapabilities;
+  mcpServer: unknown | undefined;
   process: ChildProcessWithoutNullStreams | undefined;
   lineSplitter: NdjsonLineSplitter;
+  stderrLineSplitter: NdjsonLineSplitter;
+  stderrTail: string[];
+  livenessTimer: ReturnType<typeof setInterval> | undefined;
+  consecutivePingMisses: number;
   promptTimeoutPaused: boolean;
 };
 
@@ -107,6 +112,18 @@ export abstract class ACPAdapter {
   protected abstract spawnArgs(): { readonly command: string; readonly args: readonly string[]; readonly env?: NodeJS.ProcessEnv };
   protected abstract mapProviderEvent(message: JsonRpcMessage): AcpProviderEvent | undefined;
   protected abstract mapProviderError(error: unknown): AdapterError;
+
+  protected onProviderEvent(session: AcpAdapterSession, event: AcpProviderEvent): void {
+    void session;
+    void event;
+    // Subclasses may bridge provider events into AdapterBridge or other boundaries.
+  }
+
+  protected onSessionFailed(session: AcpAdapterSession, error: ACPAdapterError): void {
+    void session;
+    void error;
+    // Subclasses may bridge supervision failures into AdapterBridge or other boundaries.
+  }
 
   createSession(input: CreateSessionInput): Effect.Effect<ExternalSession, AdapterError> {
     return Effect.try({ try: () => this.createSessionSync(input), catch: (error) => toAdapterError(error) });
@@ -182,16 +199,16 @@ export abstract class ACPAdapter {
   protected createSessionSync(input: CreateSessionInput): ExternalSession {
     const sessionId = `acp-${this.id}-${input.runId}`;
     if (this.sessions.has(sessionId)) throw new ACPAdapterError("session_exists", `ACP session '${sessionId}' already exists`);
-    const session: AcpAdapterSession = { state: "connecting", acpSessionId: sessionId, runId: input.runId, workDir: input.workDir ?? process.cwd(), pendingRequests: new Map(), inflightPromptRequestId: undefined, clientCapabilities: acpClientCapabilities, process: undefined, lineSplitter: new NdjsonLineSplitter(), promptTimeoutPaused: false };
+    const session: AcpAdapterSession = { state: "connecting", acpSessionId: sessionId, runId: input.runId, workDir: input.workDir ?? process.cwd(), pendingRequests: new Map(), inflightPromptRequestId: undefined, clientCapabilities: acpClientCapabilities, mcpServer: input.mcpServer, process: undefined, lineSplitter: new NdjsonLineSplitter(), stderrLineSplitter: new NdjsonLineSplitter(), stderrTail: [], livenessTimer: undefined, consecutivePingMisses: 0, promptTimeoutPaused: false };
     this.sessions.set(sessionId, session);
     this.pendingByRun.set(input.runId, sessionId);
     const spawned = this.trySpawn(session);
     if (!spawned) session.state = "ready";
-    return { id: sessionId, runId: input.runId, workDir: session.workDir };
+    return { id: sessionId, runId: input.runId, workDir: session.workDir, ...(input.mcpServer !== undefined ? { mcpServer: input.mcpServer } : {}) };
   }
 
   protected attachSessionSync(input: AttachSessionInput): ExternalSession {
-    const session: AcpAdapterSession = { state: "ready", acpSessionId: input.adapterSessionId, runId: input.runId, workDir: input.workDir ?? process.cwd(), pendingRequests: new Map(), inflightPromptRequestId: undefined, clientCapabilities: acpClientCapabilities, process: undefined, lineSplitter: new NdjsonLineSplitter(), promptTimeoutPaused: false };
+    const session: AcpAdapterSession = { state: "ready", acpSessionId: input.adapterSessionId, runId: input.runId, workDir: input.workDir ?? process.cwd(), pendingRequests: new Map(), inflightPromptRequestId: undefined, clientCapabilities: acpClientCapabilities, mcpServer: undefined, process: undefined, lineSplitter: new NdjsonLineSplitter(), stderrLineSplitter: new NdjsonLineSplitter(), stderrTail: [], livenessTimer: undefined, consecutivePingMisses: 0, promptTimeoutPaused: false };
     this.sessions.set(input.adapterSessionId, session);
     this.pendingByRun.set(input.runId, input.adapterSessionId);
     return { id: input.adapterSessionId, runId: input.runId, workDir: session.workDir, ...(input.providerConversationId !== undefined ? { providerConversationId: input.providerConversationId } : {}) };
@@ -257,6 +274,7 @@ export abstract class ACPAdapter {
     session.pendingRequests.clear();
     session.inflightPromptRequestId = undefined;
     if (session.process !== undefined && !session.process.killed) killProcessTree(session.process);
+    if (session.livenessTimer !== undefined) clearInterval(session.livenessTimer);
     session.state = "disposed";
     if (session.runId !== undefined) this.pendingByRun.delete(session.runId);
   }
@@ -276,7 +294,10 @@ export abstract class ACPAdapter {
         clearPending(pending);
         session.pendingRequests.delete(requestId);
         if (message.error !== undefined) pending.reject(this.mapProviderError(message.error));
-        else pending.resolve(message.result);
+        else {
+          pending.resolve(wrapFileReadResult(pending, message.result));
+          if (pending.method === "protocol/ping") session.consecutivePingMisses = 0;
+        }
         if (session.inflightPromptRequestId === requestId) {
           session.inflightPromptRequestId = undefined;
           if (session.state === "prompting" || session.state === "cancelling") session.state = "ready";
@@ -284,11 +305,21 @@ export abstract class ACPAdapter {
       }
       return undefined;
     }
-    if (message.method === "protocol/configUpdated") return { type: "protocol/configUpdated", payload: message.params };
-    return this.mapProviderEvent(message);
+    if (message.method === "protocol/configUpdated") {
+      const event = { type: "protocol/configUpdated", payload: message.params };
+      this.onProviderEvent(session, event);
+      return event;
+    }
+    const event = this.mapProviderEvent(message);
+    if (event !== undefined) this.onProviderEvent(session, event);
+    return event;
   }
 
   protected emitRaw(session: AcpAdapterSession, stream: "stdout" | "stderr", line: string): void {
+    if (stream === "stderr") {
+      session.stderrTail.push(line);
+      while (session.stderrTail.length > 100) session.stderrTail.shift();
+    }
     this.rawSink?.({ adapterId: this.id, sessionId: session.acpSessionId, ...(session.runId !== undefined ? { runId: session.runId } : {}), stream, line: redactAndTruncate(line) });
   }
 
@@ -299,15 +330,30 @@ export abstract class ACPAdapter {
       const child = spawn(spawnSpec.command, [...spawnSpec.args], { cwd: session.workDir, env: filterSafeEnv(spawnSpec.env ?? process.env), windowsVerbatimArguments: false, detached: false });
       session.process = child;
       session.state = "initializing";
+      child.stdin.on("error", (error) => {
+        this.handleStdinWriteError(session, error);
+      });
       child.stdout.on("data", (chunk: Buffer) => {
         for (const line of session.lineSplitter.push(chunk)) this.handleLine(session, line);
       });
       child.stderr.on("data", (chunk: Buffer) => {
-        for (const line of new NdjsonLineSplitter().push(chunk)) this.emitRaw(session, "stderr", line);
+        for (const line of session.stderrLineSplitter.push(chunk)) this.emitRaw(session, "stderr", line);
       });
-      child.on("exit", () => { if (session.state !== "disposed") session.state = "failed"; });
+      child.on("error", (error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        this.emitRaw(session, "stderr", message);
+        this.failSession(session, new ACPAdapterError("process_error", message, error));
+      });
+      const handleProcessExit = (code: number | null, signal: NodeJS.Signals | null) => {
+        if (session.state === "disposed") return;
+        const detail = signal !== null ? `signal ${signal}` : `exit code ${code ?? "unknown"}`;
+        this.failSession(session, new ACPAdapterError("process_exit", `ACP process exited with ${detail}`, { code, signal }));
+      };
+      child.on("exit", handleProcessExit);
+      child.on("close", handleProcessExit);
       this.writeJson(session, { jsonrpc: "2.0", method: "initialize", params: { clientCapabilities: session.clientCapabilities } });
-      session.state = "ready";
+      this.startLiveness(session);
+      this.markReadyUnlessFailed(session);
       return true;
     } catch (error) {
       session.state = "failed";
@@ -316,7 +362,58 @@ export abstract class ACPAdapter {
   }
 
   private writeJson(session: AcpAdapterSession, message: JsonRpcMessage): void {
-    if (session.process !== undefined && !session.process.killed) session.process.stdin.write(`${JSON.stringify(message)}\n`);
+    const child = session.process;
+    if (child !== undefined && !child.killed && child.exitCode === null && child.signalCode === null && child.stdin.writable && !child.stdin.destroyed) {
+      try {
+        child.stdin.write(`${JSON.stringify(message)}\n`, (error) => {
+          if (error !== null && error !== undefined) this.handleStdinWriteError(session, error);
+        });
+      } catch (error) {
+        this.handleStdinWriteError(session, error);
+      }
+    }
+  }
+
+  private handleStdinWriteError(session: AcpAdapterSession, error: unknown): void {
+    if (session.state === "disposed" || session.state === "failed") return;
+    const message = error instanceof Error ? error.message : String(error);
+    this.emitRaw(session, "stderr", message);
+    this.failSession(session, new ACPAdapterError("process_error", `ACP stdin write failed: ${message}`, error));
+  }
+
+  private failSession(session: AcpAdapterSession, error: ACPAdapterError): void {
+    if (session.state === "disposed" || session.state === "failed") return;
+    if (session.livenessTimer !== undefined) clearInterval(session.livenessTimer);
+    session.state = "failed";
+    this.onSessionFailed(session, error);
+  }
+
+  private markReadyUnlessFailed(session: AcpAdapterSession): void {
+    if (session.state !== "failed") session.state = "ready";
+  }
+
+  private startLiveness(session: AcpAdapterSession): void {
+    session.livenessTimer = setInterval(() => {
+      if (session.state === "disposed" || session.state === "failed") return;
+      const requestId = randomUUID();
+      const pending: AcpPendingRequest = {
+        requestId,
+        method: "protocol/ping",
+        startedAt: this.now(),
+        timeoutMs: 2_500,
+        resolve: () => { session.consecutivePingMisses = 0; },
+        reject: () => undefined,
+        timer: setTimeout(() => {
+          session.pendingRequests.delete(requestId);
+          session.consecutivePingMisses += 1;
+          if (session.consecutivePingMisses >= 5) this.failSession(session, new ACPAdapterError("liveness_timeout", "ACP process missed 5 consecutive liveness pings"));
+        }, 2_500)
+      };
+      pending.timer?.unref?.();
+      session.pendingRequests.set(requestId, pending);
+      this.writeJson(session, { jsonrpc: "2.0", id: requestId, method: "protocol/ping", params: { sessionId: session.acpSessionId } });
+    }, 3_000);
+    session.livenessTimer.unref?.();
   }
 
   private requiredSession(sessionId: string): AcpAdapterSession {
@@ -382,7 +479,7 @@ export class AdapterRawLogger {
   }
 }
 
-export type AdapterRuntimeServices = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly permissionEngine?: PermissionEngine; readonly artifactFs?: AdapterArtifactFSBoundary; readonly now?: () => number };
+export type AdapterRuntimeServices = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly getCommandBus?: () => CommandBus | undefined; readonly permissionEngine?: PermissionEngine; readonly artifactFs?: AdapterArtifactFSBoundary; readonly now?: () => number };
 
 export function emitAdapterRegistered(eventBus: EventBus, workspaceId: string, manifest: AgentAdapterManifest, now = Date.now()): void {
   eventBus.publish(adapterEvent("adapter.registered", workspaceId, manifest.id, { adapterId: manifest.id, manifest }, now));
@@ -435,6 +532,28 @@ export function permissionForTool(toolName: string, input: unknown): PermissionR
 
 function clearPending(pending: AcpPendingRequest): void {
   if (pending.timer !== undefined) clearTimeout(pending.timer);
+}
+
+function wrapFileReadResult(pending: AcpPendingRequest, result: unknown): unknown {
+  if (!isFileReadMethod(pending.method)) return result;
+  if (typeof result === "string") return wrapExternalContent("unknown", result);
+  if (!isRecord(result)) return result;
+
+  const path = stringField(result, "path") ?? stringField(result, "filePath") ?? stringField(result, "uri") ?? "unknown";
+  for (const key of ["content", "text", "data"] as const) {
+    const value = result[key];
+    if (typeof value === "string") return { ...result, [key]: wrapExternalContent(path, value) };
+  }
+  return result;
+}
+
+function isFileReadMethod(method: string): boolean {
+  return method === "fs/read" || method === "fs.read" || method === "fs.readTextFile" || method.endsWith("/readTextFile") || method.endsWith(".readTextFile");
+}
+
+function stringField(value: Record<string, unknown>, key: string): string | undefined {
+  const field = value[key];
+  return typeof field === "string" && field.length > 0 ? field : undefined;
 }
 
 function providerAllowsConcurrentPrompt(manifest: AgentAdapterManifest): boolean {

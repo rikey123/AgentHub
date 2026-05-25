@@ -1,87 +1,37 @@
 {
-  "active_plan": "C:\\project\\AgentHub\\.sisyphus\\plans\\agenthub-mvp.md",
-  "started_at": "2026-05-22T19:15:03.490Z",
+  "active_plan": "C:\\project\\AgentHub\\.sisyphus\\plans\\v05-chatroom-complete.md",
+  "started_at": "2026-05-24T10:07:41.400Z",
   "session_ids": [
-    "ses_1af0ea2b2ffelI1i8aHyHQL6vU",
-    "ses_1ad92031affeQD85T6Y6PdgeOY",
-    "ses_1ad92008effeBZ4lGAQklPkU4J",
-    "ses_1ad91fdfcffeIPMMGnlPHrdaEy",
-    "ses_1ad91fd88ffekFRtaNeKq64o5I",
-    "ses_1ad0a551dffew6fT91uGkigb0s"
+    "ses_1a6baca41ffepeBIWmVcU52ISH",
+    "ses_1a689a09effe5nRXvdlLj3MO84",
+    "ses_1a68967bbffe79vxE3GNdl1oIt",
+    "ses_1a6894253ffeQ2OvThvrj6x1A4",
+    "ses_1a6891dc4ffeXWHi4bGP4Jt4cc",
+    "ses_1a688f4caffegWumx2KL5ZF9d6",
+    "ses_1a688cd69ffepArti7pYoc4kIL",
+    "ses_1a688a65affexT7gGtyfsx3Irh"
   ],
   "session_origins": {
-    "ses_1af0ea2b2ffelI1i8aHyHQL6vU": "direct",
-    "ses_1ad92031affeQD85T6Y6PdgeOY": "appended",
-    "ses_1ad92008effeBZ4lGAQklPkU4J": "appended",
-    "ses_1ad91fdfcffeIPMMGnlPHrdaEy": "appended",
-    "ses_1ad91fd88ffekFRtaNeKq64o5I": "appended",
-    "ses_1ad0a551dffew6fT91uGkigb0s": "appended"
+    "ses_1a6baca41ffepeBIWmVcU52ISH": "direct",
+    "ses_1a689a09effe5nRXvdlLj3MO84": "appended",
+    "ses_1a68967bbffe79vxE3GNdl1oIt": "appended",
+    "ses_1a6894253ffeQ2OvThvrj6x1A4": "appended",
+    "ses_1a6891dc4ffeXWHi4bGP4Jt4cc": "appended",
+    "ses_1a688f4caffegWumx2KL5ZF9d6": "appended",
+    "ses_1a688cd69ffepArti7pYoc4kIL": "appended",
+    "ses_1a688a65affexT7gGtyfsx3Irh": "appended"
   },
-  "plan_name": "agenthub-mvp",
+  "plan_name": "v05-chatroom-complete",
   "agent": "atlas",
   "task_sessions": {
-    "todo:1": {
-      "task_key": "todo:1",
-      "task_label": "1",
-      "task_title": "M0 Repo, Protocol Skeleton, CI Gates, DB Foundation",
-      "session_id": "ses_1aea990e1ffeiUl1pNxH3oxMo9",
-      "agent": "Sisyphus-Junior",
-      "category": "unspecified-high",
-      "updated_at": "2026-05-22T20:30:33.975Z"
-    },
-    "todo:2": {
-      "task_key": "todo:2",
-      "task_label": "2",
-      "task_title": "M1 Bus Runtime, RunLifecycle, Lock Matrix, Mock Golden Path",
-      "session_id": "ses_1ae790819ffeYbGHvJwYSeaqDL",
-      "agent": "Sisyphus-Junior",
-      "category": "",
-      "updated_at": "2026-05-22T21:31:01.868Z"
-    },
-    "todo:3": {
-      "task_key": "todo:3",
-      "task_label": "3",
-      "task_title": "M2 Permission, Intervention, Context Ledger, Debug Basics",
-      "session_id": "ses_1ae410000ffeFdDdnSexHTZ0Wi",
-      "agent": "Sisyphus-Junior",
-      "category": "deep",
-      "updated_at": "2026-05-22T22:22:01.947Z"
-    },
-    "todo:4": {
-      "task_key": "todo:4",
-      "task_label": "4",
-      "task_title": "M3 Artifacts and ArtifactFS Run-Level Diff",
-      "session_id": "ses_1ae351e1cffe2LxBFL61kKqjVh",
-      "agent": "Sisyphus-Junior",
-      "category": "deep",
-      "updated_at": "2026-05-22T23:00:17.090Z"
-    },
-    "todo:5": {
-      "task_key": "todo:5",
-      "task_label": "5",
-      "task_title": "M4 Web UI Main Timeline, Run Detail, Cards, PendingTurn",
-      "session_id": "ses_1ae12518fffevJl3ptVtuAoLKA",
-      "agent": "Sisyphus-Junior",
-      "category": "visual-engineering",
-      "updated_at": "2026-05-23T00:41:19.157Z"
-    },
-    "todo:7": {
-      "task_key": "todo:7",
-      "task_label": "7",
-      "task_title": "M6 Security, Recovery, V1 Stubs, Docs, Demo",
-      "session_id": "ses_1adb15306ffeGA6eX6461UFuR9",
-      "agent": "Sisyphus-Junior",
-      "category": "visual-engineering",
-      "updated_at": "2026-05-23T01:14:43.328Z"
-    },
     "final-wave:f1": {
       "task_key": "final-wave:f1",
       "task_label": "F1",
       "task_title": "Plan Compliance Audit — oracle",
-      "session_id": "ses_1ad91fd88ffekFRtaNeKq64o5I",
-      "agent": "Sisyphus-Junior",
+      "session_id": "ses_1a5564277ffeNc1LntukHWIUyq",
+      "agent": "oracle",
       "category": "",
-      "updated_at": "2026-05-23T01:40:49.010Z"
+      "updated_at": "2026-05-24T15:45:42.495Z"
     }
   }
 }

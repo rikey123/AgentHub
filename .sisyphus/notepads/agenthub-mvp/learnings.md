@@ -172,3 +172,65 @@ ot_implemented result rather than a thrown HTTP route branch, preserving the thi
 - packages/daemon/src/index.ts keeps admin gating in sse() and shared edactAndTruncate(JSON.stringify(event), 64 * 1024) output, while isible(..., view='raw') allows only canonical dapter.raw.stdout / dapter.raw.stderr after room/run filters.
 - Node fetch-based SSE tests need an initial comment frame (: connected) and reader-level cancellation to avoid hanging server close after asserting a live event.
 
+## 2026-05-23 P0-2 Task API / MCP minimum chain
+
+- The existing `0004_runs_tasks.sql` migration already creates `tasks`; no new migration was needed. P0-2 implemented against the OpenSpec MVP status enum (`pending`, `in_progress`, `blocked`, `review`, `completed`, `cancelled`) while accepting P0-2 shorthand aliases `open` -> `pending` and `done` -> `completed` at service/MCP boundaries.
+- Task HTTP mutating routes follow the thin daemon rule: `POST /rooms/:id/tasks` and `POST /tasks/:id/complete` dispatch `CreateTask` / `CompleteTask` through CommandBus; `TaskService` owns SQLite writes and canonical `task.*` event publication.
+- The requested package filter `@agenthub/adapters-acp-base` does not match a workspace project; the actual package is `@agenthub/adapter-acp-base`, whose filtered tests pass.
+
+## 2026-05-23 P0-2 MCP managed startup wiring
+
+- ACP base already persists `CreateSessionInput.mcpServer`, but real provider coverage must assert the managed adapter path too; `ClaudeCodeACPAdapter.runManaged()` is the startup path that must forward the room MCP server into `createSession()`.
+- Claude adapter tests can exercise managed startup without spawning an external provider by constructing `ClaudeCodeACPAdapter({ command: "" })`, matching the existing ArtifactFS managed-run test pattern.
+
+
+## 2026-05-23 P0-3 Claude adapter runtime bridge
+
+- Daemon adapter selection now lives in packages/daemon/src/adapters/registry.ts and resolves runtime adapters from runs.adapter_id first, then agent_profiles.adapter_id; mock remains the default fallback and claude-code uses ClaudeCodeACPAdapter.runManaged().
+- ACP stdout provider events should be bridged from ACPAdapter.handleLine via an overridable onProviderEvent hook so subclasses cannot forget to route parsed events; Claude maps that hook through AdapterBridge, preserving RunLifecycleService as the only terminal run-state writer.
+- ACP process supervision needs persistent stdout/stderr line splitters plus an async child error handler; spawn ENOENT is emitted after spawn() returns on Windows/Node and must be converted into failed session state/stderr tail rather than an unhandled exception.
+- The requested plural pnpm filters (@agenthub/adapters-*) do not match workspace package names; actual verified packages remain @agenthub/adapter-acp-base and @agenthub/adapter-claude-code.
+
+## 2026-05-23 P0-3 ACP crash propagation fix
+
+- ACP process supervision failures must cross the adapter boundary, not only mutate AcpAdapterSession.state. Use a single onSessionFailed hook for child error, child exit, and liveness timeout, and let ClaudeCodeACPAdapter translate that hook into AdapterBridge session.crashed so RunLifecycleService remains the durable terminal run-state writer.
+- Daemon Claude-selection tests should assert adapter selection/session creation rather than a durable running status, because a missing or crashing local Claude ACP process now correctly transitions the run to failed through the managed lifecycle path.
+
+## 2026-05-23 P1-2 Run Detail Raw Stream live UI (fetch-based SSE)
+
+- Native `EventSource` cannot send `Authorization` headers, so it cannot prove admin-authorized raw SSE delivery in browser tests. The correct minimal fix is a fetch-based SSE reader in `useRawStream.ts` that uses `fetch()` with `ReadableStream` + a small SSE frame parser (`event:` / `data:` lines), plus an `Authorization: Bearer <token>` header.
+- Admin token source is `window.__AGENTHUB_RAW_TOKEN__` (set via `page.evaluate` in tests). No token query param leakage. Production can set this from a secure auth bootstrap.
+- The daemon's `authenticateBrowserRequest` treats same-origin requests without an `Origin` header as local/admin when no daemon token is configured. This is existing behavior, not a backend change. The e2e test accepts either placeholder text for the non-admin path because the invariant is "no raw lines exposed," not the exact placeholder wording.
+- The admin-authorized e2e test inserts an admin bearer token into the daemon's `auth_tokens` table, sets `window.__AGENTHUB_RAW_TOKEN__`, opens the Raw Stream tab, publishes a live `adapter.raw.stdout` event via `daemon.eventBus.publish()`, and verifies the line renders in the UI.
+- UI states: `connecting` -> `connected` (empty shows "No raw output has arrived yet.") -> line rendering; `forbidden` shows "Raw stream content requires admin scope or debug mode."; `error` falls back to the forbidden placeholder.
+- Verification: `pnpm.cmd --filter @agenthub/web build`, all 5 Playwright e2e tests pass, `pnpm.cmd typecheck`, `pnpm.cmd lint`, and `pnpm.cmd check:all` pass.
+
+## 2026-05-23 P1-2 Raw Stream tightened test
+
+- The admin-authorized e2e test now observes raw `/event?view=raw...` requests via Playwright `page.on("request", ...)` and asserts:
+  1. `authorization: Bearer e2e-admin-token` header is present on the raw SSE request, and
+  2. the URL search params do not include `token` (no query-param leakage).
+- The test publishes both `adapter.raw.stdout` and `adapter.raw.stderr` live events and asserts both lines render in the Raw Stream tab.
+- The non-admin test preserves the invariant that no raw lines are exposed to ordinary browser sessions.
+- All 5 Playwright e2e tests pass, plus `typecheck`, `lint`, and `check:all`.
+
+## 2026-05-23 Raw debug auth boundary
+
+- Missing Origin is no longer an admin signal. uthenticateBrowserRequest() keeps no-Origin local daemon/SDK calls at read/write scope only, while /event?view=raw continues to require explicit admin via stored/admin bearer credentials.
+
+
+Correction: Missing Origin is no longer an admin signal. authenticateBrowserRequest() keeps no-Origin local daemon/SDK calls at read/write scope only, while /event?view=raw continues to require explicit admin via stored/admin bearer credentials.
+
+
+## 2026-05-23 P1-1 CommandBus idempotency transaction boundary
+
+- CommandBus idempotent dispatch now keeps claim, synchronous handler execution, and final command_records status/result in one better-sqlite3 transaction. A handler savepoint rolls back business side effects for deterministic and transient failed CommandResults; deterministic failures then persist the cached failed result outside the savepoint but still inside the outer transaction, while transient failures delete the record so retries execute cleanly.
+- Idempotent handlers that return a Promise are rejected with an internal_error and the command record is removed, because better-sqlite3 cannot hold an async transaction boundary across awaited work without reintroducing the crash window.
+
+## 2026-05-23 Task transition and PendingTurn projection blockers
+
+- Task completion from `pending` is intentionally not an UpdateTask shortcut: callers must move through `in_progress` or `review`, while illegal transitions emit live-only `task.status.changed.rejected` and do not write durable `events` rows.
+- Queued user messages must carry `pendingTurnId` and `turnDispatchMode` in `message.created`; the web projector also backfills `pendingTurnId` from `pending_turn.created` so cancel/scheduled/consumed matching works with older or incomplete message payloads.
+
+
+- F4 scope fidelity check: CommandType excludes StartRun; Codex/LangGraph/A2A adapters are deterministic 501 stubs; daemon routes remain local-first with no cloud/multi-user routes. Background scan's tasks-schema Kanban concern appears to be core V0.5 task support rather than task-board UI scope creep.

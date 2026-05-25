@@ -1,50 +1,55 @@
 import type { RoomViewModel } from "../types.ts";
+import { CostPanel } from "./CostPanel.tsx";
 
 type SidePanelProps = {
   readonly room: RoomViewModel;
-  readonly activeTab: "context" | "tasks" | "members" | "runs" | "debug";
-  readonly onChangeTab: (tab: "context" | "tasks" | "members" | "runs" | "debug") => void;
-  readonly onOpenRunDetail?: (runId: string) => void;
+  readonly activeTab: "context" | "tasks" | "members" | "debug" | "cost";
+  readonly onChangeTab: (tab: "context" | "tasks" | "members" | "debug" | "cost") => void;
+  readonly workspaceId?: string;
 };
 
-export function SidePanel({ room, activeTab, onChangeTab, onOpenRunDetail }: SidePanelProps) {
+export function SidePanel({ room, activeTab, onChangeTab, workspaceId }: SidePanelProps) {
   const tabs: { key: SidePanelProps["activeTab"]; label: string }[] = [
     { key: "context", label: "Context" },
     { key: "tasks", label: "Tasks" },
     { key: "members", label: "Members" },
-    { key: "runs", label: "Runs" },
-    { key: "debug", label: "Debug" }
+    { key: "debug", label: "Debug" },
+    { key: "cost", label: "Cost" }
   ];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div style={{ display: "flex", borderBottom: "1px solid #e5e7eb" }}>
+      <div style={{ display: "flex", borderBottom: "1px solid var(--ah-border)" }}>
         {tabs.map((tab) => (
           <button
             key={tab.key}
             onClick={() => onChangeTab(tab.key)}
             style={{
               flex: 1,
-              padding: "10px 4px",
+              padding: "var(--ah-space-3) var(--ah-space-1)",
               border: "none",
-              borderBottom: activeTab === tab.key ? "2px solid #3b82f6" : "2px solid transparent",
+              borderBottom: activeTab === tab.key ? "2px solid var(--ah-accent)" : "2px solid transparent",
               background: "transparent",
               cursor: "pointer",
-              fontSize: 12,
+              fontSize: "var(--ah-font-size-sm)",
               fontWeight: activeTab === tab.key ? 600 : 400,
-              color: activeTab === tab.key ? "#3b82f6" : "#6b7280"
+              color: activeTab === tab.key ? "var(--ah-accent)" : "var(--ah-text-muted)"
             }}
+            data-testid={`side-panel-tab-${tab.key}`}
+            aria-label={`${tab.label} tab`}
+            aria-selected={activeTab === tab.key}
+            role="tab"
           >
             {tab.label}
           </button>
         ))}
       </div>
-      <div style={{ flex: 1, overflow: "auto", padding: 12 }}>
+      <div style={{ flex: 1, overflow: "auto", padding: "var(--ah-space-3)" }}>
         {activeTab === "context" && <ContextTab room={room} />}
         {activeTab === "tasks" && <TasksTab room={room} />}
         {activeTab === "members" && <MembersTab room={room} />}
-        {activeTab === "runs" && <RunsTab room={room} onOpenRunDetail={onOpenRunDetail} />}
         {activeTab === "debug" && <DebugTab room={room} />}
+        {activeTab === "cost" && <CostPanel workspaceId={workspaceId ?? "default-workspace"} />}
       </div>
     </div>
   );
@@ -58,16 +63,16 @@ function ContextTab({ room }: { readonly room: RoomViewModel }) {
   return (
     <div>
       {draft.length > 0 && (
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: "#d97706", textTransform: "uppercase", marginBottom: 8 }}>Draft</div>
+        <div style={{ marginBottom: "var(--ah-space-4)" }}>
+          <div style={{ fontSize: "var(--ah-font-size-xs)", fontWeight: 600, color: "var(--ah-warning)", textTransform: "uppercase", marginBottom: "var(--ah-space-2)" }}>Draft</div>
           {draft.map((item) => (
             <ContextItemRow key={item.id} item={item} />
           ))}
         </div>
       )}
       {confirmed.length > 0 && (
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: "#059669", textTransform: "uppercase", marginBottom: 8 }}>Confirmed</div>
+        <div style={{ marginBottom: "var(--ah-space-4)" }}>
+          <div style={{ fontSize: "var(--ah-font-size-xs)", fontWeight: 600, color: "var(--ah-success)", textTransform: "uppercase", marginBottom: "var(--ah-space-2)" }}>Confirmed</div>
           {confirmed.map((item) => (
             <ContextItemRow key={item.id} item={item} />
           ))}
@@ -75,25 +80,25 @@ function ContextTab({ room }: { readonly room: RoomViewModel }) {
       )}
       {deprecated.length > 0 && (
         <details>
-          <summary style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", cursor: "pointer" }}>Deprecated ({deprecated.length})</summary>
-          <div style={{ marginTop: 8 }}>
+          <summary style={{ fontSize: "var(--ah-font-size-xs)", fontWeight: 600, color: "var(--ah-text-muted)", cursor: "pointer" }}>Deprecated ({deprecated.length})</summary>
+          <div style={{ marginTop: "var(--ah-space-2)" }}>
             {deprecated.map((item) => (
               <ContextItemRow key={item.id} item={item} />
             ))}
           </div>
         </details>
       )}
-      {room.contextItems.length === 0 && <div style={{ fontSize: 13, color: "#9ca3af" }}>No context items</div>}
+      {room.contextItems.length === 0 && <div style={{ fontSize: "var(--ah-font-size-md)", color: "var(--ah-text-muted)" }}>No context items</div>}
     </div>
   );
 }
 
-function ContextItemRow({ item }: { readonly item: import("../types.ts").ContextItemViewModel }) {
+function ContextItemRow({ item }: { readonly item: import("../types.ts").ContextItemViewModel; readonly key?: React.Key }) {
   return (
-    <div style={{ padding: "8px 10px", borderRadius: 6, background: "#ffffff", border: "1px solid #e5e7eb", marginBottom: 8 }}>
-      <div style={{ fontSize: 12, fontWeight: 600, color: "#111827" }}>{item.title}</div>
-      <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2, lineHeight: 1.4 }}>{item.content.slice(0, 120)}...</div>
-      <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 4 }}>{item.scope} {item.pinned && "pinned"}</div>
+    <div style={{ padding: "var(--ah-space-2) var(--ah-space-3)", borderRadius: "var(--ah-radius-md)", background: "var(--ah-bg-primary)", border: "1px solid var(--ah-border)", marginBottom: "var(--ah-space-2)" }}>
+      <div style={{ fontSize: "var(--ah-font-size-sm)", fontWeight: 600, color: "var(--ah-text-primary)" }}>{item.title}</div>
+      <div style={{ fontSize: "var(--ah-font-size-xs)", color: "var(--ah-text-muted)", marginTop: 2, lineHeight: "var(--ah-line-height-normal)" }}>{item.content.slice(0, 120)}...</div>
+      <div style={{ fontSize: "var(--ah-font-size-xs)", color: "var(--ah-text-muted)", marginTop: "var(--ah-space-1)" }}>{item.scope} {item.pinned && "pinned"}</div>
     </div>
   );
 }
@@ -110,18 +115,18 @@ function TasksTab({ room }: { readonly room: RoomViewModel }) {
   return (
     <div>
       {columns.map((status) => (
-        <div key={status} style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", marginBottom: 8 }}>{status}</div>
+        <div key={status} style={{ marginBottom: "var(--ah-space-4)" }}>
+          <div style={{ fontSize: "var(--ah-font-size-xs)", fontWeight: 600, color: "var(--ah-text-muted)", textTransform: "uppercase", marginBottom: "var(--ah-space-2)" }}>{status}</div>
           {(byStatus[status] ?? []).map((task) => (
-            <div key={task.id} style={{ padding: "8px 10px", borderRadius: 6, background: "#ffffff", border: "1px solid #e5e7eb", marginBottom: 6 }}>
-              <div style={{ fontSize: 12, fontWeight: 500, color: "#111827" }}>{task.title}</div>
-              {task.assigneeAgentId && <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 2 }}>{task.assigneeAgentId}</div>}
+            <div key={task.id} style={{ padding: "var(--ah-space-2) var(--ah-space-3)", borderRadius: "var(--ah-radius-md)", background: "var(--ah-bg-primary)", border: "1px solid var(--ah-border)", marginBottom: "var(--ah-space-1)" }}>
+              <div style={{ fontSize: "var(--ah-font-size-sm)", fontWeight: 500, color: "var(--ah-text-primary)" }}>{task.title}</div>
+              {task.assigneeAgentId && <div style={{ fontSize: "var(--ah-font-size-xs)", color: "var(--ah-text-muted)", marginTop: 2 }}>{task.assigneeAgentId}</div>}
             </div>
           ))}
-          {(byStatus[status] ?? []).length === 0 && <div style={{ fontSize: 12, color: "#d1d5db" }}>None</div>}
+          {(byStatus[status] ?? []).length === 0 && <div style={{ fontSize: "var(--ah-font-size-sm)", color: "var(--ah-border-strong)" }}>None</div>}
         </div>
       ))}
-      {room.tasks.length === 0 && <div style={{ fontSize: 13, color: "#9ca3af" }}>No tasks</div>}
+      {room.tasks.length === 0 && <div style={{ fontSize: "var(--ah-font-size-md)", color: "var(--ah-text-muted)" }}>No tasks</div>}
     </div>
   );
 }
@@ -130,112 +135,58 @@ function MembersTab({ room }: { readonly room: RoomViewModel }) {
   return (
     <div>
       {room.participants.map((p) => (
-        <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid #f3f4f6" }}>
+        <div key={p.id} style={{ display: "flex", alignItems: "center", gap: "var(--ah-space-3)", padding: "var(--ah-space-2) 0", borderBottom: "1px solid var(--ah-border-light)" }}>
           <div
             style={{
               width: 28,
               height: 28,
-              borderRadius: 14,
-              background: "#e5e7eb",
+              borderRadius: "var(--ah-radius-full)",
+              background: "var(--ah-bg-tertiary)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              fontSize: 11,
+              fontSize: "var(--ah-font-size-xs)",
               fontWeight: 600,
-              color: "#374151"
+              color: "var(--ah-text-secondary)"
             }}
           >
             {p.name.charAt(0).toUpperCase()}
           </div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 12, fontWeight: 500, color: "#111827" }}>{p.name}</div>
-            <div style={{ fontSize: 11, color: "#6b7280" }}>
+            <div style={{ fontSize: "var(--ah-font-size-sm)", fontWeight: 500, color: "var(--ah-text-primary)" }}>{p.name}</div>
+            <div style={{ fontSize: "var(--ah-font-size-xs)", color: "var(--ah-text-muted)" }}>
               {p.role} {p.presence}
             </div>
           </div>
         </div>
       ))}
-      {room.participants.length === 0 && <div style={{ fontSize: 13, color: "#9ca3af" }}>No participants</div>}
-    </div>
-  );
-}
-
-function RunsTab({ room, onOpenRunDetail }: { readonly room: RoomViewModel; readonly onOpenRunDetail: ((runId: string) => void) | undefined }) {
-  const statusColor: Record<string, string> = {
-    queued: "#6b7280",
-    starting: "#3b82f6",
-    running: "#3b82f6",
-    waiting_permission: "#d97706",
-    completed: "#10b981",
-    failed: "#ef4444",
-    cancelled: "#6b7280"
-  };
-
-  return (
-    <div>
-      {room.runs.map((run) => (
-        <div
-          key={run.id}
-          onClick={() => onOpenRunDetail?.(run.id)}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") onOpenRunDetail?.(run.id);
-          }}
-          style={{
-            padding: "10px 12px",
-            borderRadius: 6,
-            background: "#ffffff",
-            border: "1px solid #e5e7eb",
-            marginBottom: 8,
-            cursor: onOpenRunDetail ? "pointer" : "default"
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: "#111827" }}>{run.agentName}</div>
-            <span
-              style={{
-                fontSize: 10,
-                fontWeight: 600,
-                color: "#ffffff",
-                background: statusColor[run.status] ?? "#6b7280",
-                padding: "2px 8px",
-                borderRadius: 10
-              }}
-            >
-              {run.status}
-            </span>
-          </div>
-          <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>{run.id.slice(0, 8)}</div>
-        </div>
-      ))}
-      {room.runs.length === 0 && <div style={{ fontSize: 13, color: "#9ca3af" }}>No runs</div>}
+      {room.participants.length === 0 && <div style={{ fontSize: "var(--ah-font-size-md)", color: "var(--ah-text-muted)" }}>No participants</div>}
     </div>
   );
 }
 
 function DebugTab({ room }: { readonly room: RoomViewModel }) {
   return (
-    <div style={{ fontSize: 12, color: "#6b7280" }}>
-      <div style={{ marginBottom: 8 }}>
+    <div style={{ fontSize: "var(--ah-font-size-sm)", color: "var(--ah-text-muted)" }}>
+      <div style={{ marginBottom: "var(--ah-space-2)" }}>
         <strong>Room:</strong> {room.id}
       </div>
-      <div style={{ marginBottom: 8 }}>
+      <div style={{ marginBottom: "var(--ah-space-2)" }}>
         <strong>Messages:</strong> {room.messages.length}
       </div>
-      <div style={{ marginBottom: 8 }}>
+      <div style={{ marginBottom: "var(--ah-space-2)" }}>
         <strong>Briefs:</strong> {room.briefs.length}
       </div>
-      <div style={{ marginBottom: 8 }}>
+      <div style={{ marginBottom: "var(--ah-space-2)" }}>
         <strong>Runs:</strong> {room.runs.length}
       </div>
-      <div style={{ marginBottom: 8 }}>
+      <div style={{ marginBottom: "var(--ah-space-2)" }}>
         <strong>Pending Turns:</strong> {room.pendingTurns.length}
       </div>
-      <div style={{ marginBottom: 8 }}>
+      <div style={{ marginBottom: "var(--ah-space-2)" }}>
         <strong>Interventions:</strong> {room.unresolvedInterventions.length}
       </div>
-      <div style={{ marginBottom: 8 }}>
+      <div style={{ marginBottom: "var(--ah-space-2)" }}>
         <strong>Permissions:</strong> {room.pendingPermissions.length}
       </div>
     </div>

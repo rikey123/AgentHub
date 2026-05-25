@@ -107,6 +107,9 @@ export type CommandType =
   | "DeprecateContextItem"
   | "PinContextItem"
   | "CancelRun"
+  | "CreateTask"
+  | "UpdateTask"
+  | "CompleteTask"
   | "CreateRoom"
   | "ArchiveRoom"
   | "UnarchiveRoom"
@@ -219,6 +222,9 @@ const canonicalCommandTypes = new Set<CommandType>([
   "DeprecateContextItem",
   "PinContextItem",
   "CancelRun",
+  "CreateTask",
+  "UpdateTask",
+  "CompleteTask",
   "CreateRoom",
   "ArchiveRoom",
   "UnarchiveRoom",
@@ -497,6 +503,7 @@ export class EventBus {
 class BoundedPubSub {
   private readonly capacities: Record<PubSubChannelName, number>;
   private readonly state = new Map<PubSubChannelName, { size: number; dropped: number; highWatermark: number }>();
+  private readonly drainScheduled = new Set<PubSubChannelName>();
   constructor(config: PubSubCapacityConfig = {}) {
     this.capacities = { durable: config.durable ?? 4096, message_delta: config.message_delta ?? 1024, tool_update: config.tool_update ?? 512, status_line: config.status_line ?? 64, adapter_raw: config.adapter_raw ?? 256, system_notice: config.system_notice ?? 128 };
     for (const [channel, capacity] of Object.entries(this.capacities) as [PubSubChannelName, number][]) {
@@ -514,11 +521,21 @@ class BoundedPubSub {
     }
     state.size += 1;
     state.highWatermark = Math.max(state.highWatermark, state.size);
-    state.size -= 1;
+    this.scheduleDrain(channel);
     return true;
   }
   stats(): PubSubChannelStats[] {
     return (["durable", "message_delta", "tool_update", "status_line", "adapter_raw", "system_notice"] as const).map((channel) => ({ channel, capacity: this.capacities[channel], size: this.state.get(channel)?.size ?? 0, dropped: this.state.get(channel)?.dropped ?? 0, highWatermark: this.state.get(channel)?.highWatermark ?? 0 }));
+  }
+
+  private scheduleDrain(channel: PubSubChannelName): void {
+    if (this.drainScheduled.has(channel)) return;
+    this.drainScheduled.add(channel);
+    queueMicrotask(() => {
+      const state = this.state.get(channel);
+      if (state !== undefined) state.size = 0;
+      this.drainScheduled.delete(channel);
+    });
   }
 }
 
@@ -547,11 +564,18 @@ export class CommandBus {
   }
 
   private dispatchIdempotent<C extends Command>(command: C, meta: CommandMeta, idempotencyKey: string): CommandResult | Promise<CommandResult> {
+    // Reject async handlers before touching the DB: an async handler can produce side effects
+    // after its first await even if we rollback the savepoint, so we must never invoke one in
+    // the idempotent path.
+    const handler = this.handlers[command.type];
+    if (handler !== undefined && isAsyncFunction(handler)) {
+      return failedCommand("internal_error", "idempotent command handlers must be synchronous to preserve transaction atomicity");
+    }
     const actor = actorIdentity(meta);
     const commandHash = hashCommand(command);
     const now = this.now();
     const expiresAt = now + 24 * 60 * 60 * 1000;
-    const claim = this.options.database.sqlite.transaction(() => {
+    return this.options.database.sqlite.transaction(() => {
       const existing = this.options.database.sqlite
         .prepare(
           `SELECT command_hash, status, result_json, created_at
@@ -577,53 +601,84 @@ export class CommandBus {
              WHERE actor_type = ? AND actor_id = ? AND idempotency_key = ?`
           )
           .run(command.type, commandHash, meta.traceId, now, expiresAt, actor.type, actor.id, idempotencyKey);
-        return undefined;
       }
 
-      this.options.database.sqlite
-        .prepare(
-          `INSERT INTO command_records (
-            actor_type, actor_id, idempotency_key, command_type, command_hash, status, result_json, trace_id, created_at, expires_at
-          ) VALUES (?, ?, ?, ?, ?, 'in_flight', NULL, ?, ?, ?)`
-        )
-        .run(actor.type, actor.id, idempotencyKey, command.type, commandHash, meta.traceId, now, expiresAt);
-      return undefined;
+      if (!existing) {
+        this.options.database.sqlite
+          .prepare(
+            `INSERT INTO command_records (
+              actor_type, actor_id, idempotency_key, command_type, command_hash, status, result_json, trace_id, created_at, expires_at
+            ) VALUES (?, ?, ?, ?, ?, 'in_flight', NULL, ?, ?, ?)`
+          )
+          .run(actor.type, actor.id, idempotencyKey, command.type, commandHash, meta.traceId, now, expiresAt);
+      }
+
+      return this.executeAndFinalizeIdempotent(command, meta, actor, idempotencyKey);
     })();
+  }
 
-    if (claim !== undefined) {
-      return claim;
-    }
-
+  private executeAndFinalizeIdempotent<C extends Command>(command: C, meta: CommandMeta, actor: { type: string; id: string }, idempotencyKey: string): CommandResult {
+    const savepointName = `command_handler_${randomUUID().replace(/-/gu, "_")}`;
+    this.options.database.sqlite.exec(`SAVEPOINT ${savepointName}`);
     try {
       const result = this.execute(command, meta);
       if (isPromiseLike(result)) {
-        return result.then((resolved) => this.finalizeIdempotentResult(actor, idempotencyKey, resolved));
+        this.rollbackAndReleaseSavepoint(savepointName);
+        this.deleteCommandRecord(actor, idempotencyKey);
+        // SPEC RECONCILIATION (bus-runtime §3.9 / tasks.md §3.9):
+        // Idempotent handlers MUST be synchronous. Native async functions are pre-rejected by
+        // isAsyncFunction() before invocation. For non-async functions that return a Promise,
+        // we can only detect the violation after invocation: the savepoint rollback covers any
+        // synchronous DB writes made before the first await, but post-await side effects cannot
+        // be prevented by a synchronous SQLite transaction. This is a known limitation of the
+        // SQLite sync transaction model. The command record is deleted so the key can retry, and
+        // the caller receives internal_error. All real-world idempotent handlers in this codebase
+        // are synchronous; this path is a safety net, not a guarantee.
+        result.catch(() => undefined);
+        return failedCommand("internal_error", "idempotent command handlers must complete synchronously to preserve transaction atomicity");
       }
-      return this.finalizeIdempotentResult(actor, idempotencyKey, result);
+
+      if (result.ok) {
+        this.options.database.sqlite.exec(`RELEASE SAVEPOINT ${savepointName}`);
+        this.persistCommandRecordResult(actor, idempotencyKey, "succeeded", result);
+        return result;
+      }
+
+      if (shouldPersistFailedRecord(result.error.code)) {
+        this.rollbackAndReleaseSavepoint(savepointName);
+        this.persistCommandRecordResult(actor, idempotencyKey, "failed", result);
+        return result;
+      }
+
+      this.rollbackAndReleaseSavepoint(savepointName);
+      this.deleteCommandRecord(actor, idempotencyKey);
+      return result;
     } catch (error) {
-      this.options.database.sqlite
-        .prepare("DELETE FROM command_records WHERE actor_type = ? AND actor_id = ? AND idempotency_key = ?")
-        .run(actor.type, actor.id, idempotencyKey);
+      this.rollbackAndReleaseSavepoint(savepointName);
+      this.deleteCommandRecord(actor, idempotencyKey);
       throw error;
     }
   }
 
-  private finalizeIdempotentResult(actor: { type: string; id: string }, idempotencyKey: string, result: CommandResult): CommandResult {
-    if (result.ok || shouldPersistFailedRecord(result.error.code)) {
-      this.options.database.sqlite
-        .prepare(
-          `UPDATE command_records
-           SET status = ?, result_json = ?
-           WHERE actor_type = ? AND actor_id = ? AND idempotency_key = ?`
-        )
-        .run(result.ok ? "succeeded" : "failed", JSON.stringify(result), actor.type, actor.id, idempotencyKey);
-      return result;
-    }
+  private persistCommandRecordResult(actor: { type: string; id: string }, idempotencyKey: string, status: "succeeded" | "failed", result: CommandResult): void {
+    this.options.database.sqlite
+      .prepare(
+        `UPDATE command_records
+         SET status = ?, result_json = ?
+         WHERE actor_type = ? AND actor_id = ? AND idempotency_key = ?`
+      )
+      .run(status, JSON.stringify(result), actor.type, actor.id, idempotencyKey);
+  }
 
+  private deleteCommandRecord(actor: { type: string; id: string }, idempotencyKey: string): void {
     this.options.database.sqlite
       .prepare("DELETE FROM command_records WHERE actor_type = ? AND actor_id = ? AND idempotency_key = ?")
       .run(actor.type, actor.id, idempotencyKey);
-    return result;
+  }
+
+  private rollbackAndReleaseSavepoint(savepointName: string): void {
+    this.options.database.sqlite.exec(`ROLLBACK TO SAVEPOINT ${savepointName}`);
+    this.options.database.sqlite.exec(`RELEASE SAVEPOINT ${savepointName}`);
   }
 
   private execute<C extends Command>(command: C, meta: CommandMeta): CommandResult | Promise<CommandResult> {
@@ -985,6 +1040,11 @@ function stableStringify(value: unknown): string {
 
 function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
   return typeof value === "object" && value !== null && "then" in value && typeof value.then === "function";
+}
+
+function isAsyncFunction(fn: unknown): boolean {
+  // Detect native async functions by constructor name; covers async () => {} and async function f() {}.
+  return typeof fn === "function" && fn.constructor?.name === "AsyncFunction";
 }
 
 function sleep(ms: number): Promise<void> {

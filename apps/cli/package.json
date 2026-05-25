@@ -13,7 +13,9 @@
     "test": "node scripts/run-tests.mjs"
   },
   "dependencies": {
+    "@agenthub/agents": "workspace:*",
     "@agenthub/daemon": "workspace:*",
+    "@agenthub/db": "workspace:*",
     "@agenthub/sdk": "workspace:*"
   }
 }

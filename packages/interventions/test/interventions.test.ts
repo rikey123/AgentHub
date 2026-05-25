@@ -66,6 +66,7 @@ describe("InterventionEngine", () => {
     expect(approved).toMatchObject({ status: "closed", resolvedAt: now });
     expect(interventionEvents()).toEqual(["intervention.requested", "intervention.approved", "intervention.injected", "intervention.resolved", "intervention.closed"]);
     expect(lastPayload("intervention.injected")).toMatchObject({ effectiveText: "use JWT_SECRET env and add tests", injectionMode: "immediate" });
+    expect(currentDb().sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'intervention.approved' AND payload LIKE '%\"audit\":true%' ").get()).toMatchObject({ count: 1 });
     expect(presence()).toMatchObject({ state: "observing" });
     expect(agentStateEvents()).toEqual(["knocking", "active", "observing"]);
   });
@@ -80,6 +81,7 @@ describe("InterventionEngine", () => {
     expect(currentEngine().get(rejected.interventionId)).toMatchObject({ status: "closed" });
     expect(interventionEvents()).toEqual(["intervention.requested", "intervention.ignored", "intervention.closed", "intervention.requested", "intervention.rejected", "intervention.closed"]);
     expect(currentDb().sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'intervention.injected'").get()).toMatchObject({ count: 0 });
+    expect(currentDb().sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type IN ('intervention.ignored','intervention.rejected') AND payload LIKE '%\"audit\":true%' ").get()).toMatchObject({ count: 2 });
   });
 
   it("snoozes and reactivates due interventions while preserving newer pending precedence", () => {

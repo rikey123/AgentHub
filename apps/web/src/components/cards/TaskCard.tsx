@@ -6,43 +6,44 @@ type TaskCardProps = {
 
 export function TaskCard({ card }: TaskCardProps) {
   const statusColors: Record<string, string> = {
-    todo: "#6b7280",
-    queued: "#3b82f6",
-    running: "#3b82f6",
-    waiting_approval: "#d97706",
-    blocked: "#ef4444",
+    todo: "var(--ah-text-muted)",
+    queued: "var(--ah-accent)",
+    running: "var(--ah-accent)",
+    waiting_approval: "var(--ah-warning)",
+    blocked: "var(--ah-danger)",
     review: "#8b5cf6",
-    done: "#10b981",
-    failed: "#ef4444",
-    cancelled: "#6b7280"
+    done: "var(--ah-success)",
+    failed: "var(--ah-danger)",
+    cancelled: "var(--ah-text-muted)"
   };
 
   return (
     <div
       style={{
-        marginTop: 8,
-        padding: "12px 14px",
-        borderRadius: 8,
-        background: "#faf5ff",
-        border: "1px solid #e9d5ff"
+        marginTop: "var(--ah-space-2)",
+        padding: "var(--ah-space-3) var(--ah-space-4)",
+        borderRadius: "var(--ah-radius-lg)",
+        background: "var(--ah-bg-secondary)",
+        border: "1px solid var(--ah-border)"
       }}
     >
-      <div style={{ fontSize: 12, fontWeight: 600, color: "#6b21a8", marginBottom: 6 }}>Task</div>
-      <div style={{ fontSize: 13, fontWeight: 600, color: "#581c87", marginBottom: 4 }}>{card.title}</div>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+      <div style={{ fontSize: "var(--ah-font-size-xs)", fontWeight: 600, color: "var(--ah-text-muted)", marginBottom: "var(--ah-space-2)" }}>Task</div>
+      <div style={{ fontSize: "var(--ah-font-size-md)", fontWeight: 600, color: "var(--ah-text-primary)", marginBottom: "var(--ah-space-1)" }}>{card.title}</div>
+      <div style={{ display: "flex", alignItems: "center", gap: "var(--ah-space-2)", marginTop: "var(--ah-space-1)" }}>
         <span
           style={{
-            fontSize: 10,
+            fontSize: "var(--ah-font-size-xs)",
             fontWeight: 600,
-            color: "#ffffff",
-            background: statusColors[card.status] ?? "#6b7280",
-            padding: "2px 8px",
-            borderRadius: 10
+            color: "var(--ah-text-inverse)",
+            background: statusColors[card.status] ?? "var(--ah-text-muted)",
+            padding: "2px var(--ah-space-2)",
+            borderRadius: "var(--ah-radius-full)"
           }}
+          aria-label={`Status: ${card.status}`}
         >
           {card.status}
         </span>
-        {card.assigneeAgentId && <span style={{ fontSize: 11, color: "#7e22ce" }}>{card.assigneeAgentId}</span>}
+        {card.assigneeAgentId && <span style={{ fontSize: "var(--ah-font-size-xs)", color: "var(--ah-text-muted)" }}>{card.assigneeAgentId}</span>}
       </div>
     </div>
   );

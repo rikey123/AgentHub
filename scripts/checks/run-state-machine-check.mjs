@@ -18,7 +18,7 @@ const requiredEvents = ["agent.run.queued", "agent.run.waiting", "agent.run.star
 
 await runCheck("run-state-machine:check", async function checkRunStateMachine() {
   const errors = [];
-  const busSpec = await readText("openspec/changes/add-agenthub-mvp/specs/bus-runtime/spec.md");
+  const busSpec = await readText("openspec/specs/bus-runtime/spec.md");
   const schema = await readText("packages/db/src/schema.ts");
   const registry = await readText("packages/protocol/src/events/registry.ts");
 

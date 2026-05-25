@@ -43,52 +43,53 @@ export function DiffCard({ card }: DiffCardProps) {
   return (
     <div
       style={{
-        marginTop: 8,
-        padding: "12px 14px",
-        borderRadius: 8,
-        background: "#f0fdf4",
-        border: "1px solid #bbf7d0"
+        marginTop: "var(--ah-space-2)",
+        padding: "var(--ah-space-3) var(--ah-space-4)",
+        borderRadius: "var(--ah-radius-lg)",
+        background: "var(--ah-success-light)",
+        border: "1px solid var(--ah-success)"
       }}
     >
-      <div style={{ fontSize: 12, fontWeight: 600, color: "#166534", marginBottom: 6 }}>Diff</div>
-      <div style={{ fontSize: 13, color: "#14532d", marginBottom: 4 }}>
+      <div style={{ fontSize: "var(--ah-font-size-xs)", fontWeight: 600, color: "var(--ah-success-hover)", marginBottom: "var(--ah-space-2)" }}>Diff</div>
+      <div style={{ fontSize: "var(--ah-font-size-md)", color: "var(--ah-success-hover)", marginBottom: "var(--ah-space-1)" }}>
         {card.files.length} files changed
-        <span style={{ color: "#10b981", marginLeft: 8 }}>+{totalAdditions}</span>
-        <span style={{ color: "#ef4444", marginLeft: 4 }}>-{totalDeletions}</span>
+        <span style={{ color: "var(--ah-success)", marginLeft: "var(--ah-space-2)" }}>+{totalAdditions}</span>
+        <span style={{ color: "var(--ah-danger)", marginLeft: "var(--ah-space-1)" }}>-{totalDeletions}</span>
       </div>
 
       {expanded && (
-        <div style={{ marginTop: 8, marginBottom: 8 }}>
+        <div style={{ marginTop: "var(--ah-space-2)", marginBottom: "var(--ah-space-2)" }}>
           {card.files.map((file) => (
-            <div key={file.path} style={{ fontSize: 12, color: "#374151", padding: "4px 0", borderBottom: "1px solid #e5e7eb" }}>
+            <div key={file.path} style={{ fontSize: "var(--ah-font-size-sm)", color: "var(--ah-text-secondary)", padding: "var(--ah-space-1) 0", borderBottom: "1px solid var(--ah-border)" }}>
               <span
                 style={{
                   fontWeight: 600,
-                  color: file.status === "added" ? "#10b981" : file.status === "deleted" ? "#ef4444" : "#3b82f6"
+                  color: file.status === "added" ? "var(--ah-success)" : file.status === "deleted" ? "var(--ah-danger)" : "var(--ah-accent)"
                 }}
               >
                 {file.status}
               </span>{" "}
               {file.path}
-              <span style={{ color: "#10b981", marginLeft: 8 }}>+{file.additions}</span>
-              <span style={{ color: "#ef4444", marginLeft: 4 }}>-{file.deletions}</span>
+              <span style={{ color: "var(--ah-success)", marginLeft: "var(--ah-space-2)" }}>+{file.additions}</span>
+              <span style={{ color: "var(--ah-danger)", marginLeft: "var(--ah-space-1)" }}>-{file.deletions}</span>
             </div>
           ))}
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+      <div style={{ display: "flex", gap: "var(--ah-space-2)", marginTop: "var(--ah-space-2)" }}>
         <button
           onClick={() => setExpanded((v) => !v)}
           style={{
-            padding: "6px 12px",
-            borderRadius: 6,
-            border: "1px solid #d1d5db",
-            background: "#ffffff",
+            padding: "var(--ah-space-2) var(--ah-space-3)",
+            borderRadius: "var(--ah-radius-md)",
+            border: "1px solid var(--ah-border-strong)",
+            background: "var(--ah-bg-primary)",
             cursor: "pointer",
-            fontSize: 12,
-            color: "#374151"
+            fontSize: "var(--ah-font-size-sm)",
+            color: "var(--ah-text-secondary)"
           }}
+          aria-label={expanded ? "Hide diff details" : "View diff details"}
         >
           {expanded ? "Hide" : "View"}
         </button>
@@ -97,36 +98,38 @@ export function DiffCard({ card }: DiffCardProps) {
             <button
               onClick={handleApply}
               style={{
-                padding: "6px 12px",
-                borderRadius: 6,
+                padding: "var(--ah-space-2) var(--ah-space-3)",
+                borderRadius: "var(--ah-radius-md)",
                 border: "none",
-                background: "#10b981",
-                color: "#ffffff",
+                background: "var(--ah-success)",
+                color: "var(--ah-text-inverse)",
                 cursor: "pointer",
-                fontSize: 12,
+                fontSize: "var(--ah-font-size-sm)",
                 fontWeight: 600
               }}
+              aria-label="Apply diff"
             >
               Apply
             </button>
             <button
               onClick={handleReject}
               style={{
-                padding: "6px 12px",
-                borderRadius: 6,
+                padding: "var(--ah-space-2) var(--ah-space-3)",
+                borderRadius: "var(--ah-radius-md)",
                 border: "none",
-                background: "#ef4444",
-                color: "#ffffff",
+                background: "var(--ah-danger)",
+                color: "var(--ah-text-inverse)",
                 cursor: "pointer",
-                fontSize: 12,
+                fontSize: "var(--ah-font-size-sm)",
                 fontWeight: 600
               }}
+              aria-label="Reject diff"
             >
               Reject
             </button>
           </>
         ) : (
-          <span style={{ fontSize: 12, fontWeight: 600, color: status === "applied" ? "#059669" : "#dc2626" }}>
+          <span style={{ fontSize: "var(--ah-font-size-sm)", fontWeight: 600, color: status === "applied" ? "var(--ah-success)" : "var(--ah-danger)" }}>
             {status === "applied" ? "Applied" : status === "rejected" ? "Rejected" : status}
           </span>
         )}

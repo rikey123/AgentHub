@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@agenthub/adapter-acp-base": "workspace:*",
+    "@agenthub/orchestrator": "workspace:*",
+    "@agenthub/permissions": "workspace:*",
     "@agenthub/protocol": "workspace:*",
     "effect": "^3.19.6"
   }

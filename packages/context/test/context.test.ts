@@ -2,11 +2,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { Effect } from "effect";
 import { EventBus } from "@agenthub/bus";
 import { createDatabase, type AgentHubDatabase } from "@agenthub/db";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { ContextLedger, createContextCommandHandlers, isVisible, MemoryError, NoopHybridMemoryRouter, NoopMemoryAdapter, NoopVectorIndex, roomSearchMemoryTool, type ContextItem } from "../src/index.ts";
+import { ContextLedger, createContextCommandHandlers, HeuristicBriefGenerator, isVisible, MemoryError, NoopHybridMemoryRouter, NoopMemoryAdapter, NoopVectorIndex, roomSearchMemoryTool, type BriefGeneratorInput, type ContextItem } from "../src/index.ts";
 
 let dir: string | undefined;
 let database: AgentHubDatabase | undefined;
@@ -132,6 +133,24 @@ describe("ContextLedger", () => {
     expect(result).toEqual({ ok: true, data: { mode: "next_turn", applied: false, effectiveAt: "next_turn", reason: "pending_inject" }, emittedEvents: [] });
   });
 
+  it("converts context.snapshot events into idempotent summary drafts", () => {
+    currentDb().sqlite.prepare("INSERT INTO tasks (id, workspace_id, room_id, title, status, created_at, updated_at) VALUES ('task_1', 'ws_1', 'room_1', 'Task', 'open', 1, 1)").run();
+
+    currentDb().sqlite.transaction(() => {
+      currentDb().sqlite.prepare("INSERT INTO runs (id, workspace_id, task_id, room_id, agent_id, parent_run_id, status, wake_reason, workspace_mode, target_files, mailbox_claim_count, created_at, updated_at) VALUES ('run_1', 'ws_1', 'task_1', 'room_1', 'builder', NULL, 'running', 'primary_turn', NULL, '[]', 0, 1, 1)").run();
+    })();
+    currentLedger();
+    currentDb();
+    const first = eventBus?.publish({ id: "evt_snapshot_1", type: "context.snapshot", schemaVersion: 1, workspaceId: "ws_1", roomId: "room_1", taskId: "task_1", runId: "run_1", agentId: "builder", payload: { snapshot: { kind: "claude_compact", text: "compact summary" }, idempotencyKey: "claude_compact:run_1" }, createdAt: now });
+    if (first?.durability === "durable") eventBus?.deliverPersisted(first.event);
+    const second = eventBus?.publish({ id: "evt_snapshot_2", type: "context.snapshot", schemaVersion: 1, workspaceId: "ws_1", roomId: "room_1", taskId: "task_1", runId: "run_1", agentId: "builder", payload: { snapshot: { kind: "claude_compact", text: "new compact summary" }, idempotencyKey: "claude_compact:run_1" }, createdAt: now + 1 });
+    if (second?.durability === "durable") eventBus?.deliverPersisted(second.event);
+
+    const items = currentLedger().list({ workspaceId: "ws_1", taskId: "task_1", status: "draft" });
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ type: "summary", scope: "task", status: "draft", confidence: "inferred", content: "compact summary", sourceMessageId: "claude_compact:run_1", source: { type: "tool", id: "claude_code_compact", kind: "claude_compact" } });
+  });
+
   it("provides a no-op vector index for future vector search", async () => {
     const index = new NoopVectorIndex();
     await expect(index.search("auth.ts changes", 8, { workspaceId: "ws_1" })).resolves.toEqual([]);
@@ -149,6 +168,41 @@ describe("ContextLedger", () => {
     expect(router.route(entry)).toEqual([adapter]);
     expect(router.merge([[entry], [entry]])).toEqual([entry]);
     expect(() => roomSearchMemoryTool()).toThrow(MemoryError);
+  });
+});
+
+describe("HeuristicBriefGenerator", () => {
+  it("first sentence truncation", () => {
+    const longSentence = "a".repeat(121);
+
+    expect(generateBrief({ finalAssistantText: `${longSentence}. Second sentence.`, artifactCounts: { diff: 1, file: 0, tool: 3 } })).toBe(`${"a".repeat(120)}…（artifacts: 1 diff / 0 files / 3 tools）`);
+  });
+
+  it("Chinese punctuation", () => {
+    expect(generateBrief({ finalAssistantText: "我已添加 OAuth 校验逻辑到 src/auth.ts，并修复了 cookie 过期处理。第二句不应出现。", artifactCounts: { diff: 1, file: 0, tool: 3 } })).toBe("我已添加 OAuth 校验逻辑到 src/auth.ts，并修复了 cookie 过期处理（artifacts: 1 diff / 0 files / 3 tools）");
+  });
+
+  it("code block skip", () => {
+    expect(generateBrief({ finalAssistantText: "```ts\nconst value = 1;\n```\n\nImplemented the feature. Extra details.", artifactCounts: { diff: 0, file: 0, tool: 0 } })).toBe("Implemented the feature");
+  });
+
+  it("failure template", () => {
+    expect(generateBrief({ artifactCounts: { diff: 0, file: 0, tool: 2 }, failureClass: "transient", failureReason: "lock_timeout" })).toBe("Lock timed out, retrying（artifacts: 0 diff / 0 files / 2 tools）");
+  });
+
+  it("cancel template", () => {
+    expect(generateBrief({ artifactCounts: { diff: 0, file: 0, tool: 0 }, cancelled: true })).toBe("User cancelled this run");
+  });
+
+  it("parse failure fallback", () => {
+    const text = "x".repeat(200);
+
+    expect(generateBrief({ finalAssistantText: text, artifactCounts: { diff: 0, file: 0, tool: 0 } })).toBe(`${"x".repeat(120)}…`);
+  });
+
+  it("artifact suffix only when nonzero", () => {
+    expect(generateBrief({ finalAssistantText: "Completed work.", artifactCounts: { diff: 0, file: 0, tool: 0 } })).toBe("Completed work");
+    expect(generateBrief({ finalAssistantText: "Completed work.", artifactCounts: { diff: 0, file: 1, tool: 0 } })).toBe("Completed work（artifacts: 0 diff / 1 files / 0 tools）");
   });
 });
 
@@ -181,4 +235,8 @@ function versionRows(contextId: string): number[] {
 function lastPayload(): unknown {
   const row = currentDb().sqlite.prepare("SELECT payload FROM events WHERE type LIKE 'context.%' ORDER BY seq DESC LIMIT 1").get() as { payload: string };
   return JSON.parse(row.payload) as unknown;
+}
+
+function generateBrief(overrides: Partial<BriefGeneratorInput>): string {
+  return Effect.runSync(new HeuristicBriefGenerator().generate({ runId: "run_1", artifactCounts: { diff: 0, file: 0, tool: 0 }, ...overrides }));
 }

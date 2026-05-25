@@ -143,7 +143,7 @@ export class PermissionEngine {
         const resource = JSON.parse(row.resource) as PermissionResource;
         this.options.database.sqlite.prepare("INSERT INTO permission_rules (id, workspace_id, agent_id, profile_id, resource_type, resource_match, action, remember, created_at) VALUES (?, ?, ?, NULL, ?, ?, 'allow', 1, ?)").run(randomUUID(), row.workspace_id, row.agent_id, resourceTypeFor(resource), resourceMatchFor(resource), now);
       }
-      this.options.eventBus.publish(permissionEvent("permission.resolved", row.workspace_id, row.room_id ?? undefined, row.run_id ?? undefined, row.agent_id ?? undefined, { requestId, resource: JSON.parse(row.resource) as unknown, decision, reason: reason ?? "user_resolved", remembered: remember, requested: true }, now));
+      this.options.eventBus.publish(permissionEvent("permission.resolved", row.workspace_id, row.room_id ?? undefined, row.run_id ?? undefined, row.agent_id ?? undefined, { audit: true, actor: { type: row.agent_id ? "agent" : "user", id: row.agent_id ?? "local" }, action: "resolve", target: `permission-request:${requestId}`, outcome: decision, requestId, resource: JSON.parse(row.resource) as unknown, decision, reason: reason ?? "user_resolved", remembered: remember, requested: true }, now));
     })();
     const resolved: PermissionResolution = { requestId, decision: decision === "allow" ? "allowed" : "denied", reason: reason ?? "user_resolved" };
     this.releaseRequest(row, resolved);
@@ -235,6 +235,19 @@ export class PermissionEngine {
     const changed = this.options.database.sqlite.prepare("UPDATE permission_requests SET status = 'expired', decision = 'deny', resolved_at = ? WHERE id = ? AND status = 'pending'").run(now, row.id).changes;
     if (changed === 0) return;
     this.options.eventBus.publish(permissionEvent("permission.resolved", row.workspace_id, row.room_id ?? undefined, row.run_id ?? undefined, row.agent_id ?? undefined, { requestId: row.id, resource: JSON.parse(row.resource) as unknown, decision: "deny", reason, remembered: false, requested: true }, now));
+    publishAuditEvent(this.options.eventBus, {
+      type: "permission.resolved",
+      workspaceId: row.workspace_id,
+      ...(row.room_id !== null ? { roomId: row.room_id } : {}),
+      ...(row.run_id !== null ? { runId: row.run_id } : {}),
+      ...(row.agent_id !== null ? { agentId: row.agent_id } : {}),
+      actor: { type: row.agent_id ? "agent" : "user", id: row.agent_id ?? "local" },
+      action: "resolve",
+      target: `permission-request:${row.id}`,
+      outcome: "deny",
+      createdAt: now,
+      payload: { requestId: row.id, reason }
+    });
     this.releaseRequest(row, { requestId: row.id, decision: "expired", reason });
   }
 
@@ -278,7 +291,7 @@ export class PermissionEngine {
   }
 
   private publishResolved(input: PermissionCheckInput, data: { readonly decision: PermissionAction; readonly reason: string; readonly requested: boolean; readonly requestId?: string; readonly matchedRuleId?: string }): void {
-    this.options.eventBus.publish(permissionEvent("permission.resolved", input.workspaceId, input.roomId, input.runId, input.agentId, { requestId: data.requestId, resource: input.resource, decision: data.decision, reason: data.reason, remembered: false, requested: data.requested, matchedRuleId: data.matchedRuleId }, this.now()));
+    this.options.eventBus.publish(permissionEvent("permission.resolved", input.workspaceId, input.roomId, input.runId, input.agentId, { audit: true, actor: { type: input.agentId ? "agent" : "user", id: input.agentId ?? "local" }, action: "resolve", target: `permission-${data.requested ? "request" : "rule"}:${data.requestId ?? data.matchedRuleId ?? "direct"}`, outcome: data.decision, requestId: data.requestId, resource: input.resource, decision: data.decision, reason: data.reason, remembered: false, requested: data.requested, matchedRuleId: data.matchedRuleId }, this.now()));
   }
 }
 
@@ -293,8 +306,8 @@ export function seedBuiltInPermissionProfiles(database: AgentHubDatabase, now = 
 export function createPermissionCommandHandlers(engine: PermissionEngine, database: AgentHubDatabase, eventBus: EventBus, now: () => number = Date.now): Partial<Record<Command["type"], CommandHandler>> {
   return {
     ResolvePermission: (command) => resolvePermission(engine, command),
-    CreatePermissionProfile: (command) => writeProfile(database, command, now, false),
-    PatchPermissionProfile: (command) => writeProfile(database, command, now, true),
+    CreatePermissionProfile: (command, meta) => writeProfile(database, eventBus, command, meta, now, false),
+    PatchPermissionProfile: (command, meta) => writeProfile(database, eventBus, command, meta, now, true),
     DeletePermissionRule: (command, meta) => deleteRule(database, eventBus, command, meta, now)
   };
 }
@@ -308,7 +321,7 @@ function resolvePermission(engine: PermissionEngine, command: Command): CommandR
   return { ok: true, data: resolved, emittedEvents: latestPermissionEvents(engineDatabase(engine), requestId) };
 }
 
-function writeProfile(database: AgentHubDatabase, command: Command, now: () => number, patch: boolean): CommandResult {
+function writeProfile(database: AgentHubDatabase, eventBus: EventBus, command: Command, meta: CommandMeta, now: () => number, patch: boolean): CommandResult {
   const id = stringField(command, "profileId") ?? stringField(command, "id") ?? (patch ? undefined : randomUUID());
   const name = stringField(command, "name");
   const payload = isObject(command.payload) ? command.payload : command;
@@ -321,6 +334,7 @@ function writeProfile(database: AgentHubDatabase, command: Command, now: () => n
   } else {
     database.sqlite.prepare("INSERT INTO permission_profiles (id, workspace_id, name, payload, created_at, updated_at) VALUES (?, NULL, ?, ?, ?, ?)").run(id, name, JSON.stringify(payload), timestamp, timestamp);
   }
+  eventBus.publish(permissionEvent("permission.resolved", "default-workspace", undefined, undefined, undefined, { audit: true, actor: meta.actor, action: patch ? "update" : "create", target: `permission-profile:${id}`, outcome: "saved", profileId: id, patch }, timestamp));
   return { ok: true, data: { profileId: id }, emittedEvents: [] };
 }
 
@@ -418,4 +432,37 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 function failed(code: "validation_failed" | "not_found" | "conflict", message: string): CommandResult {
   return { ok: false, error: { code, message } };
+}
+
+function publishAuditEvent(eventBus: EventBus, input: {
+  readonly type: string;
+  readonly workspaceId: string;
+  readonly roomId?: string;
+  readonly runId?: string;
+  readonly agentId?: string;
+  readonly actor: { readonly type: string; readonly id: string };
+  readonly action: string;
+  readonly target: string;
+  readonly outcome: string;
+  readonly createdAt: number;
+  readonly payload?: Record<string, unknown>;
+}): void {
+  eventBus.publish({
+    id: randomUUID(),
+    type: input.type as Parameters<EventBus["publish"]>[0]["type"],
+    schemaVersion: 1,
+    workspaceId: input.workspaceId,
+    ...(input.roomId !== undefined ? { roomId: input.roomId } : {}),
+    ...(input.runId !== undefined ? { runId: input.runId } : {}),
+    ...(input.agentId !== undefined ? { agentId: input.agentId } : {}),
+    payload: {
+      audit: true,
+      actor: input.actor,
+      action: input.action,
+      target: input.target,
+      outcome: input.outcome,
+      ...(input.payload ?? {})
+    },
+    createdAt: input.createdAt
+  });
 }

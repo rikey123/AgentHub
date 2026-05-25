@@ -10,19 +10,19 @@ type RoomListProps = {
 export function RoomList({ rooms, activeRoomId, onSelectRoom, onCreateRoom }: RoomListProps) {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div style={{ padding: 12 }}>
+      <div style={{ padding: "var(--ah-space-3)" }}>
         <button
           onClick={onCreateRoom}
           style={{
             width: "100%",
-            padding: "8px 12px",
-            borderRadius: 6,
-            border: "1px solid #d1d5db",
-            background: "#ffffff",
+            padding: "var(--ah-space-2) var(--ah-space-3)",
+            borderRadius: "var(--ah-radius-md)",
+            border: "1px solid var(--ah-border-strong)",
+            background: "var(--ah-bg-primary)",
             cursor: "pointer",
-            fontSize: 13,
+            fontSize: "var(--ah-font-size-md)",
             fontWeight: 500,
-            color: "#374151"
+            color: "var(--ah-text-secondary)"
           }}
         >
           + New Room
@@ -30,7 +30,7 @@ export function RoomList({ rooms, activeRoomId, onSelectRoom, onCreateRoom }: Ro
       </div>
       <div style={{ flex: 1, overflow: "auto" }}>
         {rooms.length === 0 && (
-          <div style={{ padding: 16, fontSize: 13, color: "#9ca3af", textAlign: "center" }}>No rooms yet</div>
+          <div style={{ padding: "var(--ah-space-4)", fontSize: "var(--ah-font-size-md)", color: "var(--ah-text-muted)", textAlign: "center" }}>No rooms yet</div>
         )}
         {rooms.map((room) => (
           <div
@@ -38,25 +38,28 @@ export function RoomList({ rooms, activeRoomId, onSelectRoom, onCreateRoom }: Ro
             onClick={() => onSelectRoom(room.id)}
             role="button"
             tabIndex={0}
-            onKeyDown={(e) => {
+            onKeyDown={(e: React.KeyboardEvent<HTMLDivElement>) => {
               if (e.key === "Enter" || e.key === " ") onSelectRoom(room.id);
             }}
             style={{
-              padding: "10px 12px",
+              padding: "var(--ah-space-3)",
               cursor: "pointer",
-              borderBottom: "1px solid #f3f4f6",
-              background: room.id === activeRoomId ? "#eff6ff" : "transparent",
+              borderBottom: "1px solid var(--ah-border-light)",
+              background: room.id === activeRoomId ? "var(--ah-accent-light)" : "transparent",
               display: "flex",
               alignItems: "center",
-              justifyContent: "space-between"
+              justifyContent: "space-between",
+              borderRadius: "var(--ah-radius-sm)",
+              margin: "0 var(--ah-space-2)",
+              transition: "background var(--ah-transition-fast)"
             }}
           >
             <div style={{ overflow: "hidden" }}>
               <div
                 style={{
-                  fontSize: 13,
+                  fontSize: "var(--ah-font-size-md)",
                   fontWeight: 500,
-                  color: "#111827",
+                  color: "var(--ah-text-primary)",
                   whiteSpace: "nowrap",
                   overflow: "hidden",
                   textOverflow: "ellipsis"
@@ -64,20 +67,21 @@ export function RoomList({ rooms, activeRoomId, onSelectRoom, onCreateRoom }: Ro
               >
                 {room.title}
               </div>
-              <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{room.mode}</div>
+              <div style={{ fontSize: "var(--ah-font-size-xs)", color: "var(--ah-text-muted)", marginTop: 2 }}>{room.mode}</div>
             </div>
             {room.unreadCount > 0 && (
               <span
                 style={{
-                  background: "#ef4444",
-                  color: "#ffffff",
-                  fontSize: 11,
+                  background: "var(--ah-danger)",
+                  color: "var(--ah-text-inverse)",
+                  fontSize: "var(--ah-font-size-xs)",
                   fontWeight: 600,
-                  padding: "2px 6px",
-                  borderRadius: 10,
+                  padding: "2px var(--ah-space-2)",
+                  borderRadius: "var(--ah-radius-full)",
                   minWidth: 18,
                   textAlign: "center"
                 }}
+                aria-label={`${room.unreadCount} unread messages`}
               >
                 {room.unreadCount}
               </span>

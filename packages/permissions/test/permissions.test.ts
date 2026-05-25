@@ -68,6 +68,13 @@ describe("PermissionEngine", () => {
     expect(currentDb().sqlite.prepare("SELECT action, remember FROM permission_rules").get()).toMatchObject({ action: "allow", remember: 1 });
     expect(currentEngine().check({ workspaceId: "ws_1", roomId: "room_1", agentId: "agent_1", profileId: "builder-strict", resource: { type: "file", path: "src/a.ts", operation: "write" } })).toMatchObject({ status: "allow", reason: "matched stored rule" });
     expect(currentDb().sqlite.prepare("SELECT type FROM events WHERE type LIKE 'permission.%' ORDER BY seq ASC").all().map((row) => (row as { type: string }).type)).toEqual(["permission.requested", "permission.resolved", "permission.resolved"]);
+    expect(currentDb().sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'permission.resolved' AND payload LIKE '%\"audit\":true%' ").get()).toMatchObject({ count: 2 });
+  });
+
+  it("records an audit event for sensitive file denies", () => {
+    const result = currentEngine().check({ workspaceId: "ws_1", profileId: "builder-loose", resource: { type: "file", path: ".env", operation: "read" } });
+    expect(result).toMatchObject({ status: "deny", reason: "Sensitive file pattern matched: .env" });
+    expect(currentDb().sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'permission.resolved' AND payload LIKE '%\"audit\":true%' ").get()).toMatchObject({ count: 1 });
   });
 
   it("serializes per-session requests and deduplicates pending idempotency keys", () => {

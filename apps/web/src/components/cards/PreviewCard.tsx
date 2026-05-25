@@ -11,29 +11,30 @@ export function PreviewCard({ card }: PreviewCardProps) {
   return (
     <div
       style={{
-        marginTop: 8,
-        padding: "12px 14px",
-        borderRadius: 8,
-        background: "#f0f9ff",
-        border: "1px solid #bae6fd"
+        marginTop: "var(--ah-space-2)",
+        padding: "var(--ah-space-3) var(--ah-space-4)",
+        borderRadius: "var(--ah-radius-lg)",
+        background: "var(--ah-accent-light)",
+        border: "1px solid var(--ah-accent)"
       }}
     >
-      <div style={{ fontSize: 12, fontWeight: 600, color: "#0369a1", marginBottom: 6 }}>Preview</div>
-      <div style={{ fontSize: 13, color: "#0c4a6e", marginBottom: 8 }}>{card.kind}</div>
+      <div style={{ fontSize: "var(--ah-font-size-xs)", fontWeight: 600, color: "var(--ah-accent-text)", marginBottom: "var(--ah-space-2)" }}>Preview</div>
+      <div style={{ fontSize: "var(--ah-font-size-md)", color: "var(--ah-accent-text)", marginBottom: "var(--ah-space-2)" }}>{card.kind}</div>
 
       {!fullscreen && (
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: "var(--ah-space-2)" }}>
           <button
             onClick={() => setFullscreen(true)}
             style={{
-              padding: "6px 12px",
-              borderRadius: 6,
-              border: "1px solid #d1d5db",
-              background: "#ffffff",
+              padding: "var(--ah-space-2) var(--ah-space-3)",
+              borderRadius: "var(--ah-radius-md)",
+              border: "1px solid var(--ah-border-strong)",
+              background: "var(--ah-bg-primary)",
               cursor: "pointer",
-              fontSize: 12,
-              color: "#374151"
+              fontSize: "var(--ah-font-size-sm)",
+              color: "var(--ah-text-secondary)"
             }}
+            aria-label="Open preview"
           >
             Open Preview
           </button>
@@ -41,25 +42,27 @@ export function PreviewCard({ card }: PreviewCardProps) {
       )}
 
       {fullscreen && (
-        <div style={{ marginTop: 8 }}>
+        <div style={{ marginTop: "var(--ah-space-2)" }}>
           <iframe
             src={card.url}
             sandbox="allow-scripts"
-            style={{ width: "100%", height: 300, border: "1px solid #bfdbfe", borderRadius: 6 }}
+            style={{ width: "100%", height: 300, border: "1px solid var(--ah-accent)", borderRadius: "var(--ah-radius-md)" }}
             title="Preview"
+            loading="lazy"
           />
           <button
             onClick={() => setFullscreen(false)}
             style={{
-              marginTop: 8,
-              padding: "6px 12px",
-              borderRadius: 6,
-              border: "1px solid #d1d5db",
-              background: "#ffffff",
+              marginTop: "var(--ah-space-2)",
+              padding: "var(--ah-space-2) var(--ah-space-3)",
+              borderRadius: "var(--ah-radius-md)",
+              border: "1px solid var(--ah-border-strong)",
+              background: "var(--ah-bg-primary)",
               cursor: "pointer",
-              fontSize: 12,
-              color: "#374151"
+              fontSize: "var(--ah-font-size-sm)",
+              color: "var(--ah-text-secondary)"
             }}
+            aria-label="Close preview"
           >
             Close Preview
           </button>

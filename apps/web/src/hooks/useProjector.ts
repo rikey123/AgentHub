@@ -6,6 +6,12 @@ import { ensureAuthSession } from "./useSdk.ts";
 
 type ProjectorListener = (state: ProjectorState) => void;
 
+type DeltaBatch = {
+  readonly messageId: string;
+  readonly deltas: string[];
+  readonly rafId: number | null;
+};
+
 class Projector {
   private rooms = new Map<string, RoomViewModel>();
   private listeners = new Set<ProjectorListener>();
@@ -13,12 +19,15 @@ class Projector {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectDelay = 1000;
   private maxReconnectDelay = 30000;
+  private reconnectAttempts = 0;
+  private maxReconnectAttempts = 3;
   private cursor = 0;
   private view: "main" | "detail" = "main";
   private roomId: string | undefined;
   private runId: string | undefined;
   private connectionStatus: ProjectorState["connectionStatus"] = "disconnected";
   private connectionError: string | undefined;
+  private deltaBatches = new Map<string, DeltaBatch>();
 
   connect(view: "main" | "detail", roomId?: string, runId?: string): void {
     this.disconnect();
@@ -27,6 +36,7 @@ class Projector {
     this.runId = runId;
     this.connectionStatus = "connecting";
     this.connectionError = undefined;
+    this.reconnectAttempts = 0;
     this.notify();
 
     const params = new URLSearchParams();
@@ -41,14 +51,12 @@ class Projector {
 
     es.onopen = () => {
       this.reconnectDelay = 1000;
+      this.reconnectAttempts = 0;
       this.connectionStatus = "connected";
       this.connectionError = undefined;
       this.notify();
     };
 
-    // The daemon sends named events (event: room.created, etc.).
-    // EventSource.onmessage only catches default events.
-    // We register listeners for all known event types from the registry.
     const handleMessage = (ev: MessageEvent) => {
       if (typeof ev.data === "string" && ev.data.startsWith("heartbeat")) return;
       try {
@@ -67,8 +75,14 @@ class Projector {
     }
 
     es.onerror = () => {
-      this.connectionStatus = "disconnected";
-      this.connectionError = "SSE connection lost";
+      this.reconnectAttempts++;
+      if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+        this.connectionStatus = "offline";
+        this.connectionError = "SSE connection lost - max retries exceeded";
+      } else {
+        this.connectionStatus = "reconnecting";
+        this.connectionError = "SSE connection lost";
+      }
       this.notify();
       this.scheduleReconnect();
     };
@@ -83,13 +97,22 @@ class Projector {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    // Flush any pending delta batches
+    for (const batch of this.deltaBatches.values()) {
+      if (batch.rafId !== null) {
+        cancelAnimationFrame(batch.rafId);
+      }
+    }
+    this.deltaBatches.clear();
   }
 
   private scheduleReconnect(): void {
     if (this.reconnectTimer) return;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
-      this.connect(this.view, this.roomId, this.runId);
+      if (this.connectionStatus !== "offline") {
+        this.connect(this.view, this.roomId, this.runId);
+      }
     }, this.reconnectDelay);
     this.reconnectDelay = Math.min(this.reconnectDelay * 2, this.maxReconnectDelay);
   }
@@ -118,6 +141,43 @@ class Projector {
       (state as Record<string, unknown>).connectionError = this.connectionError;
     }
     return state;
+  }
+
+  private flushDeltaBatch(messageId: string): void {
+    const batch = this.deltaBatches.get(messageId);
+    if (!batch || batch.deltas.length === 0) return;
+    const combinedText = batch.deltas.join("");
+    this.deltaBatches.delete(messageId);
+
+    for (const room of this.rooms.values()) {
+      const msgIndex = room.messages.findIndex((m) => m.id === messageId);
+      if (msgIndex >= 0) {
+        const updatedMessages = [...room.messages];
+        updatedMessages[msgIndex] = {
+          ...updatedMessages[msgIndex]!,
+          text: updatedMessages[msgIndex]!.text + combinedText
+        };
+        const updatedRoom = { ...room, messages: updatedMessages };
+        this.rooms.set(room.id, updatedRoom);
+        this.notify();
+        break;
+      }
+    }
+  }
+
+  private scheduleDeltaFlush(messageId: string): void {
+    const batch = this.deltaBatches.get(messageId);
+    if (!batch) return;
+    if (batch.rafId !== null) {
+      cancelAnimationFrame(batch.rafId);
+    }
+    const id = requestAnimationFrame(() => {
+      const current = this.deltaBatches.get(messageId);
+      if (current && current.rafId === id) {
+        this.flushDeltaBatch(messageId);
+      }
+    });
+    this.deltaBatches.set(messageId, { ...batch, rafId: id });
   }
 
   apply(event: EventEnvelope): void {
@@ -180,8 +240,23 @@ class Projector {
         }
         break;
       }
+      case "message.part.delta": {
+        if (payload && typeof payload.messageId === "string" && typeof payload.text === "string") {
+          const messageId = payload.messageId;
+          const existingBatch = this.deltaBatches.get(messageId);
+          if (existingBatch) {
+            existingBatch.deltas.push(payload.text);
+          } else {
+            this.deltaBatches.set(messageId, { messageId, deltas: [payload.text], rafId: null });
+          }
+          this.scheduleDeltaFlush(messageId);
+        }
+        break;
+      }
       case "message.completed": {
         if (payload && typeof payload.messageId === "string") {
+          // Flush any pending deltas for this message first
+          this.flushDeltaBatch(payload.messageId);
           room = {
             ...room,
             messages: room.messages.map((m) =>
@@ -197,10 +272,10 @@ class Projector {
         if (payload) {
           const brief: BriefViewModel = {
             kind: (typeof payload.kind === "string" ? payload.kind : "run_completed") as BriefViewModel["kind"],
-            runId: typeof payload.runId === "string" ? payload.runId : "",
+            runId: typeof event.runId === "string" ? event.runId : typeof payload.runId === "string" ? payload.runId : "",
             agentId: event.agentId ?? "",
             agentName: this.agentName(room, event.agentId ?? "") ?? "Agent",
-            summary: typeof payload.summary === "string" ? payload.summary : "",
+            summary: typeof payload.text === "string" ? payload.text : typeof payload.summary === "string" ? payload.summary : "",
             artifactCount: typeof payload.artifactCount === "number" ? payload.artifactCount : undefined,
             cost: typeof payload.cost === "object" && payload.cost !== null ? (payload.cost as { tokens: number; usd?: number | undefined }) : undefined,
             failureReason: typeof payload.failureReason === "string" ? payload.failureReason : undefined,
@@ -214,16 +289,25 @@ class Projector {
       }
       case "pending_turn.created": {
         if (payload && typeof payload.messageId === "string") {
+          const pendingTurnId = typeof payload.pendingTurnId === "string" ? payload.pendingTurnId : payload.messageId;
           const existing = room.messages.find((m) => m.id === payload.messageId);
           if (existing) {
+            const updatedMessage = {
+              ...existing,
+              pendingTurnId,
+              pendingTurnStatus: "queued" as const,
+              pendingTurnPosition: room.pendingTurns.length + 1
+            };
             room = {
               ...room,
               messages: room.messages.map((m) =>
                 m.id === payload.messageId
-                  ? { ...m, pendingTurnStatus: "queued", pendingTurnPosition: room.pendingTurns.length + 1 }
+                  ? updatedMessage
                   : m
               ),
-              pendingTurns: [...room.pendingTurns, existing]
+              pendingTurns: room.pendingTurns.some((m) => m.pendingTurnId === pendingTurnId)
+                ? room.pendingTurns.map((m) => (m.pendingTurnId === pendingTurnId ? updatedMessage : m))
+                : [...room.pendingTurns, updatedMessage]
             };
             this.rooms.set(roomId, room);
             changed = true;
@@ -465,6 +549,136 @@ class Projector {
         }
         break;
       }
+      case "mailbox.delivery.failed": {
+        if (payload) {
+          // Store mailbox failures as a special message or system card
+          // For now, append a system message with a special marker
+          const failureMessage: MessageViewModel = {
+            id: typeof payload.messageId === "string" ? payload.messageId : `mailbox-fail-${Date.now()}`,
+            roomId,
+            senderType: "system",
+            senderId: "system",
+            senderName: "System",
+            role: "system",
+            status: "completed",
+            text: `Delivery failed: ${typeof payload.reason === "string" ? payload.reason : "unknown"}`,
+            parts: [{
+              type: "card",
+              seq: 0,
+              card: {
+                type: "intervention",
+                interventionId: `mailbox-${Date.now()}`,
+                agentId: event.agentId ?? "",
+                reason: typeof payload.reason === "string" ? payload.reason : "Delivery failed",
+                priority: "high",
+                actions: ["approve", "ignore"],
+                status: "pending_user_decision"
+              }
+            }],
+            createdAt: event.createdAt
+          };
+          room = { ...room, messages: [...room.messages, failureMessage] };
+          this.rooms.set(roomId, room);
+          changed = true;
+        }
+        break;
+      }
+      case "subagent.started": {
+        if (payload && typeof payload.subagentId === "string") {
+          // Add subagent info to runs or messages as a note
+          const subagentRun: RunViewModel = {
+            id: typeof payload.runId === "string" ? payload.runId : payload.subagentId,
+            agentId: event.agentId ?? "",
+            agentName: this.agentName(room, event.agentId ?? "") ?? "Subagent",
+            status: "starting",
+            startedAt: event.createdAt
+          };
+          const existingIndex = room.runs.findIndex((r) => r.id === subagentRun.id);
+          if (existingIndex >= 0) {
+            const updated = [...room.runs];
+            updated[existingIndex] = { ...updated[existingIndex]!, status: "starting", startedAt: event.createdAt };
+            room = { ...room, runs: updated };
+          } else {
+            room = { ...room, runs: [...room.runs, subagentRun] };
+          }
+          this.rooms.set(roomId, room);
+          changed = true;
+        }
+        break;
+      }
+      case "subagent.completed": {
+        if (payload && typeof payload.subagentId === "string") {
+          const runId = typeof payload.runId === "string" ? payload.runId : payload.subagentId;
+          const existingIndex = room.runs.findIndex((r) => r.id === runId);
+          if (existingIndex >= 0) {
+            const updated = [...room.runs];
+            updated[existingIndex] = {
+              ...updated[existingIndex]!,
+              status: "completed",
+              endedAt: event.createdAt,
+              cost: typeof payload.cost === "object" && payload.cost !== null ? (payload.cost as RunViewModel["cost"]) : undefined
+            };
+            room = { ...room, runs: updated };
+            this.rooms.set(roomId, room);
+            changed = true;
+          }
+        }
+        break;
+      }
+      case "artifact.diff.detected": {
+        if (payload && typeof payload.artifactId === "string") {
+          // Add a diff card to messages
+          const diffMessage: MessageViewModel = {
+            id: `artifact-${payload.artifactId}`,
+            roomId,
+            senderType: "system",
+            senderId: "system",
+            senderName: "System",
+            role: "system",
+            status: "completed",
+            text: "Artifact diff detected",
+            parts: [{
+              type: "card",
+              seq: 0,
+              card: {
+                type: "diff",
+                artifactId: payload.artifactId,
+                files: Array.isArray(payload.files) ? payload.files : [],
+                applyStatus: "draft"
+              }
+            }],
+            createdAt: event.createdAt
+          };
+          room = { ...room, messages: [...room.messages, diffMessage] };
+          this.rooms.set(roomId, room);
+          changed = true;
+        }
+        break;
+      }
+      case "context.snapshot": {
+        if (payload && typeof payload.contextId === "string") {
+          const existingIndex = room.contextItems.findIndex((c) => c.id === payload.contextId);
+          const item = {
+            id: payload.contextId,
+            title: typeof payload.title === "string" ? payload.title : "Context Snapshot",
+            content: typeof payload.content === "string" ? payload.content : "",
+            status: (typeof payload.status === "string" ? payload.status : "draft") as "draft" | "confirmed" | "deprecated" | "disputed",
+            scope: typeof payload.scope === "string" ? payload.scope : "conversation",
+            pinned: typeof payload.pinned === "boolean" ? payload.pinned : false,
+            runId: typeof payload.runId === "string" ? payload.runId : undefined
+          };
+          if (existingIndex >= 0) {
+            const updated = [...room.contextItems];
+            updated[existingIndex] = item;
+            room = { ...room, contextItems: updated };
+          } else {
+            room = { ...room, contextItems: [...room.contextItems, item] };
+          }
+          this.rooms.set(roomId, room);
+          changed = true;
+        }
+        break;
+      }
     }
 
     if (changed) {
@@ -478,6 +692,10 @@ class Projector {
 }
 
 const globalProjector = new Projector();
+
+if (typeof window !== "undefined") {
+  (window as unknown as Record<string, unknown>).__PROJECTOR__ = globalProjector;
+}
 
 export function useProjector(view: "main" | "detail", roomId?: string, runId?: string): ProjectorState {
   const [state, setState] = useState<ProjectorState>({
