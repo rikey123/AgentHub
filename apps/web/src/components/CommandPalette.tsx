@@ -59,7 +59,8 @@ export function CommandPalette({
           type: "room",
           label: room.title,
           subtitle: `${room.mode} · ${room.messages.length} messages`,
-          onSelect: () => onSelectRoom(room.id)
+          onSelect: () => onSelectRoom(room.id),
+          shortcut: "↵"
         });
       }
     }
@@ -74,7 +75,8 @@ export function CommandPalette({
           type: "run",
           label: `Run: ${run.agentName}`,
           subtitle: `${run.status} · ${run.id.slice(0, 8)}`,
-          onSelect: () => onOpenRunDetail(run.id)
+          onSelect: () => onOpenRunDetail(run.id),
+          shortcut: "↵"
         });
       }
     }
@@ -86,35 +88,48 @@ export function CommandPalette({
         type: "action",
         label: "Switch to Light Theme",
         subtitle: `Current: ${currentTheme}`,
-        onSelect: () => onSwitchTheme("light")
+        onSelect: () => onSwitchTheme("light"),
+        shortcut: "↵"
       },
       {
         id: "action-theme-dark",
         type: "action",
         label: "Switch to Dark Theme",
         subtitle: `Current: ${currentTheme}`,
-        onSelect: () => onSwitchTheme("dark")
+        onSelect: () => onSwitchTheme("dark"),
+        shortcut: "↵"
       },
       {
         id: "action-theme-auto",
         type: "action",
         label: "Switch to Auto Theme",
         subtitle: `Current: ${currentTheme}`,
-        onSelect: () => onSwitchTheme("auto")
+        onSelect: () => onSwitchTheme("auto"),
+        shortcut: "↵"
       },
       {
         id: "action-density-cozy",
         type: "action",
         label: "Switch to Cozy Density",
         subtitle: `Current: ${currentDensity}`,
-        onSelect: () => onSwitchDensity("cozy")
+        onSelect: () => onSwitchDensity("cozy"),
+        shortcut: "↵"
       },
       {
         id: "action-density-compact",
         type: "action",
         label: "Switch to Compact Density",
         subtitle: `Current: ${currentDensity}`,
-        onSelect: () => onSwitchDensity("compact")
+        onSelect: () => onSwitchDensity("compact"),
+        shortcut: "↵"
+      },
+      {
+        id: "action-close",
+        type: "action",
+        label: "Close command palette",
+        subtitle: "Cancel and return to the room",
+        onSelect: onClose,
+        shortcut: "Esc"
       }
     ];
 
@@ -125,7 +140,7 @@ export function CommandPalette({
     }
 
     return result;
-  }, [rooms, activeRoomId, query, onSelectRoom, onOpenRunDetail, onSwitchTheme, onSwitchDensity, currentTheme, currentDensity]);
+  }, [rooms, activeRoomId, query, onSelectRoom, onOpenRunDetail, onSwitchTheme, onSwitchDensity, onClose, currentTheme, currentDensity]);
 
   useEffect(() => {
     setSelectedIndex(0);
@@ -242,7 +257,7 @@ export function CommandPalette({
           }}
         >
           <span><kbd>↑↓</kbd> Navigate</span>
-          <span><kbd>Enter</kbd> Select</span>
+          <span><kbd>↵</kbd> Select</span>
           <span><kbd>Esc</kbd> Close</span>
         </div>
       </div>

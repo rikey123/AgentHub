@@ -53,6 +53,8 @@ export function ChatStream({ room, onOpenRunDetail, onCancelPendingTurn, onEditP
   const csrfFetch = useCsrfFetch();
   const isOffline = connectionStatus === "offline";
   const shouldVirtualize = room.messages.length >= VIRTUALIZATION_THRESHOLD;
+  const hasActiveRun = room.runs.some((run) => run.status === "running" || run.status === "starting" || run.status === "queued");
+  const activeRunAgentName = room.runs.find((run) => run.status === "running" || run.status === "starting")?.agentName ?? "Agent";
 
   const virtualizerOptions = {
     count: room.messages.length,
@@ -195,6 +197,35 @@ export function ChatStream({ room, onOpenRunDetail, onCancelPendingTurn, onEditP
       {connectionStatus === "offline" && (
         <div className="ah-banner ah-banner--offline" role="alert" aria-live="assertive">
           <span>Offline - check daemon connection</span>
+        </div>
+      )}
+      {hasActiveRun && (
+        <div
+          style={{
+            background: "var(--ah-bg-info)",
+            color: "var(--ah-text-info)",
+            fontSize: "var(--ah-font-size-sm)",
+            padding: "0 var(--ah-space-4)",
+            display: "flex",
+            alignItems: "center",
+            gap: "var(--ah-space-2)",
+            height: "var(--ah-space-7)"
+          }}
+          role="status"
+          aria-live="polite"
+        >
+          <span
+            className="ah-pulse-dot"
+            style={{
+              width: "var(--ah-space-2)",
+              height: "var(--ah-space-2)",
+              borderRadius: "var(--ah-radius-full)",
+              background: "var(--ah-text-info)",
+              flexShrink: 0
+            }}
+            aria-hidden="true"
+          />
+          <span>⚡ {activeRunAgentName} is working...</span>
         </div>
       )}
       <div

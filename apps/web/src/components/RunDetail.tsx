@@ -39,6 +39,9 @@ export function RunDetail({ roomId, runId, onClose }: RunDetailProps) {
         }}
       >
         <div>
+          <div style={{ fontSize: "var(--ah-font-size-xs)", color: "var(--ah-text-muted)", marginBottom: "var(--ah-space-1)" }}>
+            {room?.title ?? "Room"} › Run Detail
+          </div>
           <div style={{ fontSize: "var(--ah-font-size-base)", fontWeight: 600, color: "var(--ah-text-primary)" }}>Run Detail</div>
           <div style={{ fontSize: "var(--ah-font-size-sm)", color: "var(--ah-text-muted)", marginTop: 2 }}>
             {run?.agentName ?? "Unknown"} {run?.status && <StatusBadge status={run.status} />}

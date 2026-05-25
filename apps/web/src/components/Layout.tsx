@@ -169,11 +169,14 @@ export function Layout({
                 cursor: "pointer",
                 padding: "var(--ah-space-1)",
                 borderRadius: "var(--ah-radius-sm)",
-                color: "var(--ah-text-muted)"
+                color: "var(--ah-text-muted)",
+                fontSize: "var(--ah-font-size-lg)",
+                fontWeight: 600
               }}
               aria-label={leftCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              title={leftCollapsed ? "Expand sidebar" : "Collapse sidebar"}
             >
-              {leftCollapsed ? ">" : "<"}
+              {leftCollapsed ? "›" : "‹"}
             </button>
           </div>
           <div style={{ flex: 1, overflow: "auto" }}>{leftPanel}</div>
@@ -206,11 +209,14 @@ export function Layout({
                 cursor: "pointer",
                 padding: "var(--ah-space-1)",
                 borderRadius: "var(--ah-radius-sm)",
-                color: "var(--ah-text-muted)"
+                color: "var(--ah-text-muted)",
+                fontSize: "var(--ah-font-size-lg)",
+                fontWeight: 600
               }}
               aria-label={rightCollapsed ? "Expand panel" : "Collapse panel"}
+              title={rightCollapsed ? "Expand panel" : "Collapse panel"}
             >
-              {rightCollapsed ? "<" : ">"}
+              {rightCollapsed ? "‹" : "›"}
             </button>
           </div>
           <div style={{ flex: 1, overflow: "auto" }}>{rightPanel}</div>
