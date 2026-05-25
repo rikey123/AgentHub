@@ -16,11 +16,11 @@
 - New file for layout contract, icon policy, selector policy, typography policy.
 - Import after tokens.css in main.tsx.
 - Contains: .ah-skip-link, .ah-rail-item, .ah-workbench-panel, body/heading/code font rules.
-- Rebuilt pps/web/src/components/Layout.tsx into a four-column shell: rooms/groups, feature rail, chat canvas, and right workbench.
+- Rebuilt apps/web/src/components/Layout.tsx into a four-column shell: rooms/groups, feature rail, chat canvas, and right workbench.
 - Preserved the App.tsx Layout contract so existing panel/data flow stays straightforward; the left/right collapse props still drive the outer columns.
-- Added a skip link, ARIA landmarks, and a ole=status connection indicator so the shell is keyboard- and screen-reader-friendly.
+- Added a skip link, ARIA landmarks, and a role=status connection indicator so the shell is keyboard- and screen-reader-friendly.
 - Replaced emoji UI icons with inline SVG glyphs to match the no-emoji policy in the visual system.
-- Theme handling now treats uto as a first-class state in the header toggle without assuming it can be flipped directly to another fixed theme.
+- Theme handling now treats auto as a first-class state in the header toggle without assuming it can be flipped directly to another fixed theme.
 - The reserved rail items are visual placeholders only, so future feature wiring can happen without changing shell structure.
 - Redesigned HomeView as a dashboard-style workbench entry with summary stats, guidance cards, and stable create-room selectors while preserving room selection flow.
 - Reworked RoomList into a persistent collaboration rail using room-item data-testid hooks so room selection tests no longer depend on label text.
@@ -51,4 +51,5 @@
 ### Verification note
 - Repo-wide typecheck/lint/build initially failed because the worktree was missing installed dependencies; installing the workspace is required before those checks can pass.
 
-- T11 cleanup: reverted .sisyphus/evidence/v05-chatroom-complete/task-8-10-a11y/axe.json because Playwright axe evidence is unrelated to the bounded polish task and should not be churned by this branch. Kept token contrast adjustments only for WCAG failures found by apps/web/e2e/a11y.spec.ts.
+- 2026-05-25: T11 cleanup removed unrelated axe JSON churn and kept only the polish/a11y changes that addressed actual WCAG contrast and responsive issues.
+- 2026-05-25: The polish/a11y pass kept the shell responsive without horizontal scroll at target breakpoints while avoiding new product behavior.
