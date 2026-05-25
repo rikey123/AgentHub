@@ -9,10 +9,11 @@ type SidePanelProps = {
 };
 
 export function SidePanel({ room, activeTab, onChangeTab, workspaceId }: SidePanelProps) {
+  const activeContextCount = room.contextItems.filter((c) => c.status !== "deprecated").length;
   const tabs: { key: SidePanelProps["activeTab"]; label: string }[] = [
-    { key: "context", label: "Context" },
-    { key: "tasks", label: "Tasks" },
-    { key: "members", label: "Members" },
+    { key: "context", label: `Context${activeContextCount > 0 ? ` (${activeContextCount})` : ""}` },
+    { key: "tasks", label: `Tasks${room.tasks.length > 0 ? ` (${room.tasks.length})` : ""}` },
+    { key: "members", label: `Members${room.participants.length > 0 ? ` (${room.participants.length})` : ""}` },
     { key: "debug", label: "Debug" },
     { key: "cost", label: "Cost" }
   ];
@@ -88,7 +89,7 @@ function ContextTab({ room }: { readonly room: RoomViewModel }) {
           </div>
         </details>
       )}
-      {room.contextItems.length === 0 && <div style={{ fontSize: "var(--ah-font-size-md)", color: "var(--ah-text-muted)" }}>No context items</div>}
+      {room.contextItems.length === 0 && <div style={{ fontSize: "var(--ah-font-size-md)", color: "var(--ah-text-muted)" }}>No context items yet. Confirmed context from runs will appear here.</div>}
     </div>
   );
 }
@@ -126,7 +127,7 @@ function TasksTab({ room }: { readonly room: RoomViewModel }) {
           {(byStatus[status] ?? []).length === 0 && <div style={{ fontSize: "var(--ah-font-size-sm)", color: "var(--ah-border-strong)" }}>None</div>}
         </div>
       ))}
-      {room.tasks.length === 0 && <div style={{ fontSize: "var(--ah-font-size-md)", color: "var(--ah-text-muted)" }}>No tasks</div>}
+      {room.tasks.length === 0 && <div style={{ fontSize: "var(--ah-font-size-md)", color: "var(--ah-text-muted)" }}>No tasks yet. Runs can create tasks automatically.</div>}
     </div>
   );
 }
@@ -160,7 +161,7 @@ function MembersTab({ room }: { readonly room: RoomViewModel }) {
           </div>
         </div>
       ))}
-      {room.participants.length === 0 && <div style={{ fontSize: "var(--ah-font-size-md)", color: "var(--ah-text-muted)" }}>No participants</div>}
+      {room.participants.length === 0 && <div style={{ fontSize: "var(--ah-font-size-md)", color: "var(--ah-text-muted)" }}>No agents in this room yet.</div>}
     </div>
   );
 }
