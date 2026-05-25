@@ -155,3 +155,8 @@
 - Evidence caveat: P1-1 / P1-2 / P1-3 completion is recorded in plan status, issue notes, git history, and verification commands, but dedicated remediation evidence files are still absent. The closeout PR therefore requires independent review before merge.
 - Final status after closeout review: MVP code implementation and merge validation are complete. OpenSpec archival remains a separate, explicit follow-up operation.
 
+## 2026-05-25 Phase 2A homepage + header
+
+- `rg` is still unavailable in this shell, so the repository’s fast glob/search helpers fail; direct file reads were the reliable way to inspect existing UI patterns.
+- The working tree already contained unrelated tracked edits in `.sisyphus/boulder.json`, `apps/web/vite.config.ts`, `package.json`, and `pnpm-lock.yaml`. They were intentionally left out of the feature commits.
+

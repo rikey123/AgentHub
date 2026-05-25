@@ -191,6 +191,12 @@ ot_implemented result rather than a thrown HTTP route branch, preserving the thi
 - ACP process supervision needs persistent stdout/stderr line splitters plus an async child error handler; spawn ENOENT is emitted after spawn() returns on Windows/Node and must be converted into failed session state/stderr tail rather than an unhandled exception.
 - The requested plural pnpm filters (@agenthub/adapters-*) do not match workspace package names; actual verified packages remain @agenthub/adapter-acp-base and @agenthub/adapter-claude-code.
 
+## 2026-05-25 Phase 2A homepage + header
+
+- The existing AgentHub web UI already has the right token backbone in `apps/web/src/styles/tokens.css`, so the new homepage/header could stay fully token-driven and match the current panel styling.
+- `RoomViewModel` already exposes everything needed for the dashboard cards: room title, mode, participants, briefs, runs, and unread count, so the homepage does not need a new projection shape.
+- The header required a layout-level height token and the run-detail overlay needed to be offset beneath it; otherwise the slide-over would cover the new app chrome.
+
 ## 2026-05-23 P0-3 ACP crash propagation fix
 
 - ACP process supervision failures must cross the adapter boundary, not only mutate AcpAdapterSession.state. Use a single onSessionFailed hook for child error, child exit, and liveness timeout, and let ClaudeCodeACPAdapter translate that hook into AdapterBridge session.crashed so RunLifecycleService remains the durable terminal run-state writer.
@@ -234,3 +240,5 @@ Correction: Missing Origin is no longer an admin signal. authenticateBrowserRequ
 
 
 - F4 scope fidelity check: CommandType excludes StartRun; Codex/LangGraph/A2A adapters are deterministic 501 stubs; daemon routes remain local-first with no cloud/multi-user routes. Background scan's tasks-schema Kanban concern appears to be core V0.5 task support rather than task-board UI scope creep.
+
+- Phase 2B frontend density work: RoomList and SidePanel use inline React styles with existing --ah-* tokens; active run pulse can reuse .ah-pulse-dot from apps/web/src/styles/tokens.css instead of adding another keyframe.
