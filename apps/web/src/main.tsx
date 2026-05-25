@@ -2,6 +2,8 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.tsx";
 import { initThemeOnMount } from "./hooks/useTheme.ts";
+import "./styles/tokens.css";
+import "./styles/visual-system.css";
 
 initThemeOnMount();
 

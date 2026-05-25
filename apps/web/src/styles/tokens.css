@@ -2,49 +2,51 @@
 /* §8.1 CSS tokenization: all spacing/radius/font-size/line-height/color */
 
 /* ============================================
-   BASE VARIABLES (light + cozy defaults)
+   BASE VARIABLES (light enterprise + cozy defaults)
    ============================================ */
 
 :root {
   /* --- Colors (light theme) --- */
-  --ah-bg-primary: #ffffff;
-  --ah-bg-elevated: #f9fafb;
-  --ah-bg-secondary: #f3f4f6;
-  --ah-bg-tertiary: #e5e7eb;
-  --ah-bg-inverse: #111827;
+  color-scheme: light;
+
+  --ah-bg-primary: #f8fafc;
+  --ah-bg-elevated: #ffffff;
+  --ah-bg-secondary: #f1f5f9;
+  --ah-bg-tertiary: #e2e8f0;
+  --ah-bg-inverse: #0f172a;
   --ah-bg-danger: #fee2e2;
   --ah-bg-warning: #fef3c7;
-  --ah-bg-success: #d1fae5;
+  --ah-bg-success: #dcfce7;
   --ah-bg-info: #dbeafe;
 
-  --ah-text-primary: #111827;
-  --ah-text-secondary: #374151;
-  --ah-text-muted: #4b5563;
-  --ah-text-inverse: #f9fafb;
+  --ah-text-primary: #0f172a;
+  --ah-text-secondary: #334155;
+  --ah-text-muted: #64748b;
+  --ah-text-inverse: #f8fafc;
   --ah-text-danger: #991b1b;
   --ah-text-warning: #92400e;
   --ah-text-success: #065f46;
   --ah-text-info: #1e40af;
 
-  --ah-border: #e5e7eb;
-  --ah-border-light: #f3f4f6;
-  --ah-border-strong: #d1d5db;
+  --ah-border: #e2e8f0;
+  --ah-border-light: #f1f5f9;
+  --ah-border-strong: #cbd5e1;
 
-  --ah-accent: #1d4ed8;
-  --ah-accent-hover: #1e40af;
+  --ah-accent: #2563eb;
+  --ah-accent-hover: #1d4ed8;
   --ah-accent-light: #dbeafe;
   --ah-accent-text: #1e3a8a;
 
-  --ah-danger: #c53030;
+  --ah-danger: #dc2626;
   --ah-danger-hover: #b91c1c;
   --ah-danger-light: #fee2e2;
 
-  --ah-success: #047857;
-  --ah-success-hover: #065f46;
-  --ah-success-light: #d1fae5;
+  --ah-success: #059669;
+  --ah-success-hover: #047857;
+  --ah-success-light: #dcfce7;
 
-  --ah-warning: #b45309;
-  --ah-warning-hover: #92400e;
+  --ah-warning: #d97706;
+  --ah-warning-hover: #b45309;
   --ah-warning-light: #fef3c7;
 
   /* --- Spacing (cozy default, 4px base) --- */
@@ -58,6 +60,10 @@
   --ah-space-8: 48px;
 
   /* --- Typography --- */
+  --ah-font-heading: 'Fira Code', 'Cascadia Code', 'JetBrains Mono', ui-monospace, monospace;
+  --ah-font-body: 'Fira Sans', 'Inter', system-ui, -apple-system, sans-serif;
+  --ah-font-mono: 'Fira Code', 'Cascadia Code', ui-monospace, monospace;
+
   --ah-font-size-xs: 11px;
   --ah-font-size-sm: 12px;
   --ah-font-size-md: 13px;
@@ -77,10 +83,10 @@
   --ah-radius-full: 9999px;
 
   /* --- Shadows --- */
-  --ah-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --ah-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
-  --ah-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
-  --ah-shadow-overlay: -4px 0 24px rgba(0, 0, 0, 0.08);
+  --ah-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --ah-shadow-md: 0 8px 20px rgba(15, 23, 42, 0.08);
+  --ah-shadow-lg: 0 18px 48px rgba(15, 23, 42, 0.12);
+  --ah-shadow-overlay: -12px 0 40px rgba(15, 23, 42, 0.14);
 
   /* --- Transitions --- */
   --ah-transition-fast: 0.1s ease;
@@ -88,14 +94,20 @@
   --ah-transition-slow: 0.3s ease;
 
   /* --- Focus ring --- */
-  --ah-focus-ring: 0 0 0 2px var(--ah-accent-light), 0 0 0 4px var(--ah-accent);
+  --ah-focus-ring: 0 0 0 2px #bfdbfe, 0 0 0 4px var(--ah-accent);
 
-  /* --- Sidebar widths --- */
+  /* --- Layout widths --- */
   --ah-app-header-height: 48px;
   --ah-sidebar-left-width: 240px;
   --ah-sidebar-left-collapsed: 48px;
   --ah-sidebar-right-width: 280px;
   --ah-sidebar-right-collapsed: 48px;
+  --ah-col-rooms-width: 240px;
+  --ah-col-rooms-collapsed: 0px;
+  --ah-col-rail-width: 56px;
+  --ah-col-rail-expanded: 200px;
+  --ah-col-right-width: 320px;
+  --ah-col-right-collapsed: 0px;
   --ah-home-card-min-width: 240px;
   --ah-home-card-min-height: 160px;
   --ah-home-empty-max-width: 512px;
@@ -112,52 +124,54 @@
    DARK THEME
    ============================================ */
 html[data-theme="dark"] {
-  --ah-bg-primary: #111827;
-  --ah-bg-elevated: #1f2937;
-  --ah-bg-secondary: #374151;
-  --ah-bg-tertiary: #4b5563;
-  --ah-bg-inverse: #f9fafb;
+  color-scheme: dark;
+
+  --ah-bg-primary: #020617;
+  --ah-bg-elevated: #0f172a;
+  --ah-bg-secondary: #1e293b;
+  --ah-bg-tertiary: #334155;
+  --ah-bg-inverse: #f8fafc;
   --ah-bg-danger: #450a0a;
   --ah-bg-warning: #451a03;
-  --ah-bg-success: #064e3b;
-  --ah-bg-info: #1e3a8a;
+  --ah-bg-success: #052e16;
+  --ah-bg-info: #172554;
 
-  --ah-text-primary: #f9fafb;
-  --ah-text-secondary: #e5e7eb;
-  --ah-text-muted: #9ca3af;
-  --ah-text-inverse: #111827;
+  --ah-text-primary: #f8fafc;
+  --ah-text-secondary: #cbd5e1;
+  --ah-text-muted: #94a3b8;
+  --ah-text-inverse: #020617;
   --ah-text-danger: #fca5a5;
   --ah-text-warning: #fcd34d;
-  --ah-text-success: #6ee7b7;
+  --ah-text-success: #86efac;
   --ah-text-info: #93c5fd;
 
-  --ah-border: #374151;
-  --ah-border-light: #1f2937;
-  --ah-border-strong: #4b5563;
+  --ah-border: #1e293b;
+  --ah-border-light: #0f172a;
+  --ah-border-strong: #334155;
 
-  --ah-accent: #60a5fa;
-  --ah-accent-hover: #3b82f6;
+  --ah-accent: #3b82f6;
+  --ah-accent-hover: #60a5fa;
   --ah-accent-light: #1e3a8a;
-  --ah-accent-text: #93c5fd;
+  --ah-accent-text: #bfdbfe;
 
   --ah-danger: #f87171;
   --ah-danger-hover: #ef4444;
   --ah-danger-light: #450a0a;
 
-  --ah-success: #34d399;
-  --ah-success-hover: #10b981;
-  --ah-success-light: #064e3b;
+  --ah-success: #22c55e;
+  --ah-success-hover: #4ade80;
+  --ah-success-light: #052e16;
 
-  --ah-warning: #fbbf24;
-  --ah-warning-hover: #f59e0b;
+  --ah-warning: #f59e0b;
+  --ah-warning-hover: #fbbf24;
   --ah-warning-light: #451a03;
 
-  --ah-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --ah-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
-  --ah-shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
-  --ah-shadow-overlay: -4px 0 24px rgba(0, 0, 0, 0.3);
+  --ah-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --ah-shadow-md: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --ah-shadow-lg: 0 18px 56px rgba(0, 0, 0, 0.65);
+  --ah-shadow-overlay: -12px 0 48px rgba(0, 0, 0, 0.55);
 
-  --ah-focus-ring: 0 0 0 2px var(--ah-accent-light), 0 0 0 4px var(--ah-accent);
+  --ah-focus-ring: 0 0 0 2px #1e3a8a, 0 0 0 4px var(--ah-accent);
 }
 
 /* ============================================

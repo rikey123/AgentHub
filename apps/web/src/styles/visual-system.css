@@ -1,0 +1,139 @@
+/* AgentHub Visual System — Four-Column Workbench */
+/* This file documents layout contracts and global policies. */
+/* Import this AFTER tokens.css in main.tsx */
+
+/* ============================================
+   FOUR-COLUMN LAYOUT CONTRACT
+   ============================================
+   Column 1: Room/Group List  — var(--ah-col-rooms-width)
+   Column 2: Feature Rail     — var(--ah-col-rail-width) / var(--ah-col-rail-expanded)
+   Column 3: Chat Canvas      — flex: 1 (fills remaining space)
+   Column 4: Right Workbench  — var(--ah-col-right-width)
+   Overlay:  Run Detail       — position: fixed, z-index: var(--ah-z-overlay)
+   Modal:    Command Palette  — position: fixed, z-index: var(--ah-z-modal)
+   ============================================ */
+
+/* ============================================
+   ICON POLICY
+   ============================================
+   - Use inline SVG only. No emoji as UI icons.
+   - Icon size: 16px (sm), 20px (md/default), 24px (lg)
+   - Icon color: currentColor (inherits from parent)
+   ============================================ */
+
+/* ============================================
+   SELECTOR POLICY
+   ============================================
+   - Interactive controls: [data-testid="..."] or [role="..."][aria-label="..."]
+   - Text selectors: ONLY for fixture/test-data content (room names, message text)
+   - Never use text selectors for UI labels (button text, tab names, status text)
+   ============================================ */
+
+/* ============================================
+   TYPOGRAPHY POLICY
+   ============================================
+   - Headings/metadata/code: var(--ah-font-heading)
+   - Body text: var(--ah-font-body)
+   - Code blocks: var(--ah-font-mono)
+   - No remote font imports. System font fallbacks only.
+   ============================================ */
+
+/* Global body font */
+body {
+  font-family: var(--ah-font-body);
+  font-size: var(--ah-font-size-base);
+  line-height: var(--ah-line-height-normal);
+  color: var(--ah-text-primary);
+  background: var(--ah-bg-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Heading elements */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--ah-font-heading);
+  line-height: var(--ah-line-height-tight);
+  color: var(--ah-text-primary);
+}
+
+/* Code and pre */
+code, pre, kbd, samp {
+  font-family: var(--ah-font-mono);
+}
+
+/* Skip link */
+.ah-skip-link {
+  position: absolute;
+  top: -100%;
+  left: var(--ah-space-4);
+  z-index: var(--ah-z-toast);
+  padding: var(--ah-space-2) var(--ah-space-4);
+  background: var(--ah-accent);
+  color: #fff;
+  border-radius: var(--ah-radius-md);
+  font-size: var(--ah-font-size-sm);
+  font-weight: 600;
+  text-decoration: none;
+  transition: top var(--ah-transition-fast);
+}
+.ah-skip-link:focus {
+  top: var(--ah-space-4);
+}
+
+/* Feature rail nav item */
+.ah-rail-item {
+  display: flex;
+  align-items: center;
+  gap: var(--ah-space-3);
+  padding: var(--ah-space-2) var(--ah-space-3);
+  border-radius: var(--ah-radius-md);
+  cursor: pointer;
+  color: var(--ah-text-muted);
+  font-size: var(--ah-font-size-sm);
+  font-weight: 500;
+  transition: background var(--ah-transition-fast), color var(--ah-transition-fast);
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.ah-rail-item:hover {
+  background: var(--ah-bg-secondary);
+  color: var(--ah-text-primary);
+}
+.ah-rail-item--active {
+  background: var(--ah-accent-light);
+  color: var(--ah-accent);
+}
+.ah-rail-item--disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* Workbench panel */
+.ah-workbench-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: var(--ah-bg-primary);
+  border-left: 1px solid var(--ah-border);
+}
+
+.ah-workbench-panel-header {
+  display: flex;
+  align-items: center;
+  gap: var(--ah-space-2);
+  padding: var(--ah-space-3) var(--ah-space-4);
+  border-bottom: 1px solid var(--ah-border);
+  font-size: var(--ah-font-size-sm);
+  font-weight: 600;
+  color: var(--ah-text-primary);
+  flex-shrink: 0;
+}
+
+/* Active nav indicator */
+[aria-current="page"],
+[aria-selected="true"] {
+  color: var(--ah-accent);
+}
