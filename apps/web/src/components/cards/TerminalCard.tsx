@@ -23,12 +23,12 @@ type TerminalCardProps = {
 };
 
 export function TerminalCard({ lines, exitCode, collapsed = true }: TerminalCardProps) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(!collapsed);
   const stdoutCount = lines.filter((l) => l.stream === "stdout").length;
   const stderrCount = lines.filter((l) => l.stream === "stderr").length;
   const hasError = exitCode !== undefined && exitCode !== 0;
 
-  if (!collapsed || expanded) {
+  if (expanded) {
     return <TerminalExpanded lines={lines} exitCode={exitCode} onClose={() => setExpanded(false)} />;
   }
 

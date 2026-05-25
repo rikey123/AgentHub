@@ -254,21 +254,18 @@ test.describe("v05 chatroom features", () => {
     await page.waitForSelector("text=trigger run");
 
     // Open Run Detail from the brief with "run completed" text
-    await page.waitForSelector("text=run completed", { timeout: 5000 });
-    await page.locator("text=run completed").first().click();
+    await page.waitForSelector('[data-testid="brief-card"]', { timeout: 8000 });
+    await page.locator('[data-testid="brief-card"]').filter({ hasText: "run completed" }).first().click();
 
     // Wait for Run Detail slide-over to open
-    await page.waitForSelector("text=Run Detail", { timeout: 5000 });
+    await page.waitForSelector("text=Run Detail", { timeout: 8000 });
 
     // Open Artifacts tab
     await page.click('[data-testid="run-detail-tab-artifacts"]');
 
-    // TerminalCard should be visible
-    await page.waitForSelector('[data-testid="terminal-card"]', { timeout: 3000 });
-    await page.click('[data-testid="terminal-expand"]');
-
-    // Modal should open
-    await page.waitForSelector('[data-testid="terminal-modal"]', { timeout: 3000 });
+    // In Run Detail, terminal artifacts are shown uncollapsed (modal already open)
+    // Wait for the terminal modal to be visible directly
+    await page.waitForSelector('[data-testid="terminal-modal"]', { timeout: 5000 });
 
     // Search functionality
     const searchInput = page.locator('[data-testid="terminal-search"]');

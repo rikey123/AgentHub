@@ -63,7 +63,7 @@ test.describe("main timeline and run detail projection", () => {
     });
 
     await page.goto(testUrl);
-    await page.getByRole("button", { name: /new room/i }).click();
+    await page.getByRole("button", { name: /new room/i }).first().click();
     await page.waitForSelector("text=New Room");
     await page.locator("textarea").fill("browser csrf hello");
     await page.getByRole("button", { name: "Send" }).click();
