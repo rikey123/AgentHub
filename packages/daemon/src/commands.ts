@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import type { Command, CommandBus, CommandErrorCode, CommandHandler, CommandMeta, CommandResult, EventBus, PublishInput } from "@agenthub/bus";
 import type { AgentHubDatabase } from "@agenthub/db";
-import { parseMentions, type PendingTurnService } from "@agenthub/orchestrator";
+import { parseMentions, nameToSlug, type PendingTurnService } from "@agenthub/orchestrator";
 
 export type DaemonCommandHandlersOptions = {
   readonly database: AgentHubDatabase;
@@ -288,8 +288,23 @@ function getRoom(database: AgentHubDatabase, roomId: string): RoomRow | undefine
   return database.sqlite.prepare("SELECT id, workspace_id, primary_agent_id, mode FROM rooms WHERE id = ? AND archived_at IS NULL").get(roomId) as RoomRow | undefined;
 }
 
-function roomMembers(database: AgentHubDatabase, roomId: string): { readonly agentId: string }[] {
-  return (database.sqlite.prepare("SELECT participant_id FROM room_participants WHERE room_id = ? AND participant_type = 'agent' ORDER BY joined_at ASC").all(roomId) as { readonly participant_id: string }[]).map((row) => ({ agentId: row.participant_id }));
+function roomMembers(database: AgentHubDatabase, roomId: string): { readonly agentId: string; readonly slug?: string; readonly name?: string }[] {
+  const rows = database.sqlite
+    .prepare(
+      `SELECT rp.participant_id, ap.name
+       FROM room_participants rp
+       LEFT JOIN agent_profiles ap ON ap.id = rp.participant_id
+       WHERE rp.room_id = ? AND rp.participant_type = 'agent'
+       ORDER BY rp.joined_at ASC`
+    )
+    .all(roomId) as { readonly participant_id: string; readonly name: string | null }[];
+  return rows.map((row) => {
+    const slug = row.name ? nameToSlug(row.name) : undefined;
+    const member: { agentId: string; name?: string; slug?: string } = { agentId: row.participant_id };
+    if (row.name !== null) member.name = row.name;
+    if (slug !== undefined) member.slug = slug;
+    return member;
+  });
 }
 
 function wakeTargetsForMessage(room: RoomRow, mentions: readonly string[]): string[] {

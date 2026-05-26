@@ -114,7 +114,9 @@ export function InputBox(props: InputBoxProps) {
     const after = text.slice(cursor);
     const at = before.lastIndexOf("@");
     if (at < 0) return;
-    const newText = before.slice(0, at) + `@${p.name} ` + after;
+    // Insert the kebab slug so the backend parser can resolve it without quotes.
+    const slug = p.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    const newText = before.slice(0, at) + `@${slug} ` + after;
     setText(newText);
     setMentionQuery(undefined);
     setMentions((prev) => Array.from(new Set([...prev, p.id])));
