@@ -9,7 +9,7 @@ import { ContextLedger, createContextCommandHandlers, HeuristicBriefGenerator } 
 import { createDatabase, type AgentHubDatabase } from "@agenthub/db";
 import { MockAdapterManager } from "@agenthub/adapter-mock";
 import { createInterventionCommandHandlers, InterventionEngine } from "@agenthub/interventions";
-import { ActiveWakesRegistry, createCancelRunHandler, createCompleteTaskHandler, createConsumePendingTurnHandler, createCreateTaskHandler, createUpdateTaskHandler, createWakeAgentHandler, MailboxService, PendingTurnService, RoomMcpServer, RunLifecycleService, RunQueue, TaskService, type BriefResolver } from "@agenthub/orchestrator";
+import { ActiveWakesRegistry, createCancelRunHandler, createCompleteTaskHandler, createConsumePendingTurnHandler, createCreateTaskHandler, createUpdateTaskHandler, createWakeAgentHandler, MailboxService, PendingTurnService, ReclaimStaleClaimedRun, RoomMcpServer, RunLifecycleService, RunQueue, StartupRecovery, TaskService, type BriefResolver } from "@agenthub/orchestrator";
 import { createPermissionCommandHandlers, PermissionEngine, seedBuiltInPermissionProfiles } from "@agenthub/permissions";
 import type { EventEnvelope } from "@agenthub/protocol/events";
 import { attachmentMaxBytes, authenticateBrowserRequest, issueBrowserSession, redactAndTruncate, storeAttachment, type BrowserAuthResult } from "@agenthub/security";
@@ -185,7 +185,24 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     // so we don't register a duplicate handler here.
     await handlers.catchUp();
 
+    // Wire the bus to notify durable handlers immediately on every durable
+    // publish. Without this, handlers (run-queue, status-line flush) only run
+    // when `outbox.drainPending` fires, which happens at HTTP dispatch
+    // boundaries — so events emitted by an in-flight agent run sit pending
+    // until the next user action. With the notifier set, handlers process
+    // events as soon as they're persisted, and SSE clients see them too.
+    eventBus.setDurableNotifier((event) => handlers.notify(event));
+
     emitPhase("startup", PHASE_RUN_QUEUE);
+    // Run startup recovery BEFORE the run queue tries to schedule anything.
+    // Without this, runs from a previous daemon process that crashed/restarted
+    // are still marked `running`/`starting` in the DB and still hold their
+    // entries in `run_locks`. New runs that need the same locks (same room,
+    // same workspace) get stuck in `waiting` forever because their lock
+    // owners are dead processes. The recovery clears `run_locks`, fails any
+    // dead-pid runs, and lets fresh runs acquire locks cleanly.
+    const reclaim = new ReclaimStaleClaimedRun(database, lifecycle, (run) => adapterRegistry.reclaimAdapterFor(run), options.now ?? Date.now);
+    await new StartupRecovery(database, lifecycle, reclaim, options.now ?? Date.now).run();
     await runQueue.scheduleTick();
 
     emitPhase("startup", PHASE_ADAPTERS);
@@ -735,7 +752,26 @@ function sse(ctx: RouteContext, url: URL, scopes: readonly string[]): void {
     if (!visible(event, view, filters.roomId, filters.runId)) return;
     ctx.res.write(`${event.seq !== undefined ? `id: ${event.seq}\n` : ""}event: ${event.type}\ndata: ${redactAndTruncate(JSON.stringify(event), 64 * 1024)}\n\n`);
   };
-  ctx.res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
+  ctx.res.writeHead(200, {
+    "content-type": "text/event-stream",
+    "cache-control": "no-cache, no-transform",
+    "connection": "keep-alive",
+    "x-accel-buffering": "no",
+    "x-content-type-options": "nosniff"
+  });
+  // Force the response headers to flush immediately so EventSource's `open`
+  // event fires without waiting for the first byte of body. Then disable
+  // Nagle's algorithm on the underlying socket — without this, Node's TCP
+  // stack batches small SSE writes and waits up to 200ms for an ACK before
+  // flushing. When live events arrive at >1Hz the batching is invisible, but
+  // when a single event arrives after a >5s idle gap (e.g. an agent is
+  // thinking and finally emits `agent.run.started`) the write can sit in the
+  // socket's send buffer indefinitely. Setting noDelay(true) makes each write
+  // hit the wire immediately.
+  if (typeof ctx.res.flushHeaders === "function") ctx.res.flushHeaders();
+  if (ctx.res.socket && typeof (ctx.res.socket as { setNoDelay?: (v: boolean) => void }).setNoDelay === "function") {
+    (ctx.res.socket as { setNoDelay: (v: boolean) => void }).setNoDelay(true);
+  }
   ctx.res.write(": connected\n\n");
   const client: SseClient = { res: ctx.res, close: () => { ctx.res.write(`event: server.shutting_down\ndata: {"status":"shutting_down"}\n\n`); ctx.res.end(); } };
   const unregisterClient = ctx.registerSseClient(client);

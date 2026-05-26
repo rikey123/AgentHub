@@ -2,7 +2,7 @@ import { ClaudeCodeACPAdapter } from "@agenthub/adapter-claude-code";
 import { OpenCodeACPAdapter } from "@agenthub/adapter-opencode";
 import { MockAdapterManager } from "@agenthub/adapter-mock";
 import type { AgentHubDatabase } from "@agenthub/db";
-import type { AdapterArtifactFSBoundary, RoomMcpServer, RunLifecycleService, RunRow, BriefResolver } from "@agenthub/orchestrator";
+import type { AdapterArtifactFSBoundary, ReclaimAdapter, RoomMcpServer, RunLifecycleService, RunRow, BriefResolver } from "@agenthub/orchestrator";
 import type { CommandBus, EventBus } from "@agenthub/bus";
 import type { PermissionEngine } from "@agenthub/permissions";
 
@@ -64,6 +64,16 @@ export class AdapterRegistry {
 
   getClaudeAdapterForTest(): ClaudeCodeACPAdapter | undefined {
     return this.claudeAdapter;
+  }
+
+  // Used by StartupRecovery to decide what to do with each in-flight run after
+  // a daemon restart. ACP adapters claim `resumable` in their manifest, but
+  // the actual ACP child process died with the previous daemon, so the
+  // attachSession path always throws. Returning `fail_run` here makes the
+  // recovery mark these runs failed cleanly (and clear `run_locks`), which
+  // lets fresh runs in the same room start without waiting on dead lock owners.
+  reclaimAdapterFor(_run: RunRow): ReclaimAdapter {
+    return { crashRecovery: "fail_run" };
   }
 
   private claude(): ClaudeCodeACPAdapter {
