@@ -11,7 +11,7 @@ The system SHALL provide a CLI binary `agenthub` (in `apps/cli`) with the follow
 | `agenthub start [--port=<n>] [--config=<path>]` | 在前台启动 daemon | 等同直接调 `node packages/daemon/dist/index.js`；ctrl-c 退出 |
 | `agenthub stop [--force] [--timeout=<s>]` | 停止运行中的 daemon | 读 PID 文件 → 发 SIGTERM；`--force` 发 SIGKILL；`--timeout` 默认 30s |
 | `agenthub status` | 检查 daemon 健康 | HTTP `/healthz` 探测，输出 `ready` / `starting` / `shutting_down` / `unreachable` |
-| `agenthub doctor` | 环境诊断 | 检查：① SQLite 文件锁状态 ② 端口是否被占 ③ KeychainBridge 是否可用（写测试 token + 读回 + 删）④ migrations 状态（DB schema vs 包内 migration 版本）⑤ config.toml 解析是否成功；每项 ✅ / ❌ 输出 |
+| `agenthub doctor` | 环境诊断 | 检查：① SQLite 文件锁状态 ② 端口是否被占 ③ 凭据存储模式（M0 输出固定 "AES fallback (file-based)"，不实写测 entry；keytar 真接入推到 V1.0）④ migrations 状态（DB schema vs 包内 migration 版本）⑤ config.toml 解析是否成功；每项 ✅ / ❌ 输出 |
 | `agenthub auth issue --description=<s> [--scope=read,write,admin] [--expires-days=<n>]` | 发 token | 调 `/auth/tokens` API，stdout 输出新 token（仅一次显示）+ id |
 | `agenthub auth list` | 列已有 token | 表格显示 id / description / scopes / created_at / expires_at / last_used_at（不显示 token 值本身，只显示 fingerprint） |
 | `agenthub auth revoke <id>` | 吊销 token | 调 `/auth/tokens/:id` DELETE |
@@ -21,7 +21,7 @@ The system SHALL provide a CLI binary `agenthub` (in `apps/cli`) with the follow
 
 PID 文件：daemon 启动时写 `<userhome>/.agenthub/daemon.pid`（含进程 PID + bind host + port），shutdown 时删除；`agenthub stop` / `status` 读此文件定位 daemon。`stop --force` 在 timeout 后发 SIGKILL，warn "可能丢失 in-flight Run 状态"。
 
-`doctor` 子命令的 `KeychainBridge` 检查需要写一个测试 entry（`__agenthub_doctor_<random>`）+ 读回校验 + 删除；如 keytar native 不可用走 AES fallback 路径，输出 "Keychain: AES fallback (file-based)"。
+`doctor` 子命令的 Keychain 行 M0 固定输出 "Keychain: AES fallback (file-based)"。理由：M0 不依赖 OS keychain，secrets 走文件级 AES（详见 `security` capability）；keytar 接入 + 真写读测试是 V1.0 OS 集成范畴。本行只验证"凭据存储模式被正确选定"，不试探可写性。
 
 #### Scenario: agenthub status 探测 ready
 

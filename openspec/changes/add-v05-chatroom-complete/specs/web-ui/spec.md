@@ -111,14 +111,14 @@ The Web UI SHALL meet WCAG 2.1 Level AA baseline including keyboard accessibilit
 **对比度**：
 
 - 文本 / 主要 UI 元素与背景对比度 ≥ 4.5:1；亮 / 暗主题各自满足；
-- CI 集成 `axe-core` 跑主要页面（Room / Run Detail / Settings），对比度违规视为 PR block。
+- M0 依赖 HeroUI v3 oklch token 阶梯保障 AA；自动化 `axe-core` CI 推到 V1.0 a11y 闭环（届时跑 Room / Run Detail / Settings）。
 
 **减少动画**：
 
 - `@media (prefers-reduced-motion: reduce)` 时所有过渡 / slide-over / fade 退化为瞬时切换；
 - progress / spinner 类（必要的视觉反馈）保留但减速到 ≥ 1s 周期。
 
-**i18n**：暂保持英文（V1.4 评估中文）；UI 字符串集中在 `apps/web/src/i18n/en.ts` 便于将来 i18n。
+**i18n**：M0 全英文；UI 字符串就近内联，不抽 `apps/web/src/i18n/en.ts`（推到 V1.4 中文化前再做集中化）。
 
 #### Scenario: 键盘 Tab 走完主流程
 
@@ -127,8 +127,8 @@ The Web UI SHALL meet WCAG 2.1 Level AA baseline including keyboard accessibilit
 
 #### Scenario: 暗色主题对比度
 
-- **WHEN** 暗色主题 `--ah-text-primary` 在 `--ah-bg-primary` 上
-- **THEN** 对比度 ≥ 4.5:1（axe-core CI 自动校验）
+- **WHEN** 暗色主题渲染主流消息文本与背景
+- **THEN** HeroUI v3 oklch token（`--foreground` / `--background`）下对比度 ≥ 4.5:1；自动化 axe-core 校验推到 V1.0。
 
 #### Scenario: prefers-reduced-motion 退化
 
