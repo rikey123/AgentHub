@@ -37,8 +37,20 @@ export class RoomMcpServer {
     if (participant.role === "observer") {
       const presence = this.options.database.sqlite.prepare("SELECT state FROM agent_presence WHERE room_id = ? AND agent_id = ?").get(session.roomId, session.agentId) as { readonly state: string } | undefined;
       if (presence?.state !== "active") {
-        if (room.primary_agent_id !== null) this.appendMailbox(room.workspace_id, session.roomId, session.agentId, room.primary_agent_id, input.text);
-        return { ok: true, data: { degraded: true } };
+        // Observer cannot speak directly when not active. Append to the primary's mailbox so
+        // the message is delivered next time the primary wakes. Return the mailbox row id so
+        // the caller can correlate / cancel / retry.
+        const mailboxMessageId = room.primary_agent_id !== null
+          ? this.appendMailbox(room.workspace_id, session.roomId, session.agentId, room.primary_agent_id, input.text)
+          : null;
+        return {
+          ok: true,
+          data: {
+            degraded: true,
+            reason: "observer_must_knock_or_mailbox",
+            ...(mailboxMessageId !== null ? { mailboxMessageId } : {})
+          }
+        };
       }
       this.options.eventBus.publish({ id: randomUUID(), type: "server.connected", schemaVersion: 1, workspaceId: room.workspace_id, roomId: session.roomId, runId: session.runId, agentId: session.agentId, payload: { audit: true, actor: { type: "agent", id: session.agentId }, action: "room.send_message", target: `room:${session.roomId}`, outcome: "allowed", observer: true }, createdAt: this.options.now?.() ?? Date.now() });
     }
@@ -80,13 +92,14 @@ export class RoomMcpServer {
     return this.options.commandBus.dispatch(command, { actor: { type: "agent", id: session.agentId }, traceId: `mcp:${session.runId}:${randomUUID()}`, ...(command.idempotencyKey !== undefined ? { idempotencyKey: command.idempotencyKey } : {}), origin: "mcp_tool" });
   }
 
-  private appendMailbox(workspaceId: string, roomId: string, fromAgentId: string, toAgentId: string, text: string): void {
+  private appendMailbox(workspaceId: string, roomId: string, fromAgentId: string, toAgentId: string, text: string): string {
     const now = this.options.now?.() ?? Date.now();
     const mailboxMessageId = randomUUID();
     this.options.database.sqlite.transaction(() => {
       this.options.database.sqlite.prepare("INSERT INTO mailbox_messages (id, workspace_id, room_id, from_type, from_id, to_agent_id, kind, content, files, read, claimed_run_id, claimed_at, delivery_batch_id, delivery_failure_reason, attempt_count, created_at, consumed_at) VALUES (?, ?, ?, 'agent', ?, ?, 'message', ?, '[]', 0, NULL, NULL, NULL, NULL, 0, ?, NULL)").run(mailboxMessageId, workspaceId, roomId, fromAgentId, toAgentId, JSON.stringify({ text }), now);
       this.options.eventBus.publish({ id: randomUUID(), type: "mailbox.message.created", schemaVersion: 1, workspaceId, roomId, agentId: toAgentId, payload: { mailboxMessageId, roomId, fromAgentId, targetAgentId: toAgentId }, createdAt: now });
     })();
+    return mailboxMessageId;
   }
 }
 

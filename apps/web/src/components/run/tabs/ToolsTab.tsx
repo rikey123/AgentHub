@@ -1,5 +1,6 @@
 import type { RoomViewModel } from "../../../types.ts";
 import { Card, Chip } from "@heroui/react";
+import { formatDuration, formatTokens, formatUsd } from "../../../lib/format.ts";
 
 export function ToolsTab({ room, runId }: { room: RoomViewModel; runId: string }) {
   const messages = room.messages.filter((m) => m.runId === runId);
@@ -46,19 +47,26 @@ export function ToolsTab({ room, runId }: { room: RoomViewModel; runId: string }
         <section>
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Subagent runs</h3>
           <ul className="flex flex-col gap-2">
-            {subagents.map((sub) => (
-              <li key={sub.id}>
-                <Card variant="transparent" className="border border-border">
-                  <Card.Header>
-                    <div className="flex items-center gap-2">
-                      <Card.Title className="text-sm">{sub.agentName}</Card.Title>
-                      <Chip size="sm" variant="soft" color="default">{sub.status}</Chip>
-                    </div>
-                    <Card.Description className="text-xs ah-mono">{sub.id}</Card.Description>
-                  </Card.Header>
-                </Card>
-              </li>
-            ))}
+            {subagents.map((sub) => {
+              const duration = sub.startedAt !== undefined && sub.endedAt !== undefined ? formatDuration(sub.endedAt - sub.startedAt) : undefined;
+              const tokens = sub.cost ? sub.cost.inputTokens + sub.cost.outputTokens : undefined;
+              return (
+                <li key={sub.id}>
+                  <Card variant="transparent" className="border border-border">
+                    <Card.Header>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Card.Title className="text-sm">{sub.agentName}</Card.Title>
+                        <Chip size="sm" variant="soft" color="default">{sub.status}</Chip>
+                        {duration ? <Chip size="sm" variant="soft" color="default">⏱ {duration}</Chip> : null}
+                        {tokens !== undefined && tokens > 0 ? <Chip size="sm" variant="soft" color="default">{formatTokens(tokens)} tok</Chip> : null}
+                        {sub.cost && sub.cost.costUsd > 0 ? <Chip size="sm" variant="soft" color="default">{formatUsd(sub.cost.costUsd)}</Chip> : null}
+                      </div>
+                      <Card.Description className="text-xs ah-mono">{sub.id}</Card.Description>
+                    </Card.Header>
+                  </Card>
+                </li>
+              );
+            })}
           </ul>
         </section>
       ) : null}

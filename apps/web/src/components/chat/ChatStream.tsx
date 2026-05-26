@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ScrollShadow } from "@heroui/react";
+import { ScrollShadow, Skeleton } from "@heroui/react";
 import type { RoomViewModel } from "../../types.ts";
 import { MessageItem } from "./MessageItem.tsx";
 import { BriefItem } from "./BriefItem.tsx";
 import { TypingIndicator } from "./TypingIndicator.tsx";
 import { ConnectionBanner } from "./ConnectionBanner.tsx";
+import { MailboxFailureCard } from "../cards/MailboxFailureCard.tsx";
 
 interface ChatStreamProps {
   room: RoomViewModel;
@@ -66,7 +67,27 @@ export function ChatStream(props: ChatStreamProps) {
     }
   }, [items.length, virtualizer]);
 
+  // Auto-scroll selected message into view (j/k navigation).
+  useEffect(() => {
+    if (!props.selectedMessageId || items.length === 0) return;
+    const idx = items.findIndex((i) => i.kind === "message" && i.id === props.selectedMessageId);
+    if (idx < 0) return;
+    const visible = virtualizer.getVirtualItems();
+    const inRange = visible.some((v) => v.index === idx);
+    if (!inRange) virtualizer.scrollToIndex(idx, { align: "center" });
+  }, [props.selectedMessageId, items, virtualizer]);
+
   const activeRun = room.runs.find((r) => r.status === "running" || r.status === "starting");
+  const [dismissedFailures, setDismissedFailures] = useState<Set<string>>(() => new Set());
+  const visibleFailures = useMemo(
+    () => room.mailboxFailures.filter((f) => !dismissedFailures.has(f.id)),
+    [room.mailboxFailures, dismissedFailures]
+  );
+  const showFirstConnectSkeleton =
+    items.length === 0 && props.connectionStatus === "connecting";
+  const showEmptyState =
+    items.length === 0 &&
+    (props.connectionStatus === "connected" || props.connectionStatus === "disconnected" || props.connectionStatus === "offline" || props.connectionStatus === "reconnecting");
 
   return (
     <div className="flex h-full flex-col">
@@ -75,9 +96,37 @@ export function ChatStream(props: ChatStreamProps) {
           <ConnectionBanner status={props.connectionStatus} error={props.connectionError} />
         </div>
       ) : null}
+      {visibleFailures.length > 0 ? (
+        <div className="flex flex-col gap-2 px-3 pt-2">
+          {visibleFailures.map((f) => (
+            <MailboxFailureCard
+              key={f.id}
+              id={f.id}
+              mailboxMessageId={f.mailboxMessageId}
+              targetAgentId={f.targetAgentId}
+              targetAgentName={f.targetAgentName}
+              reason={f.reason}
+              attemptCount={f.attemptCount}
+              failedAt={f.failedAt}
+              csrfFetch={props.csrfFetch}
+              onDismiss={(id) => setDismissedFailures((prev) => new Set(prev).add(id))}
+            />
+          ))}
+        </div>
+      ) : null}
       <ScrollShadow className="flex-1 overflow-hidden" orientation="vertical">
         <div ref={parentRef} className="h-full overflow-auto" tabIndex={0}>
-          {items.length === 0 ? (
+          {showFirstConnectSkeleton ? (
+            <div className="flex flex-col gap-3 p-3" aria-label="Loading messages">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="flex flex-col gap-2">
+                  <Skeleton className="h-3 w-24 rounded" />
+                  <Skeleton className="h-4 w-3/4 rounded" />
+                  <Skeleton className="h-4 w-1/2 rounded" />
+                </div>
+              ))}
+            </div>
+          ) : showEmptyState ? (
             <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-muted">
               <p>No messages yet.</p>
               <p>Send a message to start the conversation.</p>

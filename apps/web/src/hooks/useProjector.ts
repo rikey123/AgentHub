@@ -202,6 +202,7 @@ class Projector {
         tasks: [],
         runs: [],
         pendingTurns: [],
+        mailboxFailures: [],
         unreadCount: 0
       };
       this.rooms.set(roomId, room);
@@ -555,33 +556,20 @@ class Projector {
       }
       case "mailbox.delivery.failed": {
         if (payload) {
-          // Store mailbox failures as a special message or system card
-          // For now, append a system message with a special marker
-          const failureMessage: MessageViewModel = {
-            id: typeof payload.messageId === "string" ? payload.messageId : `mailbox-fail-${Date.now()}`,
-            roomId,
-            senderType: "system",
-            senderId: "system",
-            senderName: "System",
-            role: "system",
-            status: "completed",
-            text: `Delivery failed: ${typeof payload.reason === "string" ? payload.reason : "unknown"}`,
-            parts: [{
-              type: "card",
-              seq: 0,
-              card: {
-                type: "intervention",
-                interventionId: `mailbox-${Date.now()}`,
-                agentId: event.agentId ?? "",
-                reason: typeof payload.reason === "string" ? payload.reason : "Delivery failed",
-                priority: "high",
-                actions: ["approve", "ignore"],
-                status: "pending_user_decision"
-              }
-            }],
-            createdAt: event.createdAt
+          const reason = typeof payload.reason === "string" ? payload.reason : "unknown";
+          const targetAgentId = typeof payload.targetAgentId === "string" ? payload.targetAgentId : (event.agentId ?? "");
+          const failure = {
+            id: `mailbox-fail-${typeof payload.mailboxMessageId === "string" ? payload.mailboxMessageId : Date.now()}-${reason}`,
+            mailboxMessageId: typeof payload.mailboxMessageId === "string" ? payload.mailboxMessageId : "",
+            targetAgentId,
+            targetAgentName: this.agentName(room, targetAgentId),
+            reason,
+            attemptCount: typeof payload.attemptCount === "number" ? payload.attemptCount : 0,
+            failedAt: typeof payload.failedAt === "number" ? payload.failedAt : event.createdAt
           };
-          room = { ...room, messages: [...room.messages, failureMessage] };
+          // Replace any existing failure for the same mailboxMessageId+reason; keep latest only.
+          const filtered = room.mailboxFailures.filter((f) => f.id !== failure.id);
+          room = { ...room, mailboxFailures: [...filtered, failure] };
           this.rooms.set(roomId, room);
           changed = true;
         }

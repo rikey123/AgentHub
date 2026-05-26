@@ -1,4 +1,4 @@
-import { Drawer, Tabs, Chip, ScrollShadow } from "@heroui/react";
+import { Drawer, Tabs, Chip, ScrollShadow, Skeleton } from "@heroui/react";
 import type { RoomViewModel } from "../../types.ts";
 import { TranscriptTab } from "./tabs/TranscriptTab.tsx";
 import { ToolsTab } from "./tabs/ToolsTab.tsx";
@@ -42,8 +42,14 @@ export function RunDetailDrawer(props: RunDetailDrawerProps) {
             ) : null}
           </Drawer.Header>
           <Drawer.Body className="p-0">
-            {!room || !runId ? (
+            {!runId ? (
               <div className="p-6 text-center text-sm text-muted">No run selected.</div>
+            ) : !room || !run ? (
+              <div className="flex flex-col gap-3 p-6" aria-label="Loading run">
+                <Skeleton className="h-4 w-2/3 rounded" />
+                <Skeleton className="h-4 w-1/2 rounded" />
+                <Skeleton className="h-4 w-3/4 rounded" />
+              </div>
             ) : (
               <Tabs defaultSelectedKey="transcript" className="flex h-full min-h-0 flex-col">
                 <Tabs.ListContainer>
@@ -64,7 +70,7 @@ export function RunDetailDrawer(props: RunDetailDrawerProps) {
                   <Tabs.Panel id="perms"><PermissionsTab room={room} runId={runId} /></Tabs.Panel>
                   <Tabs.Panel id="artifacts"><ArtifactsTab room={room} runId={runId} csrfFetch={props.csrfFetch} /></Tabs.Panel>
                   <Tabs.Panel id="raw"><RawStreamTab roomId={room.id} runId={runId} /></Tabs.Panel>
-                  <Tabs.Panel id="cost">{run ? <CostTab run={run} /> : null}</Tabs.Panel>
+                  <Tabs.Panel id="cost">{run ? <CostTab run={run} csrfFetch={props.csrfFetch} /> : null}</Tabs.Panel>
                 </ScrollShadow>
               </Tabs>
             )}

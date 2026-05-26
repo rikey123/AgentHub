@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Button, Card, Chip, ListBox, Select, ToggleButton, ToggleButtonGroup } from "@heroui/react";
+import { Button, Card, Chip, ListBox, Select, Skeleton, ToggleButton, ToggleButtonGroup } from "@heroui/react";
 import { formatUsd } from "../../lib/format.ts";
 
 type CostRow = {
@@ -92,7 +92,19 @@ export function CostPanel({ csrfFetch, workspaceId = "default-workspace" }: Cost
 
       {error ? <Chip size="sm" color="danger" variant="soft">{error}</Chip> : null}
 
-      {rows.length === 0 && !loading ? (
+      {loading && rows.length === 0 ? (
+        <div className="flex flex-col gap-2" aria-label="Loading cost data">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="flex flex-col gap-1">
+              <div className="flex items-center gap-2">
+                <Skeleton className="h-4 flex-1 rounded" />
+                <Skeleton className="h-3 w-16 rounded" />
+              </div>
+              <Skeleton className="h-1 w-full rounded" />
+            </div>
+          ))}
+        </div>
+      ) : rows.length === 0 && !loading ? (
         <p className="px-3 py-2 text-sm text-muted">No cost data yet.</p>
       ) : (
         <div className="flex flex-col gap-1">

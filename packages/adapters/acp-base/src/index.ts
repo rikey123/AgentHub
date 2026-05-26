@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 
 import type { CommandBus, EventBus, PublishInput } from "@agenthub/bus";
 import type { AgentHubDatabase } from "@agenthub/db";
-import type { AdapterArtifactFSBoundary } from "@agenthub/orchestrator";
+import type { AdapterArtifactFSBoundary, BriefResolver } from "@agenthub/orchestrator";
 import type { PermissionEngine, PermissionResource } from "@agenthub/permissions";
 import type { AdapterError, AdapterMessage, AdapterRunInput, AgentAdapterManifest, AttachSessionInput, ContextInjectionResult, ContextProjection, CreateSessionInput, DetectedRuntime, ExternalContextSnapshot, ExternalSession } from "@agenthub/protocol";
 import type { EventType } from "@agenthub/protocol/events";
@@ -662,7 +662,7 @@ export class AdapterRawLogger {
   }
 }
 
-export type AdapterRuntimeServices = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly getCommandBus?: () => CommandBus | undefined; readonly permissionEngine?: PermissionEngine; readonly artifactFs?: AdapterArtifactFSBoundary; readonly now?: () => number };
+export type AdapterRuntimeServices = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly getCommandBus?: () => CommandBus | undefined; readonly permissionEngine?: PermissionEngine; readonly artifactFs?: AdapterArtifactFSBoundary; readonly briefResolver?: BriefResolver; readonly now?: () => number };
 
 export function emitAdapterRegistered(eventBus: EventBus, workspaceId: string, manifest: AgentAdapterManifest, now = Date.now()): void {
   eventBus.publish(adapterEvent("adapter.registered", workspaceId, manifest.id, { adapterId: manifest.id, manifest }, now));

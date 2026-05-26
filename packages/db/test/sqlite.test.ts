@@ -260,7 +260,8 @@ function applyAllMigrations(): void {
     "0009_mailbox.sql",
     "0010_auth.sql",
     "0011_bus_runtime.sql",
-    "0012_v05.sql"
+    "0012_v05.sql",
+    "0013_messages_pinned.sql"
   ]);
 }
 
@@ -338,7 +339,7 @@ describe("SQLite pragmas and migrations", () => {
 
   test("applies all migrations once and records them", () => {
     applyAllMigrations();
-    expect(countRows("__agenthub_migrations")).toBe(12);
+    expect(countRows("__agenthub_migrations")).toBe(13);
     expect(applyMigrations(currentDb())).toEqual([]);
 
     expect(tableNames()).toEqual([

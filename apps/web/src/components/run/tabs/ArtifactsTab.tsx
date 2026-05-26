@@ -15,12 +15,29 @@ type ArtifactSummary = {
   type: string;
   title: string;
   status: string;
+  metadata?: Record<string, unknown> | undefined;
 };
+
+type TerminalLine = { stream: "stdout" | "stderr"; text: string };
+
+type TerminalState = {
+  lines: TerminalLine[];
+  exitCode: number | null;
+};
+
+function readExitCode(meta: Record<string, unknown> | undefined): number | null {
+  if (!meta) return null;
+  const candidate = (meta as { exitCode?: unknown; exit_code?: unknown }).exitCode ?? (meta as { exit_code?: unknown }).exit_code;
+  if (typeof candidate === "number" && Number.isFinite(candidate)) return candidate;
+  if (typeof candidate === "string" && candidate.trim() !== "" && Number.isFinite(Number(candidate))) return Number(candidate);
+  return null;
+}
 
 export function ArtifactsTab({ room, runId, csrfFetch }: ArtifactsTabProps) {
   const [artifacts, setArtifacts] = useState<ArtifactSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | undefined>(undefined);
+  const [terminalById, setTerminalById] = useState<Record<string, TerminalState>>({});
 
   useEffect(() => {
     setLoading(true);
@@ -32,6 +49,56 @@ export function ArtifactsTab({ room, runId, csrfFetch }: ArtifactsTabProps) {
       .catch((err) => setError(err instanceof Error ? err.message : String(err)))
       .finally(() => setLoading(false));
   }, [room.id, csrfFetch]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const terminalArtifacts = artifacts.filter((a) => a.type === "terminal");
+    for (const t of terminalArtifacts) {
+      if (terminalById[t.id]) continue;
+      void (async () => {
+        try {
+          const filesRes = await csrfFetch(`/artifacts/${encodeURIComponent(t.id)}/files`);
+          if (!filesRes.ok) throw new Error(`files ${filesRes.status}`);
+          const filesData = (await filesRes.json()) as { files?: Array<{ path: string; updatedAt?: number }> };
+          const files = Array.isArray(filesData.files) ? filesData.files : [];
+          if (files.length === 0) {
+            if (!cancelled) {
+              setTerminalById((prev) => ({ ...prev, [t.id]: { lines: [], exitCode: readExitCode(t.metadata) } }));
+            }
+            return;
+          }
+          const stderrFile = files.find((f) => /stderr/i.test(f.path));
+          const stdoutFile = files.find((f) => /stdout/i.test(f.path));
+          const sorted = [...files].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+          const primary = stdoutFile ?? sorted[0]!;
+
+          const fetchLines = async (path: string, defaultStream: "stdout" | "stderr"): Promise<TerminalLine[]> => {
+            const res = await csrfFetch(`/artifacts/${encodeURIComponent(t.id)}/files/${encodeURIComponent(path)}`);
+            if (!res.ok) return [];
+            const text = await res.text();
+            return text.split(/\r?\n/).filter((l) => l.length > 0).map((l) => ({ stream: defaultStream, text: l }));
+          };
+
+          const out = await fetchLines(primary.path, "stdout");
+          let err: TerminalLine[] = [];
+          if (stderrFile && stderrFile.path !== primary.path) {
+            err = await fetchLines(stderrFile.path, "stderr");
+          }
+          const merged = [...out, ...err];
+          if (!cancelled) {
+            setTerminalById((prev) => ({ ...prev, [t.id]: { lines: merged, exitCode: readExitCode(t.metadata) } }));
+          }
+        } catch {
+          if (!cancelled) {
+            setTerminalById((prev) => ({ ...prev, [t.id]: { lines: [], exitCode: readExitCode(t.metadata) } }));
+          }
+        }
+      })();
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [artifacts, csrfFetch, terminalById]);
 
   const messages = room.messages.filter((m) => m.runId === runId);
   const cardArtifacts = messages.flatMap((m) =>
@@ -51,9 +118,18 @@ export function ArtifactsTab({ room, runId, csrfFetch }: ArtifactsTabProps) {
       {cardArtifacts.map(({ id, part }) =>
         part.type === "card" ? <CardRenderer key={id} card={part.card} csrfFetch={csrfFetch} /> : null
       )}
-      {terminals.map((t) => (
-        <TerminalCard key={t.id} artifactId={t.id} title={t.title || "Terminal"} lines={[]} />
-      ))}
+      {terminals.map((t) => {
+        const state = terminalById[t.id];
+        return (
+          <TerminalCard
+            key={t.id}
+            artifactId={t.id}
+            title={t.title || "Terminal"}
+            lines={state?.lines ?? []}
+            exitCode={state?.exitCode ?? null}
+          />
+        );
+      })}
       {artifacts.length > 0 ? (
         <Card variant="transparent" className="border border-border">
           <Card.Header>

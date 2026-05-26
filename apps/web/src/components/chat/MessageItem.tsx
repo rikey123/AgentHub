@@ -3,7 +3,6 @@ import type { MessageViewModel } from "../../types.ts";
 import { formatTime, initials, truncate } from "../../lib/format.ts";
 import { pendingTurnColor } from "../../lib/status.ts";
 import { CardRenderer } from "../cards/CardRenderer.tsx";
-import { MailboxFailureCard } from "../cards/MailboxFailureCard.tsx";
 
 interface MessageItemProps {
   message: MessageViewModel;
@@ -165,8 +164,6 @@ function PartView({ part, csrfFetch }: { part: MessageViewModel["parts"][number]
     case "card":
       return <CardRenderer card={part.card} csrfFetch={csrfFetch} />;
     default: {
-      const fallback = part as unknown as { type?: string };
-      if (fallback.type === "mailbox_failure") return <MailboxFailureCard reason="Delivery failed" />;
       return null;
     }
   }

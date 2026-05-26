@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Modal, Input, SearchField, Kbd } from "@heroui/react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 
 export interface PaletteCommand {
   id: string;
@@ -17,10 +18,14 @@ interface CommandPaletteProps {
   commands: PaletteCommand[];
 }
 
+type Row =
+  | { kind: "header"; group: string }
+  | { kind: "command"; cmd: PaletteCommand; cmdIndex: number };
+
 export function CommandPalette({ isOpen, onOpenChange, commands }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
   const [highlight, setHighlight] = useState(0);
-  const listRef = useRef<HTMLUListElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -36,6 +41,30 @@ export function CommandPalette({ isOpen, onOpenChange, commands }: CommandPalett
     });
   }, [query, commands]);
 
+  const grouped = useMemo(() => groupBy(filtered), [filtered]);
+
+  const rows = useMemo<Row[]>(() => {
+    const out: Row[] = [];
+    let cmdIndex = 0;
+    for (const [group, cmds] of grouped) {
+      out.push({ kind: "header", group });
+      for (const cmd of cmds) {
+        out.push({ kind: "command", cmd, cmdIndex });
+        cmdIndex++;
+      }
+    }
+    return out;
+  }, [grouped]);
+
+  const virtualize = filtered.length > 20;
+
+  const virtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => listRef.current,
+    estimateSize: (i) => (rows[i]?.kind === "header" ? 28 : 32),
+    overscan: 8
+  });
+
   useEffect(() => {
     if (!isOpen) {
       setQuery("");
@@ -46,6 +75,42 @@ export function CommandPalette({ isOpen, onOpenChange, commands }: CommandPalett
   useEffect(() => {
     setHighlight(0);
   }, [query]);
+
+  // Auto-scroll virtualized highlight into view.
+  useEffect(() => {
+    if (!virtualize) return;
+    const targetCmd = filtered[highlight];
+    if (!targetCmd) return;
+    const rowIndex = rows.findIndex((r) => r.kind === "command" && r.cmd.id === targetCmd.id);
+    if (rowIndex >= 0) virtualizer.scrollToIndex(rowIndex, { align: "auto" });
+  }, [highlight, virtualize, filtered, rows, virtualizer]);
+
+  const renderCommand = (cmd: PaletteCommand, idx: number) => {
+    const active = idx === highlight;
+    return (
+      <div
+        key={cmd.id}
+        id={`palette-${cmd.id}`}
+        role="option"
+        aria-selected={active}
+        onMouseEnter={() => setHighlight(idx)}
+        onClick={() => {
+          cmd.perform();
+          onOpenChange(false);
+        }}
+        className={[
+          "flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm",
+          active ? "bg-accent-soft text-accent-soft-foreground" : "hover:bg-default"
+        ].join(" ")}
+      >
+        <span className="flex-1 truncate">{cmd.label}</span>
+        {cmd.hint ? <span className="text-xs text-muted">{cmd.hint}</span> : null}
+        {cmd.shortcut ? <Kbd>{cmd.shortcut}</Kbd> : null}
+      </div>
+    );
+  };
+
+  const activeId = filtered[highlight] ? `palette-${filtered[highlight]!.id}` : undefined;
 
   return (
     <Modal.Backdrop isOpen={isOpen} onOpenChange={onOpenChange}>
@@ -79,49 +144,46 @@ export function CommandPalette({ isOpen, onOpenChange, commands }: CommandPalett
                 }}
               />
             </SearchField>
-            <ul
+            <div
               ref={listRef}
               role="listbox"
               aria-label="Commands"
               className="mt-2 max-h-[60vh] overflow-auto"
-              aria-activedescendant={filtered[highlight] ? `palette-${filtered[highlight].id}` : undefined}
+              aria-activedescendant={activeId}
             >
               {filtered.length === 0 ? (
-                <li className="p-4 text-center text-sm text-muted">No matches.</li>
-              ) : null}
-              {groupBy(filtered).map(([group, cmds]) => (
-                <li key={group}>
-                  <div className="px-2 pt-2 text-xs font-semibold uppercase tracking-wide text-muted">{group}</div>
-                  <ul role="group">
-                    {cmds.map((cmd) => {
-                      const idx = filtered.indexOf(cmd);
-                      const active = idx === highlight;
-                      return (
-                        <li
-                          key={cmd.id}
-                          id={`palette-${cmd.id}`}
-                          role="option"
-                          aria-selected={active}
-                          onMouseEnter={() => setHighlight(idx)}
-                          onClick={() => {
-                            cmd.perform();
-                            onOpenChange(false);
-                          }}
-                          className={[
-                            "flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm",
-                            active ? "bg-accent-soft text-accent-soft-foreground" : "hover:bg-default"
-                          ].join(" ")}
-                        >
-                          <span className="flex-1 truncate">{cmd.label}</span>
-                          {cmd.hint ? <span className="text-xs text-muted">{cmd.hint}</span> : null}
-                          {cmd.shortcut ? <Kbd>{cmd.shortcut}</Kbd> : null}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </li>
-              ))}
-            </ul>
+                <div className="p-4 text-center text-sm text-muted">No matches.</div>
+              ) : virtualize ? (
+                <div style={{ height: `${virtualizer.getTotalSize()}px`, position: "relative", width: "100%" }}>
+                  {virtualizer.getVirtualItems().map((vi) => {
+                    const row = rows[vi.index]!;
+                    return (
+                      <div
+                        key={vi.key}
+                        data-index={vi.index}
+                        ref={virtualizer.measureElement}
+                        style={{ position: "absolute", top: 0, left: 0, right: 0, transform: `translateY(${vi.start}px)` }}
+                      >
+                        {row.kind === "header" ? (
+                          <div className="px-2 pt-2 text-xs font-semibold uppercase tracking-wide text-muted">{row.group}</div>
+                        ) : (
+                          renderCommand(row.cmd, row.cmdIndex)
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                grouped.map(([group, cmds]) => (
+                  <div key={group}>
+                    <div className="px-2 pt-2 text-xs font-semibold uppercase tracking-wide text-muted">{group}</div>
+                    <div role="group">
+                      {cmds.map((cmd) => renderCommand(cmd, filtered.indexOf(cmd)))}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </Modal.Body>
         </Modal.Dialog>
       </Modal.Container>

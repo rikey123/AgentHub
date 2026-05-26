@@ -15,8 +15,11 @@ interface InputBoxProps {
   participants: ReadonlyArray<ParticipantViewModel>;
   connectionStatus: "connected" | "connecting" | "reconnecting" | "offline" | "disconnected";
   pendingCount: number;
+  /** Most recent pending-turn message id; ↑ key in an empty input jumps to editing it. */
+  latestPendingMessageId?: string | undefined;
   editingTurnId?: string | undefined;
   onCancelEdit?: () => void;
+  onRequestEdit?: ((messageId: string) => void) | undefined;
   csrfFetch: typeof fetch;
   onSend: (input: { text: string; quotedMessageId?: string; attachmentIds: string[]; mentions: string[] }) => Promise<void> | void;
   onEditSend?: (messageId: string, input: { text: string; attachmentIds: string[]; mentions: string[] }) => Promise<void> | void;
@@ -29,6 +32,7 @@ export function InputBox(props: InputBoxProps) {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [mentions, setMentions] = useState<string[]>([]);
   const [mentionQuery, setMentionQuery] = useState<string | undefined>(undefined);
+  const [mentionHighlight, setMentionHighlight] = useState(0);
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
   const [dragOver, setDragOver] = useState(false);
@@ -83,6 +87,10 @@ export function InputBox(props: InputBoxProps) {
       .filter((p) => p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q) || p.role.toLowerCase().includes(q))
       .slice(0, 8);
   }, [mentionQuery, props.participants]);
+
+  useEffect(() => {
+    setMentionHighlight(0);
+  }, [mentionQuery]);
 
   const handleChange = (next: string) => {
     setText(next);
@@ -161,7 +169,13 @@ export function InputBox(props: InputBoxProps) {
       setMentions([]);
       try { sessionStorage.removeItem(draftKey); } catch { /* ignore */ }
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      // Detect 409: pending turn was already consumed by an agent before the edit landed.
+      const message = err instanceof Error ? err.message : String(err);
+      if (/\b409\b|already (started|consumed|scheduled)/i.test(message)) {
+        setError("This message has already started processing — edit no longer applies.");
+      } else {
+        setError(message);
+      }
     } finally {
       setIsSending(false);
     }
@@ -185,7 +199,7 @@ export function InputBox(props: InputBoxProps) {
     >
       {props.editingTurnId ? (
         <div className="mb-2 flex items-center gap-2 rounded bg-warning-soft px-2 py-1 text-xs">
-          <span>Editing queued message</span>
+          <span>Editing queued message <span className="ah-mono text-muted">{props.editingTurnId?.slice(0, 8)}</span></span>
           <Button size="sm" variant="ghost" onPress={() => props.onCancelEdit?.()}>Cancel edit</Button>
         </div>
       ) : null}
@@ -217,25 +231,32 @@ export function InputBox(props: InputBoxProps) {
 
       {mentionQuery !== undefined && filteredMentions.length > 0 ? (
         <ul role="listbox" aria-label="Mention participants" className="mb-2 flex max-h-40 flex-col gap-1 overflow-auto rounded border border-border bg-overlay p-1">
-          {filteredMentions.map((p) => (
-            <li
-              key={p.id}
-              role="option"
-              aria-selected={false}
-              onClick={() => insertMention(p)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  insertMention(p);
-                }
-              }}
-              tabIndex={0}
-              className="cursor-pointer rounded px-2 py-1 text-sm hover:bg-default"
-            >
-              <div className="font-medium">{p.name}</div>
-              <div className="text-xs text-muted">{p.role} · {p.id}</div>
-            </li>
-          ))}
+          {filteredMentions.map((p, i) => {
+            const active = i === mentionHighlight;
+            return (
+              <li
+                key={p.id}
+                role="option"
+                aria-selected={active}
+                onMouseEnter={() => setMentionHighlight(i)}
+                onClick={() => insertMention(p)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    insertMention(p);
+                  }
+                }}
+                tabIndex={0}
+                className={[
+                  "cursor-pointer rounded px-2 py-1 text-sm",
+                  active ? "bg-accent-soft text-accent-soft-foreground" : "hover:bg-default"
+                ].join(" ")}
+              >
+                <div className="font-medium">{p.name}</div>
+                <div className="text-xs text-muted">{p.role} · {p.id}</div>
+              </li>
+            );
+          })}
         </ul>
       ) : null}
 
@@ -253,6 +274,19 @@ export function InputBox(props: InputBoxProps) {
           className="min-h-[44px] max-h-32 flex-1"
           disabled={props.connectionStatus !== "connected" || queueFull}
           onKeyDown={(e) => {
+            const popoverOpen = mentionQuery !== undefined && filteredMentions.length > 0;
+            if (popoverOpen && e.key === "Tab") {
+              e.preventDefault();
+              const len = filteredMentions.length;
+              setMentionHighlight((h) => (e.shiftKey ? (h - 1 + len) % len : (h + 1) % len));
+              return;
+            }
+            if (popoverOpen && e.key === "Enter") {
+              e.preventDefault();
+              const target = filteredMentions[mentionHighlight];
+              if (target) insertMention(target);
+              return;
+            }
             if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
               e.preventDefault();
               void send();
@@ -261,6 +295,11 @@ export function InputBox(props: InputBoxProps) {
               void send();
             } else if (e.key === "Escape" && mentionQuery !== undefined) {
               setMentionQuery(undefined);
+            } else if (e.key === "ArrowUp" && text.length === 0 && !props.editingTurnId && props.latestPendingMessageId !== undefined && props.onRequestEdit !== undefined) {
+              // Quick-edit: empty input + ↑ jumps the user into editing the most recent
+              // queued pending turn so they don't have to mouse over to its edit button.
+              e.preventDefault();
+              props.onRequestEdit(props.latestPendingMessageId);
             }
           }}
         />

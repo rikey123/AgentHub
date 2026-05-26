@@ -5,11 +5,11 @@ import { URL } from "node:url";
 import { createCommandBus, createDurableHandlerRegistry, createEventBus, createOutboxDispatcher, type CommandBus, type CommandHandler, type CommandType, type DurableHandlerRegistry, type EventBus, type EventBusSubscriber, type OutboxDispatcher, type PublishInput, type ReplayView } from "@agenthub/bus";
 import { bootstrapBuiltInAgents, watchAgentProfiles, type AgentProfileWatcher } from "@agenthub/agents";
 import { ArtifactFSRunRegistry, ArtifactService, createArtifactCommandHandlers } from "@agenthub/artifacts";
-import { ContextLedger, createContextCommandHandlers } from "@agenthub/context";
+import { ContextLedger, createContextCommandHandlers, HeuristicBriefGenerator } from "@agenthub/context";
 import { createDatabase, type AgentHubDatabase } from "@agenthub/db";
 import { MockAdapterManager } from "@agenthub/adapter-mock";
 import { createInterventionCommandHandlers, InterventionEngine } from "@agenthub/interventions";
-import { ActiveWakesRegistry, createCancelRunHandler, createCompleteTaskHandler, createConsumePendingTurnHandler, createCreateTaskHandler, createUpdateTaskHandler, createWakeAgentHandler, MailboxService, PendingTurnService, RoomMcpServer, RunLifecycleService, RunQueue, TaskService } from "@agenthub/orchestrator";
+import { ActiveWakesRegistry, createCancelRunHandler, createCompleteTaskHandler, createConsumePendingTurnHandler, createCreateTaskHandler, createUpdateTaskHandler, createWakeAgentHandler, MailboxService, PendingTurnService, RoomMcpServer, RunLifecycleService, RunQueue, TaskService, type BriefResolver } from "@agenthub/orchestrator";
 import { createPermissionCommandHandlers, PermissionEngine, seedBuiltInPermissionProfiles } from "@agenthub/permissions";
 import type { EventEnvelope } from "@agenthub/protocol/events";
 import { attachmentMaxBytes, authenticateBrowserRequest, issueBrowserSession, redactAndTruncate, storeAttachment, type BrowserAuthResult } from "@agenthub/security";
@@ -147,7 +147,20 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     };
     const lifecycle = new RunLifecycleService(database, eventBus, lifecycleOptions);
     const roomMcpServerRef: { current?: RoomMcpServer } = {};
-    const adapterRegistry = new AdapterRegistry({ database, eventBus, lifecycle, permissionEngine, artifactFs, getRoomMcpServer: () => currentRoomMcpServer(roomMcpServerRef), getCommandBus: () => commandBusRef.current, ...(options.now !== undefined ? { now: options.now } : {}) });
+    // Synchronous brief resolver. HeuristicBriefGenerator.generate returns Effect<string,never>,
+    // which is a pure value; Effect.runSync extracts it without async overhead. Cast through
+    // `unknown` to widen the input shape — adapter-bridge's BriefResolver uses string for
+    // `failureClass` while the context package narrows it to RunFailureClass.
+    const briefGenerator = new HeuristicBriefGenerator();
+    const briefResolver: BriefResolver = (input) => {
+      try {
+        const Effect = (require("effect") as { Effect: { runSync: <A>(eff: unknown) => A } }).Effect;
+        return Effect.runSync(briefGenerator.generate(input as never)) as string;
+      } catch {
+        return "";
+      }
+    };
+    const adapterRegistry = new AdapterRegistry({ database, eventBus, lifecycle, permissionEngine, artifactFs, briefResolver, getRoomMcpServer: () => currentRoomMcpServer(roomMcpServerRef), getCommandBus: () => commandBusRef.current, ...(options.now !== undefined ? { now: options.now } : {}) });
 
     emitPhase("startup", PHASE_OUTBOX);
     const handlers = createDurableHandlerRegistry({ database, retryDelaysMs: [0] });
@@ -158,6 +171,18 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     const runQueue = new RunQueue({ database, lifecycle, adapterManager: adapterRegistry, ...(options.now !== undefined ? { now: options.now } : {}) });
     runQueueRef.current = runQueue;
     handlers.register({ name: "run-queue", subscribes: ["agent.run.queued", "agent.run.completed", "agent.run.failed", "agent.run.cancelled"], handle: (event) => runQueue.handleEvent(event) });
+    // Force-flush the per-(agent,room) status_line buffer when a run finalizes so the UI
+    // doesn't show "working" for up to 30 seconds after the agent already returned.
+    handlers.register({
+      name: "status-line-flush-on-run-end",
+      subscribes: ["agent.run.completed", "agent.run.failed", "agent.run.cancelled"],
+      handle: () => {
+        eventBus.flushStatusLines?.();
+        return Promise.resolve();
+      }
+    });
+    // Note: ContextLedger subscribes to `context.snapshot` itself in its constructor (self-wires),
+    // so we don't register a duplicate handler here.
     await handlers.catchUp();
 
     emitPhase("startup", PHASE_RUN_QUEUE);
@@ -333,8 +358,11 @@ async function route(ctx: RouteContext): Promise<void> {
   if (ctx.req.method === "POST" && parts[0] === "context" && parts[2] === "confirm") return dispatch(ctx, { ...(await body(ctx)), contextId: parts[1] }, "ConfirmContextItem");
   if (ctx.req.method === "POST" && parts[0] === "context" && parts[2] === "deprecate") return dispatch(ctx, { ...(await body(ctx)), contextId: parts[1] }, "DeprecateContextItem");
   if (ctx.req.method === "POST" && parts[0] === "context" && parts[2] === "pin") return dispatch(ctx, { ...(await body(ctx)), contextId: parts[1] }, "PinContextItem");
-  if (ctx.req.method === "GET" && url.pathname === "/permissions/profiles") return json(ctx.res, 200, { profiles: all(ctx.database, "SELECT * FROM permission_profiles ORDER BY name ASC") });
-  if (ctx.req.method === "GET" && parts[0] === "permissions" && parts[1] === "profiles" && parts[2]) return json(ctx.res, 200, { profile: get(ctx.database, "SELECT * FROM permission_profiles WHERE id = ?", parts[2]) });
+  if (ctx.req.method === "GET" && url.pathname === "/permissions/profiles") return json(ctx.res, 200, { profiles: (all(ctx.database, "SELECT * FROM permission_profiles ORDER BY name ASC") as Array<Record<string, unknown>>).map(decodeProfilePayload) });
+  if (ctx.req.method === "GET" && parts[0] === "permissions" && parts[1] === "profiles" && parts[2]) {
+    const row = get(ctx.database, "SELECT * FROM permission_profiles WHERE id = ?", parts[2]) as Record<string, unknown> | undefined;
+    return json(ctx.res, 200, { profile: row !== undefined ? decodeProfilePayload(row) : undefined });
+  }
   if (ctx.req.method === "POST" && url.pathname === "/permissions/profiles") return dispatch(ctx, await body(ctx), "CreatePermissionProfile");
   if (ctx.req.method === "PATCH" && parts[0] === "permissions" && parts[1] === "profiles" && parts[2]) return dispatch(ctx, { ...(await body(ctx)), profileId: parts[2] }, "PatchPermissionProfile");
   if (ctx.req.method === "GET" && url.pathname === "/permissions/requests") return permissionRequests(ctx, url);
@@ -538,17 +566,61 @@ function contextItems(ctx: RouteContext, url: URL): void {
 function messages(ctx: RouteContext, url: URL, roomIdOverride?: string): void {
   const roomId = roomIdOverride ?? url.searchParams.get("roomId") ?? undefined;
   if (roomId === undefined) return json(ctx.res, 400, { error: "roomId is required" });
-  const limit = Math.min(Math.max(numberQuery(url, "limit") ?? 50, 1), 100);
+  const limit = Math.min(Math.max(numberQuery(url, "limit") ?? 50, 1), 200);
   const includeDeleted = url.searchParams.get("includeDeleted") === "true";
+  // Spec accepts `cursor` as an opaque base64 token meaning "give me the next page"; alias it to
+  // `after` (forward pagination, default for chat history). `before` / `after` remain accepted
+  // for callers that know which direction they want.
+  const cursor = cursorParam(url.searchParams.get("cursor"));
   const before = cursorParam(url.searchParams.get("before"));
-  const after = cursorParam(url.searchParams.get("after"));
+  const after = cursorParam(url.searchParams.get("after")) ?? cursor;
   const clauses = ["room_id = ?"];
   const params: unknown[] = [roomId];
   if (!includeDeleted) clauses.push("deleted_at IS NULL");
   if (before !== undefined) { clauses.push("(created_at < ? OR (created_at = ? AND id < ?))"); params.push(before.createdAt, before.createdAt, before.id); }
   if (after !== undefined) { clauses.push("(created_at > ? OR (created_at = ? AND id > ?))"); params.push(after.createdAt, after.createdAt, after.id); }
-  const rows = all(ctx.database, `SELECT * FROM messages WHERE ${clauses.join(" AND ")} ORDER BY created_at ASC, id ASC LIMIT ?`, ...params, limit) as { readonly id: string; readonly created_at: number }[];
-  json(ctx.res, 200, { messages: rows, nextCursor: rows.length === limit ? encodeCursor(rows[rows.length - 1] as { readonly id: string; readonly created_at: number }) : null });
+  const rows = all(ctx.database, `SELECT * FROM messages WHERE ${clauses.join(" AND ")} ORDER BY created_at ASC, id ASC LIMIT ?`, ...params, limit) as Array<{ readonly id: string; readonly created_at: number }>;
+  const enriched = rows.map((row) => attachMessageText(ctx, row));
+  const last = rows.length > 0 ? rows[rows.length - 1]! : undefined;
+  const first = rows.length > 0 ? rows[0]! : undefined;
+  const hasMore = rows.length === limit;
+  // `nextCursor` is preserved for older clients; new clients should read `cursor: { before, after }`.
+  const nextCursor = hasMore && last !== undefined ? encodeCursor(last) : null;
+  json(ctx.res, 200, {
+    messages: enriched,
+    nextCursor,
+    hasMore,
+    cursor: {
+      ...(hasMore && last !== undefined ? { after: encodeCursor(last) } : {}),
+      ...(first !== undefined ? { before: encodeCursor(first) } : {})
+    }
+  });
+}
+
+/**
+ * Hydrate a raw `messages` row with its `message_parts` so callers see the actual text content
+ * without a follow-up round trip. Concatenates all `text` and `code` parts in seq order; keeps
+ * non-text parts as-is in the `parts` array.
+ */
+function attachMessageText(ctx: RouteContext, row: { readonly id: string }): unknown {
+  const parts = all(
+    ctx.database,
+    "SELECT seq, part_type, payload FROM message_parts WHERE message_id = ? ORDER BY seq ASC",
+    row.id
+  ) as Array<{ readonly seq: number; readonly part_type: string; readonly payload: string }>;
+  const decoded = parts.map((part) => {
+    let payload: unknown;
+    try { payload = JSON.parse(part.payload); } catch { payload = part.payload; }
+    return { seq: part.seq, type: part.part_type, payload };
+  });
+  const textChunks = decoded
+    .filter((part) => part.type === "text" || part.type === "code")
+    .map((part) => {
+      const p = part.payload as { text?: unknown };
+      return typeof p?.text === "string" ? p.text : "";
+    })
+    .filter((t) => t.length > 0);
+  return { ...row, text: textChunks.join("\n"), parts: decoded };
 }
 
 function cursorParam(value: string | null): { readonly createdAt: number; readonly id: string } | undefined {
@@ -563,6 +635,21 @@ function cursorParam(value: string | null): { readonly createdAt: number; readon
 
 function encodeCursor(row: { readonly created_at: number; readonly id: string }): string {
   return Buffer.from(JSON.stringify({ createdAt: row.created_at, id: row.id }), "utf8").toString("base64url");
+}
+
+/**
+ * Permission profile rows store `payload` as a JSON-encoded string in SQLite. Frontends expect
+ * a parsed object so they don't have to JSON.parse a second time. Tolerates non-JSON payloads
+ * (returns the raw string) so legacy or hand-edited rows don't break the endpoint.
+ */
+function decodeProfilePayload(row: Record<string, unknown>): Record<string, unknown> {
+  const raw = row.payload;
+  if (typeof raw !== "string") return row;
+  try {
+    return { ...row, payload: JSON.parse(raw) };
+  } catch {
+    return row;
+  }
 }
 
 function permissionRules(ctx: RouteContext, url: URL): void {

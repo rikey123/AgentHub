@@ -1,9 +1,26 @@
 import { randomUUID } from "node:crypto";
 
 import type { Command, CommandBus, EventBus, PublishInput } from "@agenthub/bus";
+import type { AgentHubDatabase } from "@agenthub/db";
 import type { EventType } from "@agenthub/protocol/events";
 
 import { RunLifecycleService, type Cost } from "./run-lifecycle-service.ts";
+
+/**
+ * Synchronous brief resolver. Returns the brief text to embed in `message.brief.published`.
+ * Implementations should be deterministic and fast (no LLM calls). The resolver is given the
+ * runId, the final assistant text (if any), and counts of artifacts produced by the run, and
+ * may inspect failure/cancel state for templated outputs. We keep this structural to avoid an
+ * orchestrator -> context circular import.
+ */
+export type BriefResolver = (input: {
+  readonly runId: string;
+  readonly finalAssistantText?: string;
+  readonly artifactCounts: { readonly diff: number; readonly file: number; readonly tool: number };
+  readonly failureClass?: string;
+  readonly failureReason?: string;
+  readonly cancelled?: boolean;
+}) => string;
 
 export type AdapterEvent =
   | { readonly type: "session.opened"; readonly sessionId: string; readonly workDir?: string; readonly providerConversationId?: string }
@@ -44,6 +61,10 @@ export class AdapterBridge {
       readonly terminalEnabled?: boolean;
       readonly artifactFs?: AdapterArtifactFSBoundary;
       readonly getCommandBus?: () => CommandBus | undefined;
+      /** Optional brief resolver. When omitted, briefs default to "" (legacy behavior). */
+      readonly briefResolver?: BriefResolver;
+      /** Database used to look up the final assistant message text + artifact counts when computing the brief. */
+      readonly database?: AgentHubDatabase;
     }
   ) {}
 
@@ -64,13 +85,16 @@ export class AdapterBridge {
     }
     if (event.type === "session.ended") {
       this.input.artifactFs?.buildRunArtifact({ runId: this.input.runId, title: `Run ${this.input.runId} changes` });
-      if (event.reason === "cancelled") this.input.lifecycle.cancelFinalized(null, this.input.runId);
-      else this.input.lifecycle.complete(null, this.input.runId, event.cost ?? zeroCost());
+      const cancelled = event.reason === "cancelled";
+      const briefText = this.computeBriefText({ cancelled });
+      if (cancelled) this.input.lifecycle.cancelFinalized(null, this.input.runId, briefText);
+      else this.input.lifecycle.complete(null, this.input.runId, event.cost ?? zeroCost(), briefText);
       return;
     }
     if (event.type === "session.crashed") {
       this.input.artifactFs?.buildRunArtifact({ runId: this.input.runId, title: `Run ${this.input.runId} changes` });
-      this.input.lifecycle.fail(null, this.input.runId, "adapter_session_crashed", "retryable_visible", event.error);
+      const briefText = this.computeBriefText({ failureClass: "adapter_error", failureReason: event.error });
+      this.input.lifecycle.fail(null, this.input.runId, "adapter_session_crashed", "retryable_visible", event.error, briefText);
       return;
     }
     if (event.type === "fs.writeTextFile") {
@@ -111,6 +135,62 @@ export class AdapterBridge {
       payload: { runId: this.input.runId, ...event },
       createdAt: this.input.now?.() ?? Date.now()
     } satisfies PublishInput);
+  }
+
+  /**
+   * Look up the run's final assistant text + artifact counts from the database and feed them
+   * to the configured `briefResolver`. Returns "" when no resolver/database is wired (legacy
+   * behavior — keeps tests with stubbed services working).
+   */
+  private computeBriefText(extra: { readonly cancelled?: boolean; readonly failureClass?: string; readonly failureReason?: string } = {}): string | undefined {
+    const resolver = this.input.briefResolver;
+    const db = this.input.database;
+    if (resolver === undefined || db === undefined) return undefined;
+    try {
+      const lastAssistant = db.sqlite.prepare(
+        `SELECT id FROM messages
+         WHERE run_id = ? AND sender_type = 'agent' AND deleted_at IS NULL
+         ORDER BY created_at DESC LIMIT 1`
+      ).get(this.input.runId) as { readonly id: string } | undefined;
+      let finalAssistantText: string | undefined;
+      if (lastAssistant !== undefined) {
+        const parts = db.sqlite.prepare(
+          "SELECT payload FROM message_parts WHERE message_id = ? AND part_type IN ('text','code') ORDER BY seq ASC"
+        ).all(lastAssistant.id) as Array<{ readonly payload: string }>;
+        const joined = parts
+          .map((row) => {
+            try {
+              const parsed = JSON.parse(row.payload) as { text?: unknown };
+              return typeof parsed.text === "string" ? parsed.text : "";
+            } catch { return ""; }
+          })
+          .filter((t) => t.length > 0)
+          .join("\n");
+        if (joined.length > 0) finalAssistantText = joined;
+      }
+      const artifactCounts = (db.sqlite.prepare(
+        `SELECT
+           SUM(CASE WHEN type = 'diff' THEN 1 ELSE 0 END) AS diff,
+           SUM(CASE WHEN type = 'file' THEN 1 ELSE 0 END) AS file,
+           SUM(CASE WHEN type = 'terminal' THEN 1 ELSE 0 END) AS tool
+         FROM artifacts WHERE run_id = ?`
+      ).get(this.input.runId) as { diff: number | null; file: number | null; tool: number | null } | undefined) ?? { diff: 0, file: 0, tool: 0 };
+      return resolver({
+        runId: this.input.runId,
+        ...(finalAssistantText !== undefined ? { finalAssistantText } : {}),
+        artifactCounts: {
+          diff: artifactCounts.diff ?? 0,
+          file: artifactCounts.file ?? 0,
+          tool: artifactCounts.tool ?? 0
+        },
+        ...(extra.cancelled !== undefined ? { cancelled: extra.cancelled } : {}),
+        ...(extra.failureClass !== undefined ? { failureClass: extra.failureClass } : {}),
+        ...(extra.failureReason !== undefined ? { failureReason: extra.failureReason } : {})
+      });
+    } catch {
+      // Brief generation must never crash the lifecycle finalize. Fall back to empty.
+      return undefined;
+    }
   }
 }
 

@@ -2,7 +2,7 @@ import { ClaudeCodeACPAdapter } from "@agenthub/adapter-claude-code";
 import { OpenCodeACPAdapter } from "@agenthub/adapter-opencode";
 import { MockAdapterManager } from "@agenthub/adapter-mock";
 import type { AgentHubDatabase } from "@agenthub/db";
-import type { AdapterArtifactFSBoundary, RoomMcpServer, RunLifecycleService, RunRow } from "@agenthub/orchestrator";
+import type { AdapterArtifactFSBoundary, RoomMcpServer, RunLifecycleService, RunRow, BriefResolver } from "@agenthub/orchestrator";
 import type { CommandBus, EventBus } from "@agenthub/bus";
 import type { PermissionEngine } from "@agenthub/permissions";
 
@@ -14,6 +14,7 @@ export type AdapterRegistryOptions = {
   readonly lifecycle: RunLifecycleService;
   readonly permissionEngine?: PermissionEngine;
   readonly artifactFs?: AdapterArtifactFSBoundary;
+  readonly briefResolver?: BriefResolver;
   readonly getRoomMcpServer?: () => RoomMcpServer;
   readonly getCommandBus?: () => CommandBus | undefined;
   readonly mockAdapter?: MockAdapterManager;
@@ -67,7 +68,7 @@ export class AdapterRegistry {
 
   private claude(): ClaudeCodeACPAdapter {
     this.claudeAdapter ??= new ClaudeCodeACPAdapter({
-      services: { database: this.options.database, eventBus: this.options.eventBus, ...(this.options.getCommandBus !== undefined ? { getCommandBus: this.options.getCommandBus } : {}), ...(this.options.permissionEngine !== undefined ? { permissionEngine: this.options.permissionEngine } : {}), ...(this.options.artifactFs !== undefined ? { artifactFs: this.options.artifactFs } : {}) },
+      services: { database: this.options.database, eventBus: this.options.eventBus, ...(this.options.getCommandBus !== undefined ? { getCommandBus: this.options.getCommandBus } : {}), ...(this.options.permissionEngine !== undefined ? { permissionEngine: this.options.permissionEngine } : {}), ...(this.options.artifactFs !== undefined ? { artifactFs: this.options.artifactFs } : {}), ...(this.options.briefResolver !== undefined ? { briefResolver: this.options.briefResolver } : {}) },
       lifecycle: this.options.lifecycle,
       workspaceId: "default-workspace",
       ...(this.options.permissionEngine !== undefined ? { permissionEngine: this.options.permissionEngine } : {}),
@@ -79,7 +80,7 @@ export class AdapterRegistry {
 
   private opencode(): OpenCodeACPAdapter {
     this.opencodeAdapter ??= new OpenCodeACPAdapter({
-      services: { database: this.options.database, eventBus: this.options.eventBus, ...(this.options.getCommandBus !== undefined ? { getCommandBus: this.options.getCommandBus } : {}), ...(this.options.permissionEngine !== undefined ? { permissionEngine: this.options.permissionEngine } : {}), ...(this.options.artifactFs !== undefined ? { artifactFs: this.options.artifactFs } : {}) },
+      services: { database: this.options.database, eventBus: this.options.eventBus, ...(this.options.getCommandBus !== undefined ? { getCommandBus: this.options.getCommandBus } : {}), ...(this.options.permissionEngine !== undefined ? { permissionEngine: this.options.permissionEngine } : {}), ...(this.options.artifactFs !== undefined ? { artifactFs: this.options.artifactFs } : {}), ...(this.options.briefResolver !== undefined ? { briefResolver: this.options.briefResolver } : {}) },
       lifecycle: this.options.lifecycle,
       workspaceId: "default-workspace",
       ...(this.options.permissionEngine !== undefined ? { permissionEngine: this.options.permissionEngine } : {}),

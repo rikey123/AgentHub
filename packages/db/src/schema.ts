@@ -83,7 +83,8 @@ export const messages = sqliteTable("messages", {
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
   deletedAt: integer("deleted_at"),
-  briefPublishedAt: integer("brief_published_at")
+  briefPublishedAt: integer("brief_published_at"),
+  pinnedAt: integer("pinned_at")
 });
 
 export const messageParts = sqliteTable(

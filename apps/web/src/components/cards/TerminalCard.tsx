@@ -1,36 +1,75 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Button, Card, Chip, Modal, ScrollShadow, SearchField, Input, Switch } from "@heroui/react";
+import { Button, Card, Chip, Modal, SearchField, Input, Spinner, Switch } from "@heroui/react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import Convert from "ansi-to-html";
 
 interface TerminalCardProps {
   artifactId: string;
   title: string;
   lines: ReadonlyArray<{ stream: "stdout" | "stderr"; text: string }>;
+  exitCode?: number | null;
 }
 
-export function TerminalCard({ artifactId, title, lines }: TerminalCardProps) {
+const ansi = new Convert({ newline: false, escapeXML: true });
+
+function renderHtml(text: string): string {
+  try {
+    return ansi.toHtml(text);
+  } catch {
+    return text.replace(/[<>&]/g, (c) => (c === "<" ? "&lt;" : c === ">" ? "&gt;" : "&amp;"));
+  }
+}
+
+export function TerminalCard({ artifactId, title, lines, exitCode = null }: TerminalCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const stdoutCount = lines.filter((l) => l.stream === "stdout").length;
+  const stderrCount = lines.filter((l) => l.stream === "stderr").length;
+  const showSpinner = lines.length === 0 && Boolean(artifactId);
+  const showExitBadge = exitCode !== null && exitCode !== undefined && exitCode !== 0;
+
   return (
     <>
       <Card variant="default">
         <Card.Header>
           <div className="flex items-center gap-2">
             <Card.Title className="flex-1 truncate">{title}</Card.Title>
+            {showExitBadge ? (
+              <Chip size="sm" color="danger" variant="primary">exit {exitCode}</Chip>
+            ) : null}
             <Chip size="sm" variant="soft" color="default">{lines.length} lines</Chip>
           </div>
           <Card.Description className="ah-mono truncate">{artifactId}</Card.Description>
         </Card.Header>
         <Card.Content>
-          <div className="ah-mono max-h-32 overflow-hidden rounded bg-surface-secondary p-2 text-xs leading-tight">
-            {lines.slice(-6).map((line, i) => (
-              <div key={i} className={line.stream === "stderr" ? "text-danger" : ""}>
-                {line.text}
+          <div className="ah-mono max-h-48 overflow-hidden rounded bg-surface-secondary p-2 text-xs leading-tight">
+            {showSpinner ? (
+              <div className="flex items-center gap-2 text-muted">
+                <Spinner size="sm" />
+                <span>Loading…</span>
               </div>
-            ))}
+            ) : lines.length === 0 ? (
+              <div className="text-muted">No output.</div>
+            ) : (
+              lines.slice(-10).map((line, i) => (
+                <div
+                  key={i}
+                  className={line.stream === "stderr" ? "text-danger" : ""}
+                  dangerouslySetInnerHTML={{ __html: renderHtml(line.text) }}
+                />
+              ))
+            )}
           </div>
         </Card.Content>
         <Card.Footer>
-          <Button variant="secondary" onPress={() => setExpanded(true)}>Expand</Button>
+          <div className="flex items-center gap-2">
+            <Chip size="sm" variant="soft" color="default">stdout {stdoutCount}</Chip>
+            <Chip size="sm" variant="soft" color={stderrCount > 0 ? "danger" : "default"}>stderr {stderrCount}</Chip>
+            <div className="ml-auto">
+              <Button variant="secondary" onPress={() => setExpanded(true)} isDisabled={lines.length === 0}>
+                Expand
+              </Button>
+            </div>
+          </div>
         </Card.Footer>
       </Card>
       {expanded ? (
@@ -112,9 +151,8 @@ function ExpandedTerminal({ lines }: { lines: TerminalCardProps["lines"] }) {
                   transform: `translateY(${vi.start}px)`,
                   height: vi.size
                 }}
-              >
-                {line.text}
-              </div>
+                dangerouslySetInnerHTML={{ __html: renderHtml(line.text) }}
+              />
             );
           })}
         </div>

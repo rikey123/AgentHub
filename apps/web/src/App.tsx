@@ -34,7 +34,7 @@ export default function App() {
   const projector = useProjector("main", activeRoomId);
   const sdk = useSdk();
   const csrfFetch = useCsrfFetch();
-  const { theme, setTheme, toggleTheme } = useTheme();
+  const { theme, setTheme, toggleTheme, setDensity } = useTheme();
 
   const rooms = useMemo(() => Array.from(projector.rooms.values()), [projector.rooms]);
   const activeRoom = activeRoomId ? projector.rooms.get(activeRoomId) : undefined;
@@ -206,6 +206,8 @@ export default function App() {
       { id: "theme-light", label: "Theme: Light", group: "Theme", keywords: ["theme", "light"], perform: () => setTheme("light") },
       { id: "theme-dark", label: "Theme: Dark", group: "Theme", keywords: ["theme", "dark"], perform: () => setTheme("dark") },
       { id: "theme-auto", label: "Theme: Auto", group: "Theme", keywords: ["theme", "auto"], perform: () => setTheme("auto") },
+      { id: "density-cozy", label: "Density: Cozy", group: "Theme", keywords: ["density", "cozy", "spacing"], perform: () => setDensity("cozy") },
+      { id: "density-compact", label: "Density: Compact", group: "Theme", keywords: ["density", "compact", "spacing"], perform: () => setDensity("compact") },
       { id: "show-keymap", label: "Show keyboard shortcuts", group: "Help", perform: () => setKeymapOpen(true) }
     ];
     for (const room of rooms) {
@@ -218,7 +220,7 @@ export default function App() {
       });
     }
     return list;
-  }, [rooms, openNewRoom, leftCollapsed, rightCollapsed, setTheme]);
+  }, [rooms, openNewRoom, leftCollapsed, rightCollapsed, setTheme, setDensity]);
 
   const center = activeRoom ? (
     <div className="flex h-full flex-col">
@@ -247,8 +249,10 @@ export default function App() {
         participants={activeRoom.participants}
         connectionStatus={projector.connectionStatus}
         pendingCount={activeRoom.pendingTurns.length}
+        latestPendingMessageId={activeRoom.pendingTurns.length > 0 ? activeRoom.pendingTurns[activeRoom.pendingTurns.length - 1]!.id : undefined}
         editingTurnId={editingTurnId}
         onCancelEdit={() => setEditingTurnId(undefined)}
+        onRequestEdit={setEditingTurnId}
         csrfFetch={csrfFetch}
         onSend={handleSendMessage}
         onEditSend={handleEditSend}

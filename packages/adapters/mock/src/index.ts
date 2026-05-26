@@ -135,7 +135,7 @@ export class MockAdapterManager {
     }
 
     this.completeAssistantMessage(run, messageId, text.length > 0 ? text : "Mock assistant completed.");
-    bridge.handle({ type: "session.ended", sessionId, reason: "completed", cost: zeroCost() });
+    bridge.handle({ type: "session.ended", sessionId, reason: "completed", cost: syntheticCost(text, this.script.steps) });
   }
 
   cancelRun(runId: string): void {
@@ -201,4 +201,21 @@ function messageEvent(run: RunRow, type: "message.created" | "message.completed"
 
 function zeroCost() {
   return { inputTokens: 0, outputTokens: 0, cachedTokens: 0, costUsd: 0, modelId: "mock" };
+}
+
+/**
+ * Generate plausible-looking cost numbers for mock runs so the V0.5 Cost panel has data to
+ * visualize when the user is just kicking the tires with `chatter` or other mock-backed agents.
+ * NOT real billing — derived deterministically from the run's script + final text length.
+ *
+ * Approximate model: ~4 chars per token; tool calls add 50 input tokens each (system prompt
+ * inflation), each "say"/"delta" adds output tokens; price = $3/M input, $15/M output (Sonnet).
+ */
+function syntheticCost(text: string, steps: MockAgentScript["steps"]): { inputTokens: number; outputTokens: number; cachedTokens: number; costUsd: number; modelId: string } {
+  const outputTokens = Math.max(1, Math.ceil(text.length / 4));
+  const toolCount = steps.filter((s) => s.type === "tool").length;
+  const inputTokens = 200 + toolCount * 50;
+  const cachedTokens = Math.floor(inputTokens * 0.3);
+  const costUsd = Math.round(((inputTokens / 1_000_000) * 3 + (outputTokens / 1_000_000) * 15) * 1_000_000) / 1_000_000;
+  return { inputTokens, outputTokens, cachedTokens, costUsd, modelId: "mock-sonnet" };
 }

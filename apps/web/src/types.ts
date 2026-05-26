@@ -87,6 +87,16 @@ export type RunViewModel = {
   readonly error?: string | undefined;
 };
 
+export type MailboxFailureViewModel = {
+  readonly id: string;
+  readonly mailboxMessageId: string;
+  readonly targetAgentId: string;
+  readonly targetAgentName?: string | undefined;
+  readonly reason: string;
+  readonly attemptCount: number;
+  readonly failedAt: number;
+};
+
 export type RoomViewModel = {
   readonly id: string;
   readonly title: string;
@@ -101,6 +111,7 @@ export type RoomViewModel = {
   readonly tasks: TaskViewModel[];
   readonly runs: RunViewModel[];
   readonly pendingTurns: MessageViewModel[];
+  readonly mailboxFailures: MailboxFailureViewModel[];
   readonly cursor?: string | undefined;
   readonly unreadCount: number;
 };

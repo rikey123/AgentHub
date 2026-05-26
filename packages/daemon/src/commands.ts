@@ -134,18 +134,26 @@ function sendMessage(options: DaemonCommandHandlersOptions, command: Command, me
     }
   })();
 
-  const wakeResult = wakeAgents(options, meta, room, roomId, messageId, text, wakeTargets.filter((agentId) => !(busy && agentId === room.primary_agent_id)), mentions.length > 0 ? "user_mention" : "primary_turn");
+  // Per-agent wake reason: the primary always gets `primary_turn` (it owns the conversation
+  // turn even when @-mentioned alongside others); explicitly mentioned non-primary agents get
+  // `user_mention`; an agent woken without mentions gets `primary_turn` by default.
+  const wakeReasonFor = (agentId: string): "primary_turn" | "user_mention" => {
+    if (agentId === room.primary_agent_id) return "primary_turn";
+    return mentions.includes(agentId) ? "user_mention" : "primary_turn";
+  };
+  const wakeResult = wakeAgents(options, meta, room, roomId, messageId, text, wakeTargets.filter((agentId) => !(busy && agentId === room.primary_agent_id)), wakeReasonFor);
   if (isPromiseLike(wakeResult)) return wakeResult.then((result) => (result.ok ? successMessage(options, roomId, messageId) : result));
   if (!wakeResult.ok) return wakeResult;
 
   return successMessage(options, roomId, messageId);
 }
 
-function wakeAgents(options: DaemonCommandHandlersOptions, meta: CommandMeta, room: RoomRow, roomId: string, messageId: string, text: string, agentIds: readonly string[], reason: "primary_turn" | "user_mention"): CommandResult | Promise<CommandResult> {
+function wakeAgents(options: DaemonCommandHandlersOptions, meta: CommandMeta, room: RoomRow, roomId: string, messageId: string, text: string, agentIds: readonly string[], reason: "primary_turn" | "user_mention" | ((agentId: string) => "primary_turn" | "user_mention")): CommandResult | Promise<CommandResult> {
+  const reasonFor = typeof reason === "function" ? reason : () => reason;
   let chain: Promise<CommandResult> | undefined;
   for (const agentId of agentIds) {
     const dispatchWake = () => options.getCommandBus().dispatch(
-      { type: "WakeAgent", roomId, agentId, workspaceId: room.workspace_id, reason: agentId === room.primary_agent_id && reason === "primary_turn" ? "primary_turn" : reason, messageId, promptDelta: { kind: "delta_only", instructions: text }, idempotencyKey: `wake:${messageId}:${agentId}` },
+      { type: "WakeAgent", roomId, agentId, workspaceId: room.workspace_id, reason: reasonFor(agentId), messageId, promptDelta: { kind: "delta_only", instructions: text }, idempotencyKey: `wake:${messageId}:${agentId}` },
       { actor: { type: "system" }, traceId: meta.traceId, idempotencyKey: `wake:${messageId}:${agentId}`, origin: "internal" }
     );
     if (chain) chain = chain.then((result) => result.ok ? Promise.resolve(dispatchWake()) : result);
@@ -206,9 +214,15 @@ function pinMessage(options: DaemonCommandHandlersOptions, command: Command, met
   options.database.sqlite.transaction(() => {
     options.database.sqlite.prepare("INSERT INTO context_items (id, workspace_id, room_id, task_id, run_id, source_message_id, type, scope, content, source, visibility, status, confidence, version, owner_id, owner_type, created_by, pinned, created_at, updated_at, deprecated_at) VALUES (?, ?, ?, NULL, NULL, ?, 'fact', 'workspace', ?, ?, ?, 'confirmed', 'verified', 1, NULL, NULL, ?, 1, ?, ?, NULL)").run(contextId, row.workspace_id, row.room_id, messageId, text, source, visibility, actorId(meta), now, now);
     options.database.sqlite.prepare("INSERT INTO context_versions (context_id, version, payload, changed_by, changed_at) VALUES (?, 1, ?, ?, ?)").run(contextId, JSON.stringify(item), actorId(meta), now);
+    // Mark the message row itself so consumers (frontend list view, message kebab state) can show
+    // a pin glyph without a separate join. The context-item is still the source of truth for the
+    // pinned-fact semantics; this is a denormalized flag for fast rendering.
+    options.database.sqlite.prepare("UPDATE messages SET pinned_at = ?, updated_at = ? WHERE id = ?").run(now, now, messageId);
     options.eventBus.publish({ id: randomUUID(), type: "context.item.created", schemaVersion: 1, workspaceId: row.workspace_id, roomId: row.room_id, payload: { contextId, status: "confirmed", source: item.source }, createdAt: now });
     options.eventBus.publish({ id: randomUUID(), type: "context.item.confirmed", schemaVersion: 1, workspaceId: row.workspace_id, roomId: row.room_id, payload: { contextId, byUserId: null, source: "user", downgraded: false }, createdAt: now });
     options.eventBus.publish({ id: randomUUID(), type: "context.item.visibility.changed", schemaVersion: 1, workspaceId: row.workspace_id, roomId: row.room_id, payload: { contextId, scope: "workspace", pinned: true, visibility: {} }, createdAt: now });
+    // Echo the pin onto the originating message so SSE consumers can update the kebab state.
+    options.eventBus.publish({ id: randomUUID(), type: "message.updated", schemaVersion: 1, workspaceId: row.workspace_id, roomId: row.room_id, payload: { messageId, pinnedAt: now, contextId }, createdAt: now });
   })();
   return { ok: true, data: item, emittedEvents: latestContextEvents(options.database, contextId) };
 }
