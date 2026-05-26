@@ -30,6 +30,12 @@ class Projector {
   private deltaBatches = new Map<string, DeltaBatch>();
 
   connect(view: "main" | "detail", roomId?: string, runId?: string): void {
+    // When the consumer changes view target (different room or different run), the projector's
+    // global `cursor` from the previous SSE session would skip historical events for the new
+    // target. Reset the cursor when the (view, roomId, runId) triple changes so SSE replay
+    // delivers the full history needed to render the destination.
+    const targetChanged = this.view !== view || this.roomId !== roomId || this.runId !== runId;
+    if (targetChanged) this.cursor = 0;
     this.disconnect();
     this.view = view;
     this.roomId = roomId;
@@ -699,6 +705,15 @@ export function useProjector(view: "main" | "detail", roomId?: string, runId?: s
   const roomIdRef = useRef(roomId);
   const runIdRef = useRef(runId);
 
+  // For the main timeline view we keep ONE long-lived SSE subscription that
+  // streams every event, so switching the active room never tears down the
+  // stream and never drops live deltas. Only the run-detail view scopes to a
+  // specific (room, run). Without this, every `activeRoomId` change closed the
+  // EventSource and re-opened it with a server-side roomId filter — racing with
+  // any in-flight `agent.run.*` / `message.*` events for the new room.
+  const sseRoomId = view === "main" ? undefined : roomId;
+  const sseRunId = view === "main" ? undefined : runId;
+
   useEffect(() => {
     let cancelled = false;
     viewRef.current = view;
@@ -706,16 +721,16 @@ export function useProjector(view: "main" | "detail", roomId?: string, runId?: s
     runIdRef.current = runId;
     ensureAuthSession()
       .then(() => {
-        if (!cancelled) globalProjector.connect(view, roomId, runId);
+        if (!cancelled) globalProjector.connect(view, sseRoomId, sseRunId);
       })
       .catch(() => {
-        if (!cancelled) globalProjector.connect(view, roomId, runId);
+        if (!cancelled) globalProjector.connect(view, sseRoomId, sseRunId);
       });
     return () => {
       cancelled = true;
       globalProjector.disconnect();
     };
-  }, [view, roomId, runId]);
+  }, [view, sseRoomId, sseRunId]);
 
   useEffect(() => {
     return globalProjector.subscribe(setState);
