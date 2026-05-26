@@ -131,8 +131,9 @@ describe("ClaudeCodeACPAdapter", () => {
     lifecycle.create(null, { runId: "run", workspaceId: "w", roomId: "r", agentId: "a", wakeReason: "primary_turn" });
     lifecycle.markClaimed(null, "run");
     lifecycle.markStarting(null, "run", 123);
-    // Child exits only after it receives the managed session/prompt request. This proves the
-    // post-session.opened prompt path while keeping the crash in a real child process.
+    // Child replies to the ACP handshake (initialize + session/new), then exits when it
+    // receives the managed session/prompt request. This proves the post-session.opened prompt
+    // path while keeping the crash in a real child process.
     const crashAfterPromptScript = `
       let buffer = "";
       process.stdin.setEncoding("utf8");
@@ -143,6 +144,14 @@ describe("ClaudeCodeACPAdapter", () => {
         for (const line of lines) {
           if (!line) continue;
           const msg = JSON.parse(line);
+          if (msg.method === "initialize") {
+            process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: {} }) + "\\n");
+            continue;
+          }
+          if (msg.method === "session/new") {
+            process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { sessionId: "test-session" } }) + "\\n");
+            continue;
+          }
           if (msg.method === "session/prompt") process.exit(7);
         }
       });

@@ -16,6 +16,10 @@
     "@agenthub/permissions": "workspace:*",
     "@agenthub/protocol": "workspace:*",
     "@agenthub/security": "workspace:*",
+    "cross-spawn": "^7.0.6",
     "effect": "^3.19.6"
+  },
+  "devDependencies": {
+    "@types/cross-spawn": "^6.0.6"
   }
 }

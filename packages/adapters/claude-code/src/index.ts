@@ -38,6 +38,7 @@ export class ClaudeCodeACPAdapter extends ACPAdapter {
   private readonly bridgeByRun = new Map<string, AdapterBridge>();
   private readonly runById = new Map<string, RunRow>();
   private readonly workspaceByRun = new Map<string, string>();
+  private readonly assistantTextByRun = new Map<string, string>();
   private readonly openedRuns = new Set<string>();
   private readonly pendingFailuresByRun = new Map<string, ACPAdapterError>();
   private readonly permissionEngine: PermissionEngine | undefined;
@@ -47,8 +48,12 @@ export class ClaudeCodeACPAdapter extends ACPAdapter {
     const logger = options.services !== undefined && options.workspaceId !== undefined ? new AdapterRawLogger(options.services.eventBus, { workspaceId: options.workspaceId, ...(options.now !== undefined ? { now: options.now } : {}) }) : undefined;
     const rawLogger = logger?.write.bind(logger);
     super("claude-code", "Claude Code Adapter", claudeCodeManifest, { ...(options.now !== undefined ? { now: options.now } : {}), ...(rawLogger !== undefined ? { rawSink: rawLogger } : {}) });
-    this.command = options.command ?? "claude";
-    this.args = options.args ?? ["--acp"];
+    // Anthropic's `claude` CLI no longer ships an ACP server (--acp / --experimental-acp removed
+    // around v2.1). The community ACP bridge `@agentclientprotocol/claude-agent-acp` provides one.
+    // We launch it via `npx -y` so users only need npx + the claude CLI on PATH (the bridge calls
+    // `claude` itself for the actual conversation).
+    this.command = options.command ?? "npx";
+    this.args = options.args ?? ["-y", "@agentclientprotocol/claude-agent-acp@0.29.2"];
     this.env = options.env;
     this.permissionEngine = options.permissionEngine ?? options.services?.permissionEngine;
     this.health = options.services !== undefined ? new AdapterHealthRegistry(options.services.eventBus, { ...(options.now !== undefined ? { now: options.now } : {}) }) : undefined;
@@ -57,7 +62,11 @@ export class ClaudeCodeACPAdapter extends ACPAdapter {
   detect(): Effect.Effect<DetectedRuntime[], AdapterError> {
     return Effect.try({
       try: () => {
-        const result = classifyClaudeDetection(this.command);
+        // The bridge calls `claude` under the hood, but tests construct the adapter with a
+        // custom command to verify the not-found path. Honor the custom command if provided
+        // (anything other than the default npx invocation), otherwise probe `claude`.
+        const probeCmd = this.options.command !== undefined && this.options.command !== "npx" ? this.options.command : "claude";
+        const result = classifyClaudeDetection(probeCmd);
         if (!result.ok) throw new ACPAdapterError(result.code, result.message);
         return result.runtimes;
       },
@@ -84,7 +93,7 @@ export class ClaudeCodeACPAdapter extends ACPAdapter {
     this.drainPendingFailure(run.id, acpSession);
     if (acpSession.state === "failed") return;
     this.health?.update({ adapterId: this.id, workspaceId: run.workspace_id, liveness: "busy", pendingRunIds: [run.id] });
-    this.sendPrompt(session.id, { role: "user", content: promptFromRun(run) });
+    this.sendPrompt(session.id, { role: "user", content: this.promptFromRun(run) });
   }
 
   async cancelManagedRun(runId: string): Promise<void> {
@@ -146,6 +155,19 @@ export class ClaudeCodeACPAdapter extends ACPAdapter {
     const bridge = this.bridgeByRun.get(runId);
     if (bridge === undefined) return;
     const payload = isRecord(event.payload) ? event.payload : {};
+    // Stream agent message text from ACP v1 `session/update.agent_message_chunk` (translated by acp-base).
+    if (event.type === "message/delta") {
+      const delta = typeof payload.delta === "string" ? payload.delta : "";
+      if (delta.length === 0) return;
+      const messageId = `msg_${runId}`;
+      const accumulated = (this.assistantTextByRun.get(runId) ?? "") + delta;
+      if (!this.assistantTextByRun.has(runId)) {
+        this.persistAssistantMessageStart(runId, messageId);
+      }
+      this.assistantTextByRun.set(runId, accumulated);
+      this.publishRunEvent(runId, "message.part.delta", { messageId, text: delta });
+      return;
+    }
     if (event.type === "assistant/message_delta" && typeof payload.delta === "string") return;
     if (event.type === "assistant/message_complete") return;
     if (event.type === "tool/pre_use") {
@@ -182,7 +204,37 @@ export class ClaudeCodeACPAdapter extends ACPAdapter {
       this.publishRunEvent(runId, "subagent.completed", { runId, subagentId, cost: costFromPayload(payload), durationMs: numberField(payload, "durationMs") ?? numberField(payload, "duration") ?? 0 });
       return;
     }
-    if (event.type === "session/end") bridge.handle({ type: "session.ended", sessionId: stringField(payload, "sessionId") ?? `claude-${runId}`, reason: stringField(payload, "reason") ?? "completed", cost: { inputTokens: 0, outputTokens: 0, cachedTokens: 0, costUsd: 0, modelId: stringField(payload, "modelId") ?? "claude" } });
+    if (event.type === "session/end") {
+      const messageId = `msg_${runId}`;
+      const text = this.assistantTextByRun.get(runId) ?? "";
+      if (this.assistantTextByRun.has(runId)) {
+        this.persistAssistantMessageEnd(runId, messageId, text);
+        this.assistantTextByRun.delete(runId);
+      }
+      bridge.handle({ type: "session.ended", sessionId: stringField(payload, "sessionId") ?? `claude-${runId}`, reason: stringField(payload, "reason") ?? "completed", cost: { inputTokens: 0, outputTokens: 0, cachedTokens: 0, costUsd: 0, modelId: stringField(payload, "modelId") ?? "claude" } });
+    }
+  }
+
+  private persistAssistantMessageStart(runId: string, messageId: string): void {
+    const run = this.runById.get(runId);
+    const db = this.options.services?.database;
+    if (run === undefined || db === undefined) return;
+    const now = this.options.now?.() ?? Date.now();
+    db.sqlite.prepare(
+      `INSERT INTO messages (id, workspace_id, room_id, sender_type, sender_id, run_id, role, status, quoted_message_id, turn_dispatch_mode, pending_turn_id, created_at, updated_at, deleted_at)
+       VALUES (?, ?, ?, 'agent', ?, ?, 'assistant', 'streaming', NULL, 'immediate', NULL, ?, ?, NULL)`
+    ).run(messageId, run.workspace_id, run.room_id, run.agent_id, runId, now, now);
+    this.publishRunEvent(runId, "message.created", { messageId, role: "assistant", senderId: run.agent_id, runId });
+  }
+
+  private persistAssistantMessageEnd(runId: string, messageId: string, text: string): void {
+    const db = this.options.services?.database;
+    if (db === undefined) return;
+    const now = this.options.now?.() ?? Date.now();
+    const nextSeq = ((db.sqlite.prepare("SELECT COALESCE(MAX(seq), 0) + 1 AS seq FROM message_parts WHERE message_id = ?").get(messageId) as { seq: number }).seq);
+    db.sqlite.prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, ?, 'text', ?, ?)").run(messageId, nextSeq, JSON.stringify({ text }), now);
+    db.sqlite.prepare("UPDATE messages SET status = 'completed', updated_at = ? WHERE id = ?").run(now, messageId);
+    this.publishRunEvent(runId, "message.completed", { messageId, text });
   }
 
   private publishRunEvent(runId: string, type: PublishInput["type"], payload: Record<string, unknown>): void {
@@ -190,6 +242,35 @@ export class ClaudeCodeACPAdapter extends ACPAdapter {
     const eventBus = this.options.services?.eventBus;
     if (run === undefined || eventBus === undefined) return;
     eventBus.publish({ id: randomUUID(), type, schemaVersion: 1, workspaceId: run.workspace_id, roomId: run.room_id, ...(run.task_id !== null ? { taskId: run.task_id } : {}), runId, agentId: run.agent_id, payload, createdAt: this.options.now?.() ?? Date.now() } satisfies PublishInput);
+  }
+
+  /**
+   * Build the prompt sent to the ACP agent. Reads the most recent user message in the
+   * room from the daemon's database and forwards its text. Falls back to a routing
+   * string if no DB or message is available (keeps tests with stubbed services working).
+   */
+  private promptFromRun(run: RunRow): string {
+    const db = this.options.services?.database;
+    if (db === undefined) return `Run ${run.id} for agent ${run.agent_id}`;
+    const userMessage = db.sqlite.prepare(
+      `SELECT id FROM messages
+       WHERE room_id = ? AND role = 'user' AND deleted_at IS NULL
+       ORDER BY created_at DESC LIMIT 1`
+    ).get(run.room_id) as { id: string } | undefined;
+    if (userMessage === undefined) return `Run ${run.id} for agent ${run.agent_id}`;
+    const parts = db.sqlite.prepare(
+      "SELECT payload FROM message_parts WHERE message_id = ? AND part_type = 'text' ORDER BY seq ASC"
+    ).all(userMessage.id) as Array<{ payload: string }>;
+    const text = parts
+      .map((row) => {
+        try {
+          const parsed = JSON.parse(row.payload) as { text?: unknown };
+          return typeof parsed.text === "string" ? parsed.text : "";
+        } catch { return ""; }
+      })
+      .filter((t) => t.length > 0)
+      .join("\n");
+    return text.length > 0 ? text : `Run ${run.id} for agent ${run.agent_id}`;
   }
 }
 
@@ -200,6 +281,8 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions = {}):
 function promptFromRun(run: RunRow): string {
   return `Run ${run.id} for agent ${run.agent_id}`;
 }
+
+void promptFromRun;
 
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
 function stringField(value: Record<string, unknown>, key: string): string | undefined { const field = value[key]; return typeof field === "string" ? field : undefined; }

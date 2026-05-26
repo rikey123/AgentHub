@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { spawn as crossSpawn } from "cross-spawn";
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
@@ -49,7 +50,14 @@ export type AcpAdapterSession = {
   stderrTail: string[];
   livenessTimer: ReturnType<typeof setInterval> | undefined;
   consecutivePingMisses: number;
+  pingDisabled?: boolean;
+  /** Server-issued sessionId from session/new. Used in outgoing ACP requests; falls back to acpSessionId. */
+  serverSessionId?: string;
+  /** True after initialize+session/new resolve (or fall back to legacy). Gates queued prompt flush. */
+  handshakeComplete?: boolean;
   promptTimeoutPaused: boolean;
+  /** Prompts submitted before session/new returned. Flushed once the server-issued sessionId is available. */
+  queuedPrompts?: Array<{ message: AdapterMessage }>;
 };
 
 export type JsonRpcMessage = { readonly jsonrpc?: "2.0"; readonly id?: string | number; readonly method?: string; readonly params?: unknown; readonly result?: unknown; readonly error?: unknown };
@@ -203,7 +211,12 @@ export abstract class ACPAdapter {
     this.sessions.set(sessionId, session);
     this.pendingByRun.set(input.runId, sessionId);
     const spawned = this.trySpawn(session);
-    if (!spawned) session.state = "ready";
+    if (!spawned) {
+      session.state = "ready";
+      // No real ACP handshake to perform; treat the session as already established so prompts
+      // are sent directly (and existing tests that stub spawnSpec to {command:""} continue to work).
+      session.handshakeComplete = true;
+    }
     return { id: sessionId, runId: input.runId, workDir: session.workDir, ...(input.mcpServer !== undefined ? { mcpServer: input.mcpServer } : {}) };
   }
 
@@ -244,7 +257,19 @@ export abstract class ACPAdapter {
   }
 
   protected sendPrompt(sessionId: string, message: AdapterMessage): string {
-    return this.request(sessionId, "session/prompt", { message: serializePrompt(message) }, { prompt: true });
+    const session = this.requiredSession(sessionId);
+    // If the ACP handshake (initialize -> session/new) hasn't completed yet, queue the prompt
+    // so it can be flushed with the correct server-issued sessionId.
+    if (session.handshakeComplete !== true && session.serverSessionId === undefined) {
+      session.queuedPrompts ??= [];
+      session.queuedPrompts.push({ message });
+      return `queued-${randomUUID()}`;
+    }
+    // ACP `session/prompt` requires `{ sessionId, prompt: ContentBlock[] }`.
+    return this.request(sessionId, "session/prompt", {
+      sessionId: session.serverSessionId ?? session.acpSessionId,
+      prompt: [{ type: "text", text: serializePrompt(message) }]
+    }, { prompt: true });
   }
 
   protected cancelRunSync(runId: string): void {
@@ -254,7 +279,7 @@ export abstract class ACPAdapter {
     if (session.inflightPromptRequestId === undefined) return;
     const prompt = session.pendingRequests.get(session.inflightPromptRequestId);
     session.state = "cancelling";
-    this.writeJson(session, { jsonrpc: "2.0", method: "session/cancel", params: { sessionId: session.acpSessionId } });
+    this.writeJson(session, { jsonrpc: "2.0", method: "session/cancel", params: { sessionId: session.serverSessionId ?? session.acpSessionId } });
     if (prompt !== undefined) {
       clearPending(prompt);
       session.pendingRequests.delete(prompt.requestId);
@@ -293,14 +318,41 @@ export abstract class ACPAdapter {
       if (pending !== undefined) {
         clearPending(pending);
         session.pendingRequests.delete(requestId);
-        if (message.error !== undefined) pending.reject(this.mapProviderError(message.error));
-        else {
+        if (message.error !== undefined) {
+          // Detect "Method not found" from the raw JSON-RPC error before subclasses' mapProviderError
+          // strips the code. Pass through a synthetic AdapterError that initialize/session/new/ping
+          // handlers can recognize via isMethodNotFound().
+          const rawCode = isRecord(message.error) ? (message.error as { code?: unknown }).code : undefined;
+          const rawMsg = isRecord(message.error) ? (message.error as { message?: unknown }).message : undefined;
+          const isMethodMissing = rawCode === -32601 || (typeof rawMsg === "string" && /method not found|unknown method/i.test(rawMsg));
+          if (isMethodMissing) {
+            pending.reject(new ACPAdapterError("method_not_found", typeof rawMsg === "string" ? rawMsg : "Method not found"));
+          } else {
+            pending.reject(this.mapProviderError(message.error));
+          }
+        } else {
           pending.resolve(wrapFileReadResult(pending, message.result));
           if (pending.method === "protocol/ping") session.consecutivePingMisses = 0;
         }
         if (session.inflightPromptRequestId === requestId) {
           session.inflightPromptRequestId = undefined;
           if (session.state === "prompting" || session.state === "cancelling") session.state = "ready";
+          // Emit a synthetic session.ended event so adapters/bridges can finalize the run.
+          if (pending.method === "session/prompt" && message.error === undefined) {
+            const result = isRecord(message.result) ? message.result : {};
+            const stopReason = typeof result.stopReason === "string" ? result.stopReason : "completed";
+            const usage = isRecord(result.usage) ? result.usage : undefined;
+            const cost = usage !== undefined ? {
+              inputTokens: typeof usage.inputTokens === "number" ? usage.inputTokens : 0,
+              outputTokens: typeof usage.outputTokens === "number" ? usage.outputTokens : 0,
+              cachedTokens: (typeof usage.cachedReadTokens === "number" ? usage.cachedReadTokens : 0) + (typeof usage.cachedWriteTokens === "number" ? usage.cachedWriteTokens : 0),
+              costUsd: 0,
+              modelId: typeof result.modelId === "string" ? result.modelId : "claude"
+            } : undefined;
+            const synthetic: JsonRpcMessage = { jsonrpc: "2.0", method: "session/end", params: { sessionId: session.serverSessionId ?? session.acpSessionId, reason: stopReason, ...(cost !== undefined ? { cost } : {}) } };
+            const event = this.mapProviderEvent(synthetic) ?? { type: "session/end", payload: synthetic.params };
+            this.onProviderEvent(session, event);
+          }
         }
       }
       return undefined;
@@ -309,6 +361,21 @@ export abstract class ACPAdapter {
       const event = { type: "protocol/configUpdated", payload: message.params };
       this.onProviderEvent(session, event);
       return event;
+    }
+    // ACP v1 spec uses `session/update` as the umbrella notification; translate the inner
+    // `update.sessionUpdate` discriminator to legacy event types so subclasses' mapProviderEvent
+    // (which were written for older Claude/Qwen-style verbs) keep working.
+    if (message.method === "session/update" && isRecord(message.params)) {
+      const update = isRecord((message.params as { update?: unknown }).update) ? (message.params as { update: Record<string, unknown> }).update : undefined;
+      if (update !== undefined && typeof update.sessionUpdate === "string") {
+        const translated = translateSessionUpdate(update);
+        if (translated !== undefined) {
+          const synthetic: JsonRpcMessage = { jsonrpc: "2.0", method: translated.method, params: translated.params };
+          const event = this.mapProviderEvent(synthetic) ?? { type: translated.method, payload: translated.params };
+          this.onProviderEvent(session, event);
+          return event;
+        }
+      }
     }
     const event = this.mapProviderEvent(message);
     if (event !== undefined) this.onProviderEvent(session, event);
@@ -327,7 +394,16 @@ export abstract class ACPAdapter {
     const spawnSpec = this.spawnArgs();
     if (spawnSpec.command.length === 0) return false;
     try {
-      const child = spawn(spawnSpec.command, [...spawnSpec.args], { cwd: session.workDir, env: filterSafeEnv(spawnSpec.env ?? process.env), windowsVerbatimArguments: false, detached: false });
+      const invocation = windowsCommandInvocation(spawnSpec.command, spawnSpec.args);
+      // cross-spawn resolves Windows .cmd/.bat extensions and avoids ENOENT when invoking Node-based CLIs
+      // (e.g. `claude` from `npm i -g`). It still works on POSIX without changes.
+      const child = crossSpawn(invocation.command, invocation.args, {
+        cwd: session.workDir,
+        env: filterSafeEnv(spawnSpec.env ?? process.env),
+        windowsVerbatimArguments: false,
+        windowsHide: process.platform === "win32",
+        detached: false
+      }) as unknown as ChildProcessWithoutNullStreams;
       session.process = child;
       session.state = "initializing";
       child.stdin.on("error", (error) => {
@@ -351,7 +427,90 @@ export abstract class ACPAdapter {
       };
       child.on("exit", handleProcessExit);
       child.on("close", handleProcessExit);
-      this.writeJson(session, { jsonrpc: "2.0", method: "initialize", params: { clientCapabilities: session.clientCapabilities } });
+      // ACP handshake is async (initialize -> session/new). We start liveness immediately so
+      // process-crash detection doesn't depend on handshake completion. Prompts that arrive
+      // before session/new returns get queued; once the server-issued sessionId is known they
+      // flush. If the server doesn't implement session/new (-32601), we fall back to using the
+      // client-issued sessionId on the wire.
+      const initId = randomUUID();
+      session.pendingRequests.set(initId, {
+        requestId: initId,
+        method: "initialize",
+        startedAt: this.now(),
+        timeoutMs: 30_000,
+        resolve: (result) => {
+          // If the server reports that authentication is required, fail fast with a
+          // user-actionable error instead of hanging on session/new (which the server
+          // will silently ignore until authenticate succeeds).
+          if (isRecord(result)) {
+            const auth = (result as { authMethods?: unknown }).authMethods;
+            if (Array.isArray(auth) && auth.length > 0) {
+              const first = auth[0];
+              const hint = isRecord(first) && typeof first.description === "string" ? first.description :
+                isRecord(first) && typeof first.name === "string" ? first.name :
+                "Authenticate the agent CLI before retrying.";
+              this.failSession(session, new ACPAdapterError("auth_required", `Agent requires authentication: ${hint}`));
+              return;
+            }
+          }
+          // Now create the actual session on the server.
+          const newId = randomUUID();
+          session.pendingRequests.set(newId, {
+            requestId: newId,
+            method: "session/new",
+            startedAt: this.now(),
+            timeoutMs: 30_000,
+            resolve: (result) => {
+              const serverSessionId = isRecord(result) && typeof result.sessionId === "string" ? result.sessionId : undefined;
+              if (serverSessionId !== undefined) {
+                session.serverSessionId = serverSessionId;
+              }
+              session.handshakeComplete = true;
+              this.flushQueuedPrompts(session);
+            },
+            reject: (err) => {
+              if (isMethodNotFound(err)) {
+                // Server doesn't implement session/new; use client id.
+                session.handshakeComplete = true;
+                this.flushQueuedPrompts(session);
+                return;
+              }
+              this.failSession(session, err instanceof ACPAdapterError ? err : new ACPAdapterError("session_new_failed", err instanceof Error ? err.message : String(err)));
+            }
+          });
+          this.writeJson(session, {
+            jsonrpc: "2.0",
+            id: newId,
+            method: "session/new",
+            params: { cwd: session.workDir, mcpServers: [] }
+          });
+        },
+        reject: (err) => {
+          if (isMethodNotFound(err)) {
+            // Server doesn't implement initialize; assume legacy sessionId works.
+            session.handshakeComplete = true;
+            this.flushQueuedPrompts(session);
+            return;
+          }
+          this.failSession(session, err instanceof ACPAdapterError ? err : new ACPAdapterError("initialize_failed", err instanceof Error ? err.message : String(err)));
+        }
+      });
+      this.writeJson(session, {
+        jsonrpc: "2.0",
+        id: initId,
+        method: "initialize",
+        params: {
+          protocolVersion: 1,
+          // Per ACP spec, only `fs` is required. Adapters that need permission/context/terminal
+          // negotiate them via session/new metadata once initialize succeeds.
+          clientCapabilities: {
+            fs: {
+              readTextFile: session.clientCapabilities.fs.readTextFile,
+              writeTextFile: session.clientCapabilities.fs.writeTextFile
+            }
+          }
+        }
+      });
       this.startLiveness(session);
       this.markReadyUnlessFailed(session);
       return true;
@@ -392,9 +551,28 @@ export abstract class ACPAdapter {
     if (session.state !== "failed") session.state = "ready";
   }
 
+  private flushQueuedPrompts(session: AcpAdapterSession): void {
+    const queued = session.queuedPrompts ?? [];
+    delete session.queuedPrompts;
+    for (const item of queued) {
+      try {
+        this.request(session.acpSessionId, "session/prompt", {
+          sessionId: session.serverSessionId ?? session.acpSessionId,
+          prompt: [{ type: "text", text: serializePrompt(item.message) }]
+        }, { prompt: true });
+      } catch (err) {
+        this.emitRaw(session, "stderr", `failed to flush queued prompt: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+  }
+
   private startLiveness(session: AcpAdapterSession): void {
     session.livenessTimer = setInterval(() => {
       if (session.state === "disposed" || session.state === "failed") return;
+      // Some ACP servers (e.g. opencode) don't implement `protocol/ping`. Skip pinging once
+      // the server has told us it's an unknown method — process liveness is still detected
+      // via `child.exit` + stdin write errors elsewhere.
+      if (session.pingDisabled === true) return;
       const requestId = randomUUID();
       const pending: AcpPendingRequest = {
         requestId,
@@ -402,16 +580,21 @@ export abstract class ACPAdapter {
         startedAt: this.now(),
         timeoutMs: 2_500,
         resolve: () => { session.consecutivePingMisses = 0; },
-        reject: () => undefined,
+        reject: (err) => {
+          // -32601 = Method not found in JSON-RPC. If the server doesn't implement ping,
+          // stop sending them; don't count this as a missed liveness check.
+          if (isMethodNotFound(err)) session.pingDisabled = true;
+        },
         timer: setTimeout(() => {
           session.pendingRequests.delete(requestId);
+          if (session.pingDisabled === true) return;
           session.consecutivePingMisses += 1;
           if (session.consecutivePingMisses >= 5) this.failSession(session, new ACPAdapterError("liveness_timeout", "ACP process missed 5 consecutive liveness pings"));
         }, 2_500)
       };
       pending.timer?.unref?.();
       session.pendingRequests.set(requestId, pending);
-      this.writeJson(session, { jsonrpc: "2.0", id: requestId, method: "protocol/ping", params: { sessionId: session.acpSessionId } });
+      this.writeJson(session, { jsonrpc: "2.0", id: requestId, method: "protocol/ping", params: { sessionId: session.serverSessionId ?? session.acpSessionId } });
     }, 3_000);
     session.livenessTimer.unref?.();
   }
@@ -534,6 +717,58 @@ function clearPending(pending: AcpPendingRequest): void {
   if (pending.timer !== undefined) clearTimeout(pending.timer);
 }
 
+/**
+ * Translate ACP v1 `session/update` payloads into the legacy event method/params shape that
+ * subclasses' mapProviderEvent expects. Returns undefined for updates that have no chat-side
+ * side effect (e.g. usage_update, available_commands_update).
+ */
+function translateSessionUpdate(update: Record<string, unknown>): { method: string; params: Record<string, unknown> } | undefined {
+  const kind = update.sessionUpdate;
+  switch (kind) {
+    case "agent_message_chunk":
+    case "agent_thought_chunk": {
+      const content = isRecord(update.content) ? update.content : undefined;
+      const text = content !== undefined && typeof content.text === "string" ? content.text : "";
+      return { method: "message/delta", params: { delta: text, kind: kind === "agent_thought_chunk" ? "thought" : "message" } };
+    }
+    case "tool_call": {
+      return { method: "tool/pre_use", params: {
+        toolCallId: typeof update.toolCallId === "string" ? update.toolCallId : (typeof update.id === "string" ? update.id : undefined),
+        name: typeof update.title === "string" ? update.title : (typeof update.kind === "string" ? update.kind : "unknown"),
+        input: update.rawInput ?? update.locations ?? update.content ?? {}
+      } };
+    }
+    case "tool_call_update": {
+      const status = typeof update.status === "string" ? update.status : "completed";
+      return { method: "tool/post_use", params: {
+        toolCallId: typeof update.toolCallId === "string" ? update.toolCallId : undefined,
+        output: update.rawOutput ?? update.content ?? {},
+        ok: status !== "failed"
+      } };
+    }
+    case "plan":
+      return { method: "context.snapshot", params: { snapshot: { kind: "plan", entries: update.entries ?? [] } } };
+    case "user_message_chunk":
+    case "config_option_update":
+    case "available_commands_update":
+    case "usage_update":
+    case "current_mode_update":
+      return undefined;
+    default:
+      return { method: `session/update/${String(kind)}`, params: update };
+  }
+}
+
+function isMethodNotFound(err: AdapterError): boolean {
+  if (typeof err === "object" && err !== null) {
+    const code = (err as { code?: unknown }).code;
+    if (code === -32601 || code === "method_not_found") return true;
+    const message = (err as { message?: unknown }).message;
+    if (typeof message === "string" && /method not found|unknown method/i.test(message)) return true;
+  }
+  return false;
+}
+
 function wrapFileReadResult(pending: AcpPendingRequest, result: unknown): unknown {
   if (!isFileReadMethod(pending.method)) return result;
   if (typeof result === "string") return wrapExternalContent("unknown", result);
@@ -602,7 +837,13 @@ function spawnSyncStdout(command: string, args: readonly string[]): string {
 }
 
 function windowsCommandInvocation(command: string, args: readonly string[]): { readonly command: string; readonly args: string[] } {
-  if (process.platform === "win32" && /\.(cmd|bat)$/iu.test(command)) return { command: "cmd.exe", args: ["/c", command, ...args] };
+  if (process.platform !== "win32") return { command, args: [...args] };
+  // Already a .cmd/.bat: route through cmd.exe so it actually executes.
+  if (/\.(cmd|bat)$/iu.test(command)) return { command: "cmd.exe", args: ["/c", command, ...args] };
+  // Bare command: cmd.exe will resolve PATHEXT and find `command.cmd` / `command.exe`.
+  if (!/[\\/]/.test(command) && !/\.[a-z]+$/iu.test(command)) {
+    return { command: "cmd.exe", args: ["/c", command, ...args] };
+  }
   return { command, args: [...args] };
 }
 

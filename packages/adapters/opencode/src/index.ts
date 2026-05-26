@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 
 import { ACPAdapter, ACPAdapterError, AdapterHealthRegistry, AdapterRawLogger, emitAdapterRegistered, type AcpAdapterSession, type AcpProviderEvent, type AdapterRuntimeServices, type JsonRpcMessage } from "@agenthub/adapter-acp-base";
+import type { PublishInput } from "@agenthub/bus";
 import { AdapterBridge, type AdapterArtifactFSBoundary, type RoomMcpServer, type RunLifecycleService, type RunRow } from "@agenthub/orchestrator";
 import type { PermissionEngine } from "@agenthub/permissions";
 import type { AdapterError, AgentAdapterManifest, DetectedRuntime } from "@agenthub/protocol";
@@ -73,7 +74,7 @@ export class OpenCodeACPAdapter extends ACPAdapter {
     this.drainPendingFailure(run.id, acpSession);
     if (acpSession.state === "failed") return;
     this.health?.update({ adapterId: this.id, workspaceId: run.workspace_id, liveness: "busy", pendingRunIds: [run.id] });
-    this.sendPrompt(session.id, { role: "user", content: promptFromRun(run) });
+    this.sendPrompt(session.id, { role: "user", content: this.promptFromRun(run) });
   }
 
   async cancelManagedRun(runId: string): Promise<void> {
@@ -148,6 +149,14 @@ export class OpenCodeACPAdapter extends ACPAdapter {
     const bridge = this.bridgeByRun.get(runId);
     if (bridge === undefined) return;
     const payload = isRecord(event.payload) ? event.payload : {};
+    // Stream agent message text from ACP v1 `session/update.agent_message_chunk` (translated by acp-base).
+    if (event.type === "message.part.delta") {
+      const delta = typeof payload.delta === "string" ? payload.delta : "";
+      if (delta.length > 0) {
+        this.publishRunEvent(runId, "message.part.delta", { messageId: `msg_${runId}`, text: delta });
+      }
+      return;
+    }
     if (event.type === "tool.call.requested") bridge.handle({ type: "tool.call.requested", toolCallId: requiredString(payload, "toolCallId"), name: requiredString(payload, "name"), input: payload.input ?? {} });
     if (event.type === "tool.call.completed") bridge.handle({ type: "tool.call.completed", toolCallId: requiredString(payload, "toolCallId"), output: payload.output ?? {}, ok: payload.ok !== false });
     if (event.type === "subagent.started") bridge.handle({ type: "subagent.started", subRunId: requiredString(payload, "subRunId"), profileRef: requiredString(payload, "profileRef") });
@@ -156,6 +165,44 @@ export class OpenCodeACPAdapter extends ACPAdapter {
     if (event.type === "session.ended") bridge.handle({ type: "session.ended", sessionId: stringField(payload, "sessionId") ?? `opencode-${runId}`, reason: stringField(payload, "reason") ?? "completed", cost: { inputTokens: 0, outputTokens: 0, cachedTokens: 0, costUsd: 0, modelId: stringField(payload, "modelId") ?? "opencode" } });
     if (event.type === "session.crashed") bridge.handle({ type: "session.crashed", sessionId: stringField(payload, "sessionId") ?? `opencode-${runId}`, error: stringField(payload, "error") ?? JSON.stringify(payload) });
   }
+
+  private publishRunEvent(runId: string, type: PublishInput["type"], payload: Record<string, unknown>): void {
+    const eventBus = this.options.services?.eventBus;
+    const lifecycle = this.options.lifecycle;
+    if (eventBus === undefined || lifecycle === undefined) return;
+    let run: RunRow | undefined;
+    try { run = lifecycle.read(runId); } catch { return; }
+    if (run === undefined) return;
+    eventBus.publish({ id: randomUUID(), type, schemaVersion: 1, workspaceId: run.workspace_id, roomId: run.room_id, ...(run.task_id !== null ? { taskId: run.task_id } : {}), runId, agentId: run.agent_id, payload, createdAt: this.options.now?.() ?? Date.now() } satisfies PublishInput);
+  }
+
+  /**
+   * Build the prompt sent to the ACP agent. Reads the most recent user message text
+   * from the room. Falls back to the legacy routing string if the DB isn't accessible.
+   */
+  private promptFromRun(run: RunRow): string {
+    const db = this.options.services?.database;
+    if (db === undefined) return `Run ${run.id} for agent ${run.agent_id}`;
+    const userMessage = db.sqlite.prepare(
+      `SELECT id FROM messages
+       WHERE room_id = ? AND role = 'user' AND deleted_at IS NULL
+       ORDER BY created_at DESC LIMIT 1`
+    ).get(run.room_id) as { id: string } | undefined;
+    if (userMessage === undefined) return `Run ${run.id} for agent ${run.agent_id}`;
+    const parts = db.sqlite.prepare(
+      "SELECT payload FROM message_parts WHERE message_id = ? AND part_type = 'text' ORDER BY seq ASC"
+    ).all(userMessage.id) as Array<{ payload: string }>;
+    const text = parts
+      .map((row) => {
+        try {
+          const parsed = JSON.parse(row.payload) as { text?: unknown };
+          return typeof parsed.text === "string" ? parsed.text : "";
+        } catch { return ""; }
+      })
+      .filter((t) => t.length > 0)
+      .join("\n");
+    return text.length > 0 ? text : `Run ${run.id} for agent ${run.agent_id}`;
+  }
 }
 
 export function createOpenCodeAdapter(options: OpenCodeAdapterOptions = {}): OpenCodeACPAdapter { return new OpenCodeACPAdapter(options); }
@@ -163,6 +210,8 @@ export function createOpenCodeAdapter(options: OpenCodeAdapterOptions = {}): Ope
 function promptFromRun(run: RunRow): string {
   return `Run ${run.id} for agent ${run.agent_id}`;
 }
+
+void promptFromRun;
 
 function detectOpenCode(command: string): DetectedRuntime[] {
   const found = findExecutable(command);
