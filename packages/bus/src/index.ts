@@ -262,6 +262,12 @@ export class EventBus {
   private readonly boundedPubSub: BoundedPubSub;
   private readonly now: () => number;
   private readonly onSubscriberError: ((error: unknown, event: EventEnvelope) => void) | undefined;
+  // Optional bridge to a DurableHandlerRegistry. Set by the orchestrator
+  // wiring layer so that `publish()` can immediately notify durable handlers
+  // (run-queue, status-line flush) for events that come from the in-process
+  // event loop, instead of relying on the outbox drain at the next HTTP
+  // dispatch boundary.
+  private durableNotifier: ((event: EventEnvelope) => Promise<void> | void) | undefined;
 
   constructor(private readonly options: EventBusOptions) {
     this.deltaCoalesceMs = options.deltaCoalesceMs ?? 40;
@@ -275,6 +281,22 @@ export class EventBus {
 
     if (envelope.durability === "durable") {
       const persisted = this.persistDurable(envelope);
+      // Deliver durable events to in-process subscribers (e.g. SSE clients)
+      // and durable handlers (e.g. run-queue) immediately, then mark the
+      // outbox row as dispatched. Without this, subscribers and handlers only
+      // see new events when something else triggers `OutboxDispatcher.drainPending`
+      // (e.g. the next HTTP command), so a long-running agent run that emits
+      // events between user commands appears frozen until the next click.
+      // The outbox row stays as a crash-recovery / retry log; on daemon
+      // restart, any rows still 'pending' get redelivered by the startup drain.
+      this.deliver(persisted);
+      if (this.durableNotifier) {
+        const result = this.durableNotifier(persisted);
+        if (result && typeof result === "object" && "catch" in result && typeof result.catch === "function") {
+          result.catch((error: unknown) => this.onSubscriberError?.(error, persisted));
+        }
+      }
+      this.markOutboxDispatched(persisted.id);
       return { durability: "durable", seq: persisted.seq as number, event: persisted };
     }
 
@@ -285,6 +307,21 @@ export class EventBus {
 
     this.deliver(envelope);
     return { durability: "ephemeral", event: envelope };
+  }
+
+  setDurableNotifier(notifier: ((event: EventEnvelope) => Promise<void> | void) | undefined): void {
+    this.durableNotifier = notifier;
+  }
+
+  private markOutboxDispatched(eventId: string): void {
+    try {
+      this.options.database.sqlite
+        .prepare("UPDATE outbox SET status = 'dispatched', dispatched_at = ?, last_error = NULL WHERE event_id = ? AND status = 'pending'")
+        .run(this.now(), eventId);
+    } catch {
+      // ignore — outbox is best-effort here; if the update fails the row
+      // remains 'pending' and will be picked up on the next drain.
+    }
   }
 
   subscribeAll(subscriber: EventBusSubscriber): Unsubscribe {
@@ -713,7 +750,18 @@ export class CommandBus {
 
 export class DurableHandlerRegistry {
   private readonly handlers = new Map<string, DurableHandler>();
-  private readonly processing = new Set<string>();
+  // `draining` guards `drainHandler` from running concurrently for the same
+  // handler — it iterates the persisted event log and would conflict with
+  // itself. `inHandle` is finer-grained: it's true only while a handler's
+  // `handle()` is awaited, so reentrant `notify()` calls (caused by handlers
+  // that publish events from inside `handle`) are deferred via `pendingDrains`
+  // instead of racing with the in-flight call.
+  private readonly draining = new Set<string>();
+  private readonly inHandle = new Set<string>();
+  // Tracks handler names whose handle() invocation tried to publish-and-deliver
+  // a new event while still in-flight. After the outer handle() finishes, we
+  // drain again so the deferred events get processed in order.
+  private readonly pendingDrains = new Set<string>();
   private readonly retryDelaysMs: readonly number[];
   private readonly now: () => number;
 
@@ -745,10 +793,10 @@ export class DurableHandlerRegistry {
   }
 
   private async drainHandler(handler: DurableHandler): Promise<void> {
-    if (this.processing.has(handler.name)) {
+    if (this.draining.has(handler.name)) {
       return;
     }
-    this.processing.add(handler.name);
+    this.draining.add(handler.name);
     try {
       const cursor = this.cursorFor(handler.name);
       const events = this.options.database.sqlite
@@ -762,12 +810,24 @@ export class DurableHandlerRegistry {
         }
       }
     } finally {
-      this.processing.delete(handler.name);
+      this.draining.delete(handler.name);
     }
   }
 
   private async processHandler(handler: DurableHandler, event: EventEnvelope): Promise<boolean> {
     if (event.seq === undefined) {
+      return true;
+    }
+    // Reentrancy guard: with in-process delivery via `setDurableNotifier`, a
+    // handler's `handle()` can publish new events (e.g. run-queue's
+    // `markStarting` publishes `agent.run.started` while handling
+    // `agent.run.queued`). Re-entering `processHandler` from inside the await
+    // would race with the outer call and could spawn duplicate adapter
+    // sessions for the same run. We defer the reentrant call by recording a
+    // pending drain; the outer `processHandler` will run `drainHandler` once
+    // its `handle()` finishes, picking up the queued events in seq order.
+    if (this.inHandle.has(handler.name)) {
+      this.pendingDrains.add(handler.name);
       return true;
     }
     const currentCursor = this.cursorFor(handler.name);
@@ -784,21 +844,31 @@ export class DurableHandlerRegistry {
       return true;
     }
 
-    for (let attempt = 1; attempt <= this.retryDelaysMs.length; attempt += 1) {
-      try {
-        await handler.handle(event, { attempt, maxAttempts: this.retryDelaysMs.length });
-        this.advanceCursor(handler.name, event.seq);
-        return true;
-      } catch (error) {
-        if (attempt === this.retryDelaysMs.length) {
-          this.writeDeadLetter(handler.name, event, attempt, error);
-          return false;
+    this.inHandle.add(handler.name);
+    try {
+      for (let attempt = 1; attempt <= this.retryDelaysMs.length; attempt += 1) {
+        try {
+          await handler.handle(event, { attempt, maxAttempts: this.retryDelaysMs.length });
+          this.advanceCursor(handler.name, event.seq);
+          return true;
+        } catch (error) {
+          if (attempt === this.retryDelaysMs.length) {
+            this.writeDeadLetter(handler.name, event, attempt, error);
+            return false;
+          }
+          await sleep(this.retryDelaysMs[attempt - 1] ?? 0);
         }
-        await sleep(this.retryDelaysMs[attempt - 1] ?? 0);
+      }
+
+      return false;
+    } finally {
+      this.inHandle.delete(handler.name);
+      // If notify() was called for this handler while we were awaiting handle(),
+      // drain the deferred events now (in order, via the persisted event log).
+      if (this.pendingDrains.delete(handler.name)) {
+        await this.drainHandler(handler);
       }
     }
-
-    return false;
   }
 
   private cursorFor(handlerName: string): number {

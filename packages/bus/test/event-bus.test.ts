@@ -52,10 +52,16 @@ describe("EventBus", () => {
 
     expect(first).toMatchObject({ durability: "durable", seq: 1 });
     expect(second).toMatchObject({ durability: "durable", seq: 2 });
-    expect(delivered).toEqual([]);
+    // Durable events are delivered to subscribers immediately on publish so
+    // SSE clients see live updates without waiting for the next outbox drain.
+    expect(delivered).toEqual(["1:message.created", "2:message.completed"]);
     expect(eventRowCount()).toBe(2);
-    expect(outboxStatuses()).toEqual(["pending", "pending"]);
+    // Outbox rows are marked dispatched in-line because the events were
+    // already delivered to in-process subscribers; the outbox stays as a
+    // crash-recovery / retry log rather than the live delivery path.
+    expect(outboxStatuses()).toEqual(["dispatched", "dispatched"]);
 
+    // Drain remains a no-op for already-dispatched rows; safe to call again.
     await new OutboxDispatcher({ database: currentDatabase(), eventBus: currentBus() }).drainPending();
 
     expect(delivered).toEqual(["1:message.created", "2:message.completed"]);
@@ -143,8 +149,8 @@ describe("EventBus", () => {
     }
     currentBus().publish(messageCreated("evt_durable", "room_1", "run_1"));
 
+    // Durable events are delivered to subscribers at publish time.
     expect(deltas).toEqual([]);
-    await new OutboxDispatcher({ database: currentDatabase(), eventBus: currentBus() }).drainPending();
     expect(durable).toEqual(["1:evt_durable"]);
     expect(eventRowCount()).toBe(1);
 
@@ -177,8 +183,9 @@ describe("EventBus", () => {
       delivered.push(event.id);
     });
 
-    const result = currentBus().publish(messageCreated("evt_safe", "room_1", "run_1"));
-    currentBus().deliverPersisted(result.event);
+    // Publish delivers durable events to subscribers immediately, so the
+    // failing subscriber fires once here and the safe one records the event.
+    currentBus().publish(messageCreated("evt_safe", "room_1", "run_1"));
 
     expect(errors).toHaveLength(1);
     expect(delivered).toEqual(["evt_safe"]);
@@ -420,9 +427,21 @@ describe("OutboxDispatcher and DurableHandlerRegistry", () => {
       }
     });
 
+    // Without a durable notifier set on the bus, durable handlers run only
+    // when the outbox dispatcher drains. We exercise that path here by
+    // publishing first, then draining.
     currentBus().publish(messageCreated("evt_dispatch_1", "room_1", "run_1"));
     currentBus().publish(messageCompleted("evt_dispatch_2", "room_1", "run_1"));
+
+    // Subscribers were already notified at publish time.
+    expect(subscriberEvents).toEqual(["1:evt_dispatch_1", "2:evt_dispatch_2"]);
+    // Outbox rows were marked dispatched at publish time, so the dispatcher
+    // sees nothing pending. To exercise handler delivery for this test we use
+    // catchUp via the registry directly (simulating crash recovery).
+    expect(outboxStatuses()).toEqual(["dispatched", "dispatched"]);
+
     await new OutboxDispatcher({ database: currentDatabase(), eventBus: currentBus(), handlers: registry }).drainPending();
+    await registry.catchUp();
 
     expect(subscriberEvents).toEqual(["1:evt_dispatch_1", "2:evt_dispatch_2"]);
     expect(handlerEvents).toEqual(["1:evt_dispatch_1"]);
