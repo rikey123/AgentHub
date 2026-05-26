@@ -45,6 +45,8 @@ export type AdapterArtifactFSBoundary = {
 
 export class AdapterBridge {
   private readonly toolNamesByCallId = new Map<string, string>();
+  private watchdogTimer: ReturnType<typeof setTimeout> | undefined;
+  private static readonly WATCHDOG_MS = 90_000; // 90s of silence → notify leader
 
   constructor(
     private readonly input: {
@@ -77,6 +79,7 @@ export class AdapterBridge {
       });
       this.input.artifactFs?.beginRun?.({ runId: this.input.runId, workspaceId: this.input.workspaceId, roomId: this.input.roomId, agentId: this.input.agentId, ...(this.input.taskId !== undefined ? { taskId: this.input.taskId } : {}), ...(this.input.messageId !== undefined ? { messageId: this.input.messageId } : {}), ...(this.input.workspaceMode !== undefined ? { mode: this.input.workspaceMode } : {}), terminalEnabled: this.input.terminalEnabled === true, ...(event.workDir !== undefined ? { workDir: event.workDir } : {}) });
       this.input.lifecycle.markRunning(null, this.input.runId, event.sessionId);
+      this.resetWatchdog();
       return;
     }
     if (event.type === "provider.conversation.updated") {
@@ -84,6 +87,7 @@ export class AdapterBridge {
       return;
     }
     if (event.type === "session.ended") {
+      this.clearWatchdog();
       this.input.artifactFs?.buildRunArtifact({ runId: this.input.runId, title: `Run ${this.input.runId} changes` });
       const cancelled = event.reason === "cancelled";
       const briefText = this.computeBriefText({ cancelled });
@@ -92,6 +96,7 @@ export class AdapterBridge {
       return;
     }
     if (event.type === "session.crashed") {
+      this.clearWatchdog();
       this.input.artifactFs?.buildRunArtifact({ runId: this.input.runId, title: `Run ${this.input.runId} changes` });
       const briefText = this.computeBriefText({ failureClass: "adapter_error", failureReason: event.error });
       this.input.lifecycle.fail(null, this.input.runId, "adapter_session_crashed", "retryable_visible", event.error, briefText);
@@ -107,9 +112,18 @@ export class AdapterBridge {
       this.publishAdapterDomainEvent({ type: "file.changed", path: event.path, change: "deleted" });
       return;
     }
+    // Any streaming activity resets the inactivity watchdog.
+    if (event.type === "tool.call.requested" || event.type === "tool.call.completed") {
+      this.resetWatchdog();
+    }
     if (event.type === "tool.call.requested") this.toolNamesByCallId.set(event.toolCallId, event.name);
     if (event.type === "tool.call.completed") this.createTerminalArtifact(event);
     this.publishAdapterDomainEvent(event);
+  }
+
+  /** Called by the adapter when a message delta arrives (streaming text). */
+  onMessageDelta(): void {
+    this.resetWatchdog();
   }
 
   private createTerminalArtifact(event: Extract<AdapterEvent, { readonly type: "tool.call.completed" }>): void {
@@ -135,6 +149,62 @@ export class AdapterBridge {
       payload: { runId: this.input.runId, ...event },
       createdAt: this.input.now?.() ?? Date.now()
     } satisfies PublishInput);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Inactivity watchdog
+  // ---------------------------------------------------------------------------
+
+  private resetWatchdog(): void {
+    this.clearWatchdog();
+    this.watchdogTimer = setTimeout(() => {
+      this.watchdogTimer = undefined;
+      this.notifyLeaderOfStall();
+    }, AdapterBridge.WATCHDOG_MS);
+  }
+
+  private clearWatchdog(): void {
+    if (this.watchdogTimer !== undefined) {
+      clearTimeout(this.watchdogTimer);
+      this.watchdogTimer = undefined;
+    }
+  }
+
+  private notifyLeaderOfStall(): void {
+    const db = this.input.database;
+    if (db === undefined) return;
+    try {
+      const room = db.sqlite
+        .prepare("SELECT workspace_id, primary_agent_id, mode FROM rooms WHERE id = ?")
+        .get(this.input.roomId) as { workspace_id: string; primary_agent_id: string | null; mode: string } | undefined;
+      if (!room) return;
+      // Only notify in team/squad/assisted rooms where there is a distinct leader.
+      if (room.mode !== "team" && room.mode !== "squad" && room.mode !== "assisted") return;
+      const leaderId = room.primary_agent_id;
+      if (!leaderId || leaderId === this.input.agentId) return;
+
+      const now = this.input.now?.() ?? Date.now();
+      const mailboxMessageId = randomUUID();
+      const agentName = (db.sqlite.prepare("SELECT name FROM agent_profiles WHERE id = ?").get(this.input.agentId) as { name: string } | undefined)?.name ?? this.input.agentId;
+      const stallMessage = `[Watchdog] Agent **${agentName}** (run ${this.input.runId.slice(0, 8)}) has been silent for ${Math.round(AdapterBridge.WATCHDOG_MS / 1000)}s with no output. It may be stuck. Consider reassigning its task or cancelling the run.`;
+
+      db.sqlite.transaction(() => {
+        db.sqlite
+          .prepare(
+            "INSERT INTO mailbox_messages (id, workspace_id, room_id, from_type, from_id, to_agent_id, kind, content, files, read, claimed_run_id, claimed_at, delivery_batch_id, delivery_failure_reason, attempt_count, created_at, consumed_at) VALUES (?, ?, ?, 'system', 'watchdog', ?, 'message', ?, '[]', 0, NULL, NULL, NULL, NULL, 0, ?, NULL)"
+          )
+          .run(mailboxMessageId, room.workspace_id, this.input.roomId, leaderId, JSON.stringify({ text: stallMessage }), now);
+        this.input.eventBus.publish({ id: randomUUID(), type: "mailbox.message.created", schemaVersion: 1, workspaceId: room.workspace_id, roomId: this.input.roomId, agentId: leaderId, payload: { mailboxMessageId, roomId: this.input.roomId, fromAgentId: "watchdog", targetAgentId: leaderId }, createdAt: now });
+      })();
+
+      // Wake the leader so it sees the stall notification.
+      void this.input.getCommandBus?.()?.dispatch(
+        { type: "WakeAgent", roomId: this.input.roomId, agentId: leaderId, workspaceId: room.workspace_id, reason: "agent_crashed", promptDelta: { kind: "delta_only", instructions: stallMessage }, idempotencyKey: `watchdog:${this.input.runId}:${now}` },
+        { actor: { type: "system" }, traceId: `watchdog:${this.input.runId}`, origin: "internal" }
+      );
+    } catch (err) {
+      console.warn("[AdapterBridge] watchdog notification failed:", err);
+    }
   }
 
   /**

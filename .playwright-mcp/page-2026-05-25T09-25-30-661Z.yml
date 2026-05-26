@@ -1,0 +1,124 @@
+- generic [ref=e3]:
+  - link "Skip to workbench" [ref=e4] [cursor=pointer]:
+    - /url: "#agenthub-workbench-main"
+  - banner [ref=e5]:
+    - generic [ref=e6]:
+      - img [ref=e8]
+      - generic [ref=e11]:
+        - generic [ref=e12]: AgentHub
+        - generic [ref=e13]: Dual-theme workbench
+    - status [ref=e14]:
+      - generic [ref=e16]: Offline
+    - generic [ref=e17]:
+      - button "Open command palette" [ref=e18] [cursor=pointer]:
+        - img [ref=e19]
+        - generic [ref=e24]: Command
+        - generic [ref=e25]: ⌘K
+      - 'button "Toggle theme. Current mode: Auto" [ref=e26] [cursor=pointer]':
+        - img [ref=e27]
+        - generic [ref=e33]: Auto
+  - main [ref=e34]:
+    - complementary "Rooms and groups" [ref=e35]:
+      - generic [ref=e36]:
+        - generic [ref=e37]:
+          - img [ref=e38]
+          - text: Rooms & groups
+        - button "Collapse rooms column" [ref=e43] [cursor=pointer]:
+          - img [ref=e44]
+      - generic [ref=e47]:
+        - generic [ref=e48]:
+          - button "New room" [ref=e49] [cursor=pointer]
+          - generic [ref=e50]: Collaboration rooms
+        - generic [ref=e52]: No rooms yet. Create the first collaboration space to start a run.
+    - navigation "Feature rail" [ref=e53]:
+      - generic [ref=e54]:
+        - generic [ref=e55]:
+          - img [ref=e56]
+          - text: Feature rail
+        - generic [ref=e57]: Preview
+      - generic [ref=e58]:
+        - generic [ref=e59]:
+          - img [ref=e61]
+          - generic [ref=e64]: Chat
+        - generic [ref=e65]:
+          - img [ref=e67]
+          - generic [ref=e70]: Runs
+        - generic [ref=e71]:
+          - img [ref=e73]
+          - generic [ref=e76]: Context
+        - generic [ref=e77]:
+          - img [ref=e79]
+          - generic [ref=e84]: Tasks
+        - generic:
+          - generic:
+            - img
+          - generic:
+            - generic: Kanban
+            - generic: Coming soon
+        - generic:
+          - generic:
+            - img
+          - generic:
+            - generic: Workflow
+            - generic: Coming soon
+        - generic [ref=e85]:
+          - img [ref=e87]
+          - generic [ref=e91]: Artifacts
+        - generic [ref=e92]:
+          - img [ref=e94]
+          - generic [ref=e101]: Settings
+    - region "Center chat canvas" [ref=e102]:
+      - generic [ref=e103]:
+        - generic [ref=e104]:
+          - generic [ref=e105]: Chat canvas
+          - generic [ref=e106]: Main conversation workspace
+        - generic [ref=e107]:
+          - img [ref=e108]
+          - text: Live canvas
+      - generic [ref=e111]:
+        - generic [ref=e112]:
+          - generic [ref=e113]:
+            - generic [ref=e114]: Local workbench
+            - heading "Workbench dashboard" [level=1] [ref=e115]
+            - paragraph [ref=e116]: Start a new room for focused agent work, or jump back into an active collaboration with unread updates, pending turns, and recent run briefs already surfaced.
+            - generic [ref=e117]:
+              - generic [ref=e118]:
+                - generic [ref=e119]: Rooms
+                - generic [ref=e120]: "0"
+              - generic [ref=e121]:
+                - generic [ref=e122]: Active
+                - generic [ref=e123]: "0"
+              - generic [ref=e124]:
+                - generic [ref=e125]: Unread
+                - generic [ref=e126]: "0"
+              - generic [ref=e127]:
+                - generic [ref=e128]: Pending
+                - generic [ref=e129]: "0"
+            - generic [ref=e130]:
+              - button "New Room" [ref=e131] [cursor=pointer]
+              - button "Open Latest Room" [disabled] [ref=e132]
+          - generic [ref=e133]:
+            - generic [ref=e134]: Today’s focus
+            - generic [ref=e135]:
+              - generic [ref=e136]:
+                - generic [ref=e137]: Open a room
+                - generic [ref=e138]: Resume a conversation, review briefs, or continue a queued turn from the room list.
+              - generic [ref=e139]:
+                - generic [ref=e140]: Start a new run
+                - generic [ref=e141]: Create a room when you need a fresh collaborative workspace with its own history.
+              - generic [ref=e142]:
+                - generic [ref=e143]: Watch for activity
+                - generic [ref=e144]: Unread messages, active runs, and pending turns are surfaced without opening the room.
+        - generic [ref=e145]:
+          - generic [ref=e146]: AH
+          - heading "Create your first room to get started" [level=2] [ref=e147]
+          - paragraph [ref=e148]: Start a solo room for a focused agent run, then expand into assisted collaboration when the work needs more hands.
+          - button "New Room" [ref=e149] [cursor=pointer]
+    - complementary "Workbench" [ref=e150]:
+      - generic [ref=e151]:
+        - generic [ref=e152]:
+          - img [ref=e153]
+          - text: Workbench
+        - button "Collapse workbench column" [ref=e154] [cursor=pointer]:
+          - img [ref=e155]
+      - generic [ref=e158]: No room selected

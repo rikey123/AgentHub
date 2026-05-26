@@ -30,8 +30,9 @@ export function createDaemonCommandHandlers(options: DaemonCommandHandlersOption
 function createRoom(options: DaemonCommandHandlersOptions, command: Command, meta: CommandMeta): CommandResult {
   const title = stringField(command, "title") ?? "New room";
   const mode = stringField(command, "mode") ?? "solo";
-  if (mode === "squad" || mode === "team") return failed("not_implemented", `${mode} mode is V1.0`);
-  if (mode !== "solo" && mode !== "assisted") return failed("validation_failed", `unknown room mode '${mode}'`);
+  if (mode !== "solo" && mode !== "assisted" && mode !== "team" && mode !== "squad") {
+    return failed("validation_failed", `unknown room mode '${mode}' (supported: solo, assisted, team, squad)`);
+  }
   const workspaceId = stringField(command, "workspaceId") ?? "default-workspace";
   const primaryAgentId = stringField(command, "primaryAgentId") ?? "mock-builder";
   const participants = Array.isArray(command.participants) ? command.participants : [];
@@ -47,6 +48,11 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
       .get(agentId) as { adapter_id?: string; name?: string } | undefined;
     return { adapterId: row?.adapter_id ?? "mock", name: row?.name ?? agentId };
   };
+
+  // In team/squad mode the primary agent is the leader; all other participants are teammates.
+  // In assisted mode participants keep whatever role is specified (default: observer).
+  const isTeamMode = mode === "team" || mode === "squad";
+
   options.database.sqlite.transaction(() => {
     ensureWorkspace(options.database, workspaceId, now);
     options.database.sqlite
@@ -62,8 +68,10 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
     for (const participant of participants) {
       if (isObject(participant) && participant.type === "agent" && typeof participant.agentId === "string" && participant.agentId !== primaryAgentId) {
         const info = lookupAgent(participant.agentId);
-        const role = typeof participant.role === "string" ? participant.role : "observer";
-        const presence = participant.defaultPresence === "active" ? "active" : "observing";
+        // In team/squad mode all non-primary agents are teammates (active by default).
+        // In assisted mode use the specified role/presence or fall back to observer/observing.
+        const role = isTeamMode ? "teammate" : (typeof participant.role === "string" ? participant.role : "observer");
+        const presence = isTeamMode ? "active" : (participant.defaultPresence === "active" ? "active" : "observing");
         options.database.sqlite
           .prepare("INSERT OR IGNORE INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, default_presence, joined_at) VALUES (?, ?, 'agent', ?, ?, NULL, ?, ?)")
           .run(roomId, participant.agentId, role, info.adapterId, presence, now);
@@ -123,7 +131,8 @@ function sendMessage(options: DaemonCommandHandlersOptions, command: Command, me
   const now = options.now?.() ?? Date.now();
   const messageId = randomUUID();
   const members = roomMembers(options.database, roomId);
-  const mentions = room.mode === "assisted" ? parseMentions(text, members) : [];
+  // Parse @mentions in assisted mode; in team/squad mode the leader handles routing via MCP
+  const mentions = (room.mode === "assisted") ? parseMentions(text, members) : [];
   const quotedMessageId = stringField(command, "quotedMessageId") ?? stringField(command, "quoted_message_id");
   const attachmentFileIds = stringArrayField(command, "attachmentFileIds", "attachments");
   const wakeTargets = wakeTargetsForMessage(room, mentions);
@@ -271,10 +280,64 @@ export function seedDefaultData(database: AgentHubDatabase, now = Date.now()): v
         id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at
       ) VALUES (?, NULL, ?, 'mock', 'mock', ?, ?, NULL, 0, NULL, ?, ?)`
     );
-    insert.run("mock-builder", "Mock Builder", "Deterministic builder for M1 golden path", JSON.stringify(["chat", "code.edit", "file.read", "file.write"]), now, now);
-    insert.run("mock-observer", "Mock Observer", "Passive observer; never wakes without explicit WakeAgent", JSON.stringify(["chat", "context.read"]), now, now);
-    insert.run("mock-reviewer", "Mock Reviewer", "Deterministic reviewer template", JSON.stringify(["chat", "code.review"]), now, now);
-    insert.run("mock-specialist", "Mock Specialist", "Deterministic specialist template", JSON.stringify(["chat", "task.delegate"]), now, now);
+    insert.run(
+      "mock-builder",
+      "Mock Builder",
+      `You are Mock Builder, a deterministic software engineer agent.
+
+Your responsibilities:
+- Read and write files, implement features, fix bugs
+- Write clean, well-structured code following the project's conventions
+- Report your progress and results clearly
+
+When you complete a task, summarize what you did and any important decisions you made.`,
+      JSON.stringify(["chat", "code.edit", "file.read", "file.write"]),
+      now, now
+    );
+    insert.run(
+      "mock-observer",
+      "Mock Observer",
+      `You are Mock Observer, a passive monitoring agent.
+
+Your responsibilities:
+- Monitor conversations and context without actively participating
+- Provide analysis or summaries when explicitly asked
+- Never initiate actions unless directly addressed
+
+You only respond when explicitly mentioned or assigned a task.`,
+      JSON.stringify(["chat", "context.read"]),
+      now, now
+    );
+    insert.run(
+      "mock-reviewer",
+      "Mock Reviewer",
+      `You are Mock Reviewer, a code and content review specialist.
+
+Your responsibilities:
+- Review code, documents, or plans assigned to you
+- Provide clear, actionable feedback with specific suggestions
+- Identify bugs, security issues, style violations, and logic errors
+- Approve or request changes with clear reasoning
+
+When reviewing, structure your feedback as: Summary → Issues (critical/minor) → Suggestions → Verdict (approved/changes requested).`,
+      JSON.stringify(["chat", "code.review"]),
+      now, now
+    );
+    insert.run(
+      "mock-specialist",
+      "Mock Specialist",
+      `You are Mock Specialist, a task delegation and coordination agent.
+
+Your responsibilities:
+- Break down complex tasks into smaller, assignable subtasks
+- Coordinate work between multiple agents
+- Track task dependencies and ensure correct sequencing
+- Report overall progress to the team leader
+
+When delegating, always specify: what needs to be done, what the expected output is, and any dependencies or constraints.`,
+      JSON.stringify(["chat", "task.delegate"]),
+      now, now
+    );
   })();
 }
 
@@ -308,6 +371,8 @@ function roomMembers(database: AgentHubDatabase, roomId: string): { readonly age
 }
 
 function wakeTargetsForMessage(room: RoomRow, mentions: readonly string[]): string[] {
+  // team/squad: leader always handles user messages; teammates are woken by the leader via MCP
+  if (room.mode === "team" || room.mode === "squad") return room.primary_agent_id ? [room.primary_agent_id] : [];
   if (room.mode !== "assisted") return room.primary_agent_id ? [room.primary_agent_id] : [];
   if (mentions.length === 0) return room.primary_agent_id ? [room.primary_agent_id] : [];
   return [...mentions];

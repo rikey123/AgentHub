@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { ACPAdapter, ACPAdapterError, AdapterHealthRegistry, AdapterRawLogger, classifyClaudeDetection, emitAdapterRegistered, permissionForTool, type AcpAdapterSession, type AcpProviderEvent, type AdapterRuntimeServices, type JsonRpcMessage } from "@agenthub/adapter-acp-base";
 import type { PublishInput } from "@agenthub/bus";
-import { AdapterBridge, type AdapterArtifactFSBoundary, type RoomMcpServer, type RunLifecycleService, type RunRow } from "@agenthub/orchestrator";
+import { AdapterBridge, buildFirstWakePrompt, type AdapterArtifactFSBoundary, type RoomMcpServer, type RunLifecycleService, type RunRow } from "@agenthub/orchestrator";
 import type { PermissionEngine } from "@agenthub/permissions";
 import type { AdapterError, AgentAdapterManifest, DetectedRuntime } from "@agenthub/protocol";
 import { Effect } from "effect";
@@ -166,6 +166,7 @@ export class ClaudeCodeACPAdapter extends ACPAdapter {
       }
       this.assistantTextByRun.set(runId, accumulated);
       this.publishRunEvent(runId, "message.part.delta", { messageId, text: delta });
+      bridge.onMessageDelta();
       return;
     }
     if (event.type === "assistant/message_delta" && typeof payload.delta === "string") return;
@@ -246,21 +247,14 @@ export class ClaudeCodeACPAdapter extends ACPAdapter {
 
   /**
    * Build the prompt sent to the ACP agent.
-   *
-   * On the first wake for an agent, prepends the agent's role_prompt from agent_profiles
-   * so the agent knows its identity, teammates, and available MCP tools before it sees
-   * the user message. Subsequent wakes skip the role prompt (the ACP session already has
-   * the context in its conversation history).
-   *
-   * Falls back gracefully when no DB or no message is available (keeps tests working).
+   * On first wake, prepends role prompt + teammates section via buildFirstWakePrompt.
+   * Falls back gracefully when no DB or message is available.
    */
   private promptFromRun(run: RunRow): string {
     const db = this.options.services?.database;
     if (db === undefined) return `Run ${run.id} for agent ${run.agent_id}`;
 
-    // Read role prompt from agent_profiles — inject on first wake only.
-    // "First wake" = no prior assistant message exists for this run.
-    const rolePrompt = this.buildRolePrompt(run, db);
+    const rolePrompt = db !== undefined ? buildFirstWakePrompt(run.id, run.agent_id, run.room_id, db) : undefined;
 
     const userMessage = db.sqlite.prepare(
       `SELECT id FROM messages
@@ -282,63 +276,6 @@ export class ClaudeCodeACPAdapter extends ACPAdapter {
       .join("\n");
     const userText = text.length > 0 ? text : `Run ${run.id} for agent ${run.agent_id}`;
     return rolePrompt !== undefined ? `${rolePrompt}\n\n---\n\n${userText}` : userText;
-  }
-
-  /**
-   * Build the role prompt for the first wake of a run.
-   * Reads agent_profiles.role_prompt and appends a teammates section listing
-   * all other participants in the room so the agent knows who it can @mention.
-   * Returns undefined if this is not the first wake (prior assistant message exists).
-   */
-  private buildRolePrompt(run: RunRow, db: NonNullable<typeof this.options.services>["database"]): string | undefined {
-    // Only inject on first wake — check for any prior assistant message in this run.
-    const priorAssistant = db.sqlite
-      .prepare("SELECT id FROM messages WHERE run_id = ? AND role = 'assistant' LIMIT 1")
-      .get(run.id);
-    if (priorAssistant !== undefined) return undefined;
-
-    const profile = db.sqlite
-      .prepare("SELECT role_prompt, name FROM agent_profiles WHERE id = ?")
-      .get(run.agent_id) as { role_prompt: string; name: string } | undefined;
-    if (profile === undefined || profile.role_prompt.trim().length === 0) return undefined;
-
-    // Build teammates section so the agent knows who it can @mention.
-    const teammates = db.sqlite
-      .prepare(
-        `SELECT ap.name, ap.adapter_id, rp.role,
-                COALESCE(ap2.state, 'offline') AS presence
-         FROM room_participants rp
-         LEFT JOIN agent_profiles ap ON ap.id = rp.participant_id
-         LEFT JOIN agent_presence ap2 ON ap2.room_id = rp.room_id AND ap2.agent_id = rp.participant_id
-         WHERE rp.room_id = ? AND rp.participant_type = 'agent' AND rp.participant_id != ?
-         ORDER BY rp.joined_at ASC`
-      )
-      .all(run.room_id, run.agent_id) as { name: string | null; adapter_id: string; role: string; presence: string }[];
-
-    if (teammates.length === 0) return profile.role_prompt;
-
-    const teammateLines = teammates
-      .map((t) => {
-        const name = t.name ?? t.adapter_id;
-        const slug = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-        return `- **${name}** (@${slug}) — role: ${t.role}, presence: ${t.presence}`;
-      })
-      .join("\n");
-
-    return `${profile.role_prompt}
-
-## Your Teammates
-
-You are in a multi-agent room. You can send messages to teammates using the \`room.send_message\` MCP tool with @mentions.
-
-${teammateLines}
-
-To contact a teammate, call \`room.send_message\` with their @slug in the text, e.g.:
-\`\`\`
-room.send_message({ text: "@${teammates[0] ? (teammates[0].name ?? "teammate").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") : "teammate"} please review this" })
-\`\`\`
-
-Use \`room.list_members\` to see the current roster and presence status.`;
   }
 }
 

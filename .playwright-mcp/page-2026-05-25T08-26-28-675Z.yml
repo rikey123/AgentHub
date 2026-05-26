@@ -1,0 +1,100 @@
+- generic [ref=e3]:
+  - link "Skip to workbench" [ref=e4] [cursor=pointer]:
+    - /url: "#agenthub-workbench-main"
+  - banner [ref=e5]:
+    - generic [ref=e6]:
+      - img [ref=e8]
+      - generic [ref=e11]:
+        - generic [ref=e12]: AgentHub
+        - generic [ref=e13]: Dual-theme workbench
+    - status [ref=e14]:
+      - generic [ref=e16]: Connected
+    - generic [ref=e17]:
+      - button "Open command palette" [ref=e18] [cursor=pointer]:
+        - img [ref=e19]
+        - generic [ref=e24]: Command
+        - generic [ref=e25]: ⌘K
+      - 'button "Toggle theme. Current mode: Auto" [ref=e26] [cursor=pointer]':
+        - img [ref=e27]
+        - generic [ref=e33]: Auto
+  - main [ref=e34]:
+    - complementary "Rooms and groups" [ref=e35]:
+      - generic [ref=e36]:
+        - generic [ref=e37]:
+          - img [ref=e38]
+          - text: Rooms & groups
+        - button "Collapse rooms column" [ref=e43] [cursor=pointer]:
+          - img [ref=e44]
+      - generic [ref=e47]:
+        - button "+ New Room" [ref=e49] [cursor=pointer]
+        - button "New Room" [ref=e51] [cursor=pointer]:
+          - generic [ref=e54]: New Room
+    - navigation "Feature rail" [ref=e55]:
+      - generic [ref=e56]:
+        - generic [ref=e57]:
+          - img [ref=e58]
+          - text: Feature rail
+        - generic [ref=e59]: Preview
+      - generic [ref=e60]:
+        - generic [ref=e61]:
+          - img [ref=e63]
+          - generic [ref=e66]: Chat
+        - generic [ref=e67]:
+          - img [ref=e69]
+          - generic [ref=e72]: Runs
+        - generic [ref=e73]:
+          - img [ref=e75]
+          - generic [ref=e78]: Context
+        - generic [ref=e79]:
+          - img [ref=e81]
+          - generic [ref=e86]: Tasks
+        - generic:
+          - generic:
+            - img
+          - generic:
+            - generic: Kanban
+            - generic: Coming soon
+        - generic:
+          - generic:
+            - img
+          - generic:
+            - generic: Workflow
+            - generic: Coming soon
+        - generic [ref=e87]:
+          - img [ref=e89]
+          - generic [ref=e93]: Artifacts
+        - generic [ref=e94]:
+          - img [ref=e96]
+          - generic [ref=e103]: Settings
+    - region "Center chat canvas" [ref=e104]:
+      - generic [ref=e105]:
+        - generic [ref=e106]:
+          - generic [ref=e107]: Chat canvas
+          - generic [ref=e108]: Main conversation workspace
+        - generic [ref=e109]:
+          - img [ref=e110]
+          - text: Live canvas
+      - generic [ref=e113]:
+        - generic [ref=e114]:
+          - generic [ref=e115]:
+            - generic [ref=e116]: Local workbench
+            - heading "Welcome to AgentHub" [level=1] [ref=e117]
+            - paragraph [ref=e118]: Your local multi-agent coding workbench
+          - button "+ New Room" [ref=e119] [cursor=pointer]
+        - generic [ref=e120]:
+          - generic [ref=e121]:
+            - heading "Recent Rooms" [level=2] [ref=e122]
+            - generic [ref=e123]: 1 total
+          - button "New Room solo 0 agents" [ref=e125] [cursor=pointer]:
+            - generic [ref=e127]:
+              - generic [ref=e128]: New Room
+              - generic [ref=e130]: solo
+            - generic [ref=e131]: 0 agents
+    - complementary "Workbench" [ref=e133]:
+      - generic [ref=e134]:
+        - generic [ref=e135]:
+          - img [ref=e136]
+          - text: Workbench
+        - button "Collapse workbench column" [ref=e137] [cursor=pointer]:
+          - img [ref=e138]
+      - generic [ref=e141]: No room selected

@@ -4,6 +4,7 @@ export * from "./commands.ts";
 export * from "./mailbox-service.ts";
 export * from "./mention-parser.ts";
 export * from "./pending-turn.ts";
+export * from "./prompts/index.ts";
 export * from "./recovery.ts";
 export * from "./run-lifecycle-service.ts";
 export * from "./run-queue.ts";

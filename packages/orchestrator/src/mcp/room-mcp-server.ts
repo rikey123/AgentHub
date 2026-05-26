@@ -6,7 +6,7 @@ import type { AgentHubDatabase } from "@agenthub/db";
 import { nameToSlug } from "../mention-parser.ts";
 import { TaskService, normalizeStatus } from "../task-service.ts";
 
-export type RoomMcpToolName = "room.create_task" | "room.update_task" | "room.list_tasks" | "room.send_message" | "room.list_members" | string;
+export type RoomMcpToolName = "room.create_task" | "room.update_task" | "room.list_tasks" | "room.send_message" | "room.list_members" | "room.spawn_agent" | string;
 
 export type RoomMcpSessionContext = {
   readonly roomId: string;
@@ -27,6 +27,7 @@ export class RoomMcpServer {
     if (name === "room.list_tasks") return { ok: true, data: { tasks: this.options.taskService.list({ roomId: session.roomId }) } };
     if (name === "room.send_message") return this.handleSendMessage(input, session);
     if (name === "room.list_members") return this.handleListMembers(session);
+    if (name === "room.spawn_agent") return this.handleSpawnAgent(input, session);
     return toolNotFound(name);
   }
 
@@ -204,6 +205,85 @@ export class RoomMcpServer {
       idempotencyKey: typeof input.idempotencyKey === "string" ? input.idempotencyKey : `mcp:update-task:${session.runId}:${input.taskId}:${input.status}:${randomUUID()}`
     }, session);
     return commandResult(result);
+  }
+
+  // ---------------------------------------------------------------------------
+  // room.spawn_agent — leader-only: create a new teammate in the room
+  // ---------------------------------------------------------------------------
+
+  private async handleSpawnAgent(input: unknown, session: RoomMcpSessionContext): Promise<RoomMcpToolResult> {
+    if (!isRecord(input)) return failure("validation_failed", "input must be an object");
+
+    // Only the primary (leader) agent can spawn new teammates.
+    const callerParticipant = this.options.database.sqlite
+      .prepare("SELECT role FROM room_participants WHERE room_id = ? AND participant_id = ? AND participant_type = 'agent'")
+      .get(session.roomId, session.agentId) as { readonly role: string } | undefined;
+    if (!callerParticipant) return failure("permission_denied", "agent is not a room participant");
+    if (callerParticipant.role !== "primary") return failure("permission_denied", "only the leader (primary) agent can spawn new teammates");
+
+    const agentName = typeof input.name === "string" && input.name.trim().length > 0 ? input.name.trim() : undefined;
+    if (!agentName) return failure("validation_failed", "name is required");
+
+    const adapterId = typeof input.adapterId === "string" && input.adapterId.trim().length > 0 ? input.adapterId.trim() : "mock";
+    const model = typeof input.model === "string" && input.model.trim().length > 0 ? input.model.trim() : undefined;
+    const rolePrompt = typeof input.rolePrompt === "string" ? input.rolePrompt.trim() : "";
+    const capabilities = Array.isArray(input.capabilities) ? input.capabilities.filter((c): c is string => typeof c === "string") : ["chat"];
+
+    const room = this.options.database.sqlite
+      .prepare("SELECT workspace_id, mode FROM rooms WHERE id = ? AND archived_at IS NULL")
+      .get(session.roomId) as { readonly workspace_id: string; readonly mode: string } | undefined;
+    if (!room) return failure("not_found", `Room '${session.roomId}' not found`);
+
+    const now = this.options.now?.() ?? Date.now();
+    const newAgentId = randomUUID();
+    const slug = nameToSlug(agentName);
+
+    // Create agent profile + add to room in one transaction.
+    this.options.database.sqlite.transaction(() => {
+      this.options.database.sqlite
+        .prepare(
+          `INSERT INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 0, NULL, ?, ?)`
+        )
+        .run(newAgentId, room.workspace_id, agentName, adapterId, model ?? null, rolePrompt, JSON.stringify(capabilities), now, now);
+
+      const role = room.mode === "team" || room.mode === "squad" ? "teammate" : "observer";
+      const presence = room.mode === "team" || room.mode === "squad" ? "active" : "observing";
+
+      this.options.database.sqlite
+        .prepare(
+          "INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, default_presence, joined_at) VALUES (?, ?, 'agent', ?, ?, NULL, ?, ?)"
+        )
+        .run(session.roomId, newAgentId, role, adapterId, presence, now);
+
+      this.options.database.sqlite
+        .prepare("INSERT OR REPLACE INTO agent_presence (room_id, agent_id, state, reason, status_line, updated_at) VALUES (?, ?, ?, NULL, NULL, ?)")
+        .run(session.roomId, newAgentId, presence, now);
+
+      // Emit events so SSE consumers (projector) see the new member immediately.
+      this.options.eventBus.publish({ id: randomUUID(), type: "agent.joined", schemaVersion: 1, workspaceId: room.workspace_id, roomId: session.roomId, agentId: newAgentId, payload: { agentId: newAgentId, agentName, role, adapterId }, createdAt: now });
+      this.options.eventBus.publish({ id: randomUUID(), type: "agent.state.changed", schemaVersion: 1, workspaceId: room.workspace_id, roomId: session.roomId, agentId: newAgentId, payload: { agentId: newAgentId, state: presence }, createdAt: now });
+    })();
+
+    // Wake the new agent with a first_wake prompt so it knows its role.
+    try {
+      await this.options.commandBus.dispatch(
+        {
+          type: "WakeAgent",
+          roomId: session.roomId,
+          agentId: newAgentId,
+          workspaceId: room.workspace_id,
+          reason: "primary_turn",
+          promptDelta: { kind: "first_wake", fullRolePrompt: rolePrompt.length > 0 ? rolePrompt : `You are ${agentName}, a new teammate in this room. Wait for instructions from the leader.` },
+          idempotencyKey: `spawn:${session.runId}:${newAgentId}`,
+        },
+        { actor: { type: "agent", id: session.agentId }, traceId: `mcp:spawn:${session.runId}`, origin: "mcp_tool" }
+      );
+    } catch (err) {
+      console.warn(`[RoomMcpServer] WakeAgent for spawned agent ${newAgentId} threw:`, err);
+    }
+
+    return { ok: true, data: { agentId: newAgentId, name: agentName, slug, adapterId, role: room.mode === "team" || room.mode === "squad" ? "teammate" : "observer" } };
   }
 
   // ---------------------------------------------------------------------------
