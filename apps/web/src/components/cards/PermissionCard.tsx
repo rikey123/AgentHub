@@ -1,107 +1,89 @@
+import { Button, Card, Checkbox, Chip } from "@heroui/react";
 import { useState } from "react";
-import type { Card } from "@agenthub/protocol/domains";
+import type { Card as ProtocolCard, PermissionResource } from "@agenthub/protocol/domains";
+import { permissionStatusColor } from "../../lib/status.ts";
 
-type PermissionCardProps = {
-  readonly card: Extract<Card, { type: "permission" }>;
-};
+type PermissionCardData = Extract<ProtocolCard, { type: "permission" }>;
 
-export function PermissionCard({ card }: PermissionCardProps) {
-  const [decision, setDecision] = useState<string | null>(null);
+interface PermissionCardProps {
+  card: PermissionCardData;
+  csrfFetch: typeof fetch;
+}
+
+export function PermissionCard({ card, csrfFetch }: PermissionCardProps) {
   const [remember, setRemember] = useState(false);
+  const [pending, setPending] = useState<"allow" | "deny" | undefined>(undefined);
+  const [error, setError] = useState<string | undefined>(undefined);
 
-  const handleResolve = async (decisionValue: "allow" | "deny") => {
-    setDecision(decisionValue);
+  const resolved = card.status === "allowed" || card.status === "denied" || card.status === "expired";
+
+  const resolve = async (decision: "allow" | "deny") => {
+    setPending(decision);
+    setError(undefined);
     try {
-      await fetch(`/permissions/${encodeURIComponent(card.permissionId)}/resolve`, {
+      const res = await csrfFetch(`/permissions/${encodeURIComponent(card.permissionId)}/resolve`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ decision: decisionValue, remember, scope: "once" })
+        body: JSON.stringify({ decision, remember, scope: remember ? "this_workspace" : "once" })
       });
-    } catch (error) {
-      // eslint-disable-next-line no-console
-      console.error("resolve permission failed", error);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPending(undefined);
     }
   };
 
-  const isResolved = card.status !== "pending" || decision !== null;
-  const resolvedStatus = decision ?? card.status;
-
   return (
-    <div
-      style={{
-        marginTop: "var(--ah-space-2)",
-        padding: "var(--ah-space-3) var(--ah-space-4)",
-        borderRadius: "var(--ah-radius-lg)",
-        background: "var(--ah-warning-light)",
-        border: "1px solid var(--ah-warning)"
-      }}
-    >
-      <div style={{ fontSize: "var(--ah-font-size-xs)", fontWeight: 600, color: "var(--ah-text-warning)", marginBottom: "var(--ah-space-2)" }}>Permission Request</div>
-      <div style={{ fontSize: "var(--ah-font-size-md)", color: "var(--ah-text-warning)", marginBottom: "var(--ah-space-1)" }}>
-        <strong>Agent:</strong> {card.agentId}
-      </div>
-      <div style={{ fontSize: "var(--ah-font-size-md)", color: "var(--ah-text-warning)", marginBottom: "var(--ah-space-1)" }}>
-        <strong>Resource:</strong> {card.resource.type}
-      </div>
-      {card.reason && (
-        <div style={{ fontSize: "var(--ah-font-size-sm)", color: "var(--ah-warning)", marginBottom: "var(--ah-space-2)" }}>{card.reason}</div>
-      )}
-
-      {!isResolved && (
-        <>
-          <label style={{ display: "flex", alignItems: "center", gap: "var(--ah-space-1)", fontSize: "var(--ah-font-size-sm)", color: "var(--ah-text-warning)", marginBottom: "var(--ah-space-3)", cursor: "pointer" }}>
-            <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} aria-label="Always allow for this project" />
-            Always allow for this project
-          </label>
-          <div style={{ display: "flex", gap: "var(--ah-space-2)" }}>
-            <button
-              onClick={() => handleResolve("allow")}
-              style={{
-                padding: "var(--ah-space-2) var(--ah-space-4)",
-                borderRadius: "var(--ah-radius-md)",
-                border: "none",
-                background: "var(--ah-success)",
-                color: "var(--ah-text-inverse)",
-                cursor: "pointer",
-                fontSize: "var(--ah-font-size-md)",
-                fontWeight: 600
-              }}
-              aria-label="Allow permission"
-            >
-              Allow
-            </button>
-            <button
-              onClick={() => handleResolve("deny")}
-              style={{
-                padding: "var(--ah-space-2) var(--ah-space-4)",
-                borderRadius: "var(--ah-radius-md)",
-                border: "none",
-                background: "var(--ah-danger)",
-                color: "var(--ah-text-inverse)",
-                cursor: "pointer",
-                fontSize: "var(--ah-font-size-md)",
-                fontWeight: 600
-              }}
-              aria-label="Deny permission"
-            >
-              Deny
-            </button>
-          </div>
-        </>
-      )}
-
-      {isResolved && (
-        <div
-          style={{
-            fontSize: "var(--ah-font-size-sm)",
-            fontWeight: 600,
-            color: resolvedStatus === "allowed" ? "var(--ah-success)" : "var(--ah-danger)",
-            marginTop: "var(--ah-space-1)"
-          }}
-        >
-          {resolvedStatus === "allowed" ? "Allowed" : resolvedStatus === "denied" ? "Denied" : resolvedStatus}
+    <Card variant="default" className="border border-warning/40">
+      <Card.Header>
+        <div className="flex items-center gap-2">
+          <Card.Title>Permission requested</Card.Title>
+          <Chip size="sm" variant="soft" color={permissionStatusColor(String(card.status))}>{String(card.status)}</Chip>
         </div>
-      )}
-    </div>
+        <Card.Description>
+          <ResourceLabel resource={card.resource as PermissionResource} />
+        </Card.Description>
+      </Card.Header>
+      <Card.Content>
+        <div className="text-sm text-muted">
+          <span>Agent <span className="font-medium text-foreground">{card.agentId}</span></span>
+          {card.reason ? <p className="mt-1">{card.reason}</p> : null}
+        </div>
+        {!resolved ? (
+          <Checkbox className="mt-3" isSelected={remember} onChange={setRemember}>
+            Always allow for this project
+          </Checkbox>
+        ) : null}
+        {error ? <p className="mt-2 text-xs text-danger">{error}</p> : null}
+      </Card.Content>
+      {!resolved ? (
+        <Card.Footer className="gap-2">
+          <Button variant="primary" isPending={pending === "allow"} onPress={() => resolve("allow")}>
+            Allow
+          </Button>
+          <Button variant="danger" isPending={pending === "deny"} onPress={() => resolve("deny")}>
+            Deny
+          </Button>
+        </Card.Footer>
+      ) : null}
+    </Card>
   );
+}
+
+function ResourceLabel({ resource }: { resource: PermissionResource }) {
+  if (!resource || typeof resource !== "object") return <span>Unknown resource</span>;
+  switch (resource.type) {
+    case "file":
+      return <span><strong>{resource.operation}</strong> file {resource.path}</span>;
+    case "shell":
+      return <span>Run shell: <code className="ah-mono">{resource.command}</code></span>;
+    case "tool":
+      return <span>Tool: <code className="ah-mono">{resource.toolName}</code></span>;
+    case "context":
+      return <span><strong>{resource.operation}</strong> context</span>;
+    case "agent":
+      return <span><strong>{resource.operation}</strong> agent {resource.targetAgentId}</span>;
+    default:
+      return <span>{(resource as { type?: string }).type ?? "unknown"}</span>;
+  }
 }

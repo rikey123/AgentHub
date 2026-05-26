@@ -1,22 +1,23 @@
-import type { Card } from "@agenthub/protocol/domains";
+import { Card, Chip } from "@heroui/react";
 
-type UnknownCardProps = {
-  readonly card: Card;
-};
+interface UnknownCardProps {
+  card: Record<string, unknown> & { type?: string };
+}
 
 export function UnknownCard({ card }: UnknownCardProps) {
   return (
-    <div
-      style={{
-        marginTop: "var(--ah-space-2)",
-        padding: "var(--ah-space-3) var(--ah-space-4)",
-        borderRadius: "var(--ah-radius-lg)",
-        background: "var(--ah-bg-secondary)",
-        border: "1px solid var(--ah-border)"
-      }}
-    >
-      <div style={{ fontSize: "var(--ah-font-size-xs)", fontWeight: 600, color: "var(--ah-text-muted)", marginBottom: "var(--ah-space-2)" }}>Unknown Card</div>
-      <pre style={{ fontSize: "var(--ah-font-size-xs)", color: "var(--ah-text-secondary)", overflow: "auto", maxHeight: 120 }}>{JSON.stringify(card, null, 2)}</pre>
-    </div>
+    <Card variant="default">
+      <Card.Header>
+        <div className="flex items-center gap-2">
+          <Card.Title>Card</Card.Title>
+          <Chip size="sm" variant="soft" color="default">{card.type ?? "unknown"}</Chip>
+        </div>
+      </Card.Header>
+      <Card.Content>
+        <pre className="ah-mono max-h-48 overflow-auto rounded bg-surface-secondary p-2 text-xs">
+          {JSON.stringify(card, null, 2)}
+        </pre>
+      </Card.Content>
+    </Card>
   );
 }

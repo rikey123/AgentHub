@@ -1,313 +1,305 @@
-import { useState, useCallback, useEffect, useMemo } from "react";
-import { Layout } from "./components/Layout.tsx";
-import { RoomList } from "./components/RoomList.tsx";
-import { ChatStream } from "./components/ChatStream.tsx";
-import { InputBox, type SendPayload } from "./components/InputBox.tsx";
-import { SidePanel } from "./components/SidePanel.tsx";
-import { RunDetail } from "./components/RunDetail.tsx";
-import { PendingTurnList } from "./components/PendingTurnList.tsx";
-import { CommandPalette } from "./components/CommandPalette.tsx";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useHotkeys } from "react-hotkeys-hook";
+import { AppShell } from "./components/shell/AppShell.tsx";
+import { TopBar } from "./components/shell/TopBar.tsx";
+import { FeatureRail, type RailItem } from "./components/shell/FeatureRail.tsx";
+import { RoomList } from "./components/rooms/RoomList.tsx";
+import { HomeView } from "./components/home/HomeView.tsx";
+import { ChatStream } from "./components/chat/ChatStream.tsx";
+import { InputBox } from "./components/chat/InputBox.tsx";
+import { PendingTurnList } from "./components/chat/PendingTurnList.tsx";
+import { SidePanel } from "./components/panels/SidePanel.tsx";
+import { RunDetailDrawer } from "./components/run/RunDetailDrawer.tsx";
+import { CommandPalette, type PaletteCommand } from "./components/CommandPalette.tsx";
 import { KeymapModal } from "./components/KeymapModal.tsx";
-import { ChatStreamSkeleton } from "./components/Skeleton.tsx";
-import { HomeView } from "./components/HomeView.tsx";
-import { useProjector } from "./hooks/useProjector.ts";
-import { useCsrfFetch, useSdk } from "./hooks/useSdk.ts";
+import { NewRoomDialog, type CreateRoomInput } from "./components/NewRoomDialog.tsx";
+import { useProjector, getProjector } from "./hooks/useProjector.ts";
+import { useSdk, useCsrfFetch } from "./hooks/useSdk.ts";
 import { useTheme } from "./hooks/useTheme.ts";
 
-export function App() {
+export default function App() {
   const [activeRoomId, setActiveRoomId] = useState<string | undefined>();
   const [activeRunId, setActiveRunId] = useState<string | undefined>();
-  const [sidePanelTab, setSidePanelTab] = useState<"context" | "tasks" | "members" | "debug" | "cost">("context");
+  const [selectedMessageId, setSelectedMessageId] = useState<string | undefined>();
+  const [editingTurnId, setEditingTurnId] = useState<string | undefined>();
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [keymapOpen, setKeymapOpen] = useState(false);
+  const [newRoomOpen, setNewRoomOpen] = useState(false);
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
-  const [editingPendingTurn, setEditingPendingTurn] = useState<{ readonly messageId: string; readonly text: string } | undefined>(undefined);
-  const [editError, setEditError] = useState<string | undefined>(undefined);
-  const [cmdPaletteOpen, setCmdPaletteOpen] = useState(false);
-  const [keymapOpen, setKeymapOpen] = useState(false);
+  const [sidePanelTab, setSidePanelTab] = useState<"context" | "tasks" | "members" | "debug" | "cost">("context");
+  const [rail, setRail] = useState<RailItem>("chat");
+  const [bannerError, setBannerError] = useState<string | undefined>();
 
   const projector = useProjector("main", activeRoomId);
   const sdk = useSdk();
   const csrfFetch = useCsrfFetch();
-  const { theme, density, setTheme, setDensity } = useTheme();
+  const { theme, setTheme, toggleTheme } = useTheme();
 
-  const room = activeRoomId ? projector.rooms.get(activeRoomId) : undefined;
-  const connectionStatus = projector.connectionStatus;
-  const connectionError = projector.connectionError;
-  const connectionAnnouncement = useMemo(() => {
-    switch (connectionStatus) {
-      case "connected":
-        return connectionError ? `Connected. ${connectionError}` : "Connected to live projector.";
-      case "connecting":
-        return "Connecting to live projector.";
-      case "reconnecting":
-        return connectionError ? `Reconnecting. ${connectionError}` : "Reconnecting to live projector.";
-      case "offline":
-        return connectionError ? `Offline. ${connectionError}` : "Offline. Live updates are unavailable.";
-      case "disconnected":
-      default:
-        return "Disconnected from live projector.";
-    }
-  }, [connectionError, connectionStatus]);
+  const rooms = useMemo(() => Array.from(projector.rooms.values()), [projector.rooms]);
+  const activeRoom = activeRoomId ? projector.rooms.get(activeRoomId) : undefined;
 
-  const handleSelectRoom = useCallback((roomId: string) => {
-    setActiveRoomId(roomId);
-    setActiveRunId(undefined);
-    setEditingPendingTurn(undefined);
-  }, []);
-
-  const handleOpenRunDetail = useCallback((runId: string) => {
-    setActiveRunId(runId);
-  }, []);
-
-  const handleCreateRoom = useCallback(async () => {
+  const handleCreateRoom = useCallback(async (input: CreateRoomInput) => {
+    setBannerError(undefined);
     try {
-      const result = (await sdk.createRoom({ title: "New Room", mode: "solo", primaryAgentId: "mock-builder" })) as {
-        data: { roomId: string };
-      };
-      setActiveRoomId(result.data.roomId);
-    } catch (error) {
-      // eslint-disable-next-line no-console
-      console.error("create room failed", error);
+      const res = await sdk.createRoom({
+        title: input.title,
+        mode: input.mode,
+        primaryAgentId: input.primaryAgentId,
+        participants: input.participants
+      }) as { data?: { roomId?: string }; id?: string; roomId?: string };
+      const roomId = res?.data?.roomId ?? res?.roomId ?? res?.id;
+      if (typeof roomId === "string") {
+        // Daemon doesn't emit agent.joined per participant — synthesize them locally so the
+        // members panel and message attribution show the chosen agents immediately.
+        const agentMap = await fetch("/agents", { credentials: "same-origin" })
+          .then((r) => r.ok ? r.json() : { agents: [] })
+          .catch(() => ({ agents: [] })) as { agents?: Array<{ id: string; name: string; adapter_id?: string; default_presence?: string }> };
+        const lookup = new Map((agentMap.agents ?? []).map((a) => [a.id, a]));
+        const projector = getProjector();
+        const now = Date.now();
+        const seed = (agentId: string, role: string, presence: string) => {
+          const a = lookup.get(agentId);
+          projector.apply({
+            id: `local-${roomId}-${agentId}`,
+            type: "agent.joined",
+            schemaVersion: 1,
+            durability: "durable",
+            visibility: "both",
+            workspaceId: "default-workspace",
+            roomId,
+            agentId,
+            payload: {
+              agentId,
+              agentName: a?.name ?? agentId,
+              role,
+              adapterId: a?.adapter_id ?? "mock"
+            },
+            createdAt: now
+          } as never);
+          projector.apply({
+            id: `local-state-${roomId}-${agentId}`,
+            type: "agent.state.changed",
+            schemaVersion: 1,
+            durability: "durable",
+            visibility: "both",
+            workspaceId: "default-workspace",
+            roomId,
+            agentId,
+            payload: { agentId, state: presence },
+            createdAt: now
+          } as never);
+        };
+        seed(input.primaryAgentId, "primary", "active");
+        for (const p of input.participants) {
+          seed(p.agentId, p.role, p.defaultPresence);
+        }
+        setActiveRoomId(roomId);
+      }
+    } catch (err) {
+      setBannerError(err instanceof Error ? err.message : String(err));
+      throw err;
     }
   }, [sdk]);
 
-  const handleCloseRunDetail = useCallback(() => {
-    setActiveRunId(undefined);
-  }, []);
+  const openNewRoom = useCallback(() => setNewRoomOpen(true), []);
 
-  const handleSend = useCallback(
-    async (payload: SendPayload) => {
-      if (!activeRoomId) return;
-      try {
-        const body: Record<string, unknown> = { text: payload.text };
-        if (payload.mentions && payload.mentions.length > 0) {
-          body.mentions = payload.mentions;
-        }
-        if (payload.quotedMessageId) {
-          body.quotedMessageId = payload.quotedMessageId;
-        }
-        if (payload.attachments && payload.attachments.length > 0) {
-          body.attachments = payload.attachments.map((a) => ({
-            fileId: a.fileId,
-            name: a.name,
-            mimeType: a.mimeType,
-            sizeBytes: a.sizeBytes
-          }));
-        }
-        if (editingPendingTurn) {
-          const res = await csrfFetch(`/messages/${encodeURIComponent(editingPendingTurn.messageId)}`, {
-            method: "PATCH",
-            body: JSON.stringify(body)
-          });
-          if (res.status === 409) {
-            setEditError("This message has already started processing and cannot be edited.");
-            return;
-          }
-          if (!res.ok) {
-            throw new Error(`PATCH failed: ${res.status}`);
-          }
-          setEditingPendingTurn(undefined);
-          setEditError(undefined);
-        } else {
-          await sdk.sendMessage(activeRoomId, body as { text: string });
-          setEditError(undefined);
-        }
-      } catch (error) {
-        // eslint-disable-next-line no-console
-        console.error("send failed", error);
-      }
-    },
-    [activeRoomId, sdk, csrfFetch, editingPendingTurn]
-  );
+  const handleSendMessage = useCallback(async (input: { text: string; quotedMessageId?: string; attachmentIds: string[]; mentions: string[] }) => {
+    if (!activeRoomId) return;
+    await sdk.sendMessage(activeRoomId, {
+      text: input.text,
+      ...(input.quotedMessageId ? { quotedMessageId: input.quotedMessageId } : {}),
+      ...(input.attachmentIds.length > 0 ? { attachmentIds: input.attachmentIds } : {}),
+      ...(input.mentions.length > 0 ? { mentions: input.mentions } : {})
+    } as never);
+  }, [activeRoomId, sdk]);
 
-  const handleCancelPendingTurn = useCallback(
-    async (pendingTurnId: string) => {
-      try {
-        await csrfFetch(`/pending-turns/${encodeURIComponent(pendingTurnId)}`, { method: "DELETE", body: "{}" });
-      } catch (error) {
-        // eslint-disable-next-line no-console
-        console.error("cancel failed", error);
-      }
-    },
-    [csrfFetch]
-  );
+  const handleEditSend = useCallback(async (messageId: string, input: { text: string; attachmentIds: string[]; mentions: string[] }) => {
+    await csrfFetch(`/messages/${encodeURIComponent(messageId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ text: input.text, attachmentIds: input.attachmentIds, mentions: input.mentions })
+    });
+    setEditingTurnId(undefined);
+  }, [csrfFetch]);
 
-  const handleEditPendingTurn = useCallback((messageId: string, text: string) => {
-    setEditingPendingTurn({ messageId, text });
-  }, []);
+  const handleCancelPending = useCallback(async (pendingTurnId: string) => {
+    await csrfFetch(`/pending-turns/${encodeURIComponent(pendingTurnId)}`, { method: "DELETE" });
+  }, [csrfFetch]);
 
-  const isOffline = projector.connectionStatus === "offline";
+  const handleQuoteMessage = useCallback((id: string) => {
+    if (!activeRoomId) return;
+    const m = activeRoom?.messages.find((mm) => mm.id === id);
+    const draftKey = `agenthub.draft.${activeRoomId}`;
+    try {
+      const raw = sessionStorage.getItem(draftKey);
+      const next = raw ? JSON.parse(raw) : {};
+      next.quotedMessageId = id;
+      next.quotePreview = m?.text?.slice(0, 80) ?? "";
+      sessionStorage.setItem(draftKey, JSON.stringify(next));
+      window.dispatchEvent(new StorageEvent("storage", { key: draftKey, newValue: JSON.stringify(next) }));
+    } catch {
+      // ignore
+    }
+  }, [activeRoom, activeRoomId]);
 
-  // Global keyboard shortcuts
+  const handlePin = useCallback(async (id: string) => {
+    await csrfFetch(`/messages/${encodeURIComponent(id)}/pin`, { method: "POST" });
+  }, [csrfFetch]);
+
+  const handleRegenerate = useCallback(async (id: string) => {
+    await csrfFetch(`/messages/${encodeURIComponent(id)}/regenerate`, { method: "POST" });
+  }, [csrfFetch]);
+
+  const handleDelete = useCallback(async (id: string) => {
+    if (!window.confirm("Delete this message?")) return;
+    await csrfFetch(`/messages/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }, [csrfFetch]);
+
+  // Global hotkeys
+  useHotkeys("mod+k", (e) => { e.preventDefault(); setPaletteOpen((v) => !v); }, { enableOnFormTags: true });
+  useHotkeys("shift+/", (e) => {
+    const target = e.target as HTMLElement | null;
+    if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+    e.preventDefault();
+    setKeymapOpen((v) => !v);
+  });
+  useHotkeys("g+r", () => setLeftCollapsed(false));
+  useHotkeys("g+d", () => { setRightCollapsed(false); setSidePanelTab("debug"); });
+
+  // Message navigation
+  const messageIds = activeRoom?.messages.map((m) => m.id) ?? [];
+  useHotkeys("j", () => {
+    if (!messageIds.length) return;
+    const idx = selectedMessageId ? messageIds.indexOf(selectedMessageId) : -1;
+    setSelectedMessageId(messageIds[Math.min(messageIds.length - 1, idx + 1)]);
+  });
+  useHotkeys("k", () => {
+    if (!messageIds.length) return;
+    const idx = selectedMessageId ? messageIds.indexOf(selectedMessageId) : 0;
+    setSelectedMessageId(messageIds[Math.max(0, idx - 1)]);
+  });
+  useHotkeys("q", () => { if (selectedMessageId) handleQuoteMessage(selectedMessageId); });
+  useHotkeys("p", () => { if (selectedMessageId) void handlePin(selectedMessageId); });
+  useHotkeys("d", () => { if (selectedMessageId) void handleDelete(selectedMessageId); });
+  useHotkeys("r", () => {
+    const m = activeRoom?.messages.find((mm) => mm.id === selectedMessageId);
+    if (m?.runId) setActiveRunId(m.runId);
+  });
+
+  // Auto-pick the first room if nothing is selected and the user opens "Chat"
   useEffect(() => {
-    let lastKey = "";
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      const isInput = target.tagName === "TEXTAREA" || target.tagName === "INPUT" || target.isContentEditable;
+    if (!activeRoomId && rail === "chat" && rooms.length > 0) {
+      setActiveRoomId(rooms[0]!.id);
+    }
+  }, [activeRoomId, rail, rooms]);
 
-      // Cmd/Ctrl+K for command palette
-      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
-        e.preventDefault();
-        setCmdPaletteOpen((v) => !v);
-        setKeymapOpen(false);
-        return;
-      }
+  const commands = useMemo<PaletteCommand[]>(() => {
+    const list: PaletteCommand[] = [
+      { id: "new-room", label: "New room", group: "Rooms", perform: openNewRoom },
+      { id: "toggle-left", label: leftCollapsed ? "Show rooms panel" : "Hide rooms panel", group: "View", perform: () => setLeftCollapsed((v) => !v) },
+      { id: "toggle-right", label: rightCollapsed ? "Show workbench panel" : "Hide workbench panel", group: "View", perform: () => setRightCollapsed((v) => !v) },
+      { id: "panel-context", label: "Workbench: Context", group: "View", perform: () => { setRightCollapsed(false); setSidePanelTab("context"); } },
+      { id: "panel-tasks", label: "Workbench: Tasks", group: "View", perform: () => { setRightCollapsed(false); setSidePanelTab("tasks"); } },
+      { id: "panel-members", label: "Workbench: Members", group: "View", perform: () => { setRightCollapsed(false); setSidePanelTab("members"); } },
+      { id: "panel-debug", label: "Workbench: Debug", group: "View", perform: () => { setRightCollapsed(false); setSidePanelTab("debug"); } },
+      { id: "panel-cost", label: "Workbench: Cost", group: "View", perform: () => { setRightCollapsed(false); setSidePanelTab("cost"); } },
+      { id: "theme-light", label: "Theme: Light", group: "Theme", keywords: ["theme", "light"], perform: () => setTheme("light") },
+      { id: "theme-dark", label: "Theme: Dark", group: "Theme", keywords: ["theme", "dark"], perform: () => setTheme("dark") },
+      { id: "theme-auto", label: "Theme: Auto", group: "Theme", keywords: ["theme", "auto"], perform: () => setTheme("auto") },
+      { id: "show-keymap", label: "Show keyboard shortcuts", group: "Help", perform: () => setKeymapOpen(true) }
+    ];
+    for (const room of rooms) {
+      list.push({
+        id: `room-${room.id}`,
+        label: `Open room · ${room.title}`,
+        group: "Rooms",
+        keywords: [room.id, room.mode],
+        perform: () => setActiveRoomId(room.id)
+      });
+    }
+    return list;
+  }, [rooms, openNewRoom, leftCollapsed, rightCollapsed, setTheme]);
 
-      // ? for keymap (when not in input)
-      if (e.key === "?" && !isInput) {
-        e.preventDefault();
-        setKeymapOpen((v) => !v);
-        setCmdPaletteOpen(false);
-        return;
-      }
-
-      // g r / g d sequence shortcuts
-      if (!isInput && e.key === "g") {
-        lastKey = "g";
-        return;
-      }
-      if (!isInput && lastKey === "g") {
-        if (e.key === "r") {
-          e.preventDefault();
-          setLeftCollapsed(false);
-          lastKey = "";
-          return;
-        }
-        if (e.key === "d") {
-          e.preventDefault();
-          setRightCollapsed(false);
-          setSidePanelTab("debug");
-          lastKey = "";
-          return;
-        }
-      }
-      lastKey = "";
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  const center = activeRoom ? (
+    <div className="flex h-full flex-col">
+      <ChatStream
+        room={activeRoom}
+        selectedMessageId={selectedMessageId}
+        onSelectMessage={setSelectedMessageId}
+        onOpenRun={(runId) => setActiveRunId(runId)}
+        onQuote={handleQuoteMessage}
+        onPin={(id) => void handlePin(id)}
+        onRegenerate={(id) => void handleRegenerate(id)}
+        onDelete={(id) => void handleDelete(id)}
+        onCancelPending={(id) => void handleCancelPending(id)}
+        onEditPending={setEditingTurnId}
+        csrfFetch={csrfFetch}
+        connectionStatus={projector.connectionStatus}
+        connectionError={projector.connectionError}
+      />
+      <PendingTurnList
+        turns={activeRoom.pendingTurns}
+        onCancel={(id) => void handleCancelPending(id)}
+        onEdit={setEditingTurnId}
+      />
+      <InputBox
+        roomId={activeRoom.id}
+        participants={activeRoom.participants}
+        connectionStatus={projector.connectionStatus}
+        pendingCount={activeRoom.pendingTurns.length}
+        editingTurnId={editingTurnId}
+        onCancelEdit={() => setEditingTurnId(undefined)}
+        csrfFetch={csrfFetch}
+        onSend={handleSendMessage}
+        onEditSend={handleEditSend}
+      />
+    </div>
+  ) : (
+    <HomeView rooms={rooms} onOpenRoom={setActiveRoomId} onCreate={openNewRoom} />
+  );
 
   return (
     <>
-      <Layout
-        leftCollapsed={leftCollapsed}
-        onToggleLeft={() => setLeftCollapsed((v) => !v)}
-        rightCollapsed={rightCollapsed}
-        onToggleRight={() => setRightCollapsed((v) => !v)}
-        connectionStatus={connectionStatus}
-        connectionError={connectionError}
-        connectionAnnouncement={connectionAnnouncement}
-        onOpenCommandPalette={() => setCmdPaletteOpen(true)}
-        theme={theme}
-        onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
-        leftPanel={
-          <RoomList
-            rooms={Array.from(projector.rooms.values())}
-            activeRoomId={activeRoomId}
-            onSelectRoom={handleSelectRoom}
-            onCreateRoom={handleCreateRoom}
+      <AppShell
+        topBar={
+          <TopBar
+            connectionStatus={projector.connectionStatus}
+            connectionError={projector.connectionError ?? bannerError}
+            roomTitle={activeRoom?.title}
+            theme={theme}
+            onCycleTheme={toggleTheme}
+            onOpenCommandPalette={() => setPaletteOpen(true)}
+            onOpenKeymap={() => setKeymapOpen(true)}
+            onToggleLeft={() => setLeftCollapsed((v) => !v)}
+            onToggleRight={() => setRightCollapsed((v) => !v)}
+            leftCollapsed={leftCollapsed}
+            rightCollapsed={rightCollapsed}
           />
         }
-        centerPanel={
-          room ? (
-            <>
-              <ChatStream
-                room={room}
-                onOpenRunDetail={handleOpenRunDetail}
-                onCancelPendingTurn={handleCancelPendingTurn}
-                onEditPendingTurn={handleEditPendingTurn}
-                onQuoteMessage={(messageId) => {
-                  const msg = room.messages.find((m) => m.id === messageId);
-                  if (!msg) return;
-                  const draftKey = `agenthub.draft.${room.id}`;
-                  const saved = sessionStorage.getItem(draftKey);
-                  let parsed: Record<string, unknown> = {};
-                  if (saved) {
-                    try {
-                      parsed = JSON.parse(saved);
-                    } catch {
-                      /* ignore */
-                    }
-                  }
-                  parsed.quotedMessageId = messageId;
-                  sessionStorage.setItem(draftKey, JSON.stringify(parsed));
-                  window.dispatchEvent(new StorageEvent("storage", { key: draftKey }));
-                }}
-                connectionStatus={connectionStatus}
-                connectionAnnouncement={connectionAnnouncement}
-              />
-              {room.pendingTurns.length > 0 && (
-                <PendingTurnList
-                  pendingTurns={room.pendingTurns}
-                  onCancel={handleCancelPendingTurn}
-                  onEdit={handleEditPendingTurn}
-                  disabled={isOffline}
-                />
-              )}
-              <InputBox
-                onSend={handleSend}
-                disabled={connectionStatus !== "connected"}
-                room={room}
-                pendingTurnCount={room.pendingTurns.length}
-                editingPendingTurn={editingPendingTurn}
-                onClearEdit={() => {
-                  setEditingPendingTurn(undefined);
-                  setEditError(undefined);
-                }}
-                editError={editError}
-                connectionStatus={connectionStatus}
-              />
-            </>
-          ) : activeRoomId ? (
-            <ChatStreamSkeleton count={5} />
-          ) : (
-            <HomeView rooms={Array.from(projector.rooms.values())} onSelectRoom={handleSelectRoom} onCreateRoom={handleCreateRoom} />
-          )
+        rail={<FeatureRail active={rail} onSelect={setRail} />}
+        rooms={
+          <RoomList
+            rooms={rooms}
+            activeRoomId={activeRoomId}
+            onSelect={setActiveRoomId}
+            onCreate={openNewRoom}
+          />
         }
-        rightPanel={
-          room ? (
-            <SidePanel
-              room={room}
-              activeTab={sidePanelTab}
-              onChangeTab={setSidePanelTab}
-              workspaceId="default-workspace"
-            />
-          ) : (
-            <div style={{ padding: "var(--ah-space-4)", color: "var(--ah-text-muted)" }}>No room selected</div>
-          )
-        }
-        overlay={
-          activeRunId && activeRoomId ? (
-            <RunDetail
-              roomId={activeRoomId}
-              runId={activeRunId}
-              onClose={handleCloseRunDetail}
-            />
-          ) : undefined
-        }
+        center={center}
+        panel={activeRoom ? <SidePanel room={activeRoom} csrfFetch={csrfFetch} initialTab={sidePanelTab} /> : null}
+        roomsCollapsed={leftCollapsed}
+        panelCollapsed={rightCollapsed || !activeRoom}
       />
-      {cmdPaletteOpen && (
-        <CommandPalette
-          rooms={Array.from(projector.rooms.values())}
-          activeRoomId={activeRoomId}
-          onSelectRoom={(roomId) => {
-            setActiveRoomId(roomId);
-            setActiveRunId(undefined);
-            setEditingPendingTurn(undefined);
-            setCmdPaletteOpen(false);
-          }}
-          onOpenRunDetail={(runId) => {
-            setActiveRunId(runId);
-            setCmdPaletteOpen(false);
-          }}
-          onClose={() => setCmdPaletteOpen(false)}
-          onSwitchTheme={setTheme}
-          onSwitchDensity={setDensity}
-          currentTheme={theme}
-          currentDensity={density}
-        />
-      )}
-      {keymapOpen && <KeymapModal onClose={() => setKeymapOpen(false)} />}
+      <CommandPalette isOpen={paletteOpen} onOpenChange={setPaletteOpen} commands={commands} />
+      <KeymapModal isOpen={keymapOpen} onOpenChange={setKeymapOpen} />
+      <NewRoomDialog isOpen={newRoomOpen} onOpenChange={setNewRoomOpen} onCreate={handleCreateRoom} />
+      <RunDetailDrawer
+        isOpen={!!activeRunId}
+        onOpenChange={(open) => { if (!open) setActiveRunId(undefined); }}
+        room={activeRoom}
+        runId={activeRunId}
+        csrfFetch={csrfFetch}
+      />
     </>
   );
 }

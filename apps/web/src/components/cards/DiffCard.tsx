@@ -1,139 +1,80 @@
 import { useState } from "react";
-import type { Card } from "@agenthub/protocol/domains";
+import { Button, Card, Chip, DisclosureGroup, Disclosure } from "@heroui/react";
+import type { Card as ProtocolCard } from "@agenthub/protocol/domains";
 
-type DiffCardProps = {
-  readonly card: Extract<Card, { type: "diff" }>;
-};
+type DiffCardData = Extract<ProtocolCard, { type: "diff" }>;
 
-export function DiffCard({ card }: DiffCardProps) {
-  const [expanded, setExpanded] = useState(false);
-  const [status, setStatus] = useState(card.applyStatus);
+interface DiffCardProps {
+  card: DiffCardData;
+  csrfFetch: typeof fetch;
+}
 
-  const handleApply = async () => {
+export function DiffCard({ card, csrfFetch }: DiffCardProps) {
+  const [pending, setPending] = useState<"apply" | "reject" | undefined>(undefined);
+  const [error, setError] = useState<string | undefined>(undefined);
+
+  const totalAdditions = card.files.reduce((acc, f) => acc + (f.additions ?? 0), 0);
+  const totalDeletions = card.files.reduce((acc, f) => acc + (f.deletions ?? 0), 0);
+  const isResolved = ["applied", "rejected", "failed"].includes(String(card.applyStatus));
+
+  const act = async (action: "apply" | "reject") => {
+    setPending(action);
+    setError(undefined);
     try {
-      await fetch(`/artifacts/${encodeURIComponent(card.artifactId)}/apply`, {
+      const res = await csrfFetch(`/artifacts/${encodeURIComponent(card.artifactId)}/${action}`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
         body: JSON.stringify({})
       });
-      setStatus("applied");
-    } catch (error) {
-      // eslint-disable-next-line no-console
-      console.error("apply diff failed", error);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPending(undefined);
     }
   };
-
-  const handleReject = async () => {
-    try {
-      await fetch(`/artifacts/${encodeURIComponent(card.artifactId)}/reject`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({})
-      });
-      setStatus("rejected");
-    } catch (error) {
-      // eslint-disable-next-line no-console
-      console.error("reject diff failed", error);
-    }
-  };
-
-  const totalAdditions = card.files.reduce((sum, f) => sum + f.additions, 0);
-  const totalDeletions = card.files.reduce((sum, f) => sum + f.deletions, 0);
 
   return (
-    <div
-      style={{
-        marginTop: "var(--ah-space-2)",
-        padding: "var(--ah-space-3) var(--ah-space-4)",
-        borderRadius: "var(--ah-radius-lg)",
-        background: "var(--ah-success-light)",
-        border: "1px solid var(--ah-success)"
-      }}
-    >
-      <div style={{ fontSize: "var(--ah-font-size-xs)", fontWeight: 600, color: "var(--ah-success-hover)", marginBottom: "var(--ah-space-2)" }}>Diff</div>
-      <div style={{ fontSize: "var(--ah-font-size-md)", color: "var(--ah-success-hover)", marginBottom: "var(--ah-space-1)" }}>
-        {card.files.length} files changed
-        <span style={{ color: "var(--ah-success)", marginLeft: "var(--ah-space-2)" }}>+{totalAdditions}</span>
-        <span style={{ color: "var(--ah-danger)", marginLeft: "var(--ah-space-1)" }}>-{totalDeletions}</span>
-      </div>
-
-      {expanded && (
-        <div style={{ marginTop: "var(--ah-space-2)", marginBottom: "var(--ah-space-2)" }}>
-          {card.files.map((file) => (
-            <div key={file.path} style={{ fontSize: "var(--ah-font-size-sm)", color: "var(--ah-text-secondary)", padding: "var(--ah-space-1) 0", borderBottom: "1px solid var(--ah-border)" }}>
-              <span
-                style={{
-                  fontWeight: 600,
-                  color: file.status === "added" ? "var(--ah-success)" : file.status === "deleted" ? "var(--ah-danger)" : "var(--ah-accent)"
-                }}
-              >
-                {file.status}
-              </span>{" "}
-              {file.path}
-              <span style={{ color: "var(--ah-success)", marginLeft: "var(--ah-space-2)" }}>+{file.additions}</span>
-              <span style={{ color: "var(--ah-danger)", marginLeft: "var(--ah-space-1)" }}>-{file.deletions}</span>
-            </div>
-          ))}
+    <Card variant="default">
+      <Card.Header>
+        <div className="flex items-center gap-2">
+          <Card.Title>Diff · {card.files.length} file{card.files.length === 1 ? "" : "s"}</Card.Title>
+          <Chip size="sm" variant="soft" color="default">{String(card.applyStatus)}</Chip>
         </div>
-      )}
-
-      <div style={{ display: "flex", gap: "var(--ah-space-2)", marginTop: "var(--ah-space-2)" }}>
-        <button
-          onClick={() => setExpanded((v) => !v)}
-          style={{
-            padding: "var(--ah-space-2) var(--ah-space-3)",
-            borderRadius: "var(--ah-radius-md)",
-            border: "1px solid var(--ah-border-strong)",
-            background: "var(--ah-bg-primary)",
-            cursor: "pointer",
-            fontSize: "var(--ah-font-size-sm)",
-            color: "var(--ah-text-secondary)"
-          }}
-          aria-label={expanded ? "Hide diff details" : "View diff details"}
-        >
-          {expanded ? "Hide" : "View"}
-        </button>
-        {status === "draft" || status === "reviewing" || status === "accepted" ? (
-          <>
-            <button
-              onClick={handleApply}
-              style={{
-                padding: "var(--ah-space-2) var(--ah-space-3)",
-                borderRadius: "var(--ah-radius-md)",
-                border: "none",
-                background: "var(--ah-success)",
-                color: "var(--ah-text-inverse)",
-                cursor: "pointer",
-                fontSize: "var(--ah-font-size-sm)",
-                fontWeight: 600
-              }}
-              aria-label="Apply diff"
-            >
-              Apply
-            </button>
-            <button
-              onClick={handleReject}
-              style={{
-                padding: "var(--ah-space-2) var(--ah-space-3)",
-                borderRadius: "var(--ah-radius-md)",
-                border: "none",
-                background: "var(--ah-danger)",
-                color: "var(--ah-text-inverse)",
-                cursor: "pointer",
-                fontSize: "var(--ah-font-size-sm)",
-                fontWeight: 600
-              }}
-              aria-label="Reject diff"
-            >
-              Reject
-            </button>
-          </>
-        ) : (
-          <span style={{ fontSize: "var(--ah-font-size-sm)", fontWeight: 600, color: status === "applied" ? "var(--ah-success)" : "var(--ah-danger)" }}>
-            {status === "applied" ? "Applied" : status === "rejected" ? "Rejected" : status}
-          </span>
-        )}
-      </div>
-    </div>
+        <Card.Description>
+          <span className="text-success">+{totalAdditions}</span>{" "}
+          <span className="text-danger">-{totalDeletions}</span>
+        </Card.Description>
+      </Card.Header>
+      <Card.Content>
+        <DisclosureGroup>
+          <Disclosure>
+            <Disclosure.Trigger>
+              <span className="text-sm font-medium">Files</span>
+            </Disclosure.Trigger>
+            <Disclosure.Body>
+              <ul className="flex flex-col gap-1 py-1 text-sm">
+                {card.files.map((file) => (
+                  <li key={file.path} className="flex items-center gap-2">
+                    <Chip size="sm" variant="soft" color={
+                      file.status === "added" ? "success" :
+                      file.status === "deleted" ? "danger" : "warning"
+                    }>{file.status}</Chip>
+                    <span className="ah-mono truncate flex-1">{file.path}</span>
+                    <span className="text-xs text-muted">+{file.additions} -{file.deletions}</span>
+                  </li>
+                ))}
+              </ul>
+            </Disclosure.Body>
+          </Disclosure>
+        </DisclosureGroup>
+        {error ? <p className="mt-2 text-xs text-danger">{error}</p> : null}
+      </Card.Content>
+      {!isResolved ? (
+        <Card.Footer className="gap-2">
+          <Button variant="primary" isPending={pending === "apply"} onPress={() => act("apply")}>Apply</Button>
+          <Button variant="danger" isPending={pending === "reject"} onPress={() => act("reject")}>Reject</Button>
+        </Card.Footer>
+      ) : null}
+    </Card>
   );
 }

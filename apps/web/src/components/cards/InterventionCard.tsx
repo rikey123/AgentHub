@@ -1,146 +1,75 @@
 import { useState } from "react";
-import type { Card } from "@agenthub/protocol/domains";
+import { Button, Card, Chip, TextArea } from "@heroui/react";
+import type { Card as ProtocolCard } from "@agenthub/protocol/domains";
+import { interventionPriorityColor } from "../../lib/status.ts";
 
-type InterventionCardProps = {
-  readonly card: Extract<Card, { type: "intervention" }>;
-};
+type InterventionCardData = Extract<ProtocolCard, { type: "intervention" }>;
 
-export function InterventionCard({ card }: InterventionCardProps) {
-  const [effectiveText, setEffectiveText] = useState(card.preview ?? "");
-  const [status, setStatus] = useState(card.status);
+interface InterventionCardProps {
+  card: InterventionCardData;
+  csrfFetch: typeof fetch;
+}
 
-  const handleAction = async (action: "approve" | "later" | "ignore" | "reject") => {
-    setStatus(action === "approve" ? "approved" : action === "later" ? "snoozed" : action === "ignore" ? "ignored" : "rejected");
+export function InterventionCard({ card, csrfFetch }: InterventionCardProps) {
+  const [effective, setEffective] = useState<string>(card.preview ?? "");
+  const [pending, setPending] = useState<string | undefined>(undefined);
+  const [error, setError] = useState<string | undefined>(undefined);
+
+  const resolved = ["approved", "ignored", "rejected", "snoozed", "injected", "resolved", "closed"].includes(String(card.status));
+
+  const act = async (action: "approve" | "ignore" | "reject" | "later") => {
+    setPending(action);
+    setError(undefined);
     try {
-      const endpoint = action === "approve" ? "approve" : action === "later" ? "later" : action === "ignore" ? "ignore" : "reject";
-      await fetch(`/interventions/${encodeURIComponent(card.interventionId)}/${endpoint}`, {
+      const body: Record<string, unknown> = {};
+      if (action === "approve") body.effectiveText = effective;
+      if (action === "later") body.snoozeSeconds = 5 * 60;
+      const res = await csrfFetch(`/interventions/${encodeURIComponent(card.interventionId)}/${action}`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(action === "approve" ? { effectiveText } : {})
+        body: JSON.stringify(body)
       });
-    } catch (error) {
-      // eslint-disable-next-line no-console
-      console.error("intervention action failed", error);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPending(undefined);
     }
   };
 
-  const isResolved = status !== "pending_user_decision";
-  const priorityColor = card.priority === "high" ? "var(--ah-danger)" : card.priority === "medium" ? "var(--ah-warning)" : "var(--ah-text-muted)";
-
   return (
-    <div
-      style={{
-        marginTop: "var(--ah-space-2)",
-        padding: "var(--ah-space-3) var(--ah-space-4)",
-        borderRadius: "var(--ah-radius-lg)",
-        background: "var(--ah-accent-light)",
-        border: "1px solid var(--ah-accent)"
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: "var(--ah-space-2)", marginBottom: "var(--ah-space-2)" }}>
-        <span style={{ fontSize: "var(--ah-font-size-xs)", fontWeight: 600, color: "var(--ah-accent-text)" }}>Intervention</span>
-        <span style={{ fontSize: "var(--ah-font-size-xs)", fontWeight: 600, color: "var(--ah-text-inverse)", background: priorityColor, padding: "2px var(--ah-space-2)", borderRadius: "var(--ah-radius-full)" }}>
-          {card.priority}
-        </span>
-      </div>
-      <div style={{ fontSize: "var(--ah-font-size-md)", color: "var(--ah-accent-text)", marginBottom: "var(--ah-space-1)" }}>
-        <strong>Agent:</strong> {card.agentId}
-      </div>
-      <div style={{ fontSize: "var(--ah-font-size-md)", color: "var(--ah-accent-text)", marginBottom: "var(--ah-space-1)" }}>{card.reason}</div>
-      {card.preview && (
-        <div style={{ fontSize: "var(--ah-font-size-sm)", color: "var(--ah-accent)", marginBottom: "var(--ah-space-2)", fontStyle: "italic" }}>{card.preview}</div>
-      )}
-
-      {!isResolved && (
-        <>
-          <textarea
-            value={effectiveText}
-            onChange={(e) => setEffectiveText(e.target.value)}
-            placeholder="Edit effective text..."
-            rows={2}
-            style={{
-              width: "100%",
-              padding: "var(--ah-space-2)",
-              borderRadius: "var(--ah-radius-md)",
-              border: "1px solid var(--ah-accent)",
-              fontSize: "var(--ah-font-size-sm)",
-              marginBottom: "var(--ah-space-2)",
-              resize: "vertical",
-              background: "var(--ah-bg-primary)",
-              color: "var(--ah-text-primary)"
-            }}
-            aria-label="Edit effective text"
+    <Card variant="default" className="border border-accent/30">
+      <Card.Header>
+        <div className="flex items-center gap-2">
+          <Card.Title>Intervention</Card.Title>
+          <Chip size="sm" variant="soft" color={interventionPriorityColor(String(card.priority))}>
+            {String(card.priority)}
+          </Chip>
+          <Chip size="sm" variant="soft" color="default">{String(card.status)}</Chip>
+        </div>
+        <Card.Description>{card.reason}</Card.Description>
+      </Card.Header>
+      <Card.Content>
+        {!resolved ? (
+          <TextArea
+            value={effective}
+            onChange={(e) => setEffective(e.currentTarget.value)}
+            aria-label="Effective text"
+            placeholder="Optional override text"
+            className="min-h-20"
           />
-          <div style={{ display: "flex", gap: "var(--ah-space-1)", flexWrap: "wrap" }}>
-            <button
-              onClick={() => handleAction("approve")}
-              style={{
-                padding: "var(--ah-space-2) var(--ah-space-3)",
-                borderRadius: "var(--ah-radius-md)",
-                border: "none",
-                background: "var(--ah-success)",
-                color: "var(--ah-text-inverse)",
-                cursor: "pointer",
-                fontSize: "var(--ah-font-size-sm)",
-                fontWeight: 600
-              }}
-              aria-label="Approve intervention"
-            >
-              Approve
-            </button>
-            <button
-              onClick={() => handleAction("later")}
-              style={{
-                padding: "var(--ah-space-2) var(--ah-space-3)",
-                borderRadius: "var(--ah-radius-md)",
-                border: "1px solid var(--ah-border-strong)",
-                background: "var(--ah-bg-primary)",
-                cursor: "pointer",
-                fontSize: "var(--ah-font-size-sm)",
-                color: "var(--ah-text-secondary)"
-              }}
-              aria-label="Snooze intervention"
-            >
-              Later
-            </button>
-            <button
-              onClick={() => handleAction("ignore")}
-              style={{
-                padding: "var(--ah-space-2) var(--ah-space-3)",
-                borderRadius: "var(--ah-radius-md)",
-                border: "1px solid var(--ah-border-strong)",
-                background: "var(--ah-bg-primary)",
-                cursor: "pointer",
-                fontSize: "var(--ah-font-size-sm)",
-                color: "var(--ah-text-secondary)"
-              }}
-              aria-label="Ignore intervention"
-            >
-              Ignore
-            </button>
-            <button
-              onClick={() => handleAction("reject")}
-              style={{
-                padding: "var(--ah-space-2) var(--ah-space-3)",
-                borderRadius: "var(--ah-radius-md)",
-                border: "none",
-                background: "var(--ah-danger)",
-                color: "var(--ah-text-inverse)",
-                cursor: "pointer",
-                fontSize: "var(--ah-font-size-sm)",
-                fontWeight: 600
-              }}
-              aria-label="Reject intervention"
-            >
-              Reject
-            </button>
-          </div>
-        </>
-      )}
-
-      {isResolved && (
-        <div style={{ fontSize: "var(--ah-font-size-sm)", fontWeight: 600, color: "var(--ah-text-muted)", marginTop: "var(--ah-space-1)" }}>Status: {status}</div>
-      )}
-    </div>
+        ) : (
+          card.preview ? <p className="text-sm text-muted whitespace-pre-wrap">{card.preview}</p> : null
+        )}
+        {error ? <p className="mt-2 text-xs text-danger">{error}</p> : null}
+      </Card.Content>
+      {!resolved ? (
+        <Card.Footer className="gap-2 flex-wrap">
+          <Button variant="primary" isPending={pending === "approve"} onPress={() => act("approve")}>Approve</Button>
+          <Button variant="secondary" isPending={pending === "later"} onPress={() => act("later")}>Later</Button>
+          <Button variant="tertiary" isPending={pending === "ignore"} onPress={() => act("ignore")}>Ignore</Button>
+          <Button variant="danger" isPending={pending === "reject"} onPress={() => act("reject")}>Reject</Button>
+        </Card.Footer>
+      ) : null}
+    </Card>
   );
 }

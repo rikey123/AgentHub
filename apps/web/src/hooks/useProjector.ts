@@ -220,8 +220,12 @@ class Projector {
       }
       case "message.created": {
         if (payload && typeof payload.messageId === "string") {
+          const messageId = payload.messageId;
+          if (room.messages.some((m) => m.id === messageId)) {
+            break; // dedupe — projector replays may re-emit
+          }
           const message: MessageViewModel = {
-            id: payload.messageId,
+            id: messageId,
             roomId,
             senderType: event.agentId ? "agent" : "user",
             senderId: event.agentId ?? (typeof payload.senderId === "string" ? payload.senderId : "user"),

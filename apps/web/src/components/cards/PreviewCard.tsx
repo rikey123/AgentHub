@@ -1,73 +1,38 @@
 import { useState } from "react";
-import type { Card } from "@agenthub/protocol/domains";
+import { Button, Card, Chip } from "@heroui/react";
+import type { Card as ProtocolCard } from "@agenthub/protocol/domains";
 
-type PreviewCardProps = {
-  readonly card: Extract<Card, { type: "preview" }>;
-};
+type PreviewCardData = Extract<ProtocolCard, { type: "preview" }>;
 
-export function PreviewCard({ card }: PreviewCardProps) {
-  const [fullscreen, setFullscreen] = useState(false);
-
+export function PreviewCard({ card }: { card: PreviewCardData }) {
+  const [open, setOpen] = useState(false);
   return (
-    <div
-      style={{
-        marginTop: "var(--ah-space-2)",
-        padding: "var(--ah-space-3) var(--ah-space-4)",
-        borderRadius: "var(--ah-radius-lg)",
-        background: "var(--ah-accent-light)",
-        border: "1px solid var(--ah-accent)"
-      }}
-    >
-      <div style={{ fontSize: "var(--ah-font-size-xs)", fontWeight: 600, color: "var(--ah-accent-text)", marginBottom: "var(--ah-space-2)" }}>Preview</div>
-      <div style={{ fontSize: "var(--ah-font-size-md)", color: "var(--ah-accent-text)", marginBottom: "var(--ah-space-2)" }}>{card.kind}</div>
-
-      {!fullscreen && (
-        <div style={{ display: "flex", gap: "var(--ah-space-2)" }}>
-          <button
-            onClick={() => setFullscreen(true)}
-            style={{
-              padding: "var(--ah-space-2) var(--ah-space-3)",
-              borderRadius: "var(--ah-radius-md)",
-              border: "1px solid var(--ah-border-strong)",
-              background: "var(--ah-bg-primary)",
-              cursor: "pointer",
-              fontSize: "var(--ah-font-size-sm)",
-              color: "var(--ah-text-secondary)"
-            }}
-            aria-label="Open preview"
-          >
-            Open Preview
-          </button>
+    <Card variant="default">
+      <Card.Header>
+        <div className="flex items-center gap-2">
+          <Card.Title className="flex-1">Preview</Card.Title>
+          <Chip size="sm" variant="soft" color="default">{card.kind}</Chip>
         </div>
-      )}
-
-      {fullscreen && (
-        <div style={{ marginTop: "var(--ah-space-2)" }}>
+        <Card.Description className="ah-mono truncate">{card.url}</Card.Description>
+      </Card.Header>
+      <Card.Content>
+        {open ? (
           <iframe
+            title="Artifact preview"
             src={card.url}
             sandbox="allow-scripts"
-            style={{ width: "100%", height: 300, border: "1px solid var(--ah-accent)", borderRadius: "var(--ah-radius-md)" }}
-            title="Preview"
-            loading="lazy"
+            className="h-72 w-full rounded-lg border border-border"
           />
-          <button
-            onClick={() => setFullscreen(false)}
-            style={{
-              marginTop: "var(--ah-space-2)",
-              padding: "var(--ah-space-2) var(--ah-space-3)",
-              borderRadius: "var(--ah-radius-md)",
-              border: "1px solid var(--ah-border-strong)",
-              background: "var(--ah-bg-primary)",
-              cursor: "pointer",
-              fontSize: "var(--ah-font-size-sm)",
-              color: "var(--ah-text-secondary)"
-            }}
-            aria-label="Close preview"
-          >
-            Close Preview
-          </button>
-        </div>
-      )}
-    </div>
+        ) : null}
+      </Card.Content>
+      <Card.Footer className="gap-2">
+        <Button variant="secondary" onPress={() => setOpen((v) => !v)}>
+          {open ? "Hide preview" : "Show preview"}
+        </Button>
+        <Button variant="ghost" onPress={() => window.open(card.url, "_blank", "noopener,noreferrer")}>
+          Open
+        </Button>
+      </Card.Footer>
+    </Card>
   );
 }

@@ -1,50 +1,21 @@
-import type { Card } from "@agenthub/protocol/domains";
+import { Card, Chip } from "@heroui/react";
+import type { Card as ProtocolCard } from "@agenthub/protocol/domains";
+import { taskStatusColor } from "../../lib/status.ts";
 
-type TaskCardProps = {
-  readonly card: Extract<Card, { type: "task" }>;
-};
+type TaskCardData = Extract<ProtocolCard, { type: "task" }>;
 
-export function TaskCard({ card }: TaskCardProps) {
-  const statusColors: Record<string, string> = {
-    todo: "var(--ah-text-muted)",
-    queued: "var(--ah-accent)",
-    running: "var(--ah-accent)",
-    waiting_approval: "var(--ah-warning)",
-    blocked: "var(--ah-danger)",
-    review: "#8b5cf6",
-    done: "var(--ah-success)",
-    failed: "var(--ah-danger)",
-    cancelled: "var(--ah-text-muted)"
-  };
-
+export function TaskCard({ card }: { card: TaskCardData }) {
   return (
-    <div
-      style={{
-        marginTop: "var(--ah-space-2)",
-        padding: "var(--ah-space-3) var(--ah-space-4)",
-        borderRadius: "var(--ah-radius-lg)",
-        background: "var(--ah-bg-secondary)",
-        border: "1px solid var(--ah-border)"
-      }}
-    >
-      <div style={{ fontSize: "var(--ah-font-size-xs)", fontWeight: 600, color: "var(--ah-text-muted)", marginBottom: "var(--ah-space-2)" }}>Task</div>
-      <div style={{ fontSize: "var(--ah-font-size-md)", fontWeight: 600, color: "var(--ah-text-primary)", marginBottom: "var(--ah-space-1)" }}>{card.title}</div>
-      <div style={{ display: "flex", alignItems: "center", gap: "var(--ah-space-2)", marginTop: "var(--ah-space-1)" }}>
-        <span
-          style={{
-            fontSize: "var(--ah-font-size-xs)",
-            fontWeight: 600,
-            color: "var(--ah-text-inverse)",
-            background: statusColors[card.status] ?? "var(--ah-text-muted)",
-            padding: "2px var(--ah-space-2)",
-            borderRadius: "var(--ah-radius-full)"
-          }}
-          aria-label={`Status: ${card.status}`}
-        >
-          {card.status}
-        </span>
-        {card.assigneeAgentId && <span style={{ fontSize: "var(--ah-font-size-xs)", color: "var(--ah-text-muted)" }}>{card.assigneeAgentId}</span>}
-      </div>
-    </div>
+    <Card variant="default">
+      <Card.Header>
+        <div className="flex items-center gap-2">
+          <Card.Title className="flex-1 truncate">{card.title}</Card.Title>
+          <Chip size="sm" variant="soft" color={taskStatusColor(String(card.status))}>{String(card.status)}</Chip>
+        </div>
+        {card.assigneeAgentId ? (
+          <Card.Description>Assigned to {card.assigneeAgentId}</Card.Description>
+        ) : null}
+      </Card.Header>
+    </Card>
   );
 }

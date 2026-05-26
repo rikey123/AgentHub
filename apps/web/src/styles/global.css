@@ -1,0 +1,76 @@
+/* Tailwind CSS v4 - must be imported first */
+@import "tailwindcss";
+
+/* HeroUI v3 styles + theme tokens */
+@import "@heroui/styles";
+
+/* Density variant: compact tightens the workbench */
+[data-density="compact"] {
+  --spacing: 0.2rem;
+  --radius: 0.4rem;
+}
+
+/* Visually-hidden utility */
+.ah-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Base resets */
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Custom scrollbars (HeroUI provides --scrollbar) */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--scrollbar);
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Mono font utility used by code/terminal blocks */
+.ah-mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+}
+
+/* Streaming text caret (used while message status === "streaming") */
+.ah-streaming-caret::after {
+  content: "▍";
+  display: inline-block;
+  margin-left: 2px;
+  color: var(--accent);
+  animation: ah-blink 1s steps(2) infinite;
+}
+
+@keyframes ah-blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ah-streaming-caret::after { animation: none; }
+}

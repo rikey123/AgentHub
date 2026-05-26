@@ -1,98 +1,55 @@
 import { useState } from "react";
-import type { Card } from "@agenthub/protocol/domains";
+import { Button, Card, Chip } from "@heroui/react";
+import type { Card as ProtocolCard } from "@agenthub/protocol/domains";
+import { contextStatusColor } from "../../lib/status.ts";
 
-type ContextCardProps = {
-  readonly card: Extract<Card, { type: "context" }>;
-};
+type ContextCardData = Extract<ProtocolCard, { type: "context" }>;
 
-export function ContextCard({ card }: ContextCardProps) {
-  const [status, setStatus] = useState(card.status);
+interface ContextCardProps {
+  card: ContextCardData;
+  csrfFetch: typeof fetch;
+}
 
-  const handleConfirm = async () => {
+export function ContextCard({ card, csrfFetch }: ContextCardProps) {
+  const [pending, setPending] = useState<"confirm" | "discard" | undefined>(undefined);
+  const [error, setError] = useState<string | undefined>(undefined);
+
+  const isDraft = card.status === "draft";
+
+  const act = async (action: "confirm" | "deprecate") => {
+    setPending(action === "confirm" ? "confirm" : "discard");
+    setError(undefined);
     try {
-      await fetch(`/context/${encodeURIComponent(card.contextId)}/confirm`, {
+      const res = await csrfFetch(`/context/${encodeURIComponent(card.contextId)}/${action}`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({})
+        body: JSON.stringify(action === "deprecate" ? { baseVersion: 1, reason: "discarded" } : {})
       });
-      setStatus("confirmed");
-    } catch (error) {
-      // eslint-disable-next-line no-console
-      console.error("confirm context failed", error);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPending(undefined);
     }
   };
-
-  const handleDiscard = async () => {
-    try {
-      await fetch(`/context/${encodeURIComponent(card.contextId)}/deprecate`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ baseVersion: 1, reason: "discarded from card" })
-      });
-      setStatus("deprecated");
-    } catch (error) {
-      // eslint-disable-next-line no-console
-      console.error("discard context failed", error);
-    }
-  };
-
-  const isDraft = status === "draft";
 
   return (
-    <div
-      style={{
-        marginTop: "var(--ah-space-2)",
-        padding: "var(--ah-space-3) var(--ah-space-4)",
-        borderRadius: "var(--ah-radius-lg)",
-        background: "var(--ah-accent-light)",
-        border: "1px solid var(--ah-accent)"
-      }}
-    >
-      <div style={{ fontSize: "var(--ah-font-size-xs)", fontWeight: 600, color: "var(--ah-accent-text)", marginBottom: "var(--ah-space-2)" }}>Context</div>
-      <div style={{ fontSize: "var(--ah-font-size-md)", fontWeight: 600, color: "var(--ah-accent-text)", marginBottom: "var(--ah-space-1)" }}>{card.title}</div>
-      <div style={{ fontSize: "var(--ah-font-size-sm)", color: "var(--ah-accent)", marginBottom: "var(--ah-space-2)" }}>{card.summary}</div>
-
-      {isDraft && (
-        <div style={{ display: "flex", gap: "var(--ah-space-2)" }}>
-          <button
-            onClick={handleConfirm}
-            style={{
-              padding: "var(--ah-space-2) var(--ah-space-3)",
-              borderRadius: "var(--ah-radius-md)",
-              border: "none",
-              background: "var(--ah-accent)",
-              color: "var(--ah-text-inverse)",
-              cursor: "pointer",
-              fontSize: "var(--ah-font-size-sm)",
-              fontWeight: 600
-            }}
-            aria-label="Confirm context"
-          >
-            Confirm
-          </button>
-          <button
-            onClick={handleDiscard}
-            style={{
-              padding: "var(--ah-space-2) var(--ah-space-3)",
-              borderRadius: "var(--ah-radius-md)",
-              border: "1px solid var(--ah-border-strong)",
-              background: "var(--ah-bg-primary)",
-              cursor: "pointer",
-              fontSize: "var(--ah-font-size-sm)",
-              color: "var(--ah-text-secondary)"
-            }}
-            aria-label="Discard context"
-          >
-            Discard
-          </button>
+    <Card variant="default">
+      <Card.Header>
+        <div className="flex items-center gap-2">
+          <Card.Title className="flex-1 truncate">{card.title}</Card.Title>
+          <Chip size="sm" variant="soft" color={contextStatusColor(String(card.status))}>
+            {String(card.status)}
+          </Chip>
         </div>
-      )}
-
-      {!isDraft && (
-        <div style={{ fontSize: "var(--ah-font-size-sm)", fontWeight: 600, color: status === "confirmed" ? "var(--ah-success)" : "var(--ah-text-muted)" }}>
-          {status === "confirmed" ? "Confirmed" : status === "deprecated" ? "Discarded" : status}
-        </div>
-      )}
-    </div>
+        <Card.Description>{card.summary}</Card.Description>
+      </Card.Header>
+      {error ? <Card.Content><p className="text-xs text-danger">{error}</p></Card.Content> : null}
+      {isDraft ? (
+        <Card.Footer className="gap-2">
+          <Button variant="primary" isPending={pending === "confirm"} onPress={() => act("confirm")}>Confirm</Button>
+          <Button variant="tertiary" isPending={pending === "discard"} onPress={() => act("deprecate")}>Discard</Button>
+        </Card.Footer>
+      ) : null}
+    </Card>
   );
 }

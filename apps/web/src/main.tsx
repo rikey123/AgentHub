@@ -1,18 +1,13 @@
-import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
-import { App } from "./App.tsx";
+import React from "react";
+import ReactDOM from "react-dom/client";
+import App from "./App.tsx";
 import { initThemeOnMount } from "./hooks/useTheme.ts";
-import "./styles/tokens.css";
-import "./styles/visual-system.css";
-import "./styles/a11y.css";
+import "./styles/global.css";
 
 initThemeOnMount();
 
-const root = document.getElementById("root");
-if (!root) throw new Error("root element not found");
-
-createRoot(root).render(
-  <StrictMode>
+ReactDOM.createRoot(document.getElementById("root")!).render(
+  <React.StrictMode>
     <App />
-  </StrictMode>
+  </React.StrictMode>
 );
