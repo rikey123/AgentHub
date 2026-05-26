@@ -41,36 +41,59 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
 
   const roomId = randomUUID();
   const now = options.now?.() ?? Date.now();
-  const lookupAdapter = (agentId: string): string => {
+  const lookupAgent = (agentId: string): { adapterId: string; name: string } => {
     const row = options.database.sqlite
-      .prepare("SELECT adapter_id FROM agent_profiles WHERE id = ?")
-      .get(agentId) as { adapter_id?: string } | undefined;
-    return row?.adapter_id ?? "mock";
+      .prepare("SELECT adapter_id, name FROM agent_profiles WHERE id = ?")
+      .get(agentId) as { adapter_id?: string; name?: string } | undefined;
+    return { adapterId: row?.adapter_id ?? "mock", name: row?.name ?? agentId };
   };
   options.database.sqlite.transaction(() => {
     ensureWorkspace(options.database, workspaceId, now);
     options.database.sqlite
       .prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES (?, ?, ?, ?, 'conversation', ?, NULL, ?, ?)")
       .run(roomId, workspaceId, title, mode, primaryAgentId, now, now);
-    const primaryAdapterId = lookupAdapter(primaryAgentId);
+    const primary = lookupAgent(primaryAgentId);
     options.database.sqlite
       .prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, default_presence, joined_at) VALUES (?, ?, 'agent', 'primary', ?, NULL, 'active', ?)")
-      .run(roomId, primaryAgentId, primaryAdapterId, now);
+      .run(roomId, primaryAgentId, primary.adapterId, now);
     options.database.sqlite
       .prepare("INSERT OR REPLACE INTO agent_presence (room_id, agent_id, state, reason, status_line, updated_at) VALUES (?, ?, 'active', NULL, NULL, ?)")
       .run(roomId, primaryAgentId, now);
     for (const participant of participants) {
       if (isObject(participant) && participant.type === "agent" && typeof participant.agentId === "string" && participant.agentId !== primaryAgentId) {
-        const participantAdapterId = lookupAdapter(participant.agentId);
+        const info = lookupAgent(participant.agentId);
+        const role = typeof participant.role === "string" ? participant.role : "observer";
+        const presence = participant.defaultPresence === "active" ? "active" : "observing";
         options.database.sqlite
           .prepare("INSERT OR IGNORE INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, default_presence, joined_at) VALUES (?, ?, 'agent', ?, ?, NULL, ?, ?)")
-          .run(roomId, participant.agentId, typeof participant.role === "string" ? participant.role : "observer", participantAdapterId, participant.defaultPresence === "active" ? "active" : "observing", now);
+          .run(roomId, participant.agentId, role, info.adapterId, presence, now);
         options.database.sqlite
           .prepare("INSERT OR REPLACE INTO agent_presence (room_id, agent_id, state, reason, status_line, updated_at) VALUES (?, ?, ?, NULL, NULL, ?)")
-          .run(roomId, participant.agentId, participant.defaultPresence === "active" ? "active" : "observing", now);
+          .run(roomId, participant.agentId, presence, now);
       }
     }
     options.eventBus.publish(roomEvent("room.created", workspaceId, roomId, { roomId, title, mode, primaryAgentId }, now));
+    // Emit agent.joined + agent.state.changed for each participant so SSE consumers (and SSE
+    // replay after a refresh) can rebuild the member roster without needing a separate API.
+    // Without these events, refreshing the page lost all members until the daemon happened to
+    // re-emit presence elsewhere.
+    const publishParticipantEvents = (agentId: string, agentName: string, adapterId: string, role: string, presence: string): void => {
+      options.eventBus.publish({ id: randomUUID(), type: "agent.joined", schemaVersion: 1, workspaceId, roomId, agentId, payload: { agentId, agentName, role, adapterId }, createdAt: now });
+      options.eventBus.publish({ id: randomUUID(), type: "agent.state.changed", schemaVersion: 1, workspaceId, roomId, agentId, payload: { agentId, state: presence }, createdAt: now });
+    };
+    publishParticipantEvents(primaryAgentId, primary.name, primary.adapterId, "primary", "active");
+    for (const participant of participants) {
+      if (isObject(participant) && participant.type === "agent" && typeof participant.agentId === "string" && participant.agentId !== primaryAgentId) {
+        const info = lookupAgent(participant.agentId);
+        publishParticipantEvents(
+          participant.agentId,
+          info.name,
+          info.adapterId,
+          typeof participant.role === "string" ? participant.role : "observer",
+          participant.defaultPresence === "active" ? "active" : "observing"
+        );
+      }
+    }
   })();
 
   const emittedEvents = latestEvents(options.database, roomId);

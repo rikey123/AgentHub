@@ -13,7 +13,7 @@ import { RunDetailDrawer } from "./components/run/RunDetailDrawer.tsx";
 import { CommandPalette, type PaletteCommand } from "./components/CommandPalette.tsx";
 import { KeymapModal } from "./components/KeymapModal.tsx";
 import { NewRoomDialog, type CreateRoomInput } from "./components/NewRoomDialog.tsx";
-import { useProjector, getProjector } from "./hooks/useProjector.ts";
+import { useProjector } from "./hooks/useProjector.ts";
 import { useSdk, useCsrfFetch } from "./hooks/useSdk.ts";
 import { useTheme } from "./hooks/useTheme.ts";
 
@@ -50,50 +50,9 @@ export default function App() {
       }) as { data?: { roomId?: string }; id?: string; roomId?: string };
       const roomId = res?.data?.roomId ?? res?.roomId ?? res?.id;
       if (typeof roomId === "string") {
-        // Daemon doesn't emit agent.joined per participant — synthesize them locally so the
-        // members panel and message attribution show the chosen agents immediately.
-        const agentMap = await fetch("/agents", { credentials: "same-origin" })
-          .then((r) => r.ok ? r.json() : { agents: [] })
-          .catch(() => ({ agents: [] })) as { agents?: Array<{ id: string; name: string; adapter_id?: string; default_presence?: string }> };
-        const lookup = new Map((agentMap.agents ?? []).map((a) => [a.id, a]));
-        const projector = getProjector();
-        const now = Date.now();
-        const seed = (agentId: string, role: string, presence: string) => {
-          const a = lookup.get(agentId);
-          projector.apply({
-            id: `local-${roomId}-${agentId}`,
-            type: "agent.joined",
-            schemaVersion: 1,
-            durability: "durable",
-            visibility: "both",
-            workspaceId: "default-workspace",
-            roomId,
-            agentId,
-            payload: {
-              agentId,
-              agentName: a?.name ?? agentId,
-              role,
-              adapterId: a?.adapter_id ?? "mock"
-            },
-            createdAt: now
-          } as never);
-          projector.apply({
-            id: `local-state-${roomId}-${agentId}`,
-            type: "agent.state.changed",
-            schemaVersion: 1,
-            durability: "durable",
-            visibility: "both",
-            workspaceId: "default-workspace",
-            roomId,
-            agentId,
-            payload: { agentId, state: presence },
-            createdAt: now
-          } as never);
-        };
-        seed(input.primaryAgentId, "primary", "active");
-        for (const p of input.participants) {
-          seed(p.agentId, p.role, p.defaultPresence);
-        }
+        // The daemon emits real `agent.joined` + `agent.state.changed` events for every
+        // participant inside the same transaction as room.created, so SSE replay gives us the
+        // member roster on first render and any future refresh — no local synthesis needed.
         setActiveRoomId(roomId);
       }
     } catch (err) {
