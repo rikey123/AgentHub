@@ -41,22 +41,30 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
 
   const roomId = randomUUID();
   const now = options.now?.() ?? Date.now();
+  const lookupAdapter = (agentId: string): string => {
+    const row = options.database.sqlite
+      .prepare("SELECT adapter_id FROM agent_profiles WHERE id = ?")
+      .get(agentId) as { adapter_id?: string } | undefined;
+    return row?.adapter_id ?? "mock";
+  };
   options.database.sqlite.transaction(() => {
     ensureWorkspace(options.database, workspaceId, now);
     options.database.sqlite
       .prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES (?, ?, ?, ?, 'conversation', ?, NULL, ?, ?)")
       .run(roomId, workspaceId, title, mode, primaryAgentId, now, now);
+    const primaryAdapterId = lookupAdapter(primaryAgentId);
     options.database.sqlite
-      .prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, default_presence, joined_at) VALUES (?, ?, 'agent', 'primary', 'mock', NULL, 'active', ?)")
-      .run(roomId, primaryAgentId, now);
+      .prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, default_presence, joined_at) VALUES (?, ?, 'agent', 'primary', ?, NULL, 'active', ?)")
+      .run(roomId, primaryAgentId, primaryAdapterId, now);
     options.database.sqlite
       .prepare("INSERT OR REPLACE INTO agent_presence (room_id, agent_id, state, reason, status_line, updated_at) VALUES (?, ?, 'active', NULL, NULL, ?)")
       .run(roomId, primaryAgentId, now);
     for (const participant of participants) {
       if (isObject(participant) && participant.type === "agent" && typeof participant.agentId === "string" && participant.agentId !== primaryAgentId) {
+        const participantAdapterId = lookupAdapter(participant.agentId);
         options.database.sqlite
-          .prepare("INSERT OR IGNORE INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, default_presence, joined_at) VALUES (?, ?, 'agent', ?, 'mock', NULL, ?, ?)")
-          .run(roomId, participant.agentId, typeof participant.role === "string" ? participant.role : "observer", participant.defaultPresence === "active" ? "active" : "observing", now);
+          .prepare("INSERT OR IGNORE INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, default_presence, joined_at) VALUES (?, ?, 'agent', ?, ?, NULL, ?, ?)")
+          .run(roomId, participant.agentId, typeof participant.role === "string" ? participant.role : "observer", participantAdapterId, participant.defaultPresence === "active" ? "active" : "observing", now);
         options.database.sqlite
           .prepare("INSERT OR REPLACE INTO agent_presence (room_id, agent_id, state, reason, status_line, updated_at) VALUES (?, ?, ?, NULL, NULL, ?)")
           .run(roomId, participant.agentId, participant.defaultPresence === "active" ? "active" : "observing", now);

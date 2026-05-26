@@ -90,25 +90,33 @@ export class AdapterRegistry {
   }
 
   private adapterIdForRun(run: RunRow): RuntimeAdapterId {
-    if (run.adapter_id === "claude-code") return "claude-code";
-    if (run.adapter_id === "opencode" || run.adapter_id === "opencode-default") return "opencode";
-    if (run.adapter_id === "mock") return "mock";
-    return this.adapterIdForAgent(run.agent_id);
+    return this.classify(run.adapter_id, run.agent_id);
   }
 
   private adapterIdForPersistedRun(runId: string): RuntimeAdapterId {
     const row = this.options.database.sqlite.prepare("SELECT adapter_id, agent_id FROM runs WHERE id = ?").get(runId) as { readonly adapter_id: string | null; readonly agent_id: string } | undefined;
     if (row === undefined) return "mock";
-    if (row.adapter_id === "claude-code") return "claude-code";
-    if (row.adapter_id === "opencode" || row.adapter_id === "opencode-default") return "opencode";
-    if (row.adapter_id === "mock") return "mock";
-    return this.adapterIdForAgent(row.agent_id);
+    return this.classify(row.adapter_id, row.agent_id);
   }
 
   private adapterIdForAgent(agentId: string): RuntimeAdapterId {
     const row = this.options.database.sqlite.prepare("SELECT adapter_id FROM agent_profiles WHERE id = ?").get(agentId) as { readonly adapter_id: string | null } | undefined;
-    if (row?.adapter_id === "claude-code") return "claude-code";
-    if (row?.adapter_id === "opencode" || row?.adapter_id === "opencode-default") return "opencode";
+    return this.classify(row?.adapter_id ?? null, agentId);
+  }
+
+  private classify(adapterId: string | null, agentId: string): RuntimeAdapterId {
+    if (adapterId !== null) {
+      if (adapterId === "claude-code" || adapterId.startsWith("claude-code-")) return "claude-code";
+      if (adapterId === "opencode" || adapterId.startsWith("opencode-")) return "opencode";
+      if (adapterId === "mock" || adapterId.startsWith("mock-")) return "mock";
+    }
+    // Fall back to agent_profiles lookup if we were given a run.adapter_id that didn't match.
+    const row = this.options.database.sqlite.prepare("SELECT adapter_id FROM agent_profiles WHERE id = ?").get(agentId) as { readonly adapter_id: string | null } | undefined;
+    const profileId = row?.adapter_id;
+    if (profileId !== null && profileId !== undefined) {
+      if (profileId === "claude-code" || profileId.startsWith("claude-code-")) return "claude-code";
+      if (profileId === "opencode" || profileId.startsWith("opencode-")) return "opencode";
+    }
     return "mock";
   }
 }
