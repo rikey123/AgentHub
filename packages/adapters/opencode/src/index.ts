@@ -46,7 +46,12 @@ export class OpenCodeACPAdapter extends ACPAdapter {
     const logger = options.services !== undefined && options.workspaceId !== undefined ? new AdapterRawLogger(options.services.eventBus, { workspaceId: options.workspaceId, ...(options.now !== undefined ? { now: options.now } : {}) }) : undefined;
     const rawLogger = logger?.write.bind(logger);
     super("opencode", "OpenCode Adapter", opencodeManifest, { ...(options.now !== undefined ? { now: options.now } : {}), ...(rawLogger !== undefined ? { rawSink: rawLogger } : {}) });
-    this.command = options.command ?? process.env.OPENCODE_BIN ?? "opencode";
+    // Resolve the native binary path at construction time so spawnArgs() always uses
+    // the real executable, not the npm .cmd wrapper (which uses stdio:"inherit" and
+    // breaks pipe-based ACP communication on Windows).
+    const rawCommand = options.command ?? process.env.OPENCODE_BIN ?? "opencode";
+    const found = findExecutable(rawCommand);
+    this.command = (found !== undefined ? (resolveNativeBinary(found) ?? found) : rawCommand);
     this.args = options.args ?? ["acp"];
     this.env = options.env;
     this.health = options.services !== undefined ? new AdapterHealthRegistry(options.services.eventBus, { ...(options.now !== undefined ? { now: options.now } : {}) }) : undefined;
@@ -233,8 +238,38 @@ void promptFromRun;
 function detectOpenCode(command: string): DetectedRuntime[] {
   const found = findExecutable(command);
   if (found === undefined) return [];
-  const version = spawnSyncText(found, ["--version"]).trim().split(/\r?\n/u)[0] ?? "";
-  return [{ id: "opencode", name: "opencode", ...(version.length > 0 ? { version } : {}), executablePath: found }];
+  // On Windows, `where opencode` returns the .cmd npm wrapper which uses stdio:"inherit"
+  // and breaks pipe-based ACP communication. Resolve to the actual native binary instead.
+  const resolved = resolveNativeBinary(found) ?? found;
+  const version = spawnSyncText(resolved, ["--version"]).trim().split(/\r?\n/u)[0] ?? "";
+  return [{ id: "opencode", name: "opencode", ...(version.length > 0 ? { version } : {}), executablePath: resolved }];
+}
+
+/**
+ * On Windows, npm-installed CLIs like opencode are .cmd wrappers that spawn the real
+ * binary with stdio:"inherit", breaking pipe-based ACP. Walk up from the .cmd file to
+ * find the actual native binary in node_modules.
+ */
+function resolveNativeBinary(cmdPath: string): string | undefined {
+  if (process.platform !== "win32") return undefined;
+  if (!/\.(cmd|bat)$/iu.test(cmdPath)) return undefined;
+
+  const { existsSync } = require("node:fs") as typeof import("node:fs");
+  const { join, dirname } = require("node:path") as typeof import("node:path");
+
+  // The .cmd lives in e.g. C:\Users\...\npm\opencode.cmd
+  // The package is at C:\Users\...\npm\node_modules\opencode-ai\
+  // The native binary is at node_modules\opencode-ai\node_modules\opencode-windows-x64\bin\opencode.exe
+  const npmDir = dirname(cmdPath);
+  const packageDir = join(npmDir, "node_modules", "opencode-ai", "node_modules");
+  if (!existsSync(packageDir)) return undefined;
+
+  const arch = process.arch === "arm64" ? "arm64" : "x64";
+  const candidates = [
+    join(packageDir, `opencode-windows-${arch}`, "bin", "opencode.exe"),
+    join(packageDir, `opencode-windows-${arch}-baseline`, "bin", "opencode.exe"),
+  ];
+  return candidates.find((p) => existsSync(p));
 }
 
 function findExecutable(command: string): string | undefined {

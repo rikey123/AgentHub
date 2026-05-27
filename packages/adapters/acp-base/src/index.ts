@@ -438,40 +438,11 @@ export abstract class ACPAdapter {
         method: "initialize",
         startedAt: this.now(),
         timeoutMs: 30_000,
-        resolve: (result) => {
-          // If the server reports that authentication is required, call authenticate
-          // with the first available method before proceeding to session/new.
-          // opencode always returns authMethods even when credentials are stored —
-          // calling authenticate triggers it to load them from its credential store.
-          if (isRecord(result)) {
-            const auth = (result as { authMethods?: unknown }).authMethods;
-            if (Array.isArray(auth) && auth.length > 0) {
-              const first = auth[0];
-              const methodId = isRecord(first) && typeof first.id === "string" ? first.id : undefined;
-              if (methodId !== undefined) {
-                const authId = randomUUID();
-                session.pendingRequests.set(authId, {
-                  requestId: authId,
-                  method: "authenticate",
-                  startedAt: this.now(),
-                  timeoutMs: 30_000,
-                  resolve: () => {
-                    // authenticate succeeded — proceed to session/new
-                    this.sendSessionNew(session);
-                  },
-                  reject: (err) => {
-                    const hint = isRecord(first) && typeof first.description === "string" ? first.description :
-                      isRecord(first) && typeof first.name === "string" ? first.name :
-                      "Authenticate the agent CLI before retrying.";
-                    this.failSession(session, err instanceof ACPAdapterError ? err : new ACPAdapterError("auth_required", `Agent requires authentication: ${hint}`));
-                  }
-                });
-                this.writeJson(session, { jsonrpc: "2.0", id: authId, method: "authenticate", params: { methodId } });
-                return;
-              }
-              // No methodId — fall through to session/new and let it fail naturally
-            }
-          }
+        resolve: (_result) => {
+          // authMethods in initialize does NOT require calling authenticate first.
+          // AionUi's confirmed strategy: attempt session/new directly regardless of authMethods.
+          // opencode returns authMethods but doesn't implement authenticate (-32603 "not implemented").
+          // If credentials are stored, session/new succeeds; if not, it fails with a clear error.
           this.sendSessionNew(session);
         },
         reject: (err) => {
