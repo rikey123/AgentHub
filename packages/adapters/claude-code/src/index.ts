@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { ACPAdapter, ACPAdapterError, AdapterHealthRegistry, AdapterRawLogger, classifyClaudeDetection, emitAdapterRegistered, permissionForTool, type AcpAdapterSession, type AcpProviderEvent, type AdapterRuntimeServices, type JsonRpcMessage } from "@agenthub/adapter-acp-base";
 import type { PublishInput } from "@agenthub/bus";
-import { AdapterBridge, buildFirstWakePrompt, type AdapterArtifactFSBoundary, type RoomMcpServer, type RoomMcpStdioConfig, type RunLifecycleService, type RunRow } from "@agenthub/orchestrator";
+import { AdapterBridge, buildRunPrompt, type AdapterArtifactFSBoundary, type RoomMcpServer, type RunLifecycleService, type RunRow } from "@agenthub/orchestrator";
 import type { PermissionEngine } from "@agenthub/permissions";
 import type { AdapterError, AgentAdapterManifest, DetectedRuntime } from "@agenthub/protocol";
 import { Effect } from "effect";
@@ -253,49 +253,16 @@ export class ClaudeCodeACPAdapter extends ACPAdapter {
     eventBus.publish({ id: randomUUID(), type, schemaVersion: 1, workspaceId: run.workspace_id, roomId: run.room_id, ...(run.task_id !== null ? { taskId: run.task_id } : {}), runId, agentId: run.agent_id, payload, createdAt: this.options.now?.() ?? Date.now() } satisfies PublishInput);
   }
 
-  /**
-   * Build the prompt sent to the ACP agent.
-   * On first wake, prepends role prompt + teammates section via buildFirstWakePrompt.
-   * Falls back gracefully when no DB or message is available.
-   */
   private promptFromRun(run: RunRow): string {
     const db = this.options.services?.database;
     if (db === undefined) return `Run ${run.id} for agent ${run.agent_id}`;
-
-    const rolePrompt = db !== undefined ? buildFirstWakePrompt(run.id, run.agent_id, run.room_id, db) : undefined;
-
-    const userMessage = db.sqlite.prepare(
-      `SELECT id FROM messages
-       WHERE room_id = ? AND role = 'user' AND deleted_at IS NULL
-       ORDER BY created_at DESC LIMIT 1`
-    ).get(run.room_id) as { id: string } | undefined;
-    if (userMessage === undefined) return rolePrompt ?? `Run ${run.id} for agent ${run.agent_id}`;
-    const parts = db.sqlite.prepare(
-      "SELECT payload FROM message_parts WHERE message_id = ? AND part_type = 'text' ORDER BY seq ASC"
-    ).all(userMessage.id) as Array<{ payload: string }>;
-    const text = parts
-      .map((row) => {
-        try {
-          const parsed = JSON.parse(row.payload) as { text?: unknown };
-          return typeof parsed.text === "string" ? parsed.text : "";
-        } catch { return ""; }
-      })
-      .filter((t) => t.length > 0)
-      .join("\n");
-    const userText = text.length > 0 ? text : `Run ${run.id} for agent ${run.agent_id}`;
-    return rolePrompt !== undefined ? `${rolePrompt}\n\n---\n\n${userText}` : userText;
+    return buildRunPrompt(run, db, { ...(this.options.now !== undefined ? { now: this.options.now } : {}) });
   }
 }
 
 export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions = {}): ClaudeCodeACPAdapter {
   return new ClaudeCodeACPAdapter(options);
 }
-
-function promptFromRun(run: RunRow): string {
-  return `Run ${run.id} for agent ${run.agent_id}`;
-}
-
-void promptFromRun;
 
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
 function stringField(value: Record<string, unknown>, key: string): string | undefined { const field = value[key]; return typeof field === "string" ? field : undefined; }

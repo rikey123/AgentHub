@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -9,7 +9,7 @@ import { CommandBus, createEventBus } from "@agenthub/bus";
 import { createDatabase } from "@agenthub/db";
 import { RoomMcpServer, RunLifecycleService, TaskService } from "@agenthub/orchestrator";
 import { PermissionEngine, seedBuiltInPermissionProfiles } from "@agenthub/permissions";
-import type { CreateSessionInput } from "@agenthub/protocol";
+import type { AdapterMessage, CreateSessionInput } from "@agenthub/protocol";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
 
@@ -200,7 +200,30 @@ describe("ClaudeCodeACPAdapter", () => {
     expect(database.sqlite.prepare("SELECT type FROM events WHERE type = 'agent.run.failed' AND run_id = 'run'").get()).toMatchObject({ type: "agent.run.failed" });
     database.sqlite.close();
   });
+
+  it("builds managed prompts from the run-bound mailbox instead of the latest room user message", async () => {
+    const fixture = createPromptFixture("claude-code");
+    try {
+      const adapter = new CapturingClaudeCodeACPAdapter({ command: "", services: { database: fixture.database, eventBus: fixture.eventBus }, lifecycle: fixture.lifecycle, workspaceId: "ws_1" });
+
+      await adapter.runManaged(fixture.lifecycle.read("run_mailbox"));
+
+      expect(adapter.capturedPrompt).toContain("mailbox task from teammate");
+      expect(adapter.capturedPrompt).not.toContain("WRONG latest user message");
+    } finally {
+      fixture.close();
+    }
+  });
 });
+
+class CapturingClaudeCodeACPAdapter extends ClaudeCodeACPAdapter {
+  capturedPrompt = "";
+
+  protected override sendPrompt(_sessionId: string, message: AdapterMessage): string {
+    this.capturedPrompt = message.content;
+    return "captured";
+  }
+}
 
 class EarlyFailClaudeCodeACPAdapter extends ClaudeCodeACPAdapter {
   protected override spawnArgs() { return { command: "", args: [] as const }; }
@@ -212,6 +235,36 @@ class EarlyFailClaudeCodeACPAdapter extends ClaudeCodeACPAdapter {
     this.onSessionFailed(debug, new ACPAdapterError("process_exit", "early failure"));
     return session;
   }
+}
+
+function createPromptFixture(adapterId: string): { readonly database: ReturnType<typeof createDatabase>; readonly eventBus: ReturnType<typeof createEventBus>; readonly lifecycle: RunLifecycleService; close(): void } {
+  const dir = mkdtempSync(join(tmpdir(), "agenthub-claude-prompt-"));
+  const database = createDatabase({ path: join(dir, "agenthub.sqlite"), applyMigrations: true });
+  database.sqlite.prepare("INSERT INTO workspaces (id, name, root_path, created_at, updated_at) VALUES ('ws_1', 'Workspace', '.', 1, 1)").run();
+  database.sqlite.prepare("INSERT INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES ('agent_1', 'ws_1', 'Agent One', ?, NULL, '', '{}', NULL, 0, NULL, 1, 1)").run(adapterId);
+  database.sqlite.prepare("INSERT INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES ('agent_2', 'ws_1', 'Teammate', 'mock', NULL, '', '{}', NULL, 0, NULL, 1, 1)").run();
+  database.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES ('room_1', 'ws_1', 'Room', 'assisted', 'conversation', 'agent_1', NULL, 1, 1)").run();
+  database.sqlite.prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, default_presence, joined_at) VALUES ('room_1', 'agent_1', 'agent', 'primary', ?, NULL, 'active', 1)").run(adapterId);
+  database.sqlite.prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, default_presence, joined_at) VALUES ('room_1', 'agent_2', 'agent', 'observer', 'mock', NULL, 'active', 1)").run();
+  database.sqlite.prepare("INSERT INTO messages (id, workspace_id, room_id, sender_type, sender_id, run_id, role, status, quoted_message_id, turn_dispatch_mode, pending_turn_id, created_at, updated_at, deleted_at) VALUES ('msg_latest', 'ws_1', 'room_1', 'user', 'u_1', NULL, 'user', 'completed', NULL, 'immediate', NULL, 2, 2, NULL)").run();
+  database.sqlite.prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES ('msg_latest', 1, 'text', ?, 2)").run(JSON.stringify({ text: "WRONG latest user message" }));
+  database.sqlite.prepare("INSERT INTO mailbox_messages (id, workspace_id, room_id, from_type, from_id, to_agent_id, kind, content, files, read, claimed_run_id, claimed_at, delivery_batch_id, delivery_failure_reason, attempt_count, created_at, consumed_at) VALUES ('mb_1', 'ws_1', 'room_1', 'agent', 'agent_2', 'agent_1', 'message', ?, '[]', 1, 'run_mailbox', 1, NULL, NULL, 0, 1, NULL)").run(JSON.stringify({ text: "mailbox task from teammate" }));
+  const eventBus = createEventBus({ database });
+  const lifecycle = new RunLifecycleService(database, eventBus, { now: () => 1 });
+  lifecycle.create(null, { runId: "run_mailbox", workspaceId: "ws_1", roomId: "room_1", agentId: "agent_1", wakeReason: "mailbox_message" });
+  lifecycle.markClaimed(null, "run_mailbox");
+  lifecycle.markStarting(null, "run_mailbox", 123);
+
+  return {
+    database,
+    eventBus,
+    lifecycle,
+    close: () => {
+      eventBus.close();
+      database.sqlite.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
 }
 
 function eventPayload(database: ReturnType<typeof createDatabase>, type: string): unknown {

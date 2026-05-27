@@ -238,6 +238,9 @@ importers:
       '@agenthub/bus':
         specifier: workspace:*
         version: link:../../bus
+      '@agenthub/db':
+        specifier: workspace:*
+        version: link:../../db
       '@agenthub/orchestrator':
         specifier: workspace:*
         version: link:../../orchestrator

@@ -7,15 +7,20 @@ import type { CommandBus, CommandResult, EventBus } from "@agenthub/bus";
 import type { AgentHubDatabase } from "@agenthub/db";
 
 import { nameToSlug } from "../mention-parser.ts";
+import { MailboxService } from "../mailbox-service.ts";
 import { TaskService, normalizeStatus } from "../task-service.ts";
 import { writeTcpMessage, createTcpMessageReader } from "./tcp-helpers.ts";
 
-export type RoomMcpToolName = "room.create_task" | "room.update_task" | "room.list_tasks" | "room.send_message" | "room.list_members" | "room.spawn_agent" | string;
+export type RoomMcpToolName = "room.create_task" | "room.update_task" | "room.list_tasks" | "room.read_mailbox" | "room.send_message" | "room.list_members" | "room.spawn_agent" | string;
 
 export type RoomMcpSessionContext = {
   readonly roomId: string;
   readonly runId: string;
   readonly agentId: string;
+};
+
+export type RoomMcpCallContext = {
+  readonly requestId?: string;
 };
 
 export type RoomMcpToolResult =
@@ -109,6 +114,7 @@ export class RoomMcpServer {
     const roomId = typeof msg["room_id"] === "string" ? msg["room_id"] : undefined;
     const runId = typeof msg["run_id"] === "string" ? msg["run_id"] : undefined;
     const agentId = typeof msg["agent_id"] === "string" ? msg["agent_id"] : undefined;
+    const requestId = typeof msg["mcp_request_id"] === "string" && msg["mcp_request_id"].length > 0 ? msg["mcp_request_id"] : undefined;
 
     if (!tool || !roomId || !runId || !agentId) {
       writeTcpMessage(socket, { error: "Missing required fields: tool, room_id, run_id, agent_id" });
@@ -118,7 +124,7 @@ export class RoomMcpServer {
 
     const session: RoomMcpSessionContext = { roomId, runId, agentId };
     try {
-      const result = await this.callTool(tool, args, session);
+      const result = await this.callTool(tool, args, session, requestId !== undefined ? { requestId } : {});
       writeTcpMessage(socket, { result });
     } catch (err) {
       writeTcpMessage(socket, { error: err instanceof Error ? err.message : String(err) });
@@ -130,14 +136,32 @@ export class RoomMcpServer {
   // Tool dispatch
   // ---------------------------------------------------------------------------
 
-  async callTool(name: RoomMcpToolName, input: unknown, session: RoomMcpSessionContext): Promise<RoomMcpToolResult> {
+  async callTool(name: RoomMcpToolName, input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext = {}): Promise<RoomMcpToolResult> {
     if (name === "room.create_task") return this.createTask(input, session);
     if (name === "room.update_task") return this.updateTask(input, session);
     if (name === "room.list_tasks") return { ok: true, data: { tasks: this.options.taskService.list({ roomId: session.roomId }) } };
+    if (name === "room.read_mailbox") return this.handleReadMailbox(input, session, context);
     if (name === "room.send_message") return this.handleSendMessage(input, session);
     if (name === "room.list_members") return this.handleListMembers(session);
     if (name === "room.spawn_agent") return this.handleSpawnAgent(input, session);
     return toolNotFound(name);
+  }
+
+  // ---------------------------------------------------------------------------
+  // room.read_mailbox
+  // ---------------------------------------------------------------------------
+
+  private handleReadMailbox(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): RoomMcpToolResult {
+    const deliveryBatchId = isRecord(input) && typeof input.deliveryBatchId === "string" && input.deliveryBatchId.length > 0
+      ? input.deliveryBatchId
+      : (context.requestId !== undefined ? `mcp:${context.requestId}` : randomUUID());
+    try {
+      const mailbox = new MailboxService(this.options.database, this.options.now ?? Date.now, this.options.eventBus);
+      const batch = mailbox.readForRun(null, { runId: session.runId, roomId: session.roomId, agentId: session.agentId, deliveryBatchId });
+      return { ok: true, data: batch };
+    } catch (error) {
+      return failure("conflict", error instanceof Error ? error.message : String(error));
+    }
   }
 
   // ---------------------------------------------------------------------------

@@ -144,6 +144,29 @@ describe("RunLifecycleService", () => {
     expect(statusOf("run_perm")).toBe("failed");
     expect(currentDatabase().sqlite.prepare("SELECT consumed_at FROM run_next_turns WHERE id = 'nt_1'").get()).toMatchObject({ consumed_at: now });
   });
+
+  test("retryable failure reopens adapter-start next turns consumed before the model handles them", () => {
+    createRun("run_retry");
+    insertNextTurn("nt_retry", "run_retry");
+
+    currentMailbox().readForRun(null, { runId: "run_retry", roomId: "room_1", agentId: "agent_1", deliveryBatchId: "adapter-start:run_retry" });
+    expect(currentDatabase().sqlite.prepare("SELECT consumed_at FROM run_next_turns WHERE id = 'nt_retry'").get()).toMatchObject({ consumed_at: now });
+
+    currentLifecycle().fail(null, "run_retry", "upstream_5xx", "transient");
+
+    expect(statusOf("run_retry")).toBe("failed");
+    expect(currentDatabase().sqlite.prepare("SELECT consumed_at FROM run_next_turns WHERE id = 'nt_retry'").get()).toMatchObject({ consumed_at: null });
+  });
+
+  test("retryable failure keeps explicit read_mailbox next turns consumed", () => {
+    createRun("run_explicit_read");
+    insertNextTurn("nt_explicit", "run_explicit_read");
+
+    currentMailbox().readForRun(null, { runId: "run_explicit_read", roomId: "room_1", agentId: "agent_1", deliveryBatchId: "tool_call_1" });
+    currentLifecycle().fail(null, "run_explicit_read", "visible_retry", "retryable_visible");
+
+    expect(currentDatabase().sqlite.prepare("SELECT consumed_at FROM run_next_turns WHERE id = 'nt_explicit'").get()).toMatchObject({ consumed_at: now });
+  });
 });
 
 describe("WakeAgent and CancelRun handlers", () => {
@@ -361,9 +384,67 @@ describe("TaskService and RoomMcpServer", () => {
     if (!listed.ok || !isRecord(listed.data) || !Array.isArray(listed.data.tasks)) throw new Error("expected task list");
     expect(listed.data.tasks).toHaveLength(1);
     expect(listed.data.tasks[0]).toMatchObject({ title: "MCP task", status: "completed" });
-    expect(await mcp.callTool("room.read_mailbox", {}, { roomId: "room_1", runId: "run_1", agentId: "agent_1" })).toMatchObject({ ok: false, error: { code: "tool_not_found" } });
+    expect(await mcp.callTool("unknown_tool", {}, { roomId: "room_1", runId: "run_1", agentId: "agent_1" })).toMatchObject({ ok: false, error: { code: "tool_not_found" } });
     expect(await mcp.callTool("room.update_task", { taskId: created.data.taskId, status: "in_progress" }, { roomId: "room_1", runId: "run_1", agentId: "agent_1" })).toMatchObject({ ok: false, error: { code: "conflict" } });
     unsubscribe();
+  });
+
+  test("room.read_mailbox atomically consumes current run mailbox and next turns", async () => {
+    seedRoom("room_1", "agent_1");
+    seedMailbox("mb_read", "room_1", "agent_1");
+    createRun("run_read", { roomId: "room_1", agentId: "agent_1" });
+    insertNextTurn("nt_read", "run_read");
+    const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const commandBus = new CommandBus({ database: currentDatabase() });
+    const mcp = new RoomMcpServer({ commandBus, taskService: service, database: currentDatabase(), eventBus: currentBus(), now: () => now });
+
+    const first = await mcp.callTool("room.read_mailbox", { deliveryBatchId: "batch_read" }, { roomId: "room_1", runId: "run_read", agentId: "agent_1" });
+    const second = await mcp.callTool("room.read_mailbox", { deliveryBatchId: "batch_read" }, { roomId: "room_1", runId: "run_read", agentId: "agent_1" });
+    const third = await mcp.callTool("room.read_mailbox", { deliveryBatchId: "batch_empty" }, { roomId: "room_1", runId: "run_read", agentId: "agent_1" });
+
+    expect(first).toMatchObject({
+      ok: true,
+      data: {
+        deliveryBatchId: "batch_read",
+        mailbox: [{ id: "mb_read", text: "hello", fromType: "user", fromId: "u_1" }],
+        nextTurns: [{ id: "nt_read", messageId: "msg_next" }]
+      }
+    });
+    expect(second).toEqual(first);
+    expect(third).toMatchObject({ ok: true, data: { mailbox: [], nextTurns: [] } });
+    expect(currentDatabase().sqlite.prepare("SELECT read, claimed_run_id, delivery_batch_id FROM mailbox_messages WHERE id = 'mb_read'").get()).toMatchObject({ read: 1, claimed_run_id: "run_read", delivery_batch_id: "batch_read" });
+    expect(currentDatabase().sqlite.prepare("SELECT consumed_at FROM run_next_turns WHERE id = 'nt_read'").get()).toMatchObject({ consumed_at: now });
+  });
+
+  test("room.read_mailbox uses MCP request id fallback and ignores spoofed tool args", async () => {
+    seedRoom("room_1", "agent_1");
+    seedRoom("room_2", "agent_2");
+    seedMailbox("mb_session", "room_1", "agent_1");
+    seedMailbox("mb_spoofed", "room_2", "agent_2");
+    createRun("run_session", { roomId: "room_1", agentId: "agent_1" });
+    createRun("run_spoofed", { roomId: "room_2", agentId: "agent_2" });
+    insertNextTurn("nt_session", "run_session");
+    const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const commandBus = new CommandBus({ database: currentDatabase() });
+    const mcp = new RoomMcpServer({ commandBus, taskService: service, database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const session = { roomId: "room_1", runId: "run_session", agentId: "agent_1" };
+    const spoofedInput = { roomId: "room_2", runId: "run_spoofed", agentId: "agent_2" };
+
+    const first = await mcp.callTool("room.read_mailbox", spoofedInput, session, { requestId: "rpc_1" });
+    const retry = await mcp.callTool("room.read_mailbox", spoofedInput, session, { requestId: "rpc_1" });
+    const nextRequest = await mcp.callTool("room.read_mailbox", spoofedInput, session, { requestId: "rpc_2" });
+
+    expect(first).toMatchObject({
+      ok: true,
+      data: {
+        deliveryBatchId: "mcp:rpc_1",
+        mailbox: [{ id: "mb_session" }],
+        nextTurns: [{ id: "nt_session" }]
+      }
+    });
+    expect(retry).toEqual(first);
+    expect(nextRequest).toMatchObject({ ok: true, data: { deliveryBatchId: "mcp:rpc_2", mailbox: [], nextTurns: [] } });
+    expect(currentDatabase().sqlite.prepare("SELECT read, claimed_run_id, delivery_batch_id FROM mailbox_messages WHERE id = 'mb_spoofed'").get()).toMatchObject({ read: 0, claimed_run_id: null, delivery_batch_id: null });
   });
 
   test("mention parser validates membership and dedupes in first order", () => {
@@ -458,6 +539,28 @@ describe("RunQueue", () => {
 
     expect(statusOf("run_wait")).toBe("failed");
     expect(currentLifecycle().read("run_wait").failure_class).toBe("transient");
+  });
+
+  test("adapter prompt delivery failure is transient and reopens adapter-start input", async () => {
+    createRun("run_prompt_delivery");
+    insertNextTurn("nt_prompt_delivery", "run_prompt_delivery");
+    const queue = new RunQueue({
+      database: currentDatabase(),
+      lifecycle: currentLifecycle(),
+      pid: 321,
+      adapterManager: {
+        runAgent: (run) => {
+          currentMailbox().readForRun(null, { runId: run.id, roomId: run.room_id, agentId: run.agent_id, deliveryBatchId: `adapter-start:${run.id}` });
+          throw new Error("prompt delivery failed");
+        }
+      }
+    });
+
+    await queue.scheduleTick();
+
+    expect(statusOf("run_prompt_delivery")).toBe("failed");
+    expect(currentLifecycle().read("run_prompt_delivery").failure_class).toBe("transient");
+    expect(currentDatabase().sqlite.prepare("SELECT consumed_at FROM run_next_turns WHERE id = 'nt_prompt_delivery'").get()).toMatchObject({ consumed_at: null });
   });
 });
 

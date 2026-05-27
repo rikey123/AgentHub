@@ -117,6 +117,17 @@ const TOOLS = [
     },
   },
   {
+    name: "room.read_mailbox",
+    description: "Read messages and queued next-turn inputs delivered to this run. The run identity is injected by AgentHub; agents cannot read another run's mailbox.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        deliveryBatchId: { type: "string", description: "Optional idempotency key. Reusing it returns the same batch." },
+      },
+      required: [],
+    },
+  },
+  {
     name: "room.spawn_agent",
     description: "Create a new teammate agent in this room. Leader-only. Requires prior user approval — propose the lineup first, then call this after confirmation.",
     inputSchema: {
@@ -213,6 +224,7 @@ async function handleRequest(req) {
         room_id: ROOM_ID,
         run_id: RUN_ID,
         agent_id: AGENT_ID,
+        ...(jsonRpcRequestId(id) !== undefined ? { mcp_request_id: jsonRpcRequestId(id) } : {}),
       });
 
       if (response && typeof response === "object" && "error" in response) {
@@ -258,3 +270,9 @@ rl.on("line", (line) => {
 rl.on("close", () => process.exit(0));
 process.on("SIGTERM", () => process.exit(0));
 process.on("SIGINT", () => process.exit(0));
+
+function jsonRpcRequestId(id) {
+  if (typeof id === "string" && id.length > 0) return id;
+  if (typeof id === "number" && Number.isFinite(id)) return String(id);
+  return undefined;
+}

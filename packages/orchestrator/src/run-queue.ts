@@ -1,7 +1,7 @@
 import type { AgentHubDatabase } from "@agenthub/db";
 import type { EventEnvelope } from "@agenthub/protocol/events";
 
-import { RunLifecycleError, RunLifecycleService, type RunRow, type SqliteTx } from "./run-lifecycle-service.ts";
+import { RunLifecycleError, RunLifecycleService, type RunFailureClass, type RunRow, type SqliteTx } from "./run-lifecycle-service.ts";
 
 export type AdapterExecutionManager = {
   runAgent(run: RunRow): void | Promise<void>;
@@ -88,7 +88,7 @@ export class RunQueue {
       if (error instanceof RunLifecycleError && error.code === "illegal_transition") {
         return;
       }
-      this.options.lifecycle.fail(null, run.id, "adapter_start_failed", "configuration", error instanceof Error ? error.message : String(error));
+      this.options.lifecycle.fail(null, run.id, "adapter_start_failed", adapterStartFailureClass(this.options.database, run.id, error), error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -146,4 +146,22 @@ function parseTargetFiles(value: string): string[] {
   } catch {
     return [];
   }
+}
+
+function adapterStartFailureClass(database: AgentHubDatabase, runId: string, error: unknown): RunFailureClass {
+  if (hasAdapterStartDelivery(database, runId)) return "transient";
+  return errorCode(error) === "prompt_in_flight" ? "transient" : "configuration";
+}
+
+function errorCode(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  const code = (error as { readonly code?: unknown }).code;
+  return typeof code === "string" ? code : undefined;
+}
+
+function hasAdapterStartDelivery(database: AgentHubDatabase, runId: string): boolean {
+  const row = database.sqlite
+    .prepare("SELECT 1 FROM mailbox_deliveries WHERE delivery_batch_id = ? AND run_id = ? LIMIT 1")
+    .get(`adapter-start:${runId}`, runId);
+  return row !== undefined;
 }
