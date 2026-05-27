@@ -860,28 +860,26 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Convert a RoomMcpStdioConfig (or any unknown mcpServer value) into the
- * mcpServers array format expected by ACP session/new.
- * Returns [] when no server is configured or the shape is unrecognised.
+ * Convert a RoomMcpStdioConfig into the mcpServers array expected by ACP session/new.
+ * zMcpServerStdio schema requires: { name, command, args: string[], env: [{name,value}][] }
+ * All four fields are required (no optional).
  */
 function buildMcpServers(mcpServer: unknown): unknown[] {
   if (!isRecord(mcpServer)) return [];
-  // RoomMcpStdioConfig shape: { name, command, args, env }
   if (typeof mcpServer["command"] !== "string") return [];
-  const entry: Record<string, unknown> = {
+  // env must be [{name, value}][] — keep as-is if already in that shape, else empty array
+  const envArray: Array<{ name: string; value: string }> = [];
+  if (Array.isArray(mcpServer["env"])) {
+    for (const item of mcpServer["env"]) {
+      if (isRecord(item) && typeof item["name"] === "string" && typeof item["value"] === "string") {
+        envArray.push({ name: item["name"], value: item["value"] });
+      }
+    }
+  }
+  return [{
     name: typeof mcpServer["name"] === "string" ? mcpServer["name"] : "agenthub-room",
     command: mcpServer["command"],
     args: Array.isArray(mcpServer["args"]) ? mcpServer["args"] : [],
-  };
-  // env: [{ name, value }] → convert to Record<string, string> for ACP
-  if (Array.isArray(mcpServer["env"])) {
-    const envRecord: Record<string, string> = {};
-    for (const item of mcpServer["env"]) {
-      if (isRecord(item) && typeof item["name"] === "string" && typeof item["value"] === "string") {
-        envRecord[item["name"]] = item["value"];
-      }
-    }
-    if (Object.keys(envRecord).length > 0) entry["env"] = envRecord;
-  }
-  return [entry];
+    env: envArray,
+  }];
 }
