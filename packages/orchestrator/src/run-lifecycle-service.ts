@@ -36,7 +36,8 @@ export type WakeReason =
   | "group_review"
   | "phase_completed"
   | "agent_crashed"
-  | "consume_pending_turn";
+  | "consume_pending_turn"
+  | "mailbox_message";
 
 export type AgentPromptDelta =
   | { readonly kind: "first_wake"; readonly fullRolePrompt: string }
