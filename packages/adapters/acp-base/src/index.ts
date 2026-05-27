@@ -39,6 +39,8 @@ export type AcpAdapterSession = {
   state: AcpSessionState;
   acpSessionId: string;
   runId: string | undefined;
+  roomId: string;
+  agentId: string;
   workDir: string;
   pendingRequests: Map<string, AcpPendingRequest>;
   inflightPromptRequestId: string | undefined;
@@ -65,6 +67,9 @@ export type AcpAdapterSession = {
 export type JsonRpcMessage = { readonly jsonrpc?: "2.0"; readonly id?: string | number; readonly method?: string; readonly params?: unknown; readonly result?: unknown; readonly error?: unknown };
 export type AcpProviderEvent = { readonly type: string; readonly payload?: unknown };
 export type AdapterRawSink = (input: { readonly adapterId: string; readonly sessionId: string; readonly runId?: string; readonly stream: "stdout" | "stderr"; readonly line: string }) => void;
+export type WarmSessionInput = { readonly roomId: string; readonly agentId: string; readonly sessionId?: string; readonly workDir?: string; readonly mcpServer?: unknown };
+export type WarmSessionBindingInput = { readonly roomId: string; readonly agentId: string; readonly runId: string; readonly mcpServer?: unknown };
+export type WarmExternalSession = Omit<ExternalSession, "runId"> & { readonly runId?: string };
 
 export const acpClientCapabilities: AcpClientCapabilities = {
   fs: { readTextFile: true, writeTextFile: true, deleteFile: true },
@@ -108,6 +113,7 @@ export abstract class ACPAdapter {
   readonly kind = "acp" as const;
   protected readonly sessions = new Map<string, AcpAdapterSession>();
   protected readonly pendingByRun = new Map<string, string>();
+  protected readonly warmByRoomAgent = new Map<string, string>();
   protected readonly now: () => number;
   protected readonly requestTimeoutMs: number;
   protected readonly rawSink: AdapterRawSink | undefined;
@@ -186,6 +192,60 @@ export abstract class ACPAdapter {
     return this.sessions.get(sessionId);
   }
 
+  updateSessionMcpServer(sessionId: string, mcpServer: unknown): void {
+    this.requiredSession(sessionId).mcpServer = mcpServer;
+  }
+
+  disposeRoomWarmSessions(roomId: string): void {
+    for (const [sessionId, session] of [...this.sessions.entries()]) {
+      if (session.roomId === roomId && session.runId === undefined) this.disposeSync(sessionId);
+    }
+  }
+
+  disposeAllSessions(): void {
+    for (const sessionId of [...this.sessions.keys()]) this.disposeSync(sessionId);
+  }
+
+  createWarmSession(input: WarmSessionInput): WarmExternalSession {
+    const key = warmKey(input.roomId, input.agentId);
+    const existingSessionId = this.warmByRoomAgent.get(key);
+    if (existingSessionId !== undefined) {
+      const existing = this.sessions.get(existingSessionId);
+      if (existing !== undefined && existing.state !== "disposed" && existing.state !== "failed") {
+        return { id: existing.acpSessionId, workDir: existing.workDir, ...(existing.mcpServer !== undefined ? { mcpServer: existing.mcpServer } : {}) };
+      }
+      this.warmByRoomAgent.delete(key);
+    }
+    const sessionId = input.sessionId ?? `acp-${this.id}-warm-${input.roomId}-${input.agentId}`;
+    if (this.sessions.has(sessionId)) throw new ACPAdapterError("session_exists", `ACP session '${sessionId}' already exists`);
+    const session = this.newSession({ sessionId, roomId: input.roomId, agentId: input.agentId, ...(input.workDir !== undefined ? { workDir: input.workDir } : {}), ...(input.mcpServer !== undefined ? { mcpServer: input.mcpServer } : {}) });
+    this.sessions.set(sessionId, session);
+    this.warmByRoomAgent.set(key, sessionId);
+    const spawned = this.trySpawn(session);
+    if (!spawned) {
+      session.state = "ready";
+      session.handshakeComplete = true;
+    }
+    return { id: sessionId, workDir: session.workDir, ...(input.mcpServer !== undefined ? { mcpServer: input.mcpServer } : {}) };
+  }
+
+  bindWarmSessionToRun(input: WarmSessionBindingInput): ExternalSession | undefined {
+    const key = warmKey(input.roomId, input.agentId);
+    const sessionId = this.warmByRoomAgent.get(key);
+    if (sessionId === undefined) return undefined;
+    const session = this.sessions.get(sessionId);
+    if (session === undefined || session.state === "disposed" || session.state === "failed") {
+      this.warmByRoomAgent.delete(key);
+      return undefined;
+    }
+    if (session.inflightPromptRequestId !== undefined || session.state === "prompting" || session.state === "cancelling") return undefined;
+    if (session.runId !== undefined) this.pendingByRun.delete(session.runId);
+    session.runId = input.runId;
+    if (input.mcpServer !== undefined) session.mcpServer = input.mcpServer;
+    this.pendingByRun.set(input.runId, sessionId);
+    return { id: sessionId, runId: input.runId, workDir: session.workDir, ...(session.mcpServer !== undefined ? { mcpServer: session.mcpServer } : {}) };
+  }
+
   completePromptForTest(sessionId: string, reason: "completed" | "cancelled" = "completed"): void {
     const session = this.requiredSession(sessionId);
     if (session.inflightPromptRequestId !== undefined) {
@@ -209,7 +269,7 @@ export abstract class ACPAdapter {
   protected createSessionSync(input: CreateSessionInput): ExternalSession {
     const sessionId = `acp-${this.id}-${input.runId}`;
     if (this.sessions.has(sessionId)) throw new ACPAdapterError("session_exists", `ACP session '${sessionId}' already exists`);
-    const session: AcpAdapterSession = { state: "connecting", acpSessionId: sessionId, runId: input.runId, workDir: input.workDir ?? process.cwd(), pendingRequests: new Map(), inflightPromptRequestId: undefined, clientCapabilities: acpClientCapabilities, mcpServer: input.mcpServer, process: undefined, lineSplitter: new NdjsonLineSplitter(), stderrLineSplitter: new NdjsonLineSplitter(), stderrTail: [], livenessTimer: undefined, handshakeTimeoutTimer: undefined, consecutivePingMisses: 0, promptTimeoutPaused: false };
+    const session = this.newSession({ sessionId, runId: input.runId, roomId: input.roomId, agentId: input.agentId, ...(input.workDir !== undefined ? { workDir: input.workDir } : {}), ...(input.mcpServer !== undefined ? { mcpServer: input.mcpServer } : {}) });
     this.sessions.set(sessionId, session);
     this.pendingByRun.set(input.runId, sessionId);
     const spawned = this.trySpawn(session);
@@ -223,7 +283,8 @@ export abstract class ACPAdapter {
   }
 
   protected attachSessionSync(input: AttachSessionInput): ExternalSession {
-    const session: AcpAdapterSession = { state: "ready", acpSessionId: input.adapterSessionId, runId: input.runId, workDir: input.workDir ?? process.cwd(), pendingRequests: new Map(), inflightPromptRequestId: undefined, clientCapabilities: acpClientCapabilities, mcpServer: undefined, process: undefined, lineSplitter: new NdjsonLineSplitter(), stderrLineSplitter: new NdjsonLineSplitter(), stderrTail: [], livenessTimer: undefined, handshakeTimeoutTimer: undefined, consecutivePingMisses: 0, promptTimeoutPaused: false };
+    const session = this.newSession({ sessionId: input.adapterSessionId, runId: input.runId, roomId: "", agentId: "", ...(input.workDir !== undefined ? { workDir: input.workDir } : {}) });
+    session.state = "ready";
     this.sessions.set(input.adapterSessionId, session);
     this.pendingByRun.set(input.runId, input.adapterSessionId);
     return { id: input.adapterSessionId, runId: input.runId, workDir: session.workDir, ...(input.providerConversationId !== undefined ? { providerConversationId: input.providerConversationId } : {}) };
@@ -293,6 +354,7 @@ export abstract class ACPAdapter {
   protected disposeSync(sessionId: string): void {
     const session = this.requiredSession(sessionId);
     if (session.state === "disposed") return;
+    session.state = "disposed";
     try { this.writeJson(session, { jsonrpc: "2.0", method: "session/end", params: { sessionId } }); } catch { /* process may already be gone */ }
     for (const pending of session.pendingRequests.values()) {
       clearPending(pending);
@@ -302,8 +364,8 @@ export abstract class ACPAdapter {
     session.inflightPromptRequestId = undefined;
     if (session.process !== undefined && !session.process.killed) killProcessTree(session.process);
     if (session.livenessTimer !== undefined) clearInterval(session.livenessTimer);
-    session.state = "disposed";
     if (session.runId !== undefined) this.pendingByRun.delete(session.runId);
+    this.warmByRoomAgent.delete(warmKey(session.roomId, session.agentId));
   }
 
   protected handleLine(session: AcpAdapterSession, line: string): AcpProviderEvent | undefined {
@@ -440,7 +502,7 @@ export abstract class ACPAdapter {
         method: "initialize",
         startedAt: this.now(),
         timeoutMs: 30_000,
-        resolve: (_result) => {
+        resolve: () => {
           // authMethods in initialize does NOT require calling authenticate first.
           // AionUi's confirmed strategy: attempt session/new directly regardless of authMethods.
           // opencode returns authMethods but doesn't implement authenticate (-32603 "not implemented").
@@ -514,8 +576,19 @@ export abstract class ACPAdapter {
     if (session.state === "disposed" || session.state === "failed") return;
     if (session.livenessTimer !== undefined) clearInterval(session.livenessTimer);
     if (session.handshakeTimeoutTimer !== undefined) clearTimeout(session.handshakeTimeoutTimer);
+    const pendingRequests = [...session.pendingRequests.values()];
+    session.pendingRequests.clear();
+    session.inflightPromptRequestId = undefined;
     session.state = "failed";
+    for (const pending of pendingRequests) {
+      clearPending(pending);
+      pending.reject(error);
+    }
+    if (session.process !== undefined && !session.process.killed && session.process.exitCode === null && session.process.signalCode === null) killProcessTree(session.process);
+    if (session.runId !== undefined) this.pendingByRun.delete(session.runId);
+    this.warmByRoomAgent.delete(warmKey(session.roomId, session.agentId));
     this.onSessionFailed(session, error);
+    this.sessions.delete(session.acpSessionId);
   }
 
   private sendSessionNew(session: AcpAdapterSession): void {
@@ -626,6 +699,10 @@ export abstract class ACPAdapter {
   private snapshot(sessionId: string): Record<string, unknown> {
     const session = this.requiredSession(sessionId);
     return { sessionId, state: session.state, pendingRequests: [...session.pendingRequests.keys()], inflightPromptRequestId: session.inflightPromptRequestId };
+  }
+
+  private newSession(input: { readonly sessionId: string; readonly runId?: string; readonly roomId: string; readonly agentId: string; readonly workDir?: string; readonly mcpServer?: unknown }): AcpAdapterSession {
+    return { state: "connecting", acpSessionId: input.sessionId, runId: input.runId, roomId: input.roomId, agentId: input.agentId, workDir: input.workDir ?? process.cwd(), pendingRequests: new Map(), inflightPromptRequestId: undefined, clientCapabilities: acpClientCapabilities, mcpServer: input.mcpServer, process: undefined, lineSplitter: new NdjsonLineSplitter(), stderrLineSplitter: new NdjsonLineSplitter(), stderrTail: [], livenessTimer: undefined, handshakeTimeoutTimer: undefined, consecutivePingMisses: 0, promptTimeoutPaused: false };
   }
 }
 
@@ -805,6 +882,10 @@ function stringField(value: Record<string, unknown>, key: string): string | unde
 function providerAllowsConcurrentPrompt(manifest: AgentAdapterManifest): boolean {
   const maybe = manifest as AgentAdapterManifest & { readonly acp?: { readonly concurrentPrompt?: boolean } };
   return maybe.acp?.concurrentPrompt === true;
+}
+
+function warmKey(roomId: string, agentId: string): string {
+  return `${roomId}:${agentId}`;
 }
 
 function toAdapterError(error: unknown): AdapterError {

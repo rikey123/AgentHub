@@ -117,6 +117,7 @@ describe("ClaudeCodeACPAdapter", () => {
   });
 
   it("@integration:claude-code skips real claude smoke coverage when the binary is absent", () => {
+    if (process.env.AGENTHUB_RUN_REAL_CLAUDE_SMOKE !== "1") return;
     const detected = spawnSync(process.platform === "win32" ? "where.exe" : "command", process.platform === "win32" ? ["claude"] : ["-v", "claude"], { stdio: "ignore", shell: false });
     if (detected.status !== 0) return;
     const adapter = new ClaudeCodeACPAdapter({ command: "claude" });
@@ -164,15 +165,15 @@ describe("ClaudeCodeACPAdapter", () => {
       await adapter.runManaged(lifecycle.read("run"));
       await waitFor(
         () => ({
-          sessionState: adapter.debugSession("acp-claude-code-run")?.state,
+          sessionReleased: adapter.debugSession("acp-claude-code-run") === undefined,
           run: database.sqlite.prepare("SELECT status, failure_class, error FROM runs WHERE id = 'run'").get() as { readonly status: string; readonly failure_class: string | null; readonly error: string | null },
           failedEvent: database.sqlite.prepare("SELECT type FROM events WHERE type = 'agent.run.failed' AND run_id = 'run'").get() as { readonly type: string } | undefined
         }),
-        (value) => value.sessionState === "failed" && value.run.status === "failed" && value.failedEvent?.type === "agent.run.failed",
+        (value) => value.sessionReleased && value.run.status === "failed" && value.failedEvent?.type === "agent.run.failed",
         { timeoutMs: 10_000 }
       );
 
-      expect(adapter.debugSession("acp-claude-code-run")?.state).toBe("failed");
+      expect(adapter.debugSession("acp-claude-code-run")).toBeUndefined();
       expect(database.sqlite.prepare("SELECT status, failure_class, error FROM runs WHERE id = 'run'").get()).toMatchObject({ status: "failed", failure_class: "retryable_visible", error: "ACP process exited with exit code 7" });
       expect(database.sqlite.prepare("SELECT type FROM events WHERE type = 'agent.run.failed' AND run_id = 'run'").get()).toMatchObject({ type: "agent.run.failed" });
     } finally {

@@ -33,7 +33,6 @@ export function buildFirstWakePrompt(
     .get(roomId) as { mode: string; primary_agent_id: string | null } | undefined;
 
   const agentName = profile?.name ?? agentId;
-  const agentSlug = nameToSlug(agentName);
   const roomMode = room?.mode ?? "solo";
 
   // Fetch all participants with their profiles and presence.

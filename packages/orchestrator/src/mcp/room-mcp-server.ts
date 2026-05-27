@@ -15,12 +15,20 @@ export type RoomMcpToolName = "room.create_task" | "room.update_task" | "room.li
 
 export type RoomMcpSessionContext = {
   readonly roomId: string;
-  readonly runId: string;
+  readonly runId?: string;
   readonly agentId: string;
 };
 
 export type RoomMcpCallContext = {
   readonly requestId?: string;
+  readonly registration?: RoomMcpSessionRegistration;
+};
+
+export type RoomMcpSessionRegistration = {
+  readonly token: string;
+  readonly roomId: string;
+  readonly agentId: string;
+  readonly adapterSessionId: string;
 };
 
 export type RoomMcpToolResult =
@@ -39,6 +47,7 @@ export class RoomMcpServer {
   private tcpServer: net.Server | null = null;
   private tcpPort = 0;
   private readonly authToken = randomUUID();
+  private readonly sessionRegistrations = new Map<string, RoomMcpSessionRegistration>();
 
   constructor(private readonly options: { readonly commandBus: CommandBus; readonly taskService: TaskService; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly now?: () => number }) {}
 
@@ -61,7 +70,7 @@ export class RoomMcpServer {
 
   /**
    * Returns the stdio MCP config to inject into ACP session/new mcpServers[].
-   * Includes roomId + runId + agentId so the bridge can pass them to callTool.
+   * Warm sessions may omit runId; the daemon resolves the active run when a tool is called.
    */
   getStdioConfig(session: RoomMcpSessionContext): RoomMcpStdioConfig {
     const scriptPath = resolveBridgeScript();
@@ -73,15 +82,35 @@ export class RoomMcpServer {
         { name: "ROOM_MCP_PORT", value: String(this.tcpPort) },
         { name: "ROOM_MCP_TOKEN", value: this.authToken },
         { name: "ROOM_MCP_ROOM_ID", value: session.roomId },
-        { name: "ROOM_MCP_RUN_ID", value: session.runId },
+        ...(session.runId !== undefined ? [{ name: "ROOM_MCP_RUN_ID", value: session.runId }] : []),
         { name: "ROOM_MCP_AGENT_ID", value: session.agentId },
       ],
     };
   }
 
+  getRegisteredStdioConfig(session: RoomMcpSessionContext & { readonly adapterSessionId: string }): RoomMcpStdioConfig {
+    const base = this.getStdioConfig(session);
+    const registration = this.registerSession(session);
+    return { ...base, env: [...base.env, { name: "ROOM_MCP_SESSION_TOKEN", value: registration.token }, { name: "ROOM_MCP_ADAPTER_SESSION_ID", value: session.adapterSessionId }] };
+  }
+
+  unregisterSession(adapterSessionId: string): void {
+    for (const [token, registration] of this.sessionRegistrations) {
+      if (registration.adapterSessionId === adapterSessionId) this.sessionRegistrations.delete(token);
+    }
+  }
+
+  private registerSession(session: RoomMcpSessionContext & { readonly adapterSessionId: string }): RoomMcpSessionRegistration {
+    this.unregisterSession(session.adapterSessionId);
+    const registration = { token: randomUUID(), roomId: session.roomId, agentId: session.agentId, adapterSessionId: session.adapterSessionId };
+    this.sessionRegistrations.set(registration.token, registration);
+    return registration;
+  }
+
   stopTcp(): void {
     this.tcpServer?.close();
     this.tcpServer = null;
+    this.sessionRegistrations.clear();
   }
 
   // ---------------------------------------------------------------------------
@@ -114,17 +143,34 @@ export class RoomMcpServer {
     const roomId = typeof msg["room_id"] === "string" ? msg["room_id"] : undefined;
     const runId = typeof msg["run_id"] === "string" ? msg["run_id"] : undefined;
     const agentId = typeof msg["agent_id"] === "string" ? msg["agent_id"] : undefined;
+    const sessionToken = typeof msg["session_token"] === "string" ? msg["session_token"] : undefined;
     const requestId = typeof msg["mcp_request_id"] === "string" && msg["mcp_request_id"].length > 0 ? msg["mcp_request_id"] : undefined;
 
-    if (!tool || !roomId || !runId || !agentId) {
-      writeTcpMessage(socket, { error: "Missing required fields: tool, room_id, run_id, agent_id" });
+    if (!tool || !roomId || !agentId) {
+      writeTcpMessage(socket, { error: "Missing required fields: tool, room_id, agent_id" });
       socket.end();
       return;
     }
 
-    const session: RoomMcpSessionContext = { roomId, runId, agentId };
+    if (sessionToken === undefined) {
+      writeTcpMessage(socket, { error: "Missing required field: session_token" });
+      socket.end();
+      return;
+    }
+    const registration = sessionToken !== undefined ? this.sessionRegistrations.get(sessionToken) : undefined;
+    if (registration === undefined) {
+      writeTcpMessage(socket, { error: "MCP session token is not active" });
+      socket.end();
+      return;
+    }
+    if (registration !== undefined && (registration.roomId !== roomId || registration.agentId !== agentId)) {
+      writeTcpMessage(socket, { error: "MCP session token does not match room/agent" });
+      socket.end();
+      return;
+    }
+    const session: RoomMcpSessionContext = { roomId, ...(runId !== undefined ? { runId } : {}), agentId };
     try {
-      const result = await this.callTool(tool, args, session, requestId !== undefined ? { requestId } : {});
+      const result = await this.callTool(tool, args, session, { ...(requestId !== undefined ? { requestId } : {}), ...(registration !== undefined ? { registration } : {}) });
       writeTcpMessage(socket, { result });
     } catch (err) {
       writeTcpMessage(socket, { error: err instanceof Error ? err.message : String(err) });
@@ -137,13 +183,15 @@ export class RoomMcpServer {
   // ---------------------------------------------------------------------------
 
   async callTool(name: RoomMcpToolName, input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext = {}): Promise<RoomMcpToolResult> {
-    if (name === "room.create_task") return this.createTask(input, session);
-    if (name === "room.update_task") return this.updateTask(input, session);
+    const registrationFailure = this.validateRegistration(session, context);
+    if (registrationFailure !== undefined) return registrationFailure;
+    if (name === "room.create_task") return this.createTask(input, session, context);
+    if (name === "room.update_task") return this.updateTask(input, session, context);
     if (name === "room.list_tasks") return { ok: true, data: { tasks: this.options.taskService.list({ roomId: session.roomId }) } };
     if (name === "room.read_mailbox") return this.handleReadMailbox(input, session, context);
-    if (name === "room.send_message") return this.handleSendMessage(input, session);
+    if (name === "room.send_message") return this.handleSendMessage(input, session, context);
     if (name === "room.list_members") return this.handleListMembers(session);
-    if (name === "room.spawn_agent") return this.handleSpawnAgent(input, session);
+    if (name === "room.spawn_agent") return this.handleSpawnAgent(input, session, context);
     return toolNotFound(name);
   }
 
@@ -152,12 +200,14 @@ export class RoomMcpServer {
   // ---------------------------------------------------------------------------
 
   private handleReadMailbox(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): RoomMcpToolResult {
+    const runId = this.resolveRunId(session, context);
+    if (runId === undefined) return failure("conflict", "no active run for room MCP session");
     const deliveryBatchId = isRecord(input) && typeof input.deliveryBatchId === "string" && input.deliveryBatchId.length > 0
       ? input.deliveryBatchId
       : (context.requestId !== undefined ? `mcp:${context.requestId}` : randomUUID());
     try {
       const mailbox = new MailboxService(this.options.database, this.options.now ?? Date.now, this.options.eventBus);
-      const batch = mailbox.readForRun(null, { runId: session.runId, roomId: session.roomId, agentId: session.agentId, deliveryBatchId });
+      const batch = mailbox.readForRun(null, { runId, roomId: session.roomId, agentId: session.agentId, deliveryBatchId });
       return { ok: true, data: batch };
     } catch (error) {
       return failure("conflict", error instanceof Error ? error.message : String(error));
@@ -204,7 +254,7 @@ export class RoomMcpServer {
   // room.send_message
   // ---------------------------------------------------------------------------
 
-  async handleSendMessage(input: unknown, session: RoomMcpSessionContext): Promise<RoomMcpToolResult> {
+  async handleSendMessage(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): Promise<RoomMcpToolResult> {
     if (!isRecord(input) || typeof input.text !== "string" || input.text.length === 0) return failure("validation_failed", "text is required");
     const participant = this.options.database.sqlite.prepare("SELECT role FROM room_participants WHERE room_id = ? AND participant_id = ? AND participant_type = 'agent'").get(session.roomId, session.agentId) as { readonly role: string } | undefined;
     if (!participant) return failure("permission_denied", "agent is not a room participant");
@@ -218,7 +268,7 @@ export class RoomMcpServer {
     // directly to the mentioned agents via mailbox + WakeAgent, bypassing the
     // user-message path. This is the agent-to-agent coordination channel.
     if (room.mode === "assisted") {
-      return this.handleAgentSendMessage(text, room.workspace_id, room.primary_agent_id, session, now);
+      return this.handleAgentSendMessage(text, room.workspace_id, room.primary_agent_id, session, context, now);
     }
 
     // Solo mode: fall back to the original behaviour (dispatch SendMessage as if user sent it).
@@ -230,9 +280,9 @@ export class RoomMcpServer {
           : null;
         return { ok: true, data: { degraded: true, reason: "observer_must_knock_or_mailbox", ...(mailboxMessageId !== null ? { mailboxMessageId } : {}) } };
       }
-      this.options.eventBus.publish({ id: randomUUID(), type: "server.connected", schemaVersion: 1, workspaceId: room.workspace_id, roomId: session.roomId, runId: session.runId, agentId: session.agentId, payload: { audit: true, actor: { type: "agent", id: session.agentId }, action: "room.send_message", target: `room:${session.roomId}`, outcome: "allowed", observer: true }, createdAt: now });
+      this.options.eventBus.publish({ id: randomUUID(), type: "server.connected", schemaVersion: 1, workspaceId: room.workspace_id, roomId: session.roomId, runId: this.requireRunId(session, context), agentId: session.agentId, payload: { audit: true, actor: { type: "agent", id: session.agentId }, action: "room.send_message", target: `room:${session.roomId}`, outcome: "allowed", observer: true }, createdAt: now });
     }
-    const result = await this.dispatch({ type: "SendMessage", roomId: session.roomId, text, idempotencyKey: typeof input.idempotencyKey === "string" ? input.idempotencyKey : `mcp:send-message:${session.runId}:${randomUUID()}` }, session);
+    const result = await this.dispatch({ type: "SendMessage", roomId: session.roomId, text, idempotencyKey: typeof input.idempotencyKey === "string" ? input.idempotencyKey : `mcp:send-message:${this.requireRunId(session, context)}:${randomUUID()}` }, session, context);
     return commandResult(result);
   }
 
@@ -245,6 +295,7 @@ export class RoomMcpServer {
     workspaceId: string,
     primaryAgentId: string | null,
     session: RoomMcpSessionContext,
+    context: RoomMcpCallContext,
     now: number
   ): Promise<RoomMcpToolResult> {
     // Resolve mention targets from the message text.
@@ -295,13 +346,11 @@ export class RoomMcpServer {
           reason: "mailbox_message",
           messageId: undefined,
           promptDelta: { kind: "delta_only", instructions: MAILBOX_WAKE_INSTRUCTIONS },
-          idempotencyKey: `mcp:agent-msg:${session.runId}:${targetAgentId}:${mailboxMessageId}`,
-        }, session);
-        if (!wakeResult.ok) {
-          console.warn(`[RoomMcpServer] WakeAgent for ${targetAgentId} returned error: ${wakeResult.error.message}`);
-        }
+          idempotencyKey: `mcp:agent-msg:${this.requireRunId(session, context)}:${targetAgentId}:${mailboxMessageId}`,
+        }, session, context);
+        void wakeResult;
       } catch (err) {
-        console.warn(`[RoomMcpServer] WakeAgent for ${targetAgentId} threw:`, err);
+        void err;
       }
     }
 
@@ -312,8 +361,9 @@ export class RoomMcpServer {
   // Task tools
   // ---------------------------------------------------------------------------
 
-  private async createTask(input: unknown, session: RoomMcpSessionContext): Promise<RoomMcpToolResult> {
+  private async createTask(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): Promise<RoomMcpToolResult> {
     if (!isRecord(input) || typeof input.title !== "string" || input.title.length === 0) return failure("validation_failed", "title is required");
+    const runId = this.requireRunId(session, context);
     const result = await this.dispatch({
       type: "CreateTask",
       roomId: session.roomId,
@@ -321,24 +371,25 @@ export class RoomMcpServer {
       ...(typeof input.parentTaskId === "string" ? { parentTaskId: input.parentTaskId } : {}),
       ...(typeof input.description === "string" ? { description: input.description } : {}),
       ...(typeof input.assigneeAgentId === "string" ? { assigneeAgentId: input.assigneeAgentId } : {}),
-      sourceRunId: session.runId,
+      sourceRunId: runId,
       ...(Array.isArray(input.dependencies) ? { dependencies: input.dependencies.filter((item): item is string => typeof item === "string") } : {}),
       ...(typeof input.priority === "string" ? { priority: input.priority } : {}),
       ...(typeof input.dueAt === "number" ? { dueAt: input.dueAt } : {}),
-      idempotencyKey: typeof input.idempotencyKey === "string" ? input.idempotencyKey : `mcp:create-task:${session.runId}:${randomUUID()}`
-    }, session);
+      idempotencyKey: typeof input.idempotencyKey === "string" ? input.idempotencyKey : `mcp:create-task:${runId}:${randomUUID()}`
+    }, session, context);
     return commandResult(result);
   }
 
-  private async updateTask(input: unknown, session: RoomMcpSessionContext): Promise<RoomMcpToolResult> {
+  private async updateTask(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): Promise<RoomMcpToolResult> {
     if (!isRecord(input) || typeof input.taskId !== "string" || normalizeStatus(input.status) === undefined) return failure("validation_failed", "taskId and valid status are required");
+    const runId = this.requireRunId(session, context);
     const result = await this.dispatch({
       type: "UpdateTask",
       taskId: input.taskId,
       status: input.status,
       reason: typeof input.reason === "string" ? input.reason : "mcp_update",
-      idempotencyKey: typeof input.idempotencyKey === "string" ? input.idempotencyKey : `mcp:update-task:${session.runId}:${input.taskId}:${input.status}:${randomUUID()}`
-    }, session);
+      idempotencyKey: typeof input.idempotencyKey === "string" ? input.idempotencyKey : `mcp:update-task:${runId}:${input.taskId}:${input.status}:${randomUUID()}`
+    }, session, context);
     return commandResult(result);
   }
 
@@ -346,7 +397,7 @@ export class RoomMcpServer {
   // room.spawn_agent — leader-only: create a new teammate in the room
   // ---------------------------------------------------------------------------
 
-  private async handleSpawnAgent(input: unknown, session: RoomMcpSessionContext): Promise<RoomMcpToolResult> {
+  private async handleSpawnAgent(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): Promise<RoomMcpToolResult> {
     if (!isRecord(input)) return failure("validation_failed", "input must be an object");
 
     // Only the primary (leader) agent can spawn new teammates.
@@ -411,12 +462,13 @@ export class RoomMcpServer {
           workspaceId: room.workspace_id,
           reason: "primary_turn",
           promptDelta: { kind: "first_wake", fullRolePrompt: rolePrompt.length > 0 ? rolePrompt : `You are ${agentName}, a new teammate in this room. Wait for instructions from the leader.` },
-          idempotencyKey: `spawn:${session.runId}:${newAgentId}`,
+          idempotencyKey: `spawn:${this.requireRunId(session, context)}:${newAgentId}`,
         },
-        session
+        session,
+        context
       );
     } catch (err) {
-      console.warn(`[RoomMcpServer] WakeAgent for spawned agent ${newAgentId} threw:`, err);
+      void err;
     }
 
     return { ok: true, data: { agentId: newAgentId, name: agentName, slug, adapterId, role: room.mode === "team" || room.mode === "squad" ? "teammate" : "observer" } };
@@ -426,13 +478,53 @@ export class RoomMcpServer {
   // Helpers
   // ---------------------------------------------------------------------------
 
-  private dispatch(command: Parameters<CommandBus["dispatch"]>[0], session: RoomMcpSessionContext): CommandResult | Promise<CommandResult> {
-    return this.options.commandBus.dispatch(command, { actor: { type: "agent", id: session.agentId }, traceId: `mcp:${session.runId}:${randomUUID()}`, ...(command.idempotencyKey !== undefined ? { idempotencyKey: command.idempotencyKey } : {}), origin: "mcp_tool" });
+  private dispatch(command: Parameters<CommandBus["dispatch"]>[0], session: RoomMcpSessionContext, context: RoomMcpCallContext): CommandResult | Promise<CommandResult> {
+    const runId = this.requireRunId(session, context);
+    return this.options.commandBus.dispatch(command, { actor: { type: "agent", id: session.agentId }, traceId: `mcp:${runId}:${randomUUID()}`, ...(command.idempotencyKey !== undefined ? { idempotencyKey: command.idempotencyKey } : {}), origin: "mcp_tool" });
   }
 
   // WakeAgent, RetryRun, etc. are internal-only commands — must use origin:"internal".
-  private dispatchInternal(command: Parameters<CommandBus["dispatch"]>[0], session: RoomMcpSessionContext): CommandResult | Promise<CommandResult> {
-    return this.options.commandBus.dispatch(command, { actor: { type: "agent", id: session.agentId }, traceId: `mcp:${session.runId}:${randomUUID()}`, ...(command.idempotencyKey !== undefined ? { idempotencyKey: command.idempotencyKey } : {}), origin: "internal" });
+  private dispatchInternal(command: Parameters<CommandBus["dispatch"]>[0], session: RoomMcpSessionContext, context: RoomMcpCallContext): CommandResult | Promise<CommandResult> {
+    const runId = this.requireRunId(session, context);
+    return this.options.commandBus.dispatch(command, { actor: { type: "agent", id: session.agentId }, traceId: `mcp:${runId}:${randomUUID()}`, ...(command.idempotencyKey !== undefined ? { idempotencyKey: command.idempotencyKey } : {}), origin: "internal" });
+  }
+
+  private validateRegistration(session: RoomMcpSessionContext, context: RoomMcpCallContext): RoomMcpToolResult | undefined {
+    const registration = context.registration;
+    if (registration === undefined) return undefined;
+    const active = this.sessionRegistrations.get(registration.token);
+    if (active === undefined) return failure("permission_denied", "MCP session registration is not active");
+    if (
+      active.roomId !== session.roomId
+      || active.agentId !== session.agentId
+      || active.adapterSessionId !== registration.adapterSessionId
+      || active.roomId !== registration.roomId
+      || active.agentId !== registration.agentId
+    ) {
+      return failure("permission_denied", "MCP session registration does not match room/agent/session");
+    }
+    return undefined;
+  }
+
+  private requireRunId(session: RoomMcpSessionContext, context: RoomMcpCallContext = {}): string {
+    const runId = this.resolveRunId(session, context);
+    if (runId === undefined) throw new Error("no active run for room MCP session");
+    return runId;
+  }
+
+  private resolveRunId(session: RoomMcpSessionContext, context: RoomMcpCallContext = {}): string | undefined {
+    if (context.registration === undefined) return session.runId;
+    const rows = this.options.database.sqlite
+      .prepare(
+        `SELECT id
+         FROM runs
+         WHERE room_id = ? AND agent_id = ? AND adapter_session_id = ? AND status IN ('starting', 'running', 'waiting_permission')
+         ORDER BY COALESCE(started_at, created_at) DESC, created_at DESC
+         LIMIT 2`
+      )
+      .all(session.roomId, session.agentId, context.registration.adapterSessionId) as { readonly id: string }[];
+    if (rows.length !== 1) return undefined;
+    return rows[0]?.id;
   }
 
   private appendMailbox(workspaceId: string, roomId: string, fromAgentId: string, toAgentId: string, text: string, now: number): string {

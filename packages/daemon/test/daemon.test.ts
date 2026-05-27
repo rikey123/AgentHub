@@ -4,8 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { AgentHubClient } from "@agenthub/sdk";
+import { createDatabase } from "@agenthub/db";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { AdapterRegistry } from "../src/adapters/registry.ts";
 import { createDaemon, loadAgentHubConfig, type DaemonApp, type DaemonStartupPhase } from "../src/index.ts";
 
 let currentDaemon: DaemonApp | undefined;
@@ -49,9 +51,11 @@ describe("daemon M1.4 composition", () => {
     currentDaemon = undefined;
     const phases: { readonly direction: "startup" | "shutdown"; readonly phase: DaemonStartupPhase }[] = [];
     const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-phases-"));
-    const phasedDaemon = createDaemon({ databasePath: join(dir, "agenthub.sqlite"), port: 0, onLifecyclePhase: (event) => phases.push(event) });
+    const databasePath = join(dir, "agenthub.sqlite");
+    const phasedDaemon = createDaemon({ databasePath, port: 0, onLifecyclePhase: (event) => phases.push(event) });
 
     await phasedDaemon.start();
+    phasedDaemon.database.sqlite.prepare("INSERT INTO room_participants (room_id, participant_type, participant_id, role, default_presence, adapter_id, adapter_session_id, joined_at) VALUES ('room_close', 'agent', 'agent_close', 'primary', 'active', 'claude-code', 'stale-session', 1)").run();
     await phasedDaemon.close();
 
     const expectedStartup: readonly DaemonStartupPhase[] = [
@@ -78,6 +82,12 @@ describe("daemon M1.4 composition", () => {
     ];
     expect(phases.filter((event) => event.direction === "startup").map((event) => event.phase)).toEqual(expectedStartup);
     expect(phases.filter((event) => event.direction === "shutdown").map((event) => event.phase)).toEqual(expectedShutdown);
+    const reopened = createDatabase({ path: databasePath, applyMigrations: false });
+    try {
+      expect(reopened.sqlite.prepare("SELECT adapter_session_id FROM room_participants WHERE room_id = 'room_close' AND participant_id = 'agent_close'").get()).toMatchObject({ adapter_session_id: null });
+    } finally {
+      reopened.sqlite.close();
+    }
   });
 
   it("starts on loopback without a token", async () => {
@@ -144,8 +154,83 @@ describe("daemon M1.4 composition", () => {
     expect(sent.ok).toBe(true);
     expect(daemon.mockAdapter.llmCallsFor("claude-agent")).toBe(0);
     const run = daemon.database.sqlite.prepare("SELECT id, adapter_session_id FROM runs WHERE agent_id = 'claude-agent'").get() as { readonly id: string; readonly adapter_session_id: string };
-    expect(run).toMatchObject({ adapter_session_id: `acp-claude-code-${run.id}` });
-    expect(daemon.adapterRegistry.getClaudeAdapterForTest()?.debugSession(run.adapter_session_id)).toBeDefined();
+    const warm = daemon.database.sqlite.prepare("SELECT adapter_session_id FROM room_participants WHERE room_id = ? AND participant_id = 'claude-agent'").get(room.data.roomId) as { readonly adapter_session_id: string };
+    expect(run.adapter_session_id).toBe(warm.adapter_session_id);
+    expect(daemon.adapterRegistry.getClaudeAdapterForTest()?.debugSession(run.adapter_session_id)).toMatchObject({ runId: run.id });
+  });
+
+  it("prewarms active ACP agents when a room is created without creating runs", async () => {
+    daemon.database.sqlite.prepare("INSERT INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES ('claude-agent', NULL, 'Claude Agent', 'claude-code', 'claude', 'Claude test profile', ?, NULL, 0, NULL, 1, 1)").run(JSON.stringify(["chat", "code.edit"]));
+    daemon.database.sqlite.prepare("INSERT INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES ('opencode-agent', NULL, 'OpenCode Agent', 'opencode', 'opencode', 'OpenCode test profile', ?, NULL, 0, NULL, 1, 1)").run(JSON.stringify(["chat", "code.edit"]));
+    const client = new AgentHubClient({ baseUrl });
+
+    const room = await client.createRoom({
+      title: "Warm",
+      mode: "assisted",
+      primaryAgentId: "claude-agent",
+      participants: [
+        { type: "agent", agentId: "opencode-agent", role: "observer", defaultPresence: "active" },
+        { type: "agent", agentId: "mock-observer", role: "observer", defaultPresence: "observing" }
+      ]
+    }) as { readonly data: { readonly roomId: string } };
+
+    await waitFor(
+      () => daemon.database.sqlite.prepare("SELECT participant_id, adapter_session_id FROM room_participants WHERE room_id = ? ORDER BY participant_id ASC").all(room.data.roomId) as { readonly participant_id: string; readonly adapter_session_id: string | null }[],
+      (rows) => rows.some((row) => row.participant_id === "claude-agent" && row.adapter_session_id !== null)
+        && rows.some((row) => row.participant_id === "opencode-agent" && row.adapter_session_id !== null)
+    );
+
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM runs WHERE room_id = ?").get(room.data.roomId)).toMatchObject({ count: 0 });
+    expect(daemon.database.sqlite.prepare("SELECT adapter_session_id FROM room_participants WHERE room_id = ? AND participant_id = 'mock-observer'").get(room.data.roomId)).toMatchObject({ adapter_session_id: null });
+    const claude = daemon.database.sqlite.prepare("SELECT adapter_session_id FROM room_participants WHERE room_id = ? AND participant_id = 'claude-agent'").get(room.data.roomId) as { readonly adapter_session_id: string };
+    expect(claude.adapter_session_id).toBe(`acp-claude-code-warm-${room.data.roomId}-claude-agent`);
+    expect(daemon.adapterRegistry.getClaudeAdapterForTest()?.debugSession(claude.adapter_session_id)).toBeDefined();
+
+    const archived = await fetch(`${baseUrl}/rooms/${room.data.roomId}/archive`, { method: "POST" });
+    expect(archived.status).toBe(200);
+    expect(daemon.adapterRegistry.getClaudeAdapterForTest()?.debugSession(claude.adapter_session_id)?.state).toBe("disposed");
+    expect(daemon.database.sqlite.prepare("SELECT adapter_session_id FROM room_participants WHERE room_id = ? AND participant_id = 'claude-agent'").get(room.data.roomId)).toMatchObject({ adapter_session_id: null });
+  });
+
+  it("archiving a room keeps active ACP runs lifecycle-owned instead of disposing their session", async () => {
+    daemon.database.sqlite.prepare("INSERT INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES ('claude-agent', NULL, 'Claude Agent', 'claude-code', 'claude', 'Claude test profile', ?, NULL, 0, NULL, 1, 1)").run(JSON.stringify(["chat", "code.edit"]));
+    const client = new AgentHubClient({ baseUrl });
+    const room = await client.createRoom({ title: "Active Archive", mode: "solo", primaryAgentId: "claude-agent" }) as { readonly data: { readonly roomId: string } };
+    await waitFor(
+      () => daemon.database.sqlite.prepare("SELECT adapter_session_id FROM room_participants WHERE room_id = ? AND participant_id = 'claude-agent'").get(room.data.roomId) as { readonly adapter_session_id: string | null },
+      (row) => row.adapter_session_id !== null
+    );
+
+    await client.sendMessage(room.data.roomId, { text: "long running", idempotencyKey: "archive-active-run" });
+    const run = daemon.database.sqlite.prepare("SELECT id, adapter_session_id, status FROM runs WHERE room_id = ? AND agent_id = 'claude-agent'").get(room.data.roomId) as { readonly id: string; readonly adapter_session_id: string; readonly status: string };
+    expect(run.status).toBe("running");
+
+    const archived = await fetch(`${baseUrl}/rooms/${room.data.roomId}/archive`, { method: "POST" });
+
+    expect(archived.status).toBe(200);
+    expect(daemon.adapterRegistry.getClaudeAdapterForTest()?.debugSession(run.adapter_session_id)?.state).not.toBe("disposed");
+    expect(daemon.database.sqlite.prepare("SELECT status FROM runs WHERE id = ?").get(run.id)).toMatchObject({ status: "running" });
+    expect(daemon.database.sqlite.prepare("SELECT adapter_session_id FROM room_participants WHERE room_id = ? AND participant_id = 'claude-agent'").get(room.data.roomId)).toMatchObject({ adapter_session_id: null });
+  });
+
+  it("clears stale warm session ids when ACP warmup fails synchronously", () => {
+    daemon.database.sqlite.prepare("INSERT OR IGNORE INTO workspaces (id, name, root_path, created_at, updated_at) VALUES ('default-workspace', 'Default', '.', 1, 1)").run();
+    daemon.database.sqlite.prepare("INSERT INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES ('claude-agent', NULL, 'Claude Agent', 'claude-code', 'claude', 'Claude test profile', ?, NULL, 0, NULL, 1, 1)").run(JSON.stringify(["chat", "code.edit"]));
+    daemon.database.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES ('room_warm_fail', 'default-workspace', 'Warm Fail', 'solo', 'conversation', 'claude-agent', NULL, 1, 1)").run();
+    daemon.database.sqlite.prepare("INSERT INTO room_participants (room_id, participant_type, participant_id, role, default_presence, adapter_id, adapter_session_id, joined_at) VALUES ('room_warm_fail', 'agent', 'claude-agent', 'primary', 'active', 'claude-code', NULL, 1)").run();
+    const failingAdapter = {
+      runManaged: async () => undefined,
+      cancelManagedRun: async () => undefined,
+      warmRoomAgent: () => { throw new Error("warmup failed"); },
+      disposeRoomWarmSessions: () => undefined,
+      disposeAllSessions: () => undefined,
+      debugSession: () => undefined
+    };
+    const registry = new AdapterRegistry({ database: daemon.database, eventBus: daemon.eventBus, lifecycle: {} as never, mockAdapter: daemon.mockAdapter, claudeAdapter: failingAdapter as never });
+
+    expect(() => registry.prewarmRoomAgents("room_warm_fail")).not.toThrow();
+
+    expect(daemon.database.sqlite.prepare("SELECT adapter_session_id FROM room_participants WHERE room_id = 'room_warm_fail' AND participant_id = 'claude-agent'").get()).toMatchObject({ adapter_session_id: null });
   });
 
   it("streams durable replay plus live events with main/detail visibility", async () => {
@@ -606,4 +691,15 @@ async function invokeHandler(daemon: DaemonApp, method: string, url: string): Pr
   daemon.handle(req, res);
   await ended;
   return { status: res.statusCode ?? 200, body: JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown };
+}
+
+async function waitFor<T>(read: () => T, done: (value: T) => boolean, options: { readonly timeoutMs?: number } = {}): Promise<T> {
+  const deadline = Date.now() + (options.timeoutMs ?? 2_000);
+  let value = read();
+  while (!done(value) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    value = read();
+  }
+  if (!done(value)) throw new Error(`Timed out waiting for condition: ${JSON.stringify(value)}`);
+  return value;
 }

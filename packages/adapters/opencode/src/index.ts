@@ -31,6 +31,7 @@ export type OpenCodeAdapterOptions = {
   readonly artifactFs?: AdapterArtifactFSBoundary;
   readonly mcpServer?: RoomMcpServer;
   readonly permissionEngine?: PermissionEngine;
+  readonly onWarmSessionFailed?: (input: { readonly roomId: string; readonly agentId: string; readonly adapterSessionId: string }) => void;
   readonly now?: () => number;
 };
 
@@ -76,15 +77,12 @@ export class OpenCodeACPAdapter extends ACPAdapter {
     this.bridgeByRun.set(run.id, bridge);
     this.runById.set(run.id, run);
     this.workspaceByRun.set(run.id, run.workspace_id);
-    const session = Effect.runSync(this.createSession({
-      runId: run.id,
-      roomId: run.room_id,
-      agentId: run.agent_id,
-      workDir,
-      ...(this.options.mcpServer !== undefined ? {
-        mcpServer: this.options.mcpServer.getStdioConfig({ roomId: run.room_id, runId: run.id, agentId: run.agent_id })
-      } : {})
-    }));
+    let session = this.bindWarmSessionToRun({ roomId: run.room_id, agentId: run.agent_id, runId: run.id });
+    if (session === undefined) {
+      const sessionId = `acp-${this.id}-${run.id}`;
+      const mcpServer = this.options.mcpServer?.getRegisteredStdioConfig({ roomId: run.room_id, runId: run.id, agentId: run.agent_id, adapterSessionId: sessionId });
+      session = Effect.runSync(this.createSession({ runId: run.id, roomId: run.room_id, agentId: run.agent_id, workDir, ...(mcpServer !== undefined ? { mcpServer } : {}) }));
+    }
     const acpSession = this.debugSession(session.id);
     if (acpSession === undefined) throw new ACPAdapterError("session_not_found", `ACP session '${session.id}' not found`);
     bridge.handle({ type: "session.opened", sessionId: session.id, workDir, ...(session.providerConversationId !== undefined ? { providerConversationId: session.providerConversationId } : {}) });
@@ -93,6 +91,12 @@ export class OpenCodeACPAdapter extends ACPAdapter {
     if (acpSession.state === "failed") return;
     this.health?.update({ adapterId: this.id, workspaceId: run.workspace_id, liveness: "busy", pendingRunIds: [run.id] });
     this.sendPrompt(session.id, { role: "user", content: this.promptFromRun(run) });
+  }
+
+  warmRoomAgent(input: { readonly roomId: string; readonly agentId: string; readonly workDir?: string }): string {
+    const adapterSessionId = `acp-${this.id}-warm-${input.roomId}-${input.agentId}`;
+    const mcpServer = this.options.mcpServer?.getRegisteredStdioConfig({ roomId: input.roomId, agentId: input.agentId, adapterSessionId });
+    return this.createWarmSession({ roomId: input.roomId, agentId: input.agentId, sessionId: adapterSessionId, ...(input.workDir !== undefined ? { workDir: input.workDir } : {}), ...(mcpServer !== undefined ? { mcpServer } : {}) }).id;
   }
 
   async cancelManagedRun(runId: string): Promise<void> {
@@ -140,7 +144,10 @@ export class OpenCodeACPAdapter extends ACPAdapter {
   }
 
   protected override onSessionFailed(session: AcpAdapterSession, error: ACPAdapterError): void {
-    if (session.runId === undefined) return;
+    if (session.runId === undefined) {
+      this.options.onWarmSessionFailed?.({ roomId: session.roomId, agentId: session.agentId, adapterSessionId: session.acpSessionId });
+      return;
+    }
     if (!this.openedRuns.has(session.runId)) {
       this.pendingFailuresByRun.set(session.runId, error);
       return;

@@ -13,6 +13,7 @@ import { ActiveWakesRegistry, createCancelRunHandler, createCompleteTaskHandler,
 import { createPermissionCommandHandlers, PermissionEngine, seedBuiltInPermissionProfiles } from "@agenthub/permissions";
 import type { EventEnvelope } from "@agenthub/protocol/events";
 import { attachmentMaxBytes, authenticateBrowserRequest, issueBrowserSession, redactAndTruncate, storeAttachment, type BrowserAuthResult } from "@agenthub/security";
+import { Effect } from "effect";
 
 import { AdapterRegistry } from "./adapters/registry.ts";
 import { createDaemonCommandHandlers, seedDefaultData } from "./commands.ts";
@@ -29,7 +30,7 @@ export type DaemonStartupPhase =
   | "AdapterManager detect + register"
   | "CommandBus open"
   | "HTTP server bind + SSE accept";
-export type DaemonOptions = { readonly databasePath: string; readonly host?: string; readonly port?: number; readonly token?: string; readonly allowRemote?: boolean; readonly allowedOrigins?: readonly string[]; readonly now?: () => number; readonly onLifecyclePhase?: (event: { readonly direction: "startup" | "shutdown"; readonly phase: DaemonStartupPhase }) => void };
+export type DaemonOptions = { readonly databasePath: string; readonly host?: string; readonly port?: number; readonly token?: string; readonly allowRemote?: boolean; readonly allowedOrigins?: readonly string[]; readonly adapterCommands?: { readonly claude?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv }; readonly opencode?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv } }; readonly now?: () => number; readonly onLifecyclePhase?: (event: { readonly direction: "startup" | "shutdown"; readonly phase: DaemonStartupPhase }) => void };
 export type DaemonCloseOptions = { readonly forceCancelAfterMs?: number };
 export type DaemonCloseResult = { readonly forced: boolean; readonly cancelledRunIds: readonly string[] };
 export type DaemonApp = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly roomMcpServer: RoomMcpServer; readonly adapterRegistry: AdapterRegistry; readonly mockAdapter: MockAdapterManager; readonly handle: (req: IncomingMessage, res: ServerResponse) => void; readonly inFlightRunIds: () => readonly string[]; start(): Promise<Server>; close(options?: DaemonCloseOptions): Promise<DaemonCloseResult> };
@@ -154,13 +155,12 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     const briefGenerator = new HeuristicBriefGenerator();
     const briefResolver: BriefResolver = (input) => {
       try {
-        const Effect = (require("effect") as { Effect: { runSync: <A>(eff: unknown) => A } }).Effect;
         return Effect.runSync(briefGenerator.generate(input as never)) as string;
       } catch {
         return "";
       }
     };
-    const adapterRegistry = new AdapterRegistry({ database, eventBus, lifecycle, permissionEngine, artifactFs, briefResolver, getRoomMcpServer: () => currentRoomMcpServer(roomMcpServerRef), getCommandBus: () => commandBusRef.current, ...(options.now !== undefined ? { now: options.now } : {}) });
+    const adapterRegistry = new AdapterRegistry({ database, eventBus, lifecycle, permissionEngine, artifactFs, briefResolver, getRoomMcpServer: () => currentRoomMcpServer(roomMcpServerRef), getCommandBus: () => commandBusRef.current, ...(options.adapterCommands !== undefined ? { adapterCommands: options.adapterCommands } : {}), ...(options.now !== undefined ? { now: options.now } : {}) });
 
     emitPhase("startup", PHASE_OUTBOX);
     const handlers = createDurableHandlerRegistry({ database, retryDelaysMs: [0] });
@@ -212,7 +212,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     const commandBus = createCommandBus({
       database,
       handlers: {
-        ...createDaemonCommandHandlers({ database, eventBus, getCommandBus: () => commandBus, pendingTurns, ...(options.now !== undefined ? { now: options.now } : {}) }),
+        ...createDaemonCommandHandlers({ database, eventBus, getCommandBus: () => commandBus, pendingTurns, prewarmRoomAgents: (roomId) => adapterRegistry.prewarmRoomAgents(roomId), disposeRoomAgents: (roomId) => adapterRegistry.disposeRoomAgents(roomId), ...(options.now !== undefined ? { now: options.now } : {}) }),
         ...createContextCommandHandlers(contextLedger, options.now),
         ...createArtifactCommandHandlers(artifactService),
         ...createPermissionCommandHandlers(permissionEngine, database, eventBus, options.now),
@@ -258,6 +258,8 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
       } else if (phase === PHASE_EVENT_BUS) {
         runtime?.eventBus.flushStatusLines?.();
         await runtime?.agentProfiles.close();
+        runtime?.adapterRegistry.disposeAll();
+        runtime?.roomMcpServer.stopTcp();
         runtime?.eventBus.close();
       } else if (phase === PHASE_SQLITE) {
         runtime?.database.sqlite.close();

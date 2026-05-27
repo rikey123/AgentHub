@@ -14,9 +14,10 @@
  *   ROOM_MCP_PORT    - TCP port of the daemon's RoomMcpServer
  *   ROOM_MCP_TOKEN   - auth token (UUID)
  *   ROOM_MCP_ROOM_ID - room context
- *   ROOM_MCP_RUN_ID  - run context
+ *   ROOM_MCP_RUN_ID  - optional run context (omitted for prewarmed sessions)
  *   ROOM_MCP_AGENT_ID - agent context
  */
+/* global Buffer */
 
 import * as net from "node:net";
 import * as readline from "node:readline";
@@ -26,8 +27,9 @@ const TOKEN = process.env.ROOM_MCP_TOKEN ?? "";
 const ROOM_ID = process.env.ROOM_MCP_ROOM_ID ?? "";
 const RUN_ID = process.env.ROOM_MCP_RUN_ID ?? "";
 const AGENT_ID = process.env.ROOM_MCP_AGENT_ID ?? "";
+const SESSION_TOKEN = process.env.ROOM_MCP_SESSION_TOKEN ?? "";
 
-if (!PORT || !TOKEN || !ROOM_ID || !RUN_ID || !AGENT_ID) {
+if (!PORT || !TOKEN || !ROOM_ID || !AGENT_ID) {
   process.stderr.write("[room-mcp-stdio] Missing required env vars\n");
   process.exit(1);
 }
@@ -222,8 +224,9 @@ async function handleRequest(req) {
         tool: toolName,
         args: toolArgs,
         room_id: ROOM_ID,
-        run_id: RUN_ID,
+        ...(RUN_ID ? { run_id: RUN_ID } : {}),
         agent_id: AGENT_ID,
+        ...(SESSION_TOKEN ? { session_token: SESSION_TOKEN } : {}),
         ...(jsonRpcRequestId(id) !== undefined ? { mcp_request_id: jsonRpcRequestId(id) } : {}),
       });
 
