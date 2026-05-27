@@ -104,7 +104,16 @@ ${teammateLines}
 
 Example: \`room.send_message({ text: "@${firstTeammateSlug} please review this" })\`
 
-Use \`room.list_members\` to see the current roster and presence status.`;
+Use \`room.list_members\` to see the current roster and presence status.
+
+## Receiving Messages from Other Agents (CRITICAL)
+
+When woken by a message from another agent, ask first: **does this message contain a concrete task for me?**
+
+- If YES → do the work, report results.
+- If NO (greeting, test, acknowledgement, "got it", etc.) → send ONE short reply at most, then **end your turn immediately**. Do NOT call \`room.send_message\` again unless you have actual results to report.
+
+Every \`room.send_message\` wakes the recipient. Replying to non-task messages creates infinite loops.`;
 
   if (basePrompt.length === 0) return teammatesSection;
   return `${basePrompt}\n\n${teammatesSection}`;
