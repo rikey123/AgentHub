@@ -447,6 +447,111 @@ describe("TaskService and RoomMcpServer", () => {
     expect(currentDatabase().sqlite.prepare("SELECT read, claimed_run_id, delivery_batch_id FROM mailbox_messages WHERE id = 'mb_spoofed'").get()).toMatchObject({ read: 0, claimed_run_id: null, delivery_batch_id: null });
   });
 
+  test("room.read_mailbox resolves the current active run for a prewarmed MCP session", async () => {
+    seedRoom("room_1", "agent_1");
+    seedMailbox("mb_warm", "room_1", "agent_1");
+    createRun("run_warm", { roomId: "room_1", agentId: "agent_1" });
+    currentLifecycle().markClaimed(null, "run_warm");
+    currentLifecycle().markStarting(null, "run_warm", 123);
+    currentLifecycle().markRunning(null, "run_warm", "acp-test-warm-room_1-agent_1");
+    const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const commandBus = new CommandBus({ database: currentDatabase() });
+    const mcp = new RoomMcpServer({ commandBus, taskService: service, database: currentDatabase(), eventBus: currentBus(), now: () => now });
+
+    const session = { roomId: "room_1", agentId: "agent_1" };
+    const rejected = await mcp.callTool("room.read_mailbox", { deliveryBatchId: "batch_rejected" }, session);
+    const registration = mcp.getRegisteredStdioConfig({ roomId: "room_1", agentId: "agent_1", adapterSessionId: "acp-test-warm-room_1-agent_1" });
+    const token = registration.env.find((item) => item.name === "ROOM_MCP_SESSION_TOKEN")?.value;
+    if (token === undefined) throw new Error("expected session token");
+
+    const result = await mcp.callTool("room.read_mailbox", { deliveryBatchId: "batch_warm" }, session, { registration: { token, roomId: "room_1", agentId: "agent_1", adapterSessionId: "acp-test-warm-room_1-agent_1" } });
+
+    expect(rejected).toMatchObject({ ok: false, error: { code: "conflict" } });
+    expect(result).toMatchObject({ ok: true, data: { deliveryBatchId: "batch_warm", mailbox: [{ id: "mb_warm" }] } });
+    expect(currentDatabase().sqlite.prepare("SELECT read, claimed_run_id FROM mailbox_messages WHERE id = 'mb_warm'").get()).toMatchObject({ read: 1, claimed_run_id: "run_warm" });
+  });
+
+  test("registered warm MCP sessions reject stale or mismatched registrations before any tool runs", async () => {
+    seedRoom("room_1", "agent_1");
+    createRun("run_warm_stale", { roomId: "room_1", agentId: "agent_1" });
+    currentLifecycle().markClaimed(null, "run_warm_stale");
+    currentLifecycle().markStarting(null, "run_warm_stale", 123);
+    currentLifecycle().markRunning(null, "run_warm_stale", "acp-test-warm-room_1-agent_1");
+    const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const commandBus = new CommandBus({ database: currentDatabase() });
+    const mcp = new RoomMcpServer({ commandBus, taskService: service, database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const session = { roomId: "room_1", agentId: "agent_1" };
+
+    const stale = await mcp.callTool("room.list_members", {}, session, {
+      registration: { token: "stale-token", roomId: "room_1", agentId: "agent_1", adapterSessionId: "acp-stale" }
+    });
+    const mismatched = await mcp.callTool("room.list_tasks", {}, session, {
+      registration: { token: "wrong-agent-token", roomId: "room_1", agentId: "agent_2", adapterSessionId: "acp-test-warm-room_1-agent_1" }
+    });
+
+    expect(stale).toMatchObject({ ok: false, error: { code: "permission_denied" } });
+    expect(mismatched).toMatchObject({ ok: false, error: { code: "permission_denied" } });
+  });
+
+  test("registered warm MCP sessions ignore spoofed run ids and resolve the registered active run", async () => {
+    seedRoom("room_1", "agent_1");
+    seedMailbox("mb_registered", "room_1", "agent_1");
+    createRun("run_registered", { roomId: "room_1", agentId: "agent_1" });
+    createRun("run_spoofed", { roomId: "room_1", agentId: "agent_1" });
+    currentLifecycle().markClaimed(null, "run_registered");
+    currentLifecycle().markStarting(null, "run_registered", 123);
+    currentLifecycle().markRunning(null, "run_registered", "acp-test-warm-room_1-agent_1");
+    const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const commandBus = new CommandBus({ database: currentDatabase() });
+    const mcp = new RoomMcpServer({ commandBus, taskService: service, database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const registration = registeredContext(mcp, { roomId: "room_1", agentId: "agent_1", adapterSessionId: "acp-test-warm-room_1-agent_1" });
+
+    const result = await mcp.callTool("room.read_mailbox", { deliveryBatchId: "batch_registered" }, { roomId: "room_1", runId: "run_spoofed", agentId: "agent_1" }, { registration });
+
+    expect(result).toMatchObject({ ok: true, data: { mailbox: [{ id: "mb_registered" }] } });
+    expect(currentDatabase().sqlite.prepare("SELECT claimed_run_id FROM mailbox_messages WHERE id = 'mb_registered'").get()).toMatchObject({ claimed_run_id: "run_registered" });
+  });
+
+  test("registered warm MCP sessions resolve the current run for task tools", async () => {
+    seedRoom("room_1", "agent_1");
+    createRun("run_warm_task", { roomId: "room_1", agentId: "agent_1" });
+    currentLifecycle().markClaimed(null, "run_warm_task");
+    currentLifecycle().markStarting(null, "run_warm_task", 123);
+    currentLifecycle().markRunning(null, "run_warm_task", "acp-test-warm-room_1-agent_1");
+    const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const commandBus = new CommandBus({ database: currentDatabase(), handlers: { CreateTask: createCreateTaskHandler(service), UpdateTask: createUpdateTaskHandler(service) } });
+    const mcp = new RoomMcpServer({ commandBus, taskService: service, database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const session = { roomId: "room_1", agentId: "agent_1" };
+    const registration = registeredContext(mcp, { roomId: "room_1", agentId: "agent_1", adapterSessionId: "acp-test-warm-room_1-agent_1" });
+
+    const created = await mcp.callTool("room.create_task", { title: "Warm task", assigneeAgentId: "agent_1" }, session, { registration });
+
+    expect(created).toMatchObject({ ok: true });
+    if (!created.ok || !isRecord(created.data) || typeof created.data.taskId !== "string") throw new Error("expected task id");
+    expect(currentDatabase().sqlite.prepare("SELECT source_run_id FROM tasks WHERE id = ?").get(created.data.taskId)).toMatchObject({ source_run_id: "run_warm_task" });
+    expect(await mcp.callTool("room.update_task", { taskId: created.data.taskId, status: "in_progress" }, session, { registration })).toMatchObject({ ok: true });
+  });
+
+  test("registered warm MCP sessions resolve the current run for agent messages", async () => {
+    seedAssistedRoomWithAgents("room_warm_send", "agent_sender", "agent_target");
+    createRun("run_warm_sender", { roomId: "room_warm_send", agentId: "agent_sender" });
+    currentLifecycle().markClaimed(null, "run_warm_sender");
+    currentLifecycle().markStarting(null, "run_warm_sender", 123);
+    currentLifecycle().markRunning(null, "run_warm_sender", "acp-test-warm-room_warm_send-agent_sender");
+    const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const commandBus = commandBusWithHandlers();
+    const mcp = new RoomMcpServer({ commandBus, taskService: service, database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const session = { roomId: "room_warm_send", agentId: "agent_sender" };
+    const registration = registeredContext(mcp, { roomId: "room_warm_send", agentId: "agent_sender", adapterSessionId: "acp-test-warm-room_warm_send-agent_sender" });
+
+    const result = await mcp.callTool("room.send_message", { text: "@target please read your mailbox" }, session, { registration });
+
+    expect(result).toMatchObject({ ok: true, data: { delivered: 1 } });
+    expect(currentDatabase().sqlite.prepare("SELECT from_id, to_agent_id FROM mailbox_messages WHERE room_id = 'room_warm_send'").get()).toMatchObject({ from_id: "agent_sender", to_agent_id: "agent_target" });
+    expect(currentDatabase().sqlite.prepare("SELECT run_id, source_reason FROM run_next_turns WHERE run_id = 'run_warm_sender'").get()).toBeUndefined();
+    expect(runCount()).toBe(2);
+  });
+
   test("agent mailbox wake does not append sender text as executable next-turn prompt", async () => {
     seedAssistedRoomWithAgents("room_loop", "agent_sender", "agent_target");
     createRun("run_target_active", { roomId: "room_loop", agentId: "agent_target" });
@@ -750,6 +855,13 @@ function seedRoom(roomId: string, agentId: string): void {
   currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO workspaces (id, name, root_path, created_at, updated_at) VALUES ('ws_1', 'Workspace', '.', ?, ?)").run(now, now);
   currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES (?, 'ws_1', 'Room', 'solo', 'conversation', ?, NULL, ?, ?)").run(roomId, agentId, now, now);
   currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, default_presence, joined_at) VALUES (?, ?, 'agent', 'primary', 'mock', NULL, 'active', ?)").run(roomId, agentId, now);
+}
+
+function registeredContext(mcp: RoomMcpServer, input: { readonly roomId: string; readonly agentId: string; readonly adapterSessionId: string }) {
+  const config = mcp.getRegisteredStdioConfig(input);
+  const token = config.env.find((item) => item.name === "ROOM_MCP_SESSION_TOKEN")?.value;
+  if (token === undefined) throw new Error("expected session token");
+  return { token, roomId: input.roomId, agentId: input.agentId, adapterSessionId: input.adapterSessionId };
 }
 
 function seedAssistedRoomWithAgents(roomId: string, primaryAgentId: string, targetAgentId: string): void {

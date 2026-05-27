@@ -84,7 +84,8 @@ async function status(argv: readonly string[]): Promise<number> {
 
 async function doctor(argv: readonly string[]): Promise<number> {
   const configPath = valueArg(argv, "--config");
-  const overrides = { ...(configPath !== undefined ? { configPath } : {}) };
+  const port = numericArg(argv, "--port");
+  const overrides = { ...(configPath !== undefined ? { configPath } : {}), ...(port !== undefined ? { port } : {}) };
   const config = safeCheck("config", () => { loadAgentHubConfig(overrides); });
   const parsed = config.ok ? loadAgentHubConfig(overrides) : undefined;
   const checks = [

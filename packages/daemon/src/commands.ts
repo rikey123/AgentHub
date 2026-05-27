@@ -9,6 +9,8 @@ export type DaemonCommandHandlersOptions = {
   readonly eventBus: EventBus;
   readonly getCommandBus: () => CommandBus;
   readonly pendingTurns: PendingTurnService;
+  readonly prewarmRoomAgents?: (roomId: string) => void | Promise<void>;
+  readonly disposeRoomAgents?: (roomId: string) => void;
   readonly now?: () => number;
 };
 
@@ -105,6 +107,7 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
   })();
 
   const emittedEvents = latestEvents(options.database, roomId);
+  void Promise.resolve().then(() => options.prewarmRoomAgents?.(roomId)).catch(() => undefined);
   void meta;
   return { ok: true, data: { roomId }, emittedEvents };
 }
@@ -119,6 +122,7 @@ function setRoomArchived(options: DaemonCommandHandlersOptions, command: Command
     options.database.sqlite.prepare("UPDATE rooms SET archived_at = ?, updated_at = ? WHERE id = ?").run(archived ? now : null, now, roomId);
     options.eventBus.publish(roomEvent(archived ? "room.closed" : "room.opened", room.workspace_id, roomId, { roomId }, now));
   })();
+  if (archived) options.disposeRoomAgents?.(roomId);
   return { ok: true, data: { roomId, archived }, emittedEvents: latestEvents(options.database, roomId) };
 }
 

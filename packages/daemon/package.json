@@ -25,6 +25,7 @@
     "@agenthub/protocol": "workspace:*",
     "@agenthub/security": "workspace:*",
     "@agenthub/sdk": "workspace:*",
+    "effect": "^3.19.6",
     "smol-toml": "^1.4.2"
   }
 }

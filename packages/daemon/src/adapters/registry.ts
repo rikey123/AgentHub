@@ -18,16 +18,24 @@ export type AdapterRegistryOptions = {
   readonly getRoomMcpServer?: () => RoomMcpServer;
   readonly getCommandBus?: () => CommandBus | undefined;
   readonly mockAdapter?: MockAdapterManager;
-  readonly claudeAdapter?: ClaudeCodeACPAdapter;
-  readonly opencodeAdapter?: OpenCodeACPAdapter;
+  readonly claudeAdapter?: WarmableManagedAdapter;
+  readonly opencodeAdapter?: WarmableManagedAdapter;
+  readonly adapterCommands?: {
+    readonly claude?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv };
+    readonly opencode?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv };
+  };
   readonly now?: () => number;
+};
+
+type WarmableManagedAdapter = Pick<ClaudeCodeACPAdapter, "runManaged" | "cancelManagedRun" | "warmRoomAgent" | "disposeRoomWarmSessions" | "disposeAllSessions"> & {
+  readonly debugSession?: ClaudeCodeACPAdapter["debugSession"];
 };
 
 export class AdapterRegistry {
   readonly mockAdapter: MockAdapterManager;
   private readonly runAdapters = new Map<string, RuntimeAdapterId>();
-  private claudeAdapter: ClaudeCodeACPAdapter | undefined;
-  private opencodeAdapter: OpenCodeACPAdapter | undefined;
+  private claudeAdapter: WarmableManagedAdapter | undefined;
+  private opencodeAdapter: WarmableManagedAdapter | undefined;
 
   constructor(private readonly options: AdapterRegistryOptions) {
     this.mockAdapter = options.mockAdapter ?? new MockAdapterManager({ database: options.database, eventBus: options.eventBus, lifecycle: options.lifecycle, ...(options.artifactFs !== undefined ? { artifactFs: options.artifactFs } : {}), ...(options.now !== undefined ? { now: options.now } : {}) });
@@ -49,6 +57,41 @@ export class AdapterRegistry {
     await this.mockAdapter.runAgent(run);
   }
 
+  prewarmRoomAgents(roomId: string): void {
+    const rows = this.options.database.sqlite
+      .prepare(
+        `SELECT rp.participant_id AS agent_id, rp.adapter_id, w.root_path
+         FROM room_participants rp
+         JOIN rooms r ON r.id = rp.room_id
+         LEFT JOIN workspaces w ON w.id = r.workspace_id
+         WHERE rp.room_id = ? AND rp.participant_type = 'agent' AND rp.default_presence = 'active'`
+      )
+      .all(roomId) as { readonly agent_id: string; readonly adapter_id: string | null; readonly root_path: string | null }[];
+    for (const row of rows) {
+      const adapterId = this.classify(row.adapter_id, row.agent_id);
+      if (adapterId === "mock") continue;
+      const sessionId = this.warmSessionId(adapterId, roomId, row.agent_id);
+      try {
+        const workDir = row.root_path ?? process.cwd();
+        this.options.database.sqlite
+          .prepare("UPDATE room_participants SET adapter_session_id = ? WHERE room_id = ? AND participant_id = ? AND participant_type = 'agent'")
+          .run(sessionId, roomId, row.agent_id);
+        const createdSessionId = adapterId === "claude-code"
+          ? this.claude().warmRoomAgent({ roomId, agentId: row.agent_id, workDir })
+          : this.opencode().warmRoomAgent({ roomId, agentId: row.agent_id, workDir });
+        if (createdSessionId !== sessionId) {
+          this.options.database.sqlite
+            .prepare("UPDATE room_participants SET adapter_session_id = ? WHERE room_id = ? AND participant_id = ? AND participant_type = 'agent' AND adapter_session_id = ?")
+            .run(createdSessionId, roomId, row.agent_id, sessionId);
+        }
+      } catch {
+        this.clearWarmSession({ roomId, agentId: row.agent_id, adapterSessionId: sessionId });
+        // Mirroring AionUi's warmup path: preloading is best-effort and must not
+        // make room creation fail. The first real run will create a fresh session.
+      }
+    }
+  }
+
   async cancelRun(runId: string): Promise<void> {
     const adapterId = this.runAdapters.get(runId) ?? this.adapterIdForPersistedRun(runId);
     if (adapterId === "claude-code") {
@@ -62,8 +105,25 @@ export class AdapterRegistry {
     this.mockAdapter.cancelRun(runId);
   }
 
-  getClaudeAdapterForTest(): ClaudeCodeACPAdapter | undefined {
-    return this.claudeAdapter;
+  disposeRoomAgents(roomId: string): void {
+    const rows = this.options.database.sqlite
+      .prepare("SELECT adapter_session_id FROM room_participants WHERE room_id = ? AND adapter_session_id IS NOT NULL")
+      .all(roomId) as { readonly adapter_session_id: string }[];
+    this.claudeAdapter?.disposeRoomWarmSessions(roomId);
+    this.opencodeAdapter?.disposeRoomWarmSessions(roomId);
+    const roomMcpServer = this.options.getRoomMcpServer?.();
+    for (const row of rows) roomMcpServer?.unregisterSession(row.adapter_session_id);
+    this.options.database.sqlite.prepare("UPDATE room_participants SET adapter_session_id = NULL WHERE room_id = ?").run(roomId);
+  }
+
+  disposeAll(): void {
+    this.claudeAdapter?.disposeAllSessions();
+    this.opencodeAdapter?.disposeAllSessions();
+    this.options.database.sqlite.prepare("UPDATE room_participants SET adapter_session_id = NULL WHERE adapter_session_id IS NOT NULL").run();
+  }
+
+  getClaudeAdapterForTest(): Pick<ClaudeCodeACPAdapter, "debugSession"> | undefined {
+    return this.claudeAdapter?.debugSession !== undefined ? this.claudeAdapter as Pick<ClaudeCodeACPAdapter, "debugSession"> : undefined;
   }
 
   // Used by StartupRecovery to decide what to do with each in-flight run after
@@ -72,32 +132,48 @@ export class AdapterRegistry {
   // attachSession path always throws. Returning `fail_run` here makes the
   // recovery mark these runs failed cleanly (and clear `run_locks`), which
   // lets fresh runs in the same room start without waiting on dead lock owners.
-  reclaimAdapterFor(_run: RunRow): ReclaimAdapter {
+  reclaimAdapterFor(run: RunRow): ReclaimAdapter {
+    void run;
     return { crashRecovery: "fail_run" };
   }
 
-  private claude(): ClaudeCodeACPAdapter {
+  private claude(): WarmableManagedAdapter {
     this.claudeAdapter ??= new ClaudeCodeACPAdapter({
       services: { database: this.options.database, eventBus: this.options.eventBus, ...(this.options.getCommandBus !== undefined ? { getCommandBus: this.options.getCommandBus } : {}), ...(this.options.permissionEngine !== undefined ? { permissionEngine: this.options.permissionEngine } : {}), ...(this.options.artifactFs !== undefined ? { artifactFs: this.options.artifactFs } : {}), ...(this.options.briefResolver !== undefined ? { briefResolver: this.options.briefResolver } : {}) },
       lifecycle: this.options.lifecycle,
       workspaceId: "default-workspace",
+      ...(this.options.adapterCommands?.claude !== undefined ? this.options.adapterCommands.claude : {}),
       ...(this.options.permissionEngine !== undefined ? { permissionEngine: this.options.permissionEngine } : {}),
       ...(this.options.getRoomMcpServer !== undefined ? { mcpServer: this.options.getRoomMcpServer() } : {}),
+      onWarmSessionFailed: (input) => this.clearWarmSession(input),
       ...(this.options.now !== undefined ? { now: this.options.now } : {})
     });
     return this.claudeAdapter;
   }
 
-  private opencode(): OpenCodeACPAdapter {
+  private opencode(): WarmableManagedAdapter {
     this.opencodeAdapter ??= new OpenCodeACPAdapter({
       services: { database: this.options.database, eventBus: this.options.eventBus, ...(this.options.getCommandBus !== undefined ? { getCommandBus: this.options.getCommandBus } : {}), ...(this.options.permissionEngine !== undefined ? { permissionEngine: this.options.permissionEngine } : {}), ...(this.options.artifactFs !== undefined ? { artifactFs: this.options.artifactFs } : {}), ...(this.options.briefResolver !== undefined ? { briefResolver: this.options.briefResolver } : {}) },
       lifecycle: this.options.lifecycle,
       workspaceId: "default-workspace",
+      ...(this.options.adapterCommands?.opencode !== undefined ? this.options.adapterCommands.opencode : {}),
       ...(this.options.permissionEngine !== undefined ? { permissionEngine: this.options.permissionEngine } : {}),
       ...(this.options.getRoomMcpServer !== undefined ? { mcpServer: this.options.getRoomMcpServer() } : {}),
+      onWarmSessionFailed: (input) => this.clearWarmSession(input),
       ...(this.options.now !== undefined ? { now: this.options.now } : {})
     });
     return this.opencodeAdapter;
+  }
+
+  private clearWarmSession(input: { readonly roomId: string; readonly agentId: string; readonly adapterSessionId: string }): void {
+    this.options.database.sqlite
+      .prepare("UPDATE room_participants SET adapter_session_id = NULL WHERE room_id = ? AND participant_id = ? AND participant_type = 'agent' AND adapter_session_id = ?")
+      .run(input.roomId, input.agentId, input.adapterSessionId);
+    this.options.getRoomMcpServer?.().unregisterSession(input.adapterSessionId);
+  }
+
+  private warmSessionId(adapterId: Exclude<RuntimeAdapterId, "mock">, roomId: string, agentId: string): string {
+    return `acp-${adapterId}-warm-${roomId}-${agentId}`;
   }
 
   private adapterIdForRun(run: RunRow): RuntimeAdapterId {
