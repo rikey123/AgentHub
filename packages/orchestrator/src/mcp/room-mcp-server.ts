@@ -1,10 +1,14 @@
 import { randomUUID } from "node:crypto";
+import * as net from "node:net";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type { CommandBus, CommandResult, EventBus } from "@agenthub/bus";
 import type { AgentHubDatabase } from "@agenthub/db";
 
 import { nameToSlug } from "../mention-parser.ts";
 import { TaskService, normalizeStatus } from "../task-service.ts";
+import { writeTcpMessage, createTcpMessageReader } from "./tcp-helpers.ts";
 
 export type RoomMcpToolName = "room.create_task" | "room.update_task" | "room.list_tasks" | "room.send_message" | "room.list_members" | "room.spawn_agent" | string;
 
@@ -18,8 +22,113 @@ export type RoomMcpToolResult =
   | { readonly ok: true; readonly data: unknown }
   | { readonly ok: false; readonly error: { readonly code: string; readonly message: string; readonly details?: unknown } };
 
+/** Stdio MCP config injected into ACP session/new mcpServers[]. */
+export type RoomMcpStdioConfig = {
+  readonly name: string;
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly env: ReadonlyArray<{ readonly name: string; readonly value: string }>;
+};
+
 export class RoomMcpServer {
+  private tcpServer: net.Server | null = null;
+  private tcpPort = 0;
+  private readonly authToken = randomUUID();
+
   constructor(private readonly options: { readonly commandBus: CommandBus; readonly taskService: TaskService; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly now?: () => number }) {}
+
+  /**
+   * Start the TCP server. Must be called once before getStdioConfig().
+   * Idempotent — subsequent calls are no-ops.
+   */
+  async startTcp(): Promise<void> {
+    if (this.tcpServer !== null) return;
+    this.tcpServer = net.createServer((socket) => this.handleTcpConnection(socket));
+    await new Promise<void>((resolve, reject) => {
+      this.tcpServer!.listen(0, "127.0.0.1", () => {
+        const addr = this.tcpServer!.address();
+        if (addr && typeof addr === "object") this.tcpPort = addr.port;
+        resolve();
+      });
+      this.tcpServer!.once("error", reject);
+    });
+  }
+
+  /**
+   * Returns the stdio MCP config to inject into ACP session/new mcpServers[].
+   * Includes roomId + runId + agentId so the bridge can pass them to callTool.
+   */
+  getStdioConfig(session: RoomMcpSessionContext): RoomMcpStdioConfig {
+    const scriptPath = resolveBridgeScript();
+    return {
+      name: "agenthub-room",
+      command: "node",
+      args: [scriptPath],
+      env: [
+        { name: "ROOM_MCP_PORT", value: String(this.tcpPort) },
+        { name: "ROOM_MCP_TOKEN", value: this.authToken },
+        { name: "ROOM_MCP_ROOM_ID", value: session.roomId },
+        { name: "ROOM_MCP_RUN_ID", value: session.runId },
+        { name: "ROOM_MCP_AGENT_ID", value: session.agentId },
+      ],
+    };
+  }
+
+  stopTcp(): void {
+    this.tcpServer?.close();
+    this.tcpServer = null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // TCP connection handler — one request per connection
+  // ---------------------------------------------------------------------------
+
+  private handleTcpConnection(socket: net.Socket): void {
+    socket.setTimeout(600_000);
+    socket.on("timeout", () => socket.destroy());
+
+    const reader = createTcpMessageReader(
+      (msg) => {
+        void this.handleTcpMessage(msg, socket);
+      },
+      { onError: () => socket.destroy() }
+    );
+    socket.on("data", reader);
+    socket.on("error", () => socket.destroy());
+  }
+
+  private async handleTcpMessage(msg: unknown, socket: net.Socket): Promise<void> {
+    if (!isRecord(msg)) { socket.destroy(); return; }
+    if (msg["auth_token"] !== this.authToken) {
+      writeTcpMessage(socket, { error: "Unauthorized" });
+      socket.end();
+      return;
+    }
+    const tool = typeof msg["tool"] === "string" ? msg["tool"] : undefined;
+    const args = isRecord(msg["args"]) ? msg["args"] : {};
+    const roomId = typeof msg["room_id"] === "string" ? msg["room_id"] : undefined;
+    const runId = typeof msg["run_id"] === "string" ? msg["run_id"] : undefined;
+    const agentId = typeof msg["agent_id"] === "string" ? msg["agent_id"] : undefined;
+
+    if (!tool || !roomId || !runId || !agentId) {
+      writeTcpMessage(socket, { error: "Missing required fields: tool, room_id, run_id, agent_id" });
+      socket.end();
+      return;
+    }
+
+    const session: RoomMcpSessionContext = { roomId, runId, agentId };
+    try {
+      const result = await this.callTool(tool, args, session);
+      writeTcpMessage(socket, { result });
+    } catch (err) {
+      writeTcpMessage(socket, { error: err instanceof Error ? err.message : String(err) });
+    }
+    socket.end();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Tool dispatch
+  // ---------------------------------------------------------------------------
 
   async callTool(name: RoomMcpToolName, input: unknown, session: RoomMcpSessionContext): Promise<RoomMcpToolResult> {
     if (name === "room.create_task") return this.createTask(input, session);
@@ -323,4 +432,21 @@ function failure(code: string, message: string): RoomMcpToolResult {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function resolveBridgeScript(): string {
+  // Try import.meta.url first (ESM)
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    return join(here, "room-mcp-stdio.mjs");
+  } catch {
+    // Fallback: resolve relative to this file's location at runtime
+    // Works when running via tsx/ts-node where __filename is available via Error stack
+    try {
+      const err = new Error();
+      const match = err.stack?.match(/\((.+?):\d+:\d+\)/);
+      if (match?.[1]) return join(dirname(match[1]), "room-mcp-stdio.mjs");
+    } catch { /* ignore */ }
+    return join(process.cwd(), "packages/orchestrator/src/mcp/room-mcp-stdio.mjs");
+  }
 }

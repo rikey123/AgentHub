@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 
 import { ACPAdapter, ACPAdapterError, AdapterHealthRegistry, AdapterRawLogger, emitAdapterRegistered, type AcpAdapterSession, type AcpProviderEvent, type AdapterRuntimeServices, type JsonRpcMessage } from "@agenthub/adapter-acp-base";
 import type { PublishInput } from "@agenthub/bus";
-import { AdapterBridge, buildFirstWakePrompt, type AdapterArtifactFSBoundary, type RoomMcpServer, type RunLifecycleService, type RunRow } from "@agenthub/orchestrator";
+import { AdapterBridge, buildFirstWakePrompt, type AdapterArtifactFSBoundary, type RoomMcpServer, type RoomMcpStdioConfig, type RunLifecycleService, type RunRow } from "@agenthub/orchestrator";
 import type { PermissionEngine } from "@agenthub/permissions";
 import type { AdapterError, AgentAdapterManifest, DetectedRuntime } from "@agenthub/protocol";
 import { Effect } from "effect";
@@ -66,7 +66,15 @@ export class OpenCodeACPAdapter extends ACPAdapter {
     const bridge = new AdapterBridge({ runId: run.id, workspaceId: run.workspace_id, roomId: run.room_id, agentId: run.agent_id, lifecycle: this.options.lifecycle, eventBus: this.options.services.eventBus, database: this.options.services.database, ...(getCommandBus !== undefined ? { getCommandBus } : {}), ...(this.options.services.briefResolver !== undefined ? { briefResolver: this.options.services.briefResolver } : {}), ...(this.options.now !== undefined ? { now: this.options.now } : {}), ...(run.task_id !== null ? { taskId: run.task_id } : {}), messageId: `msg_${run.id}`, ...(run.workspace_mode !== null ? { workspaceMode: run.workspace_mode } : {}), terminalEnabled: false, ...(artifactFs !== undefined ? { artifactFs } : {}) });
     this.bridgeByRun.set(run.id, bridge);
     this.workspaceByRun.set(run.id, run.workspace_id);
-    const session = Effect.runSync(this.createSession({ runId: run.id, roomId: run.room_id, agentId: run.agent_id, workDir, ...(this.options.mcpServer !== undefined ? { mcpServer: this.options.mcpServer } : {}) }));
+    const session = Effect.runSync(this.createSession({
+      runId: run.id,
+      roomId: run.room_id,
+      agentId: run.agent_id,
+      workDir,
+      ...(this.options.mcpServer !== undefined ? {
+        mcpServer: this.options.mcpServer.getStdioConfig({ roomId: run.room_id, runId: run.id, agentId: run.agent_id })
+      } : {})
+    }));
     const acpSession = this.debugSession(session.id);
     if (acpSession === undefined) throw new ACPAdapterError("session_not_found", `ACP session '${session.id}' not found`);
     bridge.handle({ type: "session.opened", sessionId: session.id, workDir, ...(session.providerConversationId !== undefined ? { providerConversationId: session.providerConversationId } : {}) });

@@ -482,7 +482,7 @@ export abstract class ACPAdapter {
             jsonrpc: "2.0",
             id: newId,
             method: "session/new",
-            params: { cwd: session.workDir, mcpServers: [] }
+            params: { cwd: session.workDir, mcpServers: buildMcpServers(session.mcpServer) }
           });
         },
         reject: (err) => {
@@ -857,4 +857,31 @@ function sha256(value: string): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Convert a RoomMcpStdioConfig (or any unknown mcpServer value) into the
+ * mcpServers array format expected by ACP session/new.
+ * Returns [] when no server is configured or the shape is unrecognised.
+ */
+function buildMcpServers(mcpServer: unknown): unknown[] {
+  if (!isRecord(mcpServer)) return [];
+  // RoomMcpStdioConfig shape: { name, command, args, env }
+  if (typeof mcpServer["command"] !== "string") return [];
+  const entry: Record<string, unknown> = {
+    name: typeof mcpServer["name"] === "string" ? mcpServer["name"] : "agenthub-room",
+    command: mcpServer["command"],
+    args: Array.isArray(mcpServer["args"]) ? mcpServer["args"] : [],
+  };
+  // env: [{ name, value }] → convert to Record<string, string> for ACP
+  if (Array.isArray(mcpServer["env"])) {
+    const envRecord: Record<string, string> = {};
+    for (const item of mcpServer["env"]) {
+      if (isRecord(item) && typeof item["name"] === "string" && typeof item["value"] === "string") {
+        envRecord[item["name"]] = item["value"];
+      }
+    }
+    if (Object.keys(envRecord).length > 0) entry["env"] = envRecord;
+  }
+  return [entry];
 }

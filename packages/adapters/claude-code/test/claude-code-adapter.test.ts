@@ -51,7 +51,9 @@ describe("ClaudeCodeACPAdapter", () => {
     const adapter = new ClaudeCodeACPAdapter({ command: "", services: { database, eventBus, permissionEngine: permissions, artifactFs }, lifecycle, workspaceId: "w", permissionEngine: permissions, mcpServer });
 
     await adapter.runManaged(lifecycle.read("run"));
-    expect(adapter.debugSession("acp-claude-code-run")?.mcpServer).toBe(mcpServer);
+    // mcpServer in the ACP session is now the stdio config (not the RoomMcpServer instance)
+    const sessionMcp = adapter.debugSession("acp-claude-code-run")?.mcpServer;
+    expect(sessionMcp).toMatchObject({ name: "agenthub-room", command: "node" });
     adapter.mapToBridgeEvent("run", { type: "fs/write", payload: { path: "src/a.ts", content: "new" } });
     adapter.mapToBridgeEvent("run", { type: "session/end", payload: { sessionId: "acp-claude-code-run", reason: "completed" } });
 

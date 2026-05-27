@@ -227,6 +227,8 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     });
     commandBusRef.current = commandBus;
     const roomMcpServer = new RoomMcpServer({ commandBus, taskService, database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
+    // Start the TCP server so agents can reach room.* MCP tools via the stdio bridge.
+    await roomMcpServer.startTcp();
     roomMcpServerRef.current = roomMcpServer;
     runtime = { database, eventBus, commandBus, roomMcpServer, adapterRegistry, mockAdapter, artifactService, taskService, outbox, handlers, runQueue, agentProfiles, lifecycle };
 
