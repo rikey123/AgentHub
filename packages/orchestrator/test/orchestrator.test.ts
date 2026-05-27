@@ -447,6 +447,38 @@ describe("TaskService and RoomMcpServer", () => {
     expect(currentDatabase().sqlite.prepare("SELECT read, claimed_run_id, delivery_batch_id FROM mailbox_messages WHERE id = 'mb_spoofed'").get()).toMatchObject({ read: 0, claimed_run_id: null, delivery_batch_id: null });
   });
 
+  test("agent mailbox wake does not append sender text as executable next-turn prompt", async () => {
+    seedAssistedRoomWithAgents("room_loop", "agent_sender", "agent_target");
+    createRun("run_target_active", { roomId: "room_loop", agentId: "agent_target" });
+    const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const commandBus = commandBusWithHandlers();
+    const mcp = new RoomMcpServer({ commandBus, taskService: service, database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const senderText = "@target 能不能看到这个房间其他两个成员，给他们俩发个消息试试";
+
+    const result = await mcp.callTool("room.send_message", { text: senderText }, { roomId: "room_loop", runId: "run_sender", agentId: "agent_sender" });
+
+    expect(result).toMatchObject({ ok: true, data: { delivered: 1 } });
+    const mailboxRow = currentDatabase().sqlite.prepare("SELECT content FROM mailbox_messages WHERE room_id = 'room_loop' AND to_agent_id = 'agent_target'").get() as { readonly content: string };
+    expect(mailboxRow.content).toContain(senderText);
+    const nextTurn = currentDatabase().sqlite.prepare("SELECT prompt_delta_json, source_reason FROM run_next_turns WHERE run_id = 'run_target_active'").get() as { readonly prompt_delta_json: string; readonly source_reason: string };
+    expect(nextTurn.source_reason).toBe("mailbox_message");
+    expect(nextTurn.prompt_delta_json).not.toContain(senderText);
+    expect(nextTurn.prompt_delta_json).toContain("room.read_mailbox");
+  });
+
+  test("assisted agent send_message requires explicit mentions instead of broadcasting", async () => {
+    seedAssistedRoomWithAgents("room_no_broadcast", "agent_sender", "agent_target");
+    const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const commandBus = commandBusWithHandlers();
+    const mcp = new RoomMcpServer({ commandBus, taskService: service, database: currentDatabase(), eventBus: currentBus(), now: () => now });
+
+    const result = await mcp.callTool("room.send_message", { text: "hello, test delivery" }, { roomId: "room_no_broadcast", runId: "run_sender", agentId: "agent_sender" });
+
+    expect(result).toMatchObject({ ok: false, error: { code: "validation_failed" } });
+    expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM mailbox_messages WHERE room_id = 'room_no_broadcast'").get()).toMatchObject({ count: 0 });
+    expect(runCount()).toBe(0);
+  });
+
   test("mention parser validates membership and dedupes in first order", () => {
     expect(parseMentions("hi @agent-1 and @missing and @agent-2 then @agent-1", [{ agentId: "agent-1" }, { agentId: "agent-2" }])).toEqual(["agent-1", "agent-2"]);
   });
@@ -718,6 +750,17 @@ function seedRoom(roomId: string, agentId: string): void {
   currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO workspaces (id, name, root_path, created_at, updated_at) VALUES ('ws_1', 'Workspace', '.', ?, ?)").run(now, now);
   currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES (?, 'ws_1', 'Room', 'solo', 'conversation', ?, NULL, ?, ?)").run(roomId, agentId, now, now);
   currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, default_presence, joined_at) VALUES (?, ?, 'agent', 'primary', 'mock', NULL, 'active', ?)").run(roomId, agentId, now);
+}
+
+function seedAssistedRoomWithAgents(roomId: string, primaryAgentId: string, targetAgentId: string): void {
+  currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO workspaces (id, name, root_path, created_at, updated_at) VALUES ('ws_1', 'Workspace', '.', ?, ?)").run(now, now);
+  currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES (?, 'ws_1', 'Sender', 'mock', NULL, '', '{}', NULL, 0, NULL, ?, ?)").run(primaryAgentId, now, now);
+  currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES (?, 'ws_1', 'Target', 'mock', NULL, '', '{}', NULL, 0, NULL, ?, ?)").run(targetAgentId, now, now);
+  currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES (?, 'ws_1', 'Assisted', 'assisted', 'conversation', ?, NULL, ?, ?)").run(roomId, primaryAgentId, now, now);
+  currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, default_presence, joined_at) VALUES (?, ?, 'agent', 'primary', 'mock', NULL, 'active', ?)").run(roomId, primaryAgentId, now);
+  currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, default_presence, joined_at) VALUES (?, ?, 'agent', 'observer', 'mock', NULL, 'active', ?)").run(roomId, targetAgentId, now);
+  currentDatabase().sqlite.prepare("INSERT OR REPLACE INTO agent_presence (room_id, agent_id, state, reason, status_line, updated_at) VALUES (?, ?, 'active', NULL, NULL, ?)").run(roomId, primaryAgentId, now);
+  currentDatabase().sqlite.prepare("INSERT OR REPLACE INTO agent_presence (room_id, agent_id, state, reason, status_line, updated_at) VALUES (?, ?, 'active', NULL, NULL, ?)").run(roomId, targetAgentId, now);
 }
 
 function seedPendingTurn(id: string, messageId: string, text = "pending text"): void {

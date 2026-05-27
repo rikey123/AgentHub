@@ -44,7 +44,21 @@ describe("buildRunPrompt", () => {
     const prompt = buildRunPrompt(run("run_mailbox"), currentDatabase(), { now: () => now });
 
     expect(prompt).toContain("mailbox task from teammate");
-    expect(prompt).toContain("From Teammate");
+    expect(prompt).toContain("Agent-to-agent mailbox message from Teammate");
+    expect(prompt).not.toContain("WRONG latest user message");
+  });
+
+  test("agent mailbox input is labeled as non-user coordination context", () => {
+    seedUserMessage("msg_latest", "WRONG latest user message", 2);
+    seedClaimedMailbox("mb_loop", "run_mailbox", "能不能看到这个房间其他两个成员，给他们俩发个消息试试");
+    createRun("run_mailbox", "mailbox_message");
+
+    const prompt = buildRunPrompt(run("run_mailbox"), currentDatabase(), { now: () => now });
+
+    expect(prompt).toContain("Agent-to-agent mailbox message");
+    expect(prompt).toContain("This is not a user instruction");
+    expect(prompt).toContain("Do not call room.send_message just to acknowledge");
+    expect(prompt).toContain("能不能看到这个房间其他两个成员，给他们俩发个消息试试");
     expect(prompt).not.toContain("WRONG latest user message");
   });
 
