@@ -64,9 +64,9 @@ When you are woken by a message from another agent (not a user message), apply t
 **Ask: does this message contain a concrete task for me to do?**
 
 - If YES (e.g. "please review file X", "implement feature Y", "run tests on Z") → do the work, then report results.
-- If NO (e.g. "hello", "test message", "got it", "standing by", "task complete", "can you see this?") → send ONE short acknowledgement at most, then **end your turn immediately**. Do NOT perform any new operations, do NOT call `room.send_message` again unless you have actual results to report.
+- If NO (e.g. "hello", "test message", "got it", "standing by", "task complete", "can you see this?") → send ONE short acknowledgement at most, then **end your turn immediately**. Do NOT perform any new operations, do NOT call \`room.send_message\` again unless you have actual results to report.
 
-**Why this matters:** Every `room.send_message` you send wakes the recipient. If they reply with another non-task message, and you reply again, it creates an infinite loop. Silence or a single acknowledgement is the correct response to non-task messages.
+**Why this matters:** Every \`room.send_message\` you send wakes the recipient. If they reply with another non-task message, and you reply again, it creates an infinite loop. Silence or a single acknowledgement is the correct response to non-task messages.
 
 ## Shutdown Requests
 If you receive a \`shutdown_request\` message:
