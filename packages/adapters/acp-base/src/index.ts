@@ -805,7 +805,10 @@ function toAdapterError(error: unknown): AdapterError {
 function filterSafeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const next: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(env)) {
-    if (/TOKEN|API_KEY|SECRET|PASSWORD|AGENTHUB_TOKEN/iu.test(key)) continue;
+    // Only strip AgentHub-internal secrets that must not leak to child agent processes.
+    // Provider API keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.) must pass through
+    // so that opencode, claude-code, and other adapters can authenticate with their providers.
+    if (/^AGENTHUB_TOKEN$/i.test(key)) continue;
     if (value !== undefined) next[key] = value;
   }
   return next;
