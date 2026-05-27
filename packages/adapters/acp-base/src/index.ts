@@ -439,51 +439,40 @@ export abstract class ACPAdapter {
         startedAt: this.now(),
         timeoutMs: 30_000,
         resolve: (result) => {
-          // If the server reports that authentication is required, fail fast with a
-          // user-actionable error instead of hanging on session/new (which the server
-          // will silently ignore until authenticate succeeds).
+          // If the server reports that authentication is required, call authenticate
+          // with the first available method before proceeding to session/new.
+          // opencode always returns authMethods even when credentials are stored —
+          // calling authenticate triggers it to load them from its credential store.
           if (isRecord(result)) {
             const auth = (result as { authMethods?: unknown }).authMethods;
             if (Array.isArray(auth) && auth.length > 0) {
               const first = auth[0];
-              const hint = isRecord(first) && typeof first.description === "string" ? first.description :
-                isRecord(first) && typeof first.name === "string" ? first.name :
-                "Authenticate the agent CLI before retrying.";
-              this.failSession(session, new ACPAdapterError("auth_required", `Agent requires authentication: ${hint}`));
-              return;
-            }
-          }
-          // Now create the actual session on the server.
-          const newId = randomUUID();
-          session.pendingRequests.set(newId, {
-            requestId: newId,
-            method: "session/new",
-            startedAt: this.now(),
-            timeoutMs: 30_000,
-            resolve: (result) => {
-              const serverSessionId = isRecord(result) && typeof result.sessionId === "string" ? result.sessionId : undefined;
-              if (serverSessionId !== undefined) {
-                session.serverSessionId = serverSessionId;
-              }
-              session.handshakeComplete = true;
-              this.flushQueuedPrompts(session);
-            },
-            reject: (err) => {
-              if (isMethodNotFound(err)) {
-                // Server doesn't implement session/new; use client id.
-                session.handshakeComplete = true;
-                this.flushQueuedPrompts(session);
+              const methodId = isRecord(first) && typeof first.id === "string" ? first.id : undefined;
+              if (methodId !== undefined) {
+                const authId = randomUUID();
+                session.pendingRequests.set(authId, {
+                  requestId: authId,
+                  method: "authenticate",
+                  startedAt: this.now(),
+                  timeoutMs: 30_000,
+                  resolve: () => {
+                    // authenticate succeeded — proceed to session/new
+                    this.sendSessionNew(session);
+                  },
+                  reject: (err) => {
+                    const hint = isRecord(first) && typeof first.description === "string" ? first.description :
+                      isRecord(first) && typeof first.name === "string" ? first.name :
+                      "Authenticate the agent CLI before retrying.";
+                    this.failSession(session, err instanceof ACPAdapterError ? err : new ACPAdapterError("auth_required", `Agent requires authentication: ${hint}`));
+                  }
+                });
+                this.writeJson(session, { jsonrpc: "2.0", id: authId, method: "authenticate", params: { methodId } });
                 return;
               }
-              this.failSession(session, err instanceof ACPAdapterError ? err : new ACPAdapterError("session_new_failed", err instanceof Error ? err.message : String(err)));
+              // No methodId — fall through to session/new and let it fail naturally
             }
-          });
-          this.writeJson(session, {
-            jsonrpc: "2.0",
-            id: newId,
-            method: "session/new",
-            params: { cwd: session.workDir, mcpServers: buildMcpServers(session.mcpServer) }
-          });
+          }
+          this.sendSessionNew(session);
         },
         reject: (err) => {
           if (isMethodNotFound(err)) {
@@ -545,6 +534,36 @@ export abstract class ACPAdapter {
     if (session.livenessTimer !== undefined) clearInterval(session.livenessTimer);
     session.state = "failed";
     this.onSessionFailed(session, error);
+  }
+
+  private sendSessionNew(session: AcpAdapterSession): void {
+    const newId = randomUUID();
+    session.pendingRequests.set(newId, {
+      requestId: newId,
+      method: "session/new",
+      startedAt: this.now(),
+      timeoutMs: 30_000,
+      resolve: (result) => {
+        const serverSessionId = isRecord(result) && typeof result.sessionId === "string" ? result.sessionId : undefined;
+        if (serverSessionId !== undefined) session.serverSessionId = serverSessionId;
+        session.handshakeComplete = true;
+        this.flushQueuedPrompts(session);
+      },
+      reject: (err) => {
+        if (isMethodNotFound(err)) {
+          session.handshakeComplete = true;
+          this.flushQueuedPrompts(session);
+          return;
+        }
+        this.failSession(session, err instanceof ACPAdapterError ? err : new ACPAdapterError("session_new_failed", err instanceof Error ? err.message : String(err)));
+      }
+    });
+    this.writeJson(session, {
+      jsonrpc: "2.0",
+      id: newId,
+      method: "session/new",
+      params: { cwd: session.workDir, mcpServers: buildMcpServers(session.mcpServer) }
+    });
   }
 
   private markReadyUnlessFailed(session: AcpAdapterSession): void {
