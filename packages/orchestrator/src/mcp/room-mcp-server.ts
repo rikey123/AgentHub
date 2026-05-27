@@ -257,20 +257,18 @@ export class RoomMcpServer {
       deliveries.push({ agentId: targetAgentId, mailboxMessageId });
 
       // Wake the target agent via WakeAgent command (best-effort, non-fatal).
+      // WakeAgent is internal-only — must use origin:"internal", not "mcp_tool".
       try {
-        const wakeResult = await this.options.commandBus.dispatch(
-          {
-            type: "WakeAgent",
-            roomId: session.roomId,
-            agentId: targetAgentId,
-            workspaceId,
-            reason: "mailbox_message",
-            messageId: undefined,
-            promptDelta: { kind: "delta_only", instructions: text },
-            idempotencyKey: `mcp:agent-msg:${session.runId}:${targetAgentId}:${mailboxMessageId}`,
-          },
-          { actor: { type: "agent", id: session.agentId }, traceId: `mcp:${session.runId}`, origin: "mcp_tool" }
-        );
+        const wakeResult = await this.dispatchInternal({
+          type: "WakeAgent",
+          roomId: session.roomId,
+          agentId: targetAgentId,
+          workspaceId,
+          reason: "mailbox_message",
+          messageId: undefined,
+          promptDelta: { kind: "delta_only", instructions: text },
+          idempotencyKey: `mcp:agent-msg:${session.runId}:${targetAgentId}:${mailboxMessageId}`,
+        }, session);
         if (!wakeResult.ok) {
           console.warn(`[RoomMcpServer] WakeAgent for ${targetAgentId} returned error: ${wakeResult.error.message}`);
         }
@@ -375,8 +373,9 @@ export class RoomMcpServer {
     })();
 
     // Wake the new agent with a first_wake prompt so it knows its role.
+    // WakeAgent is internal-only — must use origin:"internal".
     try {
-      await this.options.commandBus.dispatch(
+      await this.dispatchInternal(
         {
           type: "WakeAgent",
           roomId: session.roomId,
@@ -386,7 +385,7 @@ export class RoomMcpServer {
           promptDelta: { kind: "first_wake", fullRolePrompt: rolePrompt.length > 0 ? rolePrompt : `You are ${agentName}, a new teammate in this room. Wait for instructions from the leader.` },
           idempotencyKey: `spawn:${session.runId}:${newAgentId}`,
         },
-        { actor: { type: "agent", id: session.agentId }, traceId: `mcp:spawn:${session.runId}`, origin: "mcp_tool" }
+        session
       );
     } catch (err) {
       console.warn(`[RoomMcpServer] WakeAgent for spawned agent ${newAgentId} threw:`, err);
@@ -401,6 +400,11 @@ export class RoomMcpServer {
 
   private dispatch(command: Parameters<CommandBus["dispatch"]>[0], session: RoomMcpSessionContext): CommandResult | Promise<CommandResult> {
     return this.options.commandBus.dispatch(command, { actor: { type: "agent", id: session.agentId }, traceId: `mcp:${session.runId}:${randomUUID()}`, ...(command.idempotencyKey !== undefined ? { idempotencyKey: command.idempotencyKey } : {}), origin: "mcp_tool" });
+  }
+
+  // WakeAgent, RetryRun, etc. are internal-only commands — must use origin:"internal".
+  private dispatchInternal(command: Parameters<CommandBus["dispatch"]>[0], session: RoomMcpSessionContext): CommandResult | Promise<CommandResult> {
+    return this.options.commandBus.dispatch(command, { actor: { type: "agent", id: session.agentId }, traceId: `mcp:${session.runId}:${randomUUID()}`, ...(command.idempotencyKey !== undefined ? { idempotencyKey: command.idempotencyKey } : {}), origin: "internal" });
   }
 
   private appendMailbox(workspaceId: string, roomId: string, fromAgentId: string, toAgentId: string, text: string, now: number): string {
