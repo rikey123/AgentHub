@@ -37,7 +37,9 @@ export class OpenCodeACPAdapter extends ACPAdapter {
   private readonly args: readonly string[];
   private readonly env: NodeJS.ProcessEnv | undefined;
   private readonly bridgeByRun = new Map<string, AdapterBridge>();
+  private readonly runById = new Map<string, RunRow>();
   private readonly workspaceByRun = new Map<string, string>();
+  private readonly assistantTextByRun = new Map<string, string>();
   private readonly openedRuns = new Set<string>();
   private readonly pendingFailuresByRun = new Map<string, ACPAdapterError>();
   private readonly health: AdapterHealthRegistry | undefined;
@@ -70,6 +72,7 @@ export class OpenCodeACPAdapter extends ACPAdapter {
     const getCommandBus = this.options.services.getCommandBus;
     const bridge = new AdapterBridge({ runId: run.id, workspaceId: run.workspace_id, roomId: run.room_id, agentId: run.agent_id, lifecycle: this.options.lifecycle, eventBus: this.options.services.eventBus, database: this.options.services.database, ...(getCommandBus !== undefined ? { getCommandBus } : {}), ...(this.options.services.briefResolver !== undefined ? { briefResolver: this.options.services.briefResolver } : {}), ...(this.options.now !== undefined ? { now: this.options.now } : {}), ...(run.task_id !== null ? { taskId: run.task_id } : {}), messageId: `msg_${run.id}`, ...(run.workspace_mode !== null ? { workspaceMode: run.workspace_mode } : {}), terminalEnabled: false, ...(artifactFs !== undefined ? { artifactFs } : {}) });
     this.bridgeByRun.set(run.id, bridge);
+    this.runById.set(run.id, run);
     this.workspaceByRun.set(run.id, run.workspace_id);
     const session = Effect.runSync(this.createSession({
       runId: run.id,
@@ -162,12 +165,18 @@ export class OpenCodeACPAdapter extends ACPAdapter {
     const bridge = this.bridgeByRun.get(runId);
     if (bridge === undefined) return;
     const payload = isRecord(event.payload) ? event.payload : {};
-    // Stream agent message text from ACP v1 `session/update.agent_message_chunk` (translated by acp-base).
+    // Stream agent message text — persist to DB and publish delta event.
     if (event.type === "message.part.delta") {
       const delta = typeof payload.delta === "string" ? payload.delta : "";
-      if (delta.length > 0) {
-        this.publishRunEvent(runId, "message.part.delta", { messageId: `msg_${runId}`, text: delta });
+      if (delta.length === 0) return;
+      const messageId = `msg_${runId}`;
+      const accumulated = (this.assistantTextByRun.get(runId) ?? "") + delta;
+      if (!this.assistantTextByRun.has(runId)) {
+        this.persistAssistantMessageStart(runId, messageId);
       }
+      this.assistantTextByRun.set(runId, accumulated);
+      this.publishRunEvent(runId, "message.part.delta", { messageId, text: delta });
+      bridge.onMessageDelta();
       return;
     }
     if (event.type === "tool.call.requested") bridge.handle({ type: "tool.call.requested", toolCallId: requiredString(payload, "toolCallId"), name: requiredString(payload, "name"), input: payload.input ?? {} });
@@ -175,8 +184,39 @@ export class OpenCodeACPAdapter extends ACPAdapter {
     if (event.type === "subagent.started") bridge.handle({ type: "subagent.started", subRunId: requiredString(payload, "subRunId"), profileRef: requiredString(payload, "profileRef") });
     if (event.type === "subagent.completed") bridge.handle({ type: "subagent.completed", subRunId: requiredString(payload, "subRunId") });
     if (event.type === "context.snapshot") bridge.handle({ type: "context.snapshot", snapshot: payload });
-    if (event.type === "session.ended") bridge.handle({ type: "session.ended", sessionId: stringField(payload, "sessionId") ?? `opencode-${runId}`, reason: stringField(payload, "reason") ?? "completed", cost: { inputTokens: 0, outputTokens: 0, cachedTokens: 0, costUsd: 0, modelId: stringField(payload, "modelId") ?? "opencode" } });
+    if (event.type === "session.ended") {
+      // Persist the accumulated assistant message before finalizing the run.
+      const messageId = `msg_${runId}`;
+      const text = this.assistantTextByRun.get(runId) ?? "";
+      if (this.assistantTextByRun.has(runId)) {
+        this.persistAssistantMessageEnd(runId, messageId, text);
+        this.assistantTextByRun.delete(runId);
+      }
+      bridge.handle({ type: "session.ended", sessionId: stringField(payload, "sessionId") ?? `opencode-${runId}`, reason: stringField(payload, "reason") ?? "completed", cost: { inputTokens: 0, outputTokens: 0, cachedTokens: 0, costUsd: 0, modelId: stringField(payload, "modelId") ?? "opencode" } });
+    }
     if (event.type === "session.crashed") bridge.handle({ type: "session.crashed", sessionId: stringField(payload, "sessionId") ?? `opencode-${runId}`, error: stringField(payload, "error") ?? JSON.stringify(payload) });
+  }
+
+  private persistAssistantMessageStart(runId: string, messageId: string): void {
+    const run = this.runById.get(runId);
+    const db = this.options.services?.database;
+    if (run === undefined || db === undefined) return;
+    const now = this.options.now?.() ?? Date.now();
+    db.sqlite.prepare(
+      `INSERT OR IGNORE INTO messages (id, workspace_id, room_id, sender_type, sender_id, run_id, role, status, quoted_message_id, turn_dispatch_mode, pending_turn_id, created_at, updated_at, deleted_at)
+       VALUES (?, ?, ?, 'agent', ?, ?, 'assistant', 'streaming', NULL, 'immediate', NULL, ?, ?, NULL)`
+    ).run(messageId, run.workspace_id, run.room_id, run.agent_id, runId, now, now);
+    this.publishRunEvent(runId, "message.created", { messageId, role: "assistant", senderId: run.agent_id, runId });
+  }
+
+  private persistAssistantMessageEnd(runId: string, messageId: string, text: string): void {
+    const db = this.options.services?.database;
+    if (db === undefined) return;
+    const now = this.options.now?.() ?? Date.now();
+    const nextSeq = ((db.sqlite.prepare("SELECT COALESCE(MAX(seq), 0) + 1 AS seq FROM message_parts WHERE message_id = ?").get(messageId) as { seq: number }).seq);
+    db.sqlite.prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, ?, 'text', ?, ?)").run(messageId, nextSeq, JSON.stringify({ text }), now);
+    db.sqlite.prepare("UPDATE messages SET status = 'completed', updated_at = ? WHERE id = ?").run(now, messageId);
+    this.publishRunEvent(runId, "message.completed", { messageId, text });
   }
 
   private publishRunEvent(runId: string, type: PublishInput["type"], payload: Record<string, unknown>): void {
