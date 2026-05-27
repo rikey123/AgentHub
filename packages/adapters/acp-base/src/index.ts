@@ -49,6 +49,8 @@ export type AcpAdapterSession = {
   stderrLineSplitter: NdjsonLineSplitter;
   stderrTail: string[];
   livenessTimer: ReturnType<typeof setInterval> | undefined;
+  /** Fires if the ACP handshake (initialize→session/new) doesn't complete within the deadline. */
+  handshakeTimeoutTimer: ReturnType<typeof setTimeout> | undefined;
   consecutivePingMisses: number;
   pingDisabled?: boolean;
   /** Server-issued sessionId from session/new. Used in outgoing ACP requests; falls back to acpSessionId. */
@@ -207,7 +209,7 @@ export abstract class ACPAdapter {
   protected createSessionSync(input: CreateSessionInput): ExternalSession {
     const sessionId = `acp-${this.id}-${input.runId}`;
     if (this.sessions.has(sessionId)) throw new ACPAdapterError("session_exists", `ACP session '${sessionId}' already exists`);
-    const session: AcpAdapterSession = { state: "connecting", acpSessionId: sessionId, runId: input.runId, workDir: input.workDir ?? process.cwd(), pendingRequests: new Map(), inflightPromptRequestId: undefined, clientCapabilities: acpClientCapabilities, mcpServer: input.mcpServer, process: undefined, lineSplitter: new NdjsonLineSplitter(), stderrLineSplitter: new NdjsonLineSplitter(), stderrTail: [], livenessTimer: undefined, consecutivePingMisses: 0, promptTimeoutPaused: false };
+    const session: AcpAdapterSession = { state: "connecting", acpSessionId: sessionId, runId: input.runId, workDir: input.workDir ?? process.cwd(), pendingRequests: new Map(), inflightPromptRequestId: undefined, clientCapabilities: acpClientCapabilities, mcpServer: input.mcpServer, process: undefined, lineSplitter: new NdjsonLineSplitter(), stderrLineSplitter: new NdjsonLineSplitter(), stderrTail: [], livenessTimer: undefined, handshakeTimeoutTimer: undefined, consecutivePingMisses: 0, promptTimeoutPaused: false };
     this.sessions.set(sessionId, session);
     this.pendingByRun.set(input.runId, sessionId);
     const spawned = this.trySpawn(session);
@@ -221,7 +223,7 @@ export abstract class ACPAdapter {
   }
 
   protected attachSessionSync(input: AttachSessionInput): ExternalSession {
-    const session: AcpAdapterSession = { state: "ready", acpSessionId: input.adapterSessionId, runId: input.runId, workDir: input.workDir ?? process.cwd(), pendingRequests: new Map(), inflightPromptRequestId: undefined, clientCapabilities: acpClientCapabilities, mcpServer: undefined, process: undefined, lineSplitter: new NdjsonLineSplitter(), stderrLineSplitter: new NdjsonLineSplitter(), stderrTail: [], livenessTimer: undefined, consecutivePingMisses: 0, promptTimeoutPaused: false };
+    const session: AcpAdapterSession = { state: "ready", acpSessionId: input.adapterSessionId, runId: input.runId, workDir: input.workDir ?? process.cwd(), pendingRequests: new Map(), inflightPromptRequestId: undefined, clientCapabilities: acpClientCapabilities, mcpServer: undefined, process: undefined, lineSplitter: new NdjsonLineSplitter(), stderrLineSplitter: new NdjsonLineSplitter(), stderrTail: [], livenessTimer: undefined, handshakeTimeoutTimer: undefined, consecutivePingMisses: 0, promptTimeoutPaused: false };
     this.sessions.set(input.adapterSessionId, session);
     this.pendingByRun.set(input.runId, input.adapterSessionId);
     return { id: input.adapterSessionId, runId: input.runId, workDir: session.workDir, ...(input.providerConversationId !== undefined ? { providerConversationId: input.providerConversationId } : {}) };
@@ -472,6 +474,14 @@ export abstract class ACPAdapter {
         }
       });
       this.startLiveness(session);
+      // Overall handshake timeout: if initialize+session/new doesn't complete within 60s,
+      // the ACP process is considered hung and the session is failed. This catches cases where
+      // the child process starts but never responds (e.g. concurrent spawn collision, CLI hang).
+      session.handshakeTimeoutTimer = setTimeout(() => {
+        session.handshakeTimeoutTimer = undefined;
+        if (session.handshakeComplete) return;
+        this.failSession(session, new ACPAdapterError("handshake_timeout", "ACP handshake (initialize→session/new) did not complete within 60s"));
+      }, 60_000);
       this.markReadyUnlessFailed(session);
       return true;
     } catch (error) {
@@ -503,6 +513,7 @@ export abstract class ACPAdapter {
   private failSession(session: AcpAdapterSession, error: ACPAdapterError): void {
     if (session.state === "disposed" || session.state === "failed") return;
     if (session.livenessTimer !== undefined) clearInterval(session.livenessTimer);
+    if (session.handshakeTimeoutTimer !== undefined) clearTimeout(session.handshakeTimeoutTimer);
     session.state = "failed";
     this.onSessionFailed(session, error);
   }
@@ -515,12 +526,21 @@ export abstract class ACPAdapter {
       startedAt: this.now(),
       timeoutMs: 30_000,
       resolve: (result) => {
+        // Handshake complete — cancel the overall handshake timeout.
+        if (session.handshakeTimeoutTimer !== undefined) {
+          clearTimeout(session.handshakeTimeoutTimer);
+          session.handshakeTimeoutTimer = undefined;
+        }
         const serverSessionId = isRecord(result) && typeof result.sessionId === "string" ? result.sessionId : undefined;
         if (serverSessionId !== undefined) session.serverSessionId = serverSessionId;
         session.handshakeComplete = true;
         this.flushQueuedPrompts(session);
       },
       reject: (err) => {
+        if (session.handshakeTimeoutTimer !== undefined) {
+          clearTimeout(session.handshakeTimeoutTimer);
+          session.handshakeTimeoutTimer = undefined;
+        }
         if (isMethodNotFound(err)) {
           session.handshakeComplete = true;
           this.flushQueuedPrompts(session);
@@ -582,11 +602,12 @@ export abstract class ACPAdapter {
           if (session.consecutivePingMisses >= 5) this.failSession(session, new ACPAdapterError("liveness_timeout", "ACP process missed 5 consecutive liveness pings"));
         }, 2_500)
       };
-      pending.timer?.unref?.();
+      // Do NOT unref the ping timeout — it must fire even when the event loop is busy,
+      // otherwise a hung ACP process won't be detected for an arbitrarily long time.
       session.pendingRequests.set(requestId, pending);
       this.writeJson(session, { jsonrpc: "2.0", id: requestId, method: "protocol/ping", params: { sessionId: session.serverSessionId ?? session.acpSessionId } });
     }, 3_000);
-    session.livenessTimer.unref?.();
+    // Do NOT unref the liveness interval — it must keep firing to detect hung processes.
   }
 
   private requiredSession(sessionId: string): AcpAdapterSession {
