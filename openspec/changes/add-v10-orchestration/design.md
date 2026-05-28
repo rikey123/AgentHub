@@ -211,7 +211,7 @@ const result = await streamText({ model: provider.chatModel(modelConfig.model), 
 |---|---|---|
 | **Roles**（角色） | `pages/settings/AssistantSettings/{AssistantListPanel,AssistantEditDrawer,SkillConfirmModals}.tsx` | 角色列表 / 新建 / 编辑提示词 / 头像 / 描述 / 标签 / 默认能力 / 默认权限 profile / **AI 生成草稿入口** / 删除（需确认） |
 | **Runtimes**（运行时） | `pages/settings/AgentSettings/{LocalAgents,InlineAgentEditor,AgentCard}.tsx` | Claude Code 检测 / OpenCode 检测 / Native AgentHub Engine（始终可用）/ Custom ACP（高级用户）；每行显示 detect status + command/args/env 编辑 + test connection 按钮 |
-| **Models**（模型配置） | `pages/settings/components/AddModelModal.tsx` + `SettingsModal/contents/{GeminiModalContent,ModelModalContent}.tsx` | provider 列表（OpenAI / Anthropic / Google / OpenAI-compatible / Ollama / LM Studio）；每个 provider 配 API key（写 keychain）+ baseURL（仅 OpenAI-compatible / Ollama）+ 可用模型列表 + test model call 按钮 |
+| **Models**（模型配置） | `pages/settings/components/AddModelModal.tsx` + `SettingsModal/contents/{GeminiModalContent,ModelModalContent}.tsx` | provider 列表（OpenAI / Anthropic / Google / OpenAI-compatible / Ollama / LM Studio）；有 API key 的 provider 配 key（写 keychain）+ baseURL（仅 OpenAI-compatible / Ollama）+ 可用模型列表 + test model call 按钮；**Ollama 等本地 provider 无 API key，UI 隐藏 key 输入框，`api_key_ref=NULL`** |
 | **Permissions**（权限） | （V0.5 已有 PermissionProfile spec） | 内置三档（builder-strict / builder-loose / read-only）+ 用户自定义 profile + 文件 / shell / tool 规则 |
 | **Workspace**（工作区） | （AgentHub 自有） | workspace root / worktree mode / artifact storage / attachment limits / GC 配置 |
 | **MCP / Tools** | `pages/settings/components/AddMcpServerModal.tsx`（仅参考交互） | V1.0 仅展示已启用 Room tools（只读）+ "外部 MCP server 管理（V1.1）"占位入口 |
@@ -646,8 +646,8 @@ CREATE TABLE model_configs (
   provider        TEXT NOT NULL CHECK (provider IN ('openai','anthropic','google','openai-compatible','ollama')),
   model           TEXT NOT NULL,
   base_url        TEXT,
-  api_key_ref     TEXT NOT NULL,                  -- keychain ref，不存明文
-  api_key_fingerprint TEXT,                       -- 前 4 + 后 4 显示用
+  api_key_ref     TEXT,                           -- keychain ref，不存明文；NULL = 本地 provider（如 Ollama）无 API key
+  api_key_fingerprint TEXT,                       -- 前 4 + 后 4 显示用；NULL = 本地 provider
   temperature     REAL,
   max_tokens      INTEGER,
   reasoning       TEXT,                            -- JSON for o1/o3 series
@@ -670,10 +670,14 @@ CREATE TABLE agent_bindings (
 CREATE INDEX idx_agent_bindings_role ON agent_bindings (role_id);
 CREATE INDEX idx_agent_bindings_runtime ON agent_bindings (runtime_id);
 
--- 2. tasks 启用字段（MVP 已存在）
--- (priority / delegation_chain / assignee_role_id 已在表中，仅启用调度逻辑)
-ALTER TABLE tasks ADD COLUMN assignee_role_id TEXT;     -- 兼容现有 assignee_agent_id
--- 数据迁移层把 assignee_agent_id 反查 binding → role_id 写入
+-- 2. tasks 新增字段（V1.0 全部 ADD COLUMN；基线 tasks 表没有这些列）
+-- workspaceId 选方案 B：不加列，通过 room_id → rooms.workspace_id 派生（view 字段）
+ALTER TABLE tasks ADD COLUMN assignee_role_id TEXT REFERENCES roles(id);
+ALTER TABLE tasks ADD COLUMN assignee_binding_id TEXT REFERENCES agent_bindings(id);
+ALTER TABLE tasks ADD COLUMN assignee_agent_id TEXT;     -- V0.5 兼容字段，3 个月后 V1.4 删除
+ALTER TABLE tasks ADD COLUMN delegation_chain TEXT NOT NULL DEFAULT '[]';  -- JSON
+ALTER TABLE tasks ADD COLUMN expects_review INTEGER NOT NULL DEFAULT 0;    -- 0=Squad, 1=Team
+-- 数据迁移层把 assignee_agent_id 反查 binding → role_id / binding_id 写入
 
 -- 3. task_activities 新表
 CREATE TABLE task_activities (

@@ -27,7 +27,7 @@ The system SHALL upgrade the V0 minimal Task model to a V1.0 product-level work 
 ```ts
 type Task = {
   id: string                          // ULID
-  workspaceId: string
+  workspaceId: string                 // 派生字段（通过 room_id → rooms.workspace_id），不存 tasks 表列
   roomId: string
   parentTaskId?: string               // 嵌套深度上限 5
   delegationChain?: DelegationStep[]  // JSON: [{byRoleId, atRunId, atTimestamp}, ...]

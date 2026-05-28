@@ -14,7 +14,7 @@ The system SHALL add `model.api_call.<provider>` resource family for V1.0 Native
 | `model.api_call.anthropic` | allow | Native Runtime 调用 Anthropic provider |
 | `model.api_call.google` | allow | Native Runtime 调用 Google provider |
 | `model.api_call.openai-compatible` | allow | Native Runtime 调用 OpenAI-compatible provider |
-| `model.api_call.ollama` | allow | Native Runtime 调用 Ollama（本地，无 API key）|
+| `model.api_call.ollama` | allow | Native Runtime 调用 Ollama（本地，无 API key；permission check 仍走 allow 路径，不读 keychain）|
 
 **per-Run 缓存语义**：
 

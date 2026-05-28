@@ -71,7 +71,7 @@ import { createAnthropic } from "@ai-sdk/anthropic"
 import { createGoogleGenerativeAI } from "@ai-sdk/google"
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
 
-export function resolveProvider(modelConfig: ModelConfig, apiKey: string) {
+export function resolveProvider(modelConfig: ModelConfig, apiKey: string | undefined) {
   switch (modelConfig.provider) {
     case "openai":
       return createOpenAI({ apiKey, baseURL: modelConfig.baseUrl })
@@ -80,8 +80,15 @@ export function resolveProvider(modelConfig: ModelConfig, apiKey: string) {
     case "google":
       return createGoogleGenerativeAI({ apiKey, baseURL: modelConfig.baseUrl })
     case "openai-compatible":
-      // DeepSeek / OpenRouter / Groq / Cerebras / DeepInfra / Ollama 等
+      // DeepSeek / OpenRouter / Groq / Cerebras / DeepInfra 等（不含 Ollama，Ollama 有独立 case）
       return createOpenAICompatible({ name: modelConfig.name, apiKey, baseURL: modelConfig.baseUrl! })
+    case "ollama":
+      // 本地 Ollama，无 API key；baseUrl 默认 http://localhost:11434/v1
+      return createOpenAICompatible({
+        name: "ollama",
+        apiKey: "ollama",                  // Ollama 接受任意非空字符串
+        baseURL: modelConfig.baseUrl ?? "http://localhost:11434/v1"
+      })
     default:
       throw new Error(`provider ${modelConfig.provider} not supported in V1.0`)
   }

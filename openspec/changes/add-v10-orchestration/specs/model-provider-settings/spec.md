@@ -28,7 +28,7 @@ type ModelConfig = {
   provider: ModelProvider
   model: string                       // model id（如 "gpt-4o"、"claude-sonnet-4-6"）
   baseUrl?: string                    // 仅 openai-compatible / ollama 必填
-  apiKeyRef: string                   // OS Keychain 中的 key reference（不存明文）
+  apiKeyRef?: string                  // OS Keychain 中的 key reference（不存明文）；Ollama 等本地 provider 无 API key 时为 undefined
   apiKeyFingerprint?: string          // 前 4 + 后 4 字符，用于 UI 展示
   temperature?: number
   maxTokens?: number
@@ -47,7 +47,7 @@ CREATE TABLE model_configs (
   provider          TEXT NOT NULL CHECK (provider IN ('openai','anthropic','google','openai-compatible','ollama')),
   model             TEXT NOT NULL,
   base_url          TEXT,
-  api_key_ref       TEXT NOT NULL,
+  api_key_ref       TEXT,             -- NULL = 本地 provider（如 Ollama）无 API key
   api_key_fingerprint TEXT,
   temperature       REAL,
   max_tokens        INTEGER,
@@ -61,7 +61,7 @@ CREATE INDEX idx_model_configs_workspace ON model_configs (workspace_id, provide
 
 **API key 安全规则**：
 
-- API key 通过 `POST /model-configs` 时由 daemon 写入 OS Keychain（V0 KeychainBridge）；SQLite 只存 `api_key_ref`（keychain 条目名）和 `api_key_fingerprint`（前 4 + 后 4）；
+- API key 通过 `POST /model-configs` 时由 daemon 写入 OS Keychain（V0 KeychainBridge）；SQLite 只存 `api_key_ref`（keychain 条目名）和 `api_key_fingerprint`（前 4 + 后 4）；**Ollama 等本地 provider 无 API key**：`api_key_ref = NULL`，`api_key_fingerprint = NULL`，Settings UI 隐藏 API key 输入框；
 - `GET /model-configs` 返回的 payload **不含** API key 明文，只含 fingerprint；
 - 用户"重置 API key"时 PATCH 传新 key，daemon 更新 keychain 条目。
 
@@ -74,7 +74,7 @@ CREATE INDEX idx_model_configs_workspace ON model_configs (workspace_id, provide
 | groq | `https://api.groq.com/openai/v1` |
 | cerebras | `https://api.cerebras.ai/v1` |
 | deepinfra | `https://api.deepinfra.com/v1/openai` |
-| ollama（本地）| `http://localhost:11434/v1` |
+| ollama（本地）| `http://localhost:11434/v1`（默认；无 API key）|
 
 用户选 profile 时自动填 baseURL；也可手填自定义 baseURL（如 LiteLLM / NewAPI / 企业网关）。
 

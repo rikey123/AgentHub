@@ -35,7 +35,7 @@ V1.0 解决这三件事：
 
 - `role-system`（**NEW**）：定义 `Role`（Persona）独立实体——id / name / avatar / description / prompt / capabilities / default permission profile / tags。Role 不绑定 runtime / model。从 markdown 加载（`~/.agenthub/roles/*.md`），与现有 agent profile 兼容并行（旧 agent_profiles 行迁移成 role + binding 对）。
 - `runtime-settings`（**NEW**）：定义 `Runtime`（执行后端）独立实体——id / kind（claude-code / opencode / native / custom-acp）/ command / args / env / detected status / supported capabilities。可在 Settings UI 检测 / 配置 / 测试连接。
-- `model-provider-settings`（**NEW**）：定义 `ModelConfig`（模型配置）独立实体——provider（openai / anthropic / google / openai-compatible / ollama）/ model id / baseURL / api key ref / temperature / max tokens。API key 走 OS Keychain（V0 KeychainBridge 已就位），SQLite 仅存 ref。
+- `model-provider-settings`（**NEW**）：定义 `ModelConfig`（模型配置）独立实体——provider（openai / anthropic / google / openai-compatible / ollama）/ model id / baseURL / api key ref / temperature / max tokens。API key 走 OS Keychain（V0 KeychainBridge 已就位），SQLite 仅存 ref；**Ollama 等本地 provider 无 API key**，`api_key_ref = NULL`，Settings UI 隐藏 API key 输入框。
 - `agents`（MODIFIED）：`AgentProfile` 重命名为 `AgentBinding`——`role_id + runtime_id + model_config_id?`，把 Role 与 Runtime 在 Room 创建时绑定。旧 AgentProfile 通过 migration 拆成 role + binding。
 - `rooms`（MODIFIED）：Room 创建时不再选 agent profile id，而是选 role + runtime（model_config 可选，仅 native runtime 必需）。
 
@@ -127,7 +127,7 @@ V1.0 解决这三件事：
 - **新增包**：`packages/role-system`、`packages/native-agent-runtime`（含 Vercel AI SDK adapter 实现）、`packages/team-mode`、`packages/squad-mode`、`packages/task-workflow-core`。**无**新 deployment 包（推迟 V1.4）。
 - **修改代码区**：`packages/agents/`（AgentBinding 重构）、`packages/orchestrator/`（room.delegate + Task 调度扩展）、`packages/rooms/`（leader_role_id + 创建 API）、`packages/adapter-framework/`（NativeAgentAdapter 注册）、`packages/permissions/`（model API 资源 family）、`packages/messages/`（TaskCard 升级）、`packages/daemon/`（Settings API 路由）、`apps/web/`（Settings UI + Side Panel Tasks tab + 房间创建表单）。
 - **新增依赖**：`ai`（Vercel AI SDK Core）、`@ai-sdk/openai`、`@ai-sdk/anthropic`、`@ai-sdk/google`、`@ai-sdk/openai-compatible`（覆盖 OpenRouter / NewAPI / Ollama / LM Studio / LiteLLM 等 baseURL 兜底）。
-- **Migration**：`0014_v10.sql` — 拆 `agent_profiles` 为 `roles` + `agent_bindings` + `runtimes` + `model_configs` 四表（含旧数据迁移脚本，保留 3 个月 V0.5 形态兼容层：V1.0 daemon 能迁移并读取旧数据，并接受旧 `agent_profile_id` 入参后 resolve 到 `binding_id`；**不承诺** V0.5 daemon 在升级后的数据库上继续写入；回滚通过恢复升级前 SQLite 备份）；`tasks` 表加 `assignee_role_id` / `delegation_chain` / `priority` 启用；新增 `task_activities` 表；`rooms` 加 `leader_role_id`。
+- **Migration**：`0014_v10.sql` — 拆 `agent_profiles` 为 `roles` + `agent_bindings` + `runtimes` + `model_configs` 四表（含旧数据迁移脚本，保留 3 个月 V0.5 形态兼容层：V1.0 daemon 能迁移并读取旧数据，并接受旧 `agent_profile_id` 入参后 resolve 到 `binding_id`；**不承诺** V0.5 daemon 在升级后的数据库上继续写入；回滚通过恢复升级前 SQLite 备份）；`tasks` 表 ADD COLUMN：`assignee_role_id` / `assignee_binding_id` / `assignee_agent_id`（兼容）/ `delegation_chain` / `expects_review`（`priority` 已在基线表中）；`workspaceId` 不加列，通过 `room_id → rooms.workspace_id` 派生；新增 `task_activities` 表；`rooms` 加 `leader_role_id`；`model_configs.api_key_ref` 允许 NULL（Ollama 等本地 provider 无 API key）。
 - **API 变更**：
   - 新增 `GET/POST/PATCH/DELETE /roles`、`/runtimes`、`/model-configs`、`/agent-bindings`；
   - 新增 `POST /roles/generate`（AI 生成角色草稿）；

@@ -6,7 +6,7 @@
 
 ## 0. 基础设施（Migration + Event Registry + CI）
 
-- [ ] 0.1 写 migration `0014_v10.sql`：`roles` / `runtimes` / `model_configs` / `agent_bindings` 四表 + `rooms.leader_role_id` + `tasks.assignee_role_id` / `assignee_binding_id` / `delegation_chain` / `priority` 启用 + `task_activities` 表 — refs: design/Migration Plan
+- [ ] 0.1 写 migration `0014_v10.sql`：① `roles` / `runtimes` / `model_configs`（`api_key_ref TEXT` 允许 NULL，Ollama 无 key）/ `agent_bindings` 四表；② `rooms.leader_role_id`；③ `tasks` ADD COLUMN：`assignee_role_id` / `assignee_binding_id` / `delegation_chain` / `expects_review`（`priority` 使用基线列，不重复 ADD；`assignee_agent_id` 已在基线表中，确认保留作兼容字段）；④ `task_activities` 表 — refs: design/Migration Plan
 - [ ] 0.2 写 `0014_data.ts` 数据迁移脚本：把 `agent_profiles` 拆成 role + runtime + model_config + binding 四表行；`room_participants.agent_binding_id` 回填；`tasks.assignee_role_id` 回填 — refs: agents/AgentProfile 数据模型（MODIFIED）
 - [ ] 0.3 在 `packages/protocol/src/events/registry.ts` 注册 18 个 V1.0 新事件（含 visibility）— refs: event-system/事件分级（durable / ephemeral）
 - [ ] 0.4 新增 `ai-sdk-provider:check` CI script：扫 `packages/native-agent-runtime/**` 禁止字符串 model ID — refs: native-agent-runtime/NativeAgentAdapter 实现
@@ -79,10 +79,10 @@
 
 > 这些是工程实施 milestone，不是 spec 要求。tasks 0–6 描述的是"做什么"；M 阶段描述"按什么顺序做"。
 
-- [ ] M1 数据地基（§0 + §1）：migration / event registry / CI / Role / Runtime / ModelConfig / AgentBinding CRUD
-- [ ] M2 Native Runtime（§2）：NativeAgentAdapter + Vercel AI SDK + tool calling + permission + cancel
-- [ ] M3 Settings UI（§3）：六页 Settings modal + role-generator polling
-- [ ] M4 Team/Squad/Task Workflow（§4 + §5）：room.delegate + Squad/Team 调度 + Task Workflow + projector handlers
-- [ ] M5 收尾验收（§6）：全套测试 + strict + E2E + tasks 勾选 + V1.1 plan
+- M1 数据地基（§0 + §1）：migration / event registry / CI / Role / Runtime / ModelConfig / AgentBinding CRUD
+- M2 Native Runtime（§2）：NativeAgentAdapter + Vercel AI SDK + tool calling + permission + cancel
+- M3 Settings UI（§3）：六页 Settings modal + role-generator polling
+- M4 Team/Squad/Task Workflow（§4 + §5）：room.delegate + Squad/Team 调度 + Task Workflow + projector handlers
+- M5 收尾验收（§6）：全套测试 + strict + E2E + tasks 勾选 + V1.1 plan
 
 > 关键纪律：M2 之前 Native Runtime 只在 Solo / Assisted 验证（不接 Team/Squad）；M4 之前 Task 调度只支持单层（不支持嵌套）；所有 Settings 写路径必须 emit detail events（audit），但 Settings UI 不消费这些事件。

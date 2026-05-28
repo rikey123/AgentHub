@@ -58,7 +58,7 @@ The canonical event registry SHALL be extended with the following V1.0 event typ
 - **WHEN** daemon emit `role.created`（visibility=detail）
 - **THEN** SSE `?view=main` 不推送该事件（detail 不进 main 流）
 - **AND** Settings UI 不订阅 SSE，通过 `GET /roles` REST 拉取最新列表
-- **AND** Debug Panel `?view=detail` 可查到该事件
+- **AND** Debug Panel 通过 `/debug/events?type=role.created` 或 Event Store audit query 可查到该事件；Run Detail **不**通过 Settings CRUD SSE 实时同步
 
 #### Scenario: task.activity.added 触发 projector
 
