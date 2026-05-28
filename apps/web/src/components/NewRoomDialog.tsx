@@ -140,12 +140,12 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
 
   return (
     <Modal.Backdrop isOpen={isOpen} onOpenChange={onOpenChange}>
-      <Modal.Container size="lg">
-        <Modal.Dialog className="overflow-hidden">
+      <Modal.Container size="lg" className="w-[min(96vw,1180px)] max-w-[1180px]">
+        <Modal.Dialog className="max-h-[92vh] overflow-hidden">
           <Modal.CloseTrigger />
-          <Modal.Header className="border-b border-border bg-[linear-gradient(135deg,var(--surface),var(--surface-secondary))] px-6 py-5">
-            <div className="flex items-start gap-4">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-accent text-sm font-black text-accent-foreground shadow-[0_14px_30px_color-mix(in_oklab,var(--accent)_24%,transparent)]">
+          <Modal.Header className="border-b border-border bg-[linear-gradient(135deg,var(--surface),var(--surface-secondary))] px-6 py-4">
+            <div className="flex items-center gap-4">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-accent text-sm font-black text-accent-foreground shadow-[0_14px_30px_color-mix(in_oklab,var(--accent)_24%,transparent)]">
                 AH
               </div>
               <div className="min-w-0">
@@ -157,11 +157,11 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
             </div>
           </Modal.Header>
 
-          <Modal.Body className="max-h-[72vh] gap-0 overflow-hidden p-0">
+          <Modal.Body className="max-h-[70vh] gap-0 overflow-hidden p-0">
             <ScrollShadow className="overflow-auto" orientation="vertical">
               <div className="grid gap-4 p-5">
-                <section className="rounded-2xl border border-border bg-overlay p-4 shadow-[var(--surface-shadow)]">
-                  <div className="grid gap-4 md:grid-cols-[1.1fr_0.9fr]">
+                <section className="rounded-2xl border border-border bg-overlay p-4 shadow-sm">
+                  <div className="grid gap-4 lg:grid-cols-[minmax(320px,0.9fr)_minmax(420px,1.1fr)]">
                     <TextField value={title} onChange={setTitle}>
                       <Label className="text-sm font-semibold">Title</Label>
                       <Input placeholder="e.g. Refactor auth flow" />
@@ -174,7 +174,7 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
                         onChange={(v: unknown) => setMode(v as "solo" | "assisted")}
                         aria-label="Room mode"
                       >
-                        <div className="grid gap-2">
+                        <div className="grid gap-2 sm:grid-cols-2">
                           <RoomModeOption
                             value="assisted"
                             title="Assisted"
@@ -191,7 +191,7 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
                   </div>
                 </section>
 
-                <section className="rounded-2xl border border-border bg-overlay p-4 shadow-[var(--surface-shadow)]">
+                <section className="rounded-2xl border border-border bg-overlay p-4 shadow-sm">
                   <div className="mb-3 flex items-start justify-between gap-3">
                     <div>
                       <h3 className="text-sm font-semibold">Primary agent</h3>
@@ -207,7 +207,7 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
                   {agentsError ? <p className="mb-2 text-xs text-danger">{agentsError}</p> : null}
                   {loading ? <p className="mb-2 text-xs text-muted">Loading agents...</p> : null}
 
-                  <div role="radiogroup" aria-label="Primary agent" className="grid max-h-72 gap-2 overflow-auto pr-1 md:grid-cols-2">
+                  <div role="radiogroup" aria-label="Primary agent" className="grid max-h-[340px] gap-2 overflow-auto pr-1 md:grid-cols-2 xl:grid-cols-3">
                     {sortedAgents.map((agent) => {
                       const selected = agent.id === primaryId;
                       return (
@@ -218,7 +218,7 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
                           aria-checked={selected}
                           role="radio"
                           className={[
-                            "flex min-h-24 w-full items-start gap-3 rounded-2xl border p-3 text-left transition-all",
+                            "relative flex min-h-[126px] w-full items-start gap-3 rounded-2xl border p-3 text-left transition-all",
                             selected
                               ? "border-accent bg-accent-soft shadow-[0_12px_26px_color-mix(in_oklab,var(--accent)_18%,transparent)]"
                               : "border-border bg-surface hover:bg-surface-secondary"
@@ -228,9 +228,9 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
                             <Avatar.Fallback>{agent.avatar ? agent.avatar : initials(agent.name)}</Avatar.Fallback>
                           </Avatar>
                           <div className="min-w-0 flex-1">
-                            <div className="flex min-w-0 flex-wrap items-center gap-2">
+                            <div className="flex min-w-0 items-start gap-2">
                               <span className="truncate font-semibold">{agent.name}</span>
-                              <Chip size="sm" variant="soft" color={providerColor[agent.provider] ?? "default"}>{agent.provider}</Chip>
+                              <Chip className="ml-auto shrink-0" size="sm" variant="soft" color={providerColor[agent.provider] ?? "default"}>{agent.provider}</Chip>
                             </div>
                             <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted">{agent.description ?? agent.adapterId}</p>
                             <div className="mt-2 flex flex-wrap gap-1">
@@ -238,7 +238,7 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
                               <Chip size="sm" variant="soft" color={agent.defaultPresence === "active" ? "success" : "default"}>{agent.defaultPresence}</Chip>
                             </div>
                           </div>
-                          {selected ? <Chip size="sm" variant="primary" color="accent">Primary</Chip> : null}
+                          {selected ? <span className="absolute right-3 top-3 h-2.5 w-2.5 rounded-full bg-accent" aria-hidden="true" /> : null}
                         </button>
                       );
                     })}
@@ -246,7 +246,7 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
                 </section>
 
                 {mode === "assisted" ? (
-                  <section className="rounded-2xl border border-border bg-overlay p-4 shadow-[var(--surface-shadow)]">
+                  <section className="rounded-2xl border border-border bg-overlay p-4 shadow-sm">
                     <div className="mb-3 flex items-start justify-between gap-3">
                       <div>
                         <h3 className="text-sm font-semibold">Additional agents</h3>
@@ -257,7 +257,7 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
                       </Chip>
                     </div>
 
-                    <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                       {sortedAgents
                         .filter((agent) => agent.id !== primaryId)
                         .map((agent) => {
