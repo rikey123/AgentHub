@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Chip, Modal, ScrollShadow, Skeleton, Tabs } from "@heroui/react";
 import { ModelsTab, type ModelConfig } from "./ModelsTab.tsx";
+import { RolesTab, type RoleConfig } from "./RolesTab.tsx";
 import { RuntimesTab, type RuntimeConfig } from "./RuntimesTab.tsx";
 
 export type SettingsTabId = "roles" | "runtimes" | "models" | "permissions" | "workspace" | "mcp";
@@ -157,6 +158,7 @@ export function SettingsModal({ isOpen, selectedTab, onTabChange, onOpenChange, 
                       error={error}
                       data={tab.endpoint ? data[tab.endpoint] : undefined}
                       fetchImpl={fetchImpl}
+                      onRolesChange={(roles) => setData((current) => ({ ...current, roles }))}
                       onRuntimesChange={(runtimes) => setData((current) => ({ ...current, runtimes }))}
                       onModelConfigsChange={(configs) => setData((current) => ({ ...current, modelConfigs: configs }))}
                     />
@@ -177,6 +179,7 @@ function SettingsPanel({
   error,
   data,
   fetchImpl,
+  onRolesChange,
   onRuntimesChange,
   onModelConfigsChange
 }: {
@@ -185,9 +188,14 @@ function SettingsPanel({
   error: string | undefined;
   data: unknown;
   fetchImpl: typeof fetch;
+  onRolesChange: (roles: RoleConfig[]) => void;
   onRuntimesChange: (runtimes: RuntimeConfig[]) => void;
   onModelConfigsChange: (configs: ModelConfig[]) => void;
 }) {
+  if (tab.id === "roles" && !loading && !error && data !== undefined) {
+    return <RolesTab roles={data} fetchImpl={fetchImpl} onRolesChange={onRolesChange} />;
+  }
+
   if (tab.id === "runtimes" && !loading && !error && data !== undefined) {
     return <RuntimesTab data={data} fetchImpl={fetchImpl} onChange={onRuntimesChange} />;
   }

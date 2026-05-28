@@ -200,3 +200,10 @@
 - Invalid ?settings= values normalize to oles, and closing removes the query param while preserving unrelated room/workbench URL state.
 - Existing Settings component-contract tests already covered bootstrap behavior, so I added focused URL contract coverage alongside them instead of introducing a separate browser stack.
 
+
+## [2026-05-29T06:03:00Z] Task 3.2 Roles tab
+- `SettingsModal.tsx` now wires the Roles tab the same way as Runtimes/Models: REST bootstrap data flows into a tab component and tab-local mutations report updated arrays back into modal-local state.
+- Daemon role list/create/update responses use snake_case `is_builtin` and parsed `capabilities` arrays; direct GET /roles/:id is raw/stringified, so the UI normalizer accepts both array and JSON-string capabilities plus `isBuiltin` defensively.
+- HeroUI v3 `TextArea` does not accept `minRows`; use sizing classes such as `className="min-h-44"` like existing cards.
+- Settings UI tests remain dependency-free Vitest contract tests around exported REST helpers instead of jsdom interaction tests.
+- Required `pnpm.cmd test -- apps/web` passes; web build is still blocked by unrelated daemon/native-runtime TS errors noted before, not by RolesTab.
