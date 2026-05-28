@@ -147,3 +147,10 @@
 - Cached model permission decisions per run/model config and emitted permission.run_summary on terminal.
 - Extended the run detail permissions tab to render run-level permission summaries.
 - Added root zod devDependency so the AI SDK test path resolves cleanly in the workspace.
+
+## [2026-05-29T04:38:00Z] Task 2.6 NativeAgentAdapter integration tests
+- Added `packages/native-agent-runtime/test/native-agent-adapter.integration.test.ts` using real SQLite migrations, `EventBus`, `RunLifecycleService`, `PermissionEngine`, and mocked AI SDK/provider resolution.
+- Native runtime token deltas are `ephemeral` and coalesced by `EventBus`; integration tests should call `flushDeltas()` and assert live subscriber delivery rather than expecting `message.part.delta` rows in `events`.
+- Permission allow/deny can be exercised deterministically by seeding `permission_rules` for `model.api_call.<provider>`; deny-before-stream should assert both `resolveProvider` and `streamText` were not called.
+- Cancel integration can use a real `CommandBus` + `createCancelRunHandler` wired to `NativeAgentAdapter.cancelManagedRun()` and a mocked stream that waits on `AbortSignal`.
+- Verified `pnpm.cmd test -- packages/native-agent-runtime packages/orchestrator packages/daemon` and `pnpm.cmd ai-sdk-provider:check` pass.

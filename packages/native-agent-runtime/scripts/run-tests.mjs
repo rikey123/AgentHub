@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(packageRoot, "..", "..");
 const vitestBin = resolve(repoRoot, "node_modules", ".bin", process.platform === "win32" ? "vitest.cmd" : "vitest");
-const vitestArgs = ["run", "packages/native-agent-runtime/test/provider-registry.test.ts", "packages/native-agent-runtime/test/native-agent-adapter.test.ts", "packages/native-agent-runtime/test/mcp-tool-converter.test.ts"];
+const vitestArgs = ["run", "packages/native-agent-runtime/test/provider-registry.test.ts", "packages/native-agent-runtime/test/native-agent-adapter.test.ts", "packages/native-agent-runtime/test/native-agent-adapter.integration.test.ts", "packages/native-agent-runtime/test/mcp-tool-converter.test.ts"];
 const command = process.platform === "win32" ? "cmd.exe" : vitestBin;
 const args = process.platform === "win32" ? ["/c", vitestBin, ...vitestArgs] : vitestArgs;
 const result = spawnSync(command, args, { cwd: repoRoot, stdio: "inherit", shell: false });
