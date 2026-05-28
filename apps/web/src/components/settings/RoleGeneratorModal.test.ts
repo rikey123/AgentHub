@@ -33,7 +33,7 @@ describe("RoleGeneratorModal REST integration contract", () => {
             status: "completed",
             prompt_fragment: "Review frontend refactors",
             token_count: 34,
-            draft: {
+            draftJson: {
               name: "Frontend Refactor Reviewer",
               description: "Reviews frontend refactors",
               prompt: "Review frontend refactors with care.",
@@ -67,16 +67,16 @@ describe("RoleGeneratorModal REST integration contract", () => {
     await vi.advanceTimersByTimeAsync(500);
     const completed = await pollPromise;
     const roleInput = buildGeneratedRoleInput({
-      name: completed.draft!.name,
-      description: completed.draft!.description,
-      prompt: `${completed.draft!.prompt} Mention migration risk.`,
-      capabilitiesText: completed.draft!.capabilities.join(", ")
+      name: completed.draftJson!.name,
+      description: completed.draftJson!.description,
+      prompt: `${completed.draftJson!.prompt} Mention migration risk.`,
+      capabilitiesText: completed.draftJson!.capabilities.join(", ")
     }, jobId);
     const saved = await createGeneratedRole(fetchImpl, roleInput);
     await deleteRoleGenerationJob(fetchImpl, jobId);
     const nextRoles = upsertRole([role({ id: "role_builder", name: "Builder" })], saved);
 
-    expect(completed).toMatchObject({ status: "completed", tokenCount: 34, draft: { name: "Frontend Refactor Reviewer" } });
+    expect(completed).toMatchObject({ status: "completed", tokenCount: 34, draftJson: { name: "Frontend Refactor Reviewer" } });
     expect(saved).toMatchObject({ id: "role_generated", name: "Frontend Refactor Reviewer", is_builtin: false });
     expect(nextRoles.map((item) => item.id)).toEqual(["role_builder", "role_generated"]);
     expect(calls).toEqual([

@@ -65,6 +65,10 @@
 - The delete path checks `agent_bindings.model_config_id` first and returns `409` without publishing `model_config.deleted` when bindings exist.
 - Ollama/local configs intentionally persist `NULL` for both key fields.
 
+## [2026-05-29T06:55:00Z] Wave 4 Oracle fixes
+- The daemon’s role-generation job response shape is `draftJson`; the web modal should not expect `draft`, `roleDraft`, or `result`.
+- Failed role-generation cleanup is easiest to regression-test when the cleanup logic is factored into a helper that can be called directly.
+
 ## [2026-05-29T02:32:02Z] Task 1.1
 - Implemented REST role CRUD directly in `packages/daemon/src/index.ts` with same-transaction durable publishes for `role.created`, `role.updated`, and `role.deleted`.
 - Added a response normalizer so role API replies decode stored JSON strings for `capabilities` and `tags` before returning them to clients.
@@ -232,4 +236,6 @@
 - Existing settings tests from tasks 3.1-3.8 already covered modal bootstrap, Roles/Runtimes/Models REST helper contracts, role generation save/cancel/failure normalization, deep links, EventSource-free flows, and fake API-key redaction after save.
 - Added only the missing daemon regression: generated role drafts get a seven-day expires_at, GC removes them after the boundary, polling returns 404, and no role.generation.* events are persisted.
 - Verification passed: pnpm.cmd test -- packages/daemon apps/web (45 files, 331 passed, 1 skipped).
+
+- Role generation jobs now normalize the daemon response from draftJson; the UI should not expect legacy draft/esult shapes.\n- Failed role generation jobs should be deleted after failure handling, not just marked failed, so stale ole_drafts rows do not linger.\n- A deterministic failure regression test is easier when cleanup is factored into a small helper that can be exercised directly.
 

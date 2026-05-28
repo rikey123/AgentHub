@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AdapterRegistry } from "../src/adapters/registry.ts";
 import { seedBuiltinRoles } from "../src/builtin-roles.ts";
 import { migrateAgentProfilesToV10 } from "../src/migrations/0014_data.ts";
-import { createDaemon, loadAgentHubConfig, type DaemonApp, type DaemonStartupPhase } from "../src/index.ts";
+import { createDaemon, finalizeFailedRoleGenerationJob, loadAgentHubConfig, type DaemonApp, type DaemonStartupPhase } from "../src/index.ts";
 import { cleanExpiredRoleDrafts, startRoleDraftGC } from "../src/role-draft-gc.ts";
 import { CodexAdapterStub } from "../../adapters/codex/src/index.ts";
 
@@ -462,6 +462,16 @@ describe("daemon M1.4 composition", () => {
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM role_drafts WHERE job_id = ?").get(jobId)).toMatchObject({ count: 0 });
     const missing = await fetch(`${baseUrl}/roles/generate/jobs/${jobId}`);
     expect(missing.status).toBe(404);
+  });
+
+  it("removes failed role generation jobs from role_drafts", () => {
+    const jobId = `job_role_fail_${Date.now()}`;
+    const failedAt = Date.now();
+    daemon.database.sqlite.prepare("INSERT INTO role_drafts (job_id, description, target_work, preferred_tone, capabilities, model_config_id, draft_json, status, failure_reason, created_at, updated_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(jobId, "Broken draft", "code-review", "concise", JSON.stringify(["chat"]), "mc_1", null, "streaming", null, failedAt, failedAt, failedAt + 1_000);
+
+    finalizeFailedRoleGenerationJob({ database: daemon.database } as never, jobId, "model_config_not_found", failedAt + 1);
+
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM role_drafts WHERE job_id = ?").get(jobId)).toMatchObject({ count: 0 });
   });
 
   it("expires generated role drafts after seven days and returns 404 after GC", async () => {

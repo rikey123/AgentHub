@@ -30,7 +30,7 @@ export interface RoleGenerationJob {
   promptFragment: string;
   tokenCount: number;
   error?: string;
-  draft?: RoleDraftPreview;
+  draftJson?: RoleDraftPreview;
 }
 
 interface PreviewForm {
@@ -122,8 +122,8 @@ export function RoleGeneratorModal({
       });
       if (controller.signal.aborted) return;
       setJob(completed);
-      if (completed.status === "completed" && completed.draft) {
-        setPreview(previewFromDraft(completed.draft));
+      if (completed.status === "completed" && completed.draftJson) {
+        setPreview(previewFromDraft(completed.draftJson));
         setStatus("completed");
       } else if (completed.status === "expired") {
         setStatus("expired");
@@ -250,9 +250,9 @@ export function RoleGeneratorModal({
                       ? <Chip size="sm" variant="soft" color="default">no capabilities</Chip>
                       : parseCapabilities(preview.capabilitiesText).map((capability) => <Chip key={capability} size="sm" variant="soft" color="default">{capability}</Chip>)}
                   </div>
-                  {job?.draft?.permissionProfileId ? (
+                  {job?.draftJson?.permissionProfileId ? (
                     <p className="text-xs text-muted">
-                      Suggested permission profile: <span className="ah-mono text-foreground">{job.draft.permissionProfileId}</span>
+                      Suggested permission profile: <span className="ah-mono text-foreground">{job.draftJson.permissionProfileId}</span>
                     </p>
                   ) : null}
                 </Card.Content>
@@ -360,7 +360,7 @@ export async function deleteRoleGenerationJob(fetchImpl: typeof fetch, jobId: st
 export function normalizeRoleGenerationJob(fallbackJobId: string, payload: unknown): RoleGenerationJob {
   const row = isRecord(payload) && isRecord(payload.job) ? payload.job : payload;
   const status = normalizeJobStatus(isRecord(row) ? row.status : undefined);
-  const draft = normalizeDraft(isRecord(row) ? row.draft ?? row.roleDraft ?? row.result : undefined);
+  const draftJson = normalizeDraft(isRecord(row) ? row.draftJson : undefined);
   const job: RoleGenerationJob = {
     jobId: stringField(isRecord(row) ? row.jobId ?? row.id : undefined) ?? fallbackJobId,
     status,
@@ -369,7 +369,7 @@ export function normalizeRoleGenerationJob(fallbackJobId: string, payload: unkno
   };
   const error = stringField(isRecord(row) ? row.error : undefined);
   if (error) job.error = error;
-  if (draft) job.draft = draft;
+  if (draftJson) job.draftJson = draftJson;
   return job;
 }
 

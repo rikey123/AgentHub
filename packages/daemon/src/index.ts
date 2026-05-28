@@ -1172,13 +1172,18 @@ async function runRoleGenerationJob(ctx: RouteContext, jobId: string, modelConfi
   } catch (error) {
     const failedAt = ctx.now?.() ?? Date.now();
     const failureReason = error instanceof Error ? error.message : "role_generation_failed";
-    ctx.database.sqlite.transaction(() => {
-      const current = get(ctx.database, "SELECT status FROM role_drafts WHERE job_id = ?", jobId) as Record<string, unknown> | null;
-      if (current === null) return;
-      if (String(current.status) === "cancelled") return;
-      ctx.database.sqlite.prepare("UPDATE role_drafts SET status = ?, failure_reason = ?, updated_at = ? WHERE job_id = ?").run("failed", failureReason, failedAt, jobId);
-    })();
+    finalizeFailedRoleGenerationJob(ctx, jobId, failureReason, failedAt);
   }
+}
+
+export function finalizeFailedRoleGenerationJob(ctx: RouteContext, jobId: string, failureReason: string, failedAt: number): void {
+  ctx.database.sqlite.transaction(() => {
+    const current = get(ctx.database, "SELECT status FROM role_drafts WHERE job_id = ?", jobId) as Record<string, unknown> | null;
+    if (current === null) return;
+    if (String(current.status) === "cancelled") return;
+    ctx.database.sqlite.prepare("UPDATE role_drafts SET status = ?, failure_reason = ?, updated_at = ? WHERE job_id = ?").run("failed", failureReason, failedAt, jobId);
+    ctx.database.sqlite.prepare("DELETE FROM role_drafts WHERE job_id = ?").run(jobId);
+  })();
 }
 
 function buildRoleDraft(row: Record<string, unknown>, modelConfig: Record<string, unknown>): { readonly name: string; readonly description: string; readonly prompt: string; readonly capabilities: readonly string[]; readonly suggestedPermissionProfileId: string | null } {
