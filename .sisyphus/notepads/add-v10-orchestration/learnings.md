@@ -164,3 +164,9 @@
 - Native permission summaries now use `modelConfig.id` for both cache keys and emitted `permission.run_summary` payloads; `nativeModelConfig()` now selects `mc.id`.
 - MCP tool failures now return an error result and emit exactly one `tool.call.completed` event instead of throwing twice.
 - Verification passed: `pnpm.cmd test -- packages/native-agent-runtime packages/orchestrator packages/daemon`, `pnpm.cmd ai-sdk-provider:check`, and `pnpm.cmd check:all`.
+
+## 2026-05-29T05:17:36.8031483+08:00 — Wave 3 Oracle re-review 2
+- Registry-dispatched native runs now pass PermissionEngine into NativeAgentAdapter, so deny-before-stream is covered at daemon composition level.
+- Native model permission cache and permission.run_summary now use modelConfig.id rather than provider/model strings.
+- MCP tool converter should return structured tool error payloads and emit exactly one tool.call.completed on failures, not throw through the AI SDK tool execution path.
+

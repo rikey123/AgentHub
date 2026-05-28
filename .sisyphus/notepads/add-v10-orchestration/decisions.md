@@ -10,3 +10,7 @@
 - room.delegate: Task insert + run enqueue + events must be atomic; no silent half-success.
 - task.created/task.status.changed projector: must support full V1.0 payload semantics; no legacy todo fallback.
 - role_drafts: part of 0.1 initial schema contract.
+
+## 2026-05-29T05:17:36.8031483+08:00 — Wave 3 Oracle re-review 2
+- APPROVE Wave 3 after fixes. Requested package tests, AI SDK provider check, and check:all all pass; Wave 4 may proceed.
+
