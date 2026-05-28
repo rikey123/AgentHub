@@ -3,38 +3,6 @@
 ## Purpose
 TBD - created by archiving change add-agenthub-mvp. Update Purpose after archive.
 ## Requirements
-### Requirement: V0.5 OpenCode Adapter 占位（opencode-adapter）
-
-The system SHALL keep `AgentRuntimeAdapter` interface stable so V0.5 can add an `OpenCodeAdapter` (server/SDK 协议) without changing adapter-framework contract; MVP SHALL ship `MockAgentAdapter` + `ClaudeCodeAdapter`, V0.5 SHALL add `OpenCodeAdapter` as the second real adapter to validate the abstraction.
-
-#### Scenario: MVP 无 OpenCode adapter
-
-- **WHEN** 用户尝试创建 `provider="opencode"` 的 Agent
-- **THEN** MVP 返回 `adapter_not_found`；V0.5 起返回正常 attach 流程
-
-### Requirement: V0.5 Run Detail 投影完整化占位（run-detail-projection）
-
-The system SHALL preserve `agent.run.*` durable event lineage and `messages.run_id` linkage so V0.5 can ship a complete 7-tab Run Detail (Prompt / Tool Calls / FS Changes / Permissions / Context / Logs / Cost) without new event types.
-
-#### Scenario: MVP Run Detail 显示残缺
-
-- **WHEN** 用户在主流点开 Run Detail
-- **THEN** MVP 仅展示 Prompt + Logs 两个 tab 占位；其余 5 tab 在 V0.5 由前端补齐，daemon 不需新增事件
-
-### Requirement: V0.5 单机 Cost 面板占位（cost-panel-local）
-
-The system SHALL store cost/usage on each `runs` row (per agents capability); V0.5 SHALL aggregate by workspace / agent / model / time-window in a local panel. This capability SHALL NOT introduce multi-user 归因（路线红线 D32：永不支持多用户）；预算告警 / 降级策略推迟到 V1.5 `permission-dsl`（与表达式权限规则一起做）。
-
-#### Scenario: MVP 查 cost summary
-
-- **WHEN** `GET /workspaces/:id/cost-summary`
-- **THEN** MVP 返回 501 + `{ error: "cost-panel-local is V0.5", capability: "v1-roadmap" }`
-
-#### Scenario: V0.5 Cost 面板单机
-
-- **WHEN** （V0.5）用户在 Web UI 打开 Cost Panel
-- **THEN** （V0.5）展示当前 daemon 单机数据，按 agent / model / day 分组；不区分用户
-
 ### Requirement: V1.0 Squad / Team 模式占位
 
 The system SHALL accept `mode in ("squad", "team")` at the Room creation API level (data model already supports it per `rooms` capability) but reject with 501 in MVP and V0.5; V1.0 SHALL implement Squad（长期 Leader 路由）+ Team（任务拆解派发）共享同一 Orchestrator dispatch 引擎。
