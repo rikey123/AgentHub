@@ -178,3 +178,25 @@
 - `FeatureRail` Settings should act as an entry point, not a persistent rail tab: call the settings opener and leave the active workbench rail unchanged.
 - Repo-wide/web build typecheck is currently blocked by native-runtime/daemon TS issues outside settings UI; targeted web settings tests pass.
 
+## [2026-05-29T05:52:00Z] Task 3.3 Runtimes tab
+
+- Settings runtime rows arrive from `GET /runtimes` as arrays with snake_case DB fields; mutation responses may wrap raw rows in `{ runtime }`, so the web tab needs a normalizer that handles both decoded arrays and stringified `args`/`env`.
+- Runtime test results are REST-only: synchronous `200` returns the result directly, while async `202` polling uses `/settings/jobs/:jobId` and may return either flat `{ status, result }` or wrapped `{ job }` shapes from shared settings job infrastructure.
+- Locally added custom ACP rows should use a UI-only `draft` status to distinguish unsaved rows from persisted runtimes that are merely `missing`; otherwise empty-command persisted rows can be incorrectly POSTed again.
+- GitNexus MCP was unavailable in this session (`Not connected`), so impact/detect-change checks could not run; source-level scope was kept to `SettingsModal.tsx`, new `RuntimesTab.tsx`, tests, evidence, and notepad updates.
+
+## [2026-05-29T05:48:00Z] Task 3.4 Models tab
+
+- `GET /model-configs` currently returns snake_case rows (`base_url`, `api_key_fingerprint`), while create/update requests expect camelCase payload fields (`baseUrl`, `apiKey`); UI helpers should normalize responses defensively but write daemon-native camelCase.
+- The web Settings test style remains dependency-free: export pure REST/payload helpers from UI components and test those with mocked `fetch` instead of adding Testing Library/jsdom mid-wave.
+- HeroUI Cards in this repo use `Card.Content` rather than `Card.Body`; using the latter passes LSP but fails package `tsc`.
+- Ollama should always omit `apiKey` and send `http://localhost:11434/v1` when no custom baseURL is entered.
+- `pnpm.cmd --filter @agenthub/web build` no longer reports Settings-local errors after this task, but still fails on existing native-runtime/daemon TypeScript issues from Wave 3.
+
+
+## [2026-05-29T05:40:00Z] Task 3.5 Settings URL deep link
+- Added a small settingsUrl.ts helper so App-level URL state stays testable without coupling the modal to browser history APIs.
+- Settings modal is now controlled for tab selection; App owns settingsOpen and settingsTab and syncs them to window.history.replaceState(...).
+- Invalid ?settings= values normalize to oles, and closing removes the query param while preserving unrelated room/workbench URL state.
+- Existing Settings component-contract tests already covered bootstrap behavior, so I added focused URL contract coverage alongside them instead of introducing a separate browser stack.
+

@@ -23,7 +23,9 @@ describe("SettingsModal integration contract", () => {
     const settingsButton = findElementByProp(tree, "aria-label", "Settings");
 
     expect(settingsButton).toBeDefined();
-    settingsButton?.props.onClick();
+    const onClick = settingsButton?.props.onClick;
+    expect(typeof onClick).toBe("function");
+    if (typeof onClick === "function") onClick();
 
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
     expect(onSelect).not.toHaveBeenCalledWith("settings");

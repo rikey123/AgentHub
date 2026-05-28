@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { AppShell } from "./components/shell/AppShell.tsx";
 import { TopBar } from "./components/shell/TopBar.tsx";
@@ -14,11 +14,17 @@ import { CommandPalette, type PaletteCommand } from "./components/CommandPalette
 import { KeymapModal } from "./components/KeymapModal.tsx";
 import { NewRoomDialog, type CreateRoomInput } from "./components/NewRoomDialog.tsx";
 import { SettingsModal } from "./components/settings/index.ts";
+import { getSettingsSearch, getSettingsStateFromSearch } from "./components/settings/settingsUrl.ts";
+import type { SettingsTabId } from "./components/settings/SettingsModal.tsx";
 import { useProjector } from "./hooks/useProjector.ts";
 import { useSdk, useCsrfFetch } from "./hooks/useSdk.ts";
 import { useTheme } from "./hooks/useTheme.ts";
 
 export default function App() {
+  const initialSettingsState = useMemo(() => {
+    if (typeof window === "undefined") return { isOpen: false, tab: "roles" as SettingsTabId };
+    return getSettingsStateFromSearch(window.location.search);
+  }, []);
   const [activeRoomId, setActiveRoomId] = useState<string | undefined>();
   const [activeRunId, setActiveRunId] = useState<string | undefined>();
   const [selectedMessageId, setSelectedMessageId] = useState<string | undefined>();
@@ -26,7 +32,8 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [keymapOpen, setKeymapOpen] = useState(false);
   const [newRoomOpen, setNewRoomOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(initialSettingsState.isOpen);
+  const [settingsTab, setSettingsTab] = useState<SettingsTabId>(initialSettingsState.tab);
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
   const [sidePanelTab, setSidePanelTab] = useState<"context" | "tasks" | "members" | "debug" | "cost">("context");
@@ -37,6 +44,15 @@ export default function App() {
   const sdk = useSdk();
   const csrfFetch = useCsrfFetch();
   const { theme, setTheme, toggleTheme, setDensity } = useTheme();
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const nextSearch = getSettingsSearch(window.location.search, settingsOpen, settingsTab);
+    if (nextSearch === window.location.search) return;
+
+    const nextUrl = `${window.location.pathname}${nextSearch}${window.location.hash}`;
+    window.history.replaceState(window.history.state, "", nextUrl);
+  }, [settingsOpen, settingsTab]);
 
   const rooms = useMemo(() => Array.from(projector.rooms.values()), [projector.rooms]);
   const activeRoom = activeRoomId ? projector.rooms.get(activeRoomId) : undefined;
@@ -65,6 +81,12 @@ export default function App() {
 
   const openNewRoom = useCallback(() => setNewRoomOpen(true), []);
   const openSettings = useCallback(() => setSettingsOpen(true), []);
+  const handleSettingsOpenChange = useCallback((open: boolean) => {
+    setSettingsOpen(open);
+  }, []);
+  const handleSettingsTabChange = useCallback((tab: SettingsTabId) => {
+    setSettingsTab(tab);
+  }, []);
 
   const handleSendMessage = useCallback(async (input: { text: string; quotedMessageId?: string; attachmentIds: string[]; mentions: string[] }) => {
     if (!activeRoomId) return;
@@ -272,7 +294,7 @@ export default function App() {
       <CommandPalette isOpen={paletteOpen} onOpenChange={setPaletteOpen} commands={commands} />
       <KeymapModal isOpen={keymapOpen} onOpenChange={setKeymapOpen} />
       <NewRoomDialog isOpen={newRoomOpen} onOpenChange={setNewRoomOpen} onCreate={handleCreateRoom} />
-      <SettingsModal isOpen={settingsOpen} onOpenChange={setSettingsOpen} />
+      <SettingsModal isOpen={settingsOpen} selectedTab={settingsTab} onTabChange={handleSettingsTabChange} onOpenChange={handleSettingsOpenChange} />
       <RunDetailDrawer
         isOpen={!!activeRunId}
         onOpenChange={(open) => { if (!open) setActiveRunId(undefined); }}

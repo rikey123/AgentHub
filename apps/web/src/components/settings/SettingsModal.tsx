@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Chip, Modal, ScrollShadow, Skeleton, Tabs } from "@heroui/react";
+import { ModelsTab, type ModelConfig } from "./ModelsTab.tsx";
+import { RuntimesTab, type RuntimeConfig } from "./RuntimesTab.tsx";
 
 export type SettingsTabId = "roles" | "runtimes" | "models" | "permissions" | "workspace" | "mcp";
 
@@ -20,6 +22,8 @@ type SettingsStatus = "idle" | "loading" | "ready" | "error";
 
 interface SettingsModalProps {
   isOpen: boolean;
+  selectedTab: SettingsTabId;
+  onTabChange: (tab: SettingsTabId) => void;
   onOpenChange: (open: boolean) => void;
   fetchImpl?: typeof fetch;
 }
@@ -53,7 +57,7 @@ export async function fetchSettingsBootstrap(fetchImpl: typeof fetch, signal: Ab
   return Object.fromEntries(entries) as SettingsData;
 }
 
-export function SettingsModal({ isOpen, onOpenChange, fetchImpl = fetch }: SettingsModalProps) {
+export function SettingsModal({ isOpen, selectedTab, onTabChange, onOpenChange, fetchImpl = fetch }: SettingsModalProps) {
   const [status, setStatus] = useState<SettingsStatus>("idle");
   const [data, setData] = useState<SettingsData>(() => emptySettingsData());
   const [error, setError] = useState<string | undefined>();
@@ -126,7 +130,7 @@ export function SettingsModal({ isOpen, onOpenChange, fetchImpl = fetch }: Setti
           </Modal.Header>
 
           <Modal.Body className="max-h-[72vh] gap-0 overflow-hidden p-0">
-            <Tabs defaultSelectedKey="roles" className="flex min-h-0 flex-1 flex-col">
+            <Tabs selectedKey={selectedTab} onSelectionChange={(key) => onTabChange(String(key) as SettingsTabId)} className="flex min-h-0 flex-1 flex-col">
               <Tabs.ListContainer>
                 <Tabs.List aria-label="Settings sections" data-testid="settings-tabs">
                   {SETTINGS_TABS.map((tab, index) => (
@@ -147,7 +151,15 @@ export function SettingsModal({ isOpen, onOpenChange, fetchImpl = fetch }: Setti
               <ScrollShadow className="flex-1 overflow-auto" orientation="vertical">
                 {SETTINGS_TABS.map((tab) => (
                   <Tabs.Panel key={tab.id} id={tab.id}>
-                    <SettingsPanel tab={tab} loading={loading} error={error} data={tab.endpoint ? data[tab.endpoint] : undefined} />
+                    <SettingsPanel
+                      tab={tab}
+                      loading={loading}
+                      error={error}
+                      data={tab.endpoint ? data[tab.endpoint] : undefined}
+                      fetchImpl={fetchImpl}
+                      onRuntimesChange={(runtimes) => setData((current) => ({ ...current, runtimes }))}
+                      onModelConfigsChange={(configs) => setData((current) => ({ ...current, modelConfigs: configs }))}
+                    />
                   </Tabs.Panel>
                 ))}
               </ScrollShadow>
@@ -163,13 +175,27 @@ function SettingsPanel({
   tab,
   loading,
   error,
-  data
+  data,
+  fetchImpl,
+  onRuntimesChange,
+  onModelConfigsChange
 }: {
   tab: (typeof SETTINGS_TABS)[number];
   loading: boolean;
   error: string | undefined;
   data: unknown;
+  fetchImpl: typeof fetch;
+  onRuntimesChange: (runtimes: RuntimeConfig[]) => void;
+  onModelConfigsChange: (configs: ModelConfig[]) => void;
 }) {
+  if (tab.id === "runtimes" && !loading && !error && data !== undefined) {
+    return <RuntimesTab data={data} fetchImpl={fetchImpl} onChange={onRuntimesChange} />;
+  }
+
+  if (tab.id === "models" && !loading && !error && data !== undefined) {
+    return <ModelsTab modelConfigs={data} fetchImpl={fetchImpl} onModelConfigsChange={onModelConfigsChange} />;
+  }
+
   return (
     <section className="grid gap-4 p-5" data-testid={`settings-panel-${tab.id}`}>
       <div className="rounded-2xl border border-border bg-overlay p-4 shadow-sm">
