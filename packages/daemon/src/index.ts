@@ -16,6 +16,7 @@ import { attachmentMaxBytes, authenticateBrowserRequest, issueBrowserSession, re
 import { Effect } from "effect";
 
 import { AdapterRegistry } from "./adapters/registry.ts";
+import { normalizeRoomCreateCompat } from "./compat/agent-profile-compat.ts";
 import { migrateAgentProfilesToV10 } from "./migrations/0014_data.ts";
 import { createDaemonCommandHandlers, seedDefaultData } from "./commands.ts";
 export { daemonPidPath, defaultConfigPath, ensureAgentHubHome, ensureParentDirectory, loadAgentHubConfig, redactConfig, type AgentHubConfig, type ConfigOverrides } from "./config.ts";
@@ -353,7 +354,12 @@ async function route(ctx: RouteContext): Promise<void> {
   if (ctx.req.method === "GET" && url.pathname === "/openapi.json") return json(ctx.res, 200, openApiDocument);
   if (ctx.req.method === "GET" && url.pathname === "/event") return sse(ctx, url, auth.scopes);
   if (ctx.req.method === "GET" && url.pathname === "/rooms") return json(ctx.res, 200, { rooms: all(ctx.database, "SELECT * FROM rooms ORDER BY created_at ASC") });
-  if (ctx.req.method === "POST" && url.pathname === "/rooms") return dispatch(ctx, await body(ctx), "CreateRoom");
+  if (ctx.req.method === "POST" && url.pathname === "/rooms") {
+    const requestBody = await body(ctx);
+    const normalized = normalizeRoomCreateCompat(ctx.database, requestBody);
+    if (!normalized.ok) return json(ctx.res, normalized.status, { error: normalized.error });
+    return dispatchCreated(ctx, normalized.body, "CreateRoom");
+  }
   const parts = url.pathname.split("/").filter(Boolean);
   if (ctx.req.method === "DELETE" && parts[0] === "auth" && parts[1] === "tokens" && parts[2]) { if (!requireScope(auth, "write", ctx.res)) return; return revokeToken(ctx, parts[2]); }
   if (ctx.req.method === "GET" && parts[0] === "rooms" && parts.length === 1) return json(ctx.res, 200, { rooms: all(ctx.database, "SELECT * FROM rooms ORDER BY created_at ASC") });

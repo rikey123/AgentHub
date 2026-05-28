@@ -36,7 +36,8 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
     return failed("validation_failed", `unknown room mode '${mode}' (supported: solo, assisted, team, squad)`);
   }
   const workspaceId = stringField(command, "workspaceId") ?? "default-workspace";
-  const primaryAgentId = stringField(command, "primaryAgentId") ?? "mock-builder";
+  const primaryAgentId = stringField(command, "primaryAgentId") ?? stringField(command, "agentBindingId") ?? "mock-builder";
+  const legacyAgentProfileId = stringField(command, "agentProfileId");
   const participants = Array.isArray(command.participants) ? command.participants : [];
   if (mode === "solo" && participants.filter((item) => isObject(item) && item.type === "agent").length > 1) {
     return failed("validation_failed", "Solo rooms cannot contain multiple agents");
@@ -62,8 +63,8 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
       .run(roomId, workspaceId, title, mode, primaryAgentId, now, now);
     const primary = lookupAgent(primaryAgentId);
     options.database.sqlite
-      .prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, default_presence, joined_at) VALUES (?, ?, 'agent', 'primary', ?, NULL, 'active', ?)")
-      .run(roomId, primaryAgentId, primary.adapterId, now);
+      .prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES (?, ?, 'agent', 'primary', ?, NULL, ?, 'active', ?)")
+      .run(roomId, primaryAgentId, primary.adapterId, primaryAgentId, now);
     options.database.sqlite
       .prepare("INSERT OR REPLACE INTO agent_presence (room_id, agent_id, state, reason, status_line, updated_at) VALUES (?, ?, 'active', NULL, NULL, ?)")
       .run(roomId, primaryAgentId, now);
@@ -75,8 +76,8 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
         const role = isTeamMode ? "teammate" : (typeof participant.role === "string" ? participant.role : "observer");
         const presence = isTeamMode ? "active" : (participant.defaultPresence === "active" ? "active" : "observing");
         options.database.sqlite
-          .prepare("INSERT OR IGNORE INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, default_presence, joined_at) VALUES (?, ?, 'agent', ?, ?, NULL, ?, ?)")
-          .run(roomId, participant.agentId, role, info.adapterId, presence, now);
+          .prepare("INSERT OR IGNORE INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES (?, ?, 'agent', ?, ?, NULL, ?, ?, ?)")
+          .run(roomId, participant.agentId, role, info.adapterId, participant.agentId, presence, now);
         options.database.sqlite
           .prepare("INSERT OR REPLACE INTO agent_presence (room_id, agent_id, state, reason, status_line, updated_at) VALUES (?, ?, ?, NULL, NULL, ?)")
           .run(roomId, participant.agentId, presence, now);
@@ -109,7 +110,7 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
   const emittedEvents = latestEvents(options.database, roomId);
   void Promise.resolve().then(() => options.prewarmRoomAgents?.(roomId)).catch(() => undefined);
   void meta;
-  return { ok: true, data: { roomId }, emittedEvents };
+  return { ok: true, data: { roomId, agentBindingId: primaryAgentId, ...(legacyAgentProfileId !== undefined ? { agentProfileId: legacyAgentProfileId } : {}) }, emittedEvents };
 }
 
 function setRoomArchived(options: DaemonCommandHandlersOptions, command: Command, archived: boolean): CommandResult {

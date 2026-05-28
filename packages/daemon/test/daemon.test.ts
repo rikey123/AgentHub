@@ -229,6 +229,39 @@ describe("daemon M1.4 composition", () => {
     expect(daemon.database.sqlite.prepare("SELECT adapter_session_id FROM room_participants WHERE room_id = ? AND participant_id = 'claude-agent'").get(room.data.roomId)).toMatchObject({ adapter_session_id: null });
   });
 
+  it("resolves legacy agentProfileId room creation inputs to migrated bindings", async () => {
+    daemon.database.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, ?, ?, ?)").run("ap_legacy", "default-workspace", "role_builder", "runtime_claude", "Legacy Binding", 1, 1);
+
+    const response = await fetch(`${baseUrl}/rooms`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Legacy Room", mode: "solo", agentProfileId: "ap_legacy" })
+    });
+    const payload = await response.json() as { readonly data?: { readonly roomId: string; readonly agentBindingId: string; readonly agentProfileId?: string } };
+
+    expect(response.status).toBe(201);
+    expect(payload.data).toMatchObject({ agentBindingId: "ap_legacy", agentProfileId: "ap_legacy" });
+
+    const roomId = payload.data?.roomId ?? "";
+    expect(daemon.database.sqlite.prepare("SELECT agent_binding_id FROM room_participants WHERE room_id = ? AND participant_type = 'agent' AND role = 'primary'").get(roomId)).toMatchObject({ agent_binding_id: "ap_legacy" });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM rooms WHERE id = ?").get(roomId)).toMatchObject({ count: 1 });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE room_id = ? AND type = 'room.created'").get(roomId)).toMatchObject({ count: 1 });
+  });
+
+  it("rejects unknown legacy agentProfileId inputs without partial writes", async () => {
+    const response = await fetch(`${baseUrl}/rooms`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Missing Legacy", mode: "solo", agentProfileId: "ap_missing" })
+    });
+    const payload = await response.json() as { readonly error?: string };
+
+    expect(response.status).toBe(404);
+    expect(payload).toMatchObject({ error: "agent_profile_not_found" });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM rooms WHERE title = 'Missing Legacy'").get()).toMatchObject({ count: 0 });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'room.created'").get()).toMatchObject({ count: 0 });
+  });
+
   it("archiving a room keeps active ACP runs lifecycle-owned instead of disposing their session", async () => {
     daemon.database.sqlite.prepare("INSERT INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES ('claude-agent', NULL, 'Claude Agent', 'claude-code', 'claude', 'Claude test profile', ?, NULL, 0, NULL, 1, 1)").run(JSON.stringify(["chat", "code.edit"]));
     const client = new AgentHubClient({ baseUrl });
@@ -294,7 +327,7 @@ describe("daemon M1.4 composition", () => {
     expect(noCsrf.status).toBe(403);
 
     const created = await fetch(`${baseUrl}/rooms`, { method: "POST", headers: { ...originHeaders, cookie, "x-agenthub-csrf": sessionPayload.csrfToken }, body: JSON.stringify({ title: "Browser", mode: "solo", primaryAgentId: "mock-builder" }) });
-    expect(created.status).toBe(200);
+    expect(created.status).toBe(201);
 
     const sse = await fetch(`${baseUrl}/event`, { headers: { origin: baseUrl, cookie } });
     expect(sse.status).toBe(200);
