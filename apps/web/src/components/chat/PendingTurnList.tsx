@@ -12,33 +12,44 @@ interface PendingTurnListProps {
 export function PendingTurnList({ turns, onCancel, onEdit }: PendingTurnListProps) {
   if (turns.length === 0) return null;
   return (
-    <div className="border-t border-border bg-surface px-3 py-2">
+    <div className="border-t border-border bg-surface px-3 py-2" data-testid="pending-turn-list">
       <div className="flex items-center gap-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">Queued ({turns.length})</h3>
-        {turns.length >= 15 ? (
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">Pending ({turns.length})</h3>
+        {turns.length >= 20 ? (
+          <Chip size="sm" variant="soft" color="warning" role="alert">Queue limit reached</Chip>
+        ) : turns.length >= 15 ? (
           <Chip size="sm" variant="soft" color="warning" role="alert">Queue almost full</Chip>
         ) : null}
       </div>
       <ScrollShadow className="mt-2 max-h-32 overflow-auto" orientation="vertical">
         <ul className="flex flex-col gap-1">
-          {turns.map((turn) => (
+          {turns.map((turn, index) => (
             <li key={turn.pendingTurnId} className="flex items-center gap-2">
               <Card variant="transparent" className="flex-1 border border-border">
                 <Card.Header className="gap-1">
                   <div className="flex items-center gap-2 text-xs">
                     <Chip size="sm" variant="soft" color={pendingTurnColor(turn.pendingTurnStatus)}>
-                      {turn.pendingTurnStatus ?? "queued"}
+                      {turn.pendingTurnStatus ?? "queued"} ({turn.pendingTurnPosition ?? index + 1})
                     </Chip>
                     <span className="text-muted">{formatTime(turn.createdAt)}</span>
                   </div>
                   <Card.Description className="text-sm">{truncate(turn.text, 140)}</Card.Description>
                 </Card.Header>
               </Card>
-              <Button size="sm" variant="secondary" onPress={() => onEdit(turn.id)} aria-label="Edit pending turn">Edit</Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                onPress={() => onEdit(turn.id)}
+                aria-label="Edit pending turn"
+                data-testid={`pending-turn-edit-${turn.pendingTurnId}`}
+              >
+                Edit
+              </Button>
               <Button
                 size="sm"
                 variant="danger"
                 aria-label="Cancel pending turn"
+                data-testid={`pending-turn-cancel-${turn.pendingTurnId}`}
                 onPress={() => {
                   if (turn.pendingTurnId && window.confirm("Cancel queued message?")) {
                     onCancel(turn.pendingTurnId);

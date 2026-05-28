@@ -1,6 +1,6 @@
-import { Avatar, Button, Card, Chip } from "@heroui/react";
+import { Chip } from "@heroui/react";
 import type { BriefViewModel } from "../../types.ts";
-import { formatTokens, formatUsd, initials } from "../../lib/format.ts";
+import { formatTokens, formatUsd } from "../../lib/format.ts";
 
 interface BriefItemProps {
   brief: BriefViewModel;
@@ -16,19 +16,29 @@ const kindColor: Record<string, "success" | "danger" | "default" | "accent" | "w
 };
 
 export function BriefItem({ brief, onOpenRun }: BriefItemProps) {
+  const openRun = () => {
+    if (brief.runId) onOpenRun?.(brief.runId);
+  };
+
   return (
-    <Card variant="secondary" className="mx-3 my-2">
-      <Card.Header>
-        <div className="flex items-center gap-2">
-          <Avatar size="sm">
-            <Avatar.Fallback>{initials(brief.agentName)}</Avatar.Fallback>
-          </Avatar>
-          <Card.Title className="flex-1 text-sm">{brief.agentName}</Card.Title>
-          <Chip size="sm" variant="soft" color={kindColor[brief.kind] ?? "default"}>{brief.kind.replace("_", " ")}</Chip>
-        </div>
-        <Card.Description className="text-sm whitespace-pre-wrap">{brief.summary}</Card.Description>
-      </Card.Header>
-      <Card.Footer className="gap-2 text-xs">
+    <div
+      role="button"
+      tabIndex={0}
+      data-testid="brief-card"
+      onClick={openRun}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          openRun();
+        }
+      }}
+      className="mx-auto my-2 flex w-fit max-w-[760px] items-center gap-2 rounded-full border border-border bg-surface/55 px-3 py-1 text-xs text-muted opacity-85 backdrop-blur transition-colors hover:bg-surface hover:opacity-100"
+    >
+      <Chip size="sm" variant="soft" color={kindColor[brief.kind] ?? "default"}>{brief.kind.replace("_", " ")}</Chip>
+      <span className="max-w-[420px] truncate">
+        {brief.agentName}: {brief.summary || "Run updated"}
+      </span>
+      <span className="flex items-center gap-1">
         {brief.failureReason ? <Chip size="sm" variant="soft" color="danger">{brief.failureClass ?? "failure"}</Chip> : null}
         {brief.artifactCount ? <Chip size="sm" variant="soft" color="default">{brief.artifactCount} artifacts</Chip> : null}
         {brief.cost ? (
@@ -36,10 +46,8 @@ export function BriefItem({ brief, onOpenRun }: BriefItemProps) {
             {formatTokens(brief.cost.tokens)} tokens{brief.cost.usd != null ? ` · ${formatUsd(brief.cost.usd)}` : ""}
           </Chip>
         ) : null}
-        {brief.runId && onOpenRun ? (
-          <Button size="sm" variant="ghost" onPress={() => onOpenRun(brief.runId)}>Open run</Button>
-        ) : null}
-      </Card.Footer>
-    </Card>
+        {brief.runId && onOpenRun ? <span className="text-foreground">Open run</span> : null}
+      </span>
+    </div>
   );
 }

@@ -114,6 +114,25 @@ export default function App() {
     await csrfFetch(`/messages/${encodeURIComponent(id)}`, { method: "DELETE" });
   }, [csrfFetch]);
 
+  const handleEditPending = useCallback((messageId: string) => {
+    setEditingTurnId(messageId);
+    if (!activeRoomId) return;
+    const message = activeRoom?.pendingTurns.find((turn) => turn.id === messageId) ?? activeRoom?.messages.find((turn) => turn.id === messageId);
+    const draftKey = `agenthub.draft.${activeRoomId}`;
+    try {
+      const next = {
+        text: message?.text ?? "",
+        mentions: [] as string[],
+        attachments: [] as unknown[]
+      };
+      const newValue = JSON.stringify(next);
+      sessionStorage.setItem(draftKey, newValue);
+      window.dispatchEvent(new StorageEvent("storage", { key: draftKey, newValue }));
+    } catch {
+      // ignore
+    }
+  }, [activeRoom, activeRoomId]);
+
   // Global hotkeys
   useHotkeys("mod+k", (e) => { e.preventDefault(); setPaletteOpen((v) => !v); }, { enableOnFormTags: true });
   useHotkeys("shift+/", (e) => {
@@ -193,7 +212,7 @@ export default function App() {
         onRegenerate={(id) => void handleRegenerate(id)}
         onDelete={(id) => void handleDelete(id)}
         onCancelPending={(id) => void handleCancelPending(id)}
-        onEditPending={setEditingTurnId}
+        onEditPending={handleEditPending}
         csrfFetch={csrfFetch}
         connectionStatus={projector.connectionStatus}
         connectionError={projector.connectionError}
@@ -201,7 +220,7 @@ export default function App() {
       <PendingTurnList
         turns={activeRoom.pendingTurns}
         onCancel={(id) => void handleCancelPending(id)}
-        onEdit={setEditingTurnId}
+        onEdit={handleEditPending}
       />
       <InputBox
         roomId={activeRoom.id}
@@ -211,7 +230,7 @@ export default function App() {
         latestPendingMessageId={activeRoom.pendingTurns.length > 0 ? activeRoom.pendingTurns[activeRoom.pendingTurns.length - 1]!.id : undefined}
         editingTurnId={editingTurnId}
         onCancelEdit={() => setEditingTurnId(undefined)}
-        onRequestEdit={setEditingTurnId}
+        onRequestEdit={handleEditPending}
         csrfFetch={csrfFetch}
         onSend={handleSendMessage}
         onEditSend={handleEditSend}

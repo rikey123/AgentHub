@@ -20,19 +20,19 @@ export function AppShell({ topBar, rail, rooms, center, panel, panelCollapsed, r
 
   return (
     <div className="flex h-screen w-screen flex-col bg-background text-foreground">
-      <header className="flex h-12 shrink-0 items-center border-b border-border bg-surface">
+      <header className="flex h-12 shrink-0 items-center border-b border-border bg-surface/90 backdrop-blur">
         {topBar}
       </header>
       <div
         className="grid min-h-0 flex-1"
         style={{ gridTemplateColumns: cols, transition: "grid-template-columns 200ms ease" }}
       >
-        <aside className="border-r border-border bg-surface overflow-hidden">{rail}</aside>
-        <aside className="border-r border-border bg-surface overflow-hidden">
+        <aside aria-label="Primary navigation" className="border-r border-border bg-surface/90 overflow-hidden backdrop-blur">{rail}</aside>
+        <aside aria-label="Rooms panel" className="border-r border-border bg-surface/85 overflow-hidden backdrop-blur">
           <div className={roomsCollapsed ? "hidden" : "h-full"}>{rooms}</div>
         </aside>
         <main id="agenthub-workbench-main" className="min-w-0 overflow-hidden">{center}</main>
-        <aside className="border-l border-border bg-surface overflow-hidden">
+        <aside aria-label="Workbench panel" className="border-l border-border bg-surface/90 overflow-hidden backdrop-blur">
           <div className={panelCollapsed || !panel ? "hidden" : "h-full"}>{panel}</div>
         </aside>
       </div>

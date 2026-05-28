@@ -57,10 +57,11 @@ export function InputBox(props: InputBoxProps) {
     const onStorage = (ev: StorageEvent) => {
       if (ev.key !== draftKey || ev.newValue === null) return;
       try {
-        const parsed = JSON.parse(ev.newValue) as { text?: string; mentions?: string[]; quotedMessageId?: string; quotePreview?: string };
+        const parsed = JSON.parse(ev.newValue) as { text?: string; mentions?: string[]; quotedMessageId?: string; quotePreview?: string; attachments?: Attachment[] };
         if (typeof parsed.text === "string") setText(parsed.text);
         if (Array.isArray(parsed.mentions)) setMentions(parsed.mentions);
-        if (parsed.quotedMessageId) setQuote({ messageId: parsed.quotedMessageId, preview: parsed.quotePreview ?? "" });
+        setQuote(parsed.quotedMessageId ? { messageId: parsed.quotedMessageId, preview: parsed.quotePreview ?? "" } : undefined);
+        setAttachments(Array.isArray(parsed.attachments) ? parsed.attachments : []);
       } catch {
         // ignore
       }
@@ -186,7 +187,7 @@ export function InputBox(props: InputBoxProps) {
   return (
     <div
       className={[
-        "border-t border-border bg-surface p-3",
+        "border-t border-border bg-surface/90 p-3 shadow-[0_-10px_30px_color-mix(in_oklab,var(--background-inverse)_8%,transparent)] backdrop-blur",
         dragOver ? "outline outline-2 outline-dashed outline-accent" : ""
       ].join(" ")}
       onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
@@ -240,6 +241,7 @@ export function InputBox(props: InputBoxProps) {
                 key={p.id}
                 role="option"
                 aria-selected={active}
+                data-testid={`mention-candidate-${p.id}`}
                 onMouseEnter={() => setMentionHighlight(i)}
                 onClick={() => insertMention(p)}
                 onKeyDown={(e) => {
@@ -262,12 +264,13 @@ export function InputBox(props: InputBoxProps) {
         </ul>
       ) : null}
 
-      <div className="flex items-end gap-2">
+      <div className="mx-auto flex max-w-[920px] items-end gap-2">
         <TextArea
           ref={taRef as never}
           value={text}
           onChange={(e) => handleChange(e.currentTarget.value)}
           aria-label="Message"
+          data-testid="message-input"
           placeholder={
             props.connectionStatus !== "connected" ? "Disconnected — cannot send" :
             queueFull ? "Queue full — wait for messages to send" :
@@ -310,6 +313,7 @@ export function InputBox(props: InputBoxProps) {
           isPending={isSending}
           isDisabled={!canSend || queueFull}
           onPress={() => void send()}
+          data-testid="message-send"
         >
           {props.editingTurnId ? "Save" : "Send"}
         </Button>

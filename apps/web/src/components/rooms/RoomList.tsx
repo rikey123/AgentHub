@@ -30,7 +30,7 @@ export function RoomList({ rooms, activeRoomId, onSelect, onCreate }: RoomListPr
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
         <h2 className="flex-1 text-sm font-semibold">Rooms</h2>
-        <Button size="sm" variant="primary" onPress={onCreate} aria-label="New Room">
+        <Button size="sm" variant="primary" onPress={onCreate} aria-label="New Room" data-testid="room-list-create-room">
           New
         </Button>
       </div>
@@ -57,6 +57,7 @@ export function RoomList({ rooms, activeRoomId, onSelect, onCreate }: RoomListPr
                 role="option"
                 aria-selected={active}
                 aria-current={active ? "true" : undefined}
+                data-testid={`room-list-item-${room.id}`}
                 onClick={() => onSelect(room.id)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {

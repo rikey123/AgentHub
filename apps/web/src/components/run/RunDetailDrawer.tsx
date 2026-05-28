@@ -24,15 +24,15 @@ export function RunDetailDrawer(props: RunDetailDrawerProps) {
   const transcriptCount = room && runId ? room.messages.filter((m) => m.runId === runId).length : 0;
   const permissionCount = room && runId ? room.pendingPermissions.filter((p) => !p.runId || p.runId === runId).length : 0;
   const contextCount = room && runId ? room.contextItems.filter((c) => c.runId === runId || !c.runId).length : 0;
-  const duration = run?.startedAt && run?.endedAt ? formatDuration(run.endedAt - run.startedAt) : run?.startedAt ? formatDuration(Date.now() - run.startedAt) : "—";
+  const duration = run?.startedAt && run?.endedAt ? formatDuration(run.endedAt - run.startedAt) : run?.startedAt ? formatDuration(Date.now() - run.startedAt) : "-";
 
   return (
     <Drawer.Backdrop isOpen={props.isOpen} onOpenChange={props.onOpenChange}>
       <Drawer.Content placement="right">
         <Drawer.Dialog className="w-[640px] max-w-[90vw]">
-          <Drawer.CloseTrigger />
+          <Drawer.CloseTrigger aria-label="Close run detail" />
           <Drawer.Header>
-            <Drawer.Heading>{run?.agentName ?? "Run"} — {run?.status ?? "unknown"}</Drawer.Heading>
+            <Drawer.Heading>{run?.agentName ?? "Run"} - {run?.status ?? "unknown"}</Drawer.Heading>
             {run ? (
               <div className="mt-1 flex items-center gap-2 text-xs">
                 <Chip size="sm" variant="soft" color={runStatusColor(run.status)}>{run.status}</Chip>
@@ -51,28 +51,30 @@ export function RunDetailDrawer(props: RunDetailDrawerProps) {
                 <Skeleton className="h-4 w-3/4 rounded" />
               </div>
             ) : (
-              <Tabs defaultSelectedKey="transcript" className="flex h-full min-h-0 flex-col">
-                <Tabs.ListContainer>
-                  <Tabs.List aria-label="Run detail">
-                    <Tabs.Tab id="transcript">Transcript<Chip className="ml-1" size="sm" variant="soft" color="default">{transcriptCount}</Chip><Tabs.Indicator /></Tabs.Tab>
-                    <Tabs.Tab id="tools"><Tabs.Separator />Tools<Tabs.Indicator /></Tabs.Tab>
-                    <Tabs.Tab id="context"><Tabs.Separator />Context<Chip className="ml-1" size="sm" variant="soft" color="default">{contextCount}</Chip><Tabs.Indicator /></Tabs.Tab>
-                    <Tabs.Tab id="perms"><Tabs.Separator />Permissions<Chip className="ml-1" size="sm" variant="soft" color="default">{permissionCount}</Chip><Tabs.Indicator /></Tabs.Tab>
-                    <Tabs.Tab id="artifacts"><Tabs.Separator />Artifacts<Tabs.Indicator /></Tabs.Tab>
-                    <Tabs.Tab id="raw"><Tabs.Separator />Raw<Tabs.Indicator /></Tabs.Tab>
-                    <Tabs.Tab id="cost"><Tabs.Separator />Cost<Tabs.Indicator /></Tabs.Tab>
-                  </Tabs.List>
-                </Tabs.ListContainer>
-                <ScrollShadow className="flex-1 min-h-0 overflow-auto" orientation="vertical">
-                  <Tabs.Panel id="transcript"><TranscriptTab room={room} runId={runId} /></Tabs.Panel>
-                  <Tabs.Panel id="tools"><ToolsTab room={room} runId={runId} /></Tabs.Panel>
-                  <Tabs.Panel id="context"><ContextTab room={room} runId={runId} /></Tabs.Panel>
-                  <Tabs.Panel id="perms"><PermissionsTab room={room} runId={runId} /></Tabs.Panel>
-                  <Tabs.Panel id="artifacts"><ArtifactsTab room={room} runId={runId} csrfFetch={props.csrfFetch} /></Tabs.Panel>
-                  <Tabs.Panel id="raw"><RawStreamTab roomId={room.id} runId={runId} /></Tabs.Panel>
-                  <Tabs.Panel id="cost">{run ? <CostTab run={run} csrfFetch={props.csrfFetch} /> : null}</Tabs.Panel>
-                </ScrollShadow>
-              </Tabs>
+              <div data-testid="run-detail-tabs" className="flex h-full min-h-0 flex-col">
+                <Tabs defaultSelectedKey="transcript" className="flex h-full min-h-0 flex-col">
+                  <Tabs.ListContainer>
+                    <Tabs.List aria-label="Run detail">
+                      <Tabs.Tab id="transcript" data-testid="run-detail-tab-transcript">Transcript<Chip className="ml-1" size="sm" variant="soft" color="default">{transcriptCount}</Chip><Tabs.Indicator /></Tabs.Tab>
+                      <Tabs.Tab id="tools" data-testid="run-detail-tab-tools"><Tabs.Separator />Tools<Tabs.Indicator /></Tabs.Tab>
+                      <Tabs.Tab id="context" data-testid="run-detail-tab-context"><Tabs.Separator />Context<Chip className="ml-1" size="sm" variant="soft" color="default">{contextCount}</Chip><Tabs.Indicator /></Tabs.Tab>
+                      <Tabs.Tab id="perms" data-testid="run-detail-tab-permissions"><Tabs.Separator />Permissions<Chip className="ml-1" size="sm" variant="soft" color="default">{permissionCount}</Chip><Tabs.Indicator /></Tabs.Tab>
+                      <Tabs.Tab id="artifacts" data-testid="run-detail-tab-artifacts"><Tabs.Separator />Artifacts<Tabs.Indicator /></Tabs.Tab>
+                      <Tabs.Tab id="raw" data-testid="run-detail-tab-raw"><Tabs.Separator />Raw<Tabs.Indicator /></Tabs.Tab>
+                      <Tabs.Tab id="cost" data-testid="run-detail-tab-cost"><Tabs.Separator />Cost<Tabs.Indicator /></Tabs.Tab>
+                    </Tabs.List>
+                  </Tabs.ListContainer>
+                  <ScrollShadow className="flex-1 min-h-0 overflow-auto" orientation="vertical">
+                    <Tabs.Panel id="transcript"><TranscriptTab room={room} runId={runId} /></Tabs.Panel>
+                    <Tabs.Panel id="tools"><ToolsTab room={room} runId={runId} /></Tabs.Panel>
+                    <Tabs.Panel id="context"><ContextTab room={room} runId={runId} /></Tabs.Panel>
+                    <Tabs.Panel id="perms"><PermissionsTab room={room} runId={runId} /></Tabs.Panel>
+                    <Tabs.Panel id="artifacts"><ArtifactsTab room={room} runId={runId} csrfFetch={props.csrfFetch} /></Tabs.Panel>
+                    <Tabs.Panel id="raw"><RawStreamTab roomId={room.id} runId={runId} /></Tabs.Panel>
+                    <Tabs.Panel id="cost">{run ? <CostTab run={run} csrfFetch={props.csrfFetch} /> : null}</Tabs.Panel>
+                  </ScrollShadow>
+                </Tabs>
+              </div>
             )}
           </Drawer.Body>
         </Drawer.Dialog>

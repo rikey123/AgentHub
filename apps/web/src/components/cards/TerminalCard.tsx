@@ -65,7 +65,7 @@ export function TerminalCard({ artifactId, title, lines, exitCode = null }: Term
             <Chip size="sm" variant="soft" color="default">stdout {stdoutCount}</Chip>
             <Chip size="sm" variant="soft" color={stderrCount > 0 ? "danger" : "default"}>stderr {stderrCount}</Chip>
             <div className="ml-auto">
-              <Button variant="secondary" onPress={() => setExpanded(true)} isDisabled={lines.length === 0}>
+            <Button variant="secondary" onPress={() => setExpanded(true)} isDisabled={lines.length === 0} data-testid="terminal-expand">
                 Expand
               </Button>
             </div>
@@ -75,8 +75,8 @@ export function TerminalCard({ artifactId, title, lines, exitCode = null }: Term
       {expanded ? (
         <Modal.Backdrop isOpen={expanded} onOpenChange={setExpanded}>
           <Modal.Container size="lg">
-            <Modal.Dialog>
-              <Modal.CloseTrigger />
+            <Modal.Dialog data-testid="terminal-modal">
+              <Modal.CloseTrigger aria-label="Close terminal" />
               <Modal.Header>
                 <Modal.Heading>{title}</Modal.Heading>
               </Modal.Header>
@@ -130,10 +130,10 @@ function ExpandedTerminal({ lines }: { lines: TerminalCardProps["lines"] }) {
     <div className="flex h-[60vh] flex-col gap-2">
       <div className="flex items-center gap-2">
         <SearchField className="flex-1" aria-label="Search lines" value={search} onChange={setSearch}>
-          <Input placeholder="Filter (regex)" />
+          <Input placeholder="Filter (regex)" data-testid="terminal-search" />
         </SearchField>
         <Switch isSelected={autoScroll} onChange={setAutoScroll}>Auto-scroll</Switch>
-        <Button size="sm" variant="secondary" onPress={copyAll}>Copy all</Button>
+        <Button size="sm" variant="secondary" onPress={copyAll} data-testid="terminal-copy">Copy all</Button>
       </div>
       <div ref={parentRef} className="ah-mono flex-1 overflow-auto rounded bg-surface-secondary p-2 text-xs leading-tight">
         <div style={{ height: `${virtualizer.getTotalSize()}px`, position: "relative" }}>

@@ -115,11 +115,11 @@ export function CommandPalette({ isOpen, onOpenChange, commands }: CommandPalett
   return (
     <Modal.Backdrop isOpen={isOpen} onOpenChange={onOpenChange}>
       <Modal.Container placement="top" size="md">
-        <Modal.Dialog className="mt-16">
+        <Modal.Dialog className="mt-16" aria-label="Command palette">
           <Modal.Body className="p-2">
             <SearchField aria-label="Command palette" autoFocus value={query} onChange={setQuery}>
               <Input
-                placeholder="Type a command or search…"
+                placeholder="Type a command or search..."
                 onKeyDown={(e) => {
                   if (e.key === "ArrowDown") {
                     e.preventDefault();
@@ -150,6 +150,7 @@ export function CommandPalette({ isOpen, onOpenChange, commands }: CommandPalett
               aria-label="Commands"
               className="mt-2 max-h-[60vh] overflow-auto"
               aria-activedescendant={activeId}
+              tabIndex={0}
             >
               {filtered.length === 0 ? (
                 <div className="p-4 text-center text-sm text-muted">No matches.</div>

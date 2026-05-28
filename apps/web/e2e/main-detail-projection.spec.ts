@@ -52,6 +52,45 @@ test.describe("main timeline and run detail projection", () => {
     expect(toolCall).toBe(0);
   });
 
+  test("main timeline presents messages as chat bubbles and run briefs as transient notifications", async ({ page }) => {
+    const roomRes = await fetch(`${testUrl}/rooms`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Polish Room", mode: "solo", primaryAgentId: "mock-builder" })
+    });
+    const roomData = (await roomRes.json()) as { data: { roomId: string } };
+    const roomId = roomData.data.roomId;
+
+    await fetch(`${testUrl}/rooms/${roomId}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "bubble check", idempotencyKey: "e2e-polish" })
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await page.goto(testUrl);
+    await page.waitForSelector("text=Polish Room");
+    await page.click("text=Polish Room");
+
+    await expect(page.locator('[data-testid="message-bubble-user"]').filter({ hasText: "bubble check" })).toBeVisible();
+    await expect(page.locator('[data-testid="message-bubble-agent"]').first()).toBeVisible();
+
+    const runId = `run-toast-${Date.now()}`;
+    daemon.eventBus.publish({
+      id: `brief-toast-${runId}`,
+      type: "message.brief.published",
+      schemaVersion: 1,
+      workspaceId: "default-workspace",
+      roomId,
+      agentId: "mock-builder",
+      payload: { kind: "run_completed", runId, summary: "finished polishing the chat surface", agentName: "Mock Builder" },
+      createdAt: Date.now()
+    });
+
+    await expect(page.locator('[data-testid="run-brief-toast"]').filter({ hasText: "Mock Builder" })).toBeVisible();
+    await expect(page.locator('[data-testid="run-brief-toast"]').filter({ hasText: "Mock Builder" })).toBeHidden({ timeout: 7000 });
+  });
+
   test("browser UI bootstraps auth session and sends CSRF on room/message mutations", async ({ page }) => {
     const mutatingRequests: { readonly url: string; readonly method: string; readonly csrf: string | null; readonly contentType: string | null }[] = [];
     page.on("request", (request) => {
@@ -64,8 +103,12 @@ test.describe("main timeline and run detail projection", () => {
 
     await page.goto(testUrl);
     await page.locator('[data-testid="room-list-create-room"]').click();
-    await page.waitForSelector("text=New Room");
-    await page.locator("textarea").fill("browser csrf hello");
+    await page.waitForSelector("text=New room");
+    await page.getByRole("radio", { name: /Mock Builder.*native/u }).click();
+    await page.getByRole("button", { name: "Create room" }).click();
+    const messageInput = page.getByRole("textbox", { name: "Message" });
+    await expect(messageInput).toBeEnabled();
+    await messageInput.fill("browser csrf hello");
     await page.getByRole("button", { name: "Send" }).click();
     await page.waitForSelector("text=browser csrf hello");
 

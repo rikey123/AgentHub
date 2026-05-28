@@ -21,29 +21,29 @@ export function SidePanel({ room, csrfFetch, initialTab = "context" }: SidePanel
       <Tabs defaultSelectedKey={initialTab} className="flex flex-1 min-h-0 flex-col">
         <Tabs.ListContainer>
           <Tabs.List aria-label="Workbench panels">
-            <Tabs.Tab id="context">
+            <Tabs.Tab id="context" data-testid="side-panel-tab-context">
               Context
               <Chip className="ml-2" size="sm" variant="soft" color="default">{room.contextItems.length}</Chip>
               <Tabs.Indicator />
             </Tabs.Tab>
-            <Tabs.Tab id="tasks">
+            <Tabs.Tab id="tasks" data-testid="side-panel-tab-tasks">
               <Tabs.Separator />
               Tasks
               <Chip className="ml-2" size="sm" variant="soft" color="default">{room.tasks.length}</Chip>
               <Tabs.Indicator />
             </Tabs.Tab>
-            <Tabs.Tab id="members">
+            <Tabs.Tab id="members" data-testid="side-panel-tab-members">
               <Tabs.Separator />
               Members
               <Chip className="ml-2" size="sm" variant="soft" color="default">{room.participants.length}</Chip>
               <Tabs.Indicator />
             </Tabs.Tab>
-            <Tabs.Tab id="debug">
+            <Tabs.Tab id="debug" data-testid="side-panel-tab-debug">
               <Tabs.Separator />
               Debug
               <Tabs.Indicator />
             </Tabs.Tab>
-            <Tabs.Tab id="cost">
+            <Tabs.Tab id="cost" data-testid="side-panel-tab-cost">
               <Tabs.Separator />
               Cost
               <Tabs.Indicator />

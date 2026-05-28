@@ -63,20 +63,22 @@ export function CostPanel({ csrfFetch, workspaceId = "default-workspace" }: Cost
           <Card.Description>Total {formatUsd(total)}{loading ? " · loading…" : ""}</Card.Description>
         </Card.Header>
         <Card.Content className="flex flex-col gap-2">
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted">Time Window</div>
           <ToggleButtonGroup selectionMode="single" selectedKeys={[window]} onSelectionChange={(keys: unknown) => {
             const k = Array.from(keys as Set<string>)[0];
             if (k) setWindow(k as Window);
           }}>
-            <ToggleButton id="today">Today</ToggleButton>
-            <ToggleButton id="7d">7d</ToggleButton>
-            <ToggleButton id="30d">30d</ToggleButton>
+            <ToggleButton id="today" data-testid="cost-time-today">Today</ToggleButton>
+            <ToggleButton id="7d" data-testid="cost-time-7d">7d</ToggleButton>
+            <ToggleButton id="30d" data-testid="cost-time-30d">30d</ToggleButton>
           </ToggleButtonGroup>
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted">Group By</div>
           <Select
             aria-label="Group by"
             selectedKey={groupBy}
             onSelectionChange={(k: unknown) => setGroupBy(String(k) as GroupBy)}
           >
-            <Select.Trigger>
+            <Select.Trigger data-testid="cost-group-agent">
               <Select.Value />
             </Select.Trigger>
             <Select.Popover>

@@ -25,6 +25,19 @@ type TerminalState = {
   exitCode: number | null;
 };
 
+function metadataTerminalState(meta: Record<string, unknown> | undefined): TerminalState {
+  const lines: TerminalLine[] = [];
+  const stdout = meta?.stdout;
+  const stderr = meta?.stderr;
+  if (typeof stdout === "string") {
+    lines.push(...stdout.split(/\r?\n/).filter((line) => line.length > 0).map((line) => ({ stream: "stdout" as const, text: line })));
+  }
+  if (typeof stderr === "string") {
+    lines.push(...stderr.split(/\r?\n/).filter((line) => line.length > 0).map((line) => ({ stream: "stderr" as const, text: line })));
+  }
+  return { lines, exitCode: readExitCode(meta) };
+}
+
 function readExitCode(meta: Record<string, unknown> | undefined): number | null {
   if (!meta) return null;
   const candidate = (meta as { exitCode?: unknown; exit_code?: unknown }).exitCode ?? (meta as { exit_code?: unknown }).exit_code;
@@ -63,7 +76,7 @@ export function ArtifactsTab({ room, runId, csrfFetch }: ArtifactsTabProps) {
           const files = Array.isArray(filesData.files) ? filesData.files : [];
           if (files.length === 0) {
             if (!cancelled) {
-              setTerminalById((prev) => ({ ...prev, [t.id]: { lines: [], exitCode: readExitCode(t.metadata) } }));
+              setTerminalById((prev) => ({ ...prev, [t.id]: metadataTerminalState(t.metadata) }));
             }
             return;
           }
@@ -90,7 +103,7 @@ export function ArtifactsTab({ room, runId, csrfFetch }: ArtifactsTabProps) {
           }
         } catch {
           if (!cancelled) {
-            setTerminalById((prev) => ({ ...prev, [t.id]: { lines: [], exitCode: readExitCode(t.metadata) } }));
+            setTerminalById((prev) => ({ ...prev, [t.id]: metadataTerminalState(t.metadata) }));
           }
         }
       })();

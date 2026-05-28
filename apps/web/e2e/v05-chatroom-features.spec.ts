@@ -87,7 +87,7 @@ test.describe("v05 chatroom features", () => {
 
     // Input should now contain the mention
     const value = await textarea.inputValue();
-    expect(value).toContain("@Security Reviewer");
+    expect(value).toContain("@security-reviewer");
   });
 
   test("PendingTurnList shows queued turns with cancel and edit", async ({ page }) => {
@@ -258,13 +258,14 @@ test.describe("v05 chatroom features", () => {
     await page.locator('[data-testid="brief-card"]').filter({ hasText: "run completed" }).first().click();
 
     // Wait for Run Detail slide-over to open
-    await page.waitForSelector("text=Run Detail", { timeout: 8000 });
+    await page.waitForSelector('[data-testid="run-detail-tabs"]', { timeout: 8000 });
 
     // Open Artifacts tab
     await page.click('[data-testid="run-detail-tab-artifacts"]');
 
-    // In Run Detail, terminal artifacts are shown uncollapsed (modal already open)
-    // Wait for the terminal modal to be visible directly
+    // Expand terminal artifact into the modal.
+    await page.waitForSelector('[data-testid="terminal-expand"]', { timeout: 5000 });
+    await page.click('[data-testid="terminal-expand"]');
     await page.waitForSelector('[data-testid="terminal-modal"]', { timeout: 5000 });
 
     // Search functionality

@@ -6,14 +6,14 @@ export function RawStreamTab({ roomId, runId }: { roomId: string; runId: string 
 
   if (state.status === "forbidden") {
     return (
-      <div className="p-6 text-center text-sm text-muted">
-        Raw stream requires admin scope.
+      <div className="p-6 text-center text-sm text-muted" data-testid="raw-stream-content">
+        Raw stream content requires admin scope or debug mode.
       </div>
     );
   }
   if (state.status === "error") {
     return (
-      <div className="p-6 text-center text-sm text-danger">
+      <div className="p-6 text-center text-sm text-danger" data-testid="raw-stream-content">
         Could not connect to raw stream.
       </div>
     );
@@ -25,7 +25,7 @@ export function RawStreamTab({ roomId, runId }: { roomId: string; runId: string 
         <span className="text-xs text-muted">{state.lines.length} lines</span>
       </div>
       <ScrollShadow className="flex-1 overflow-auto" orientation="vertical">
-        <pre className="ah-mono p-3 text-xs">
+        <pre className="ah-mono p-3 text-xs" data-testid="raw-stream-content">
           {state.lines.map((line, i) => (
             <div key={i} className={line.stream === "stderr" ? "text-danger" : ""}>{line.text}</div>
           ))}

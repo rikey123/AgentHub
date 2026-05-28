@@ -6,6 +6,7 @@ import { MessageItem } from "./MessageItem.tsx";
 import { BriefItem } from "./BriefItem.tsx";
 import { TypingIndicator } from "./TypingIndicator.tsx";
 import { ConnectionBanner } from "./ConnectionBanner.tsx";
+import { RunBriefToasts } from "./RunBriefToasts.tsx";
 import { MailboxFailureCard } from "../cards/MailboxFailureCard.tsx";
 
 interface ChatStreamProps {
@@ -90,7 +91,8 @@ export function ChatStream(props: ChatStreamProps) {
     (props.connectionStatus === "connected" || props.connectionStatus === "disconnected" || props.connectionStatus === "offline" || props.connectionStatus === "reconnecting");
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="relative flex h-full flex-col bg-[radial-gradient(circle_at_top_left,color-mix(in_oklab,var(--accent)_9%,transparent),transparent_34%),linear-gradient(180deg,var(--background),var(--background-secondary))]">
+      <RunBriefToasts roomId={room.id} briefs={room.briefs} onOpenRun={props.onOpenRun} />
       {props.connectionStatus !== "connected" ? (
         <div className="px-3 pt-2">
           <ConnectionBanner status={props.connectionStatus} error={props.connectionError} />
@@ -117,7 +119,7 @@ export function ChatStream(props: ChatStreamProps) {
       <ScrollShadow className="flex-1 overflow-hidden" orientation="vertical">
         <div ref={parentRef} className="h-full overflow-auto" tabIndex={0}>
           {showFirstConnectSkeleton ? (
-            <div className="flex flex-col gap-3 p-3" aria-label="Loading messages">
+            <div className="mx-auto flex max-w-[920px] flex-col gap-3 p-4" aria-label="Loading messages">
               {Array.from({ length: 5 }).map((_, i) => (
                 <div key={i} className="flex flex-col gap-2">
                   <Skeleton className="h-3 w-24 rounded" />

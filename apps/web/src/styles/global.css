@@ -10,6 +10,41 @@
   --radius: 0.4rem;
 }
 
+:root,
+.light,
+[data-theme="light"] {
+  --background: oklch(0.965 0.018 246);
+  --background-secondary: oklch(0.935 0.026 246);
+  --surface: oklch(0.992 0.006 250);
+  --surface-secondary: oklch(0.944 0.018 248);
+  --surface-tertiary: oklch(0.925 0.024 250);
+  --overlay: oklch(0.995 0.004 250);
+  --default: oklch(0.925 0.02 250);
+  --accent: oklch(0.54 0.19 254);
+  --accent-foreground: oklch(0.995 0.004 250);
+  --accent-soft: color-mix(in oklab, var(--accent) 16%, transparent);
+  --accent-soft-hover: color-mix(in oklab, var(--accent) 24%, transparent);
+  --accent-soft-foreground: oklch(0.34 0.15 254);
+  --success: oklch(0.46 0.14 154);
+  --success-foreground: oklch(0.995 0.004 250);
+  --success-soft: oklch(0.91 0.055 154);
+  --success-soft-foreground: oklch(0.29 0.09 154);
+  --border: oklch(0.865 0.025 250);
+  --separator: oklch(0.89 0.02 250);
+  --muted: oklch(0.43 0.04 255);
+  --field-background: oklch(0.99 0.006 250);
+  --field-border: oklch(0.86 0.025 250);
+  --field-border-width: 1px;
+  --surface-shadow:
+    0 10px 28px rgba(39, 67, 105, 0.10),
+    0 2px 8px rgba(39, 67, 105, 0.06),
+    0 0 0 1px rgba(44, 89, 140, 0.04);
+  --overlay-shadow:
+    0 20px 48px rgba(25, 54, 96, 0.16),
+    0 6px 18px rgba(25, 54, 96, 0.10),
+    0 0 0 1px rgba(44, 89, 140, 0.05);
+}
+
 /* Visually-hidden utility */
 .ah-sr-only {
   position: absolute;
@@ -30,7 +65,9 @@ html, body, #root {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: var(--background);
+  background:
+    radial-gradient(circle at 16% 10%, color-mix(in oklab, var(--accent) 10%, transparent), transparent 28%),
+    linear-gradient(135deg, var(--background), var(--background-secondary));
   color: var(--foreground);
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
@@ -59,10 +96,14 @@ html, body, #root {
 
 /* Streaming text caret (used while message status === "streaming") */
 .ah-streaming-caret::after {
-  content: "▍";
+  content: "";
+  width: 0.5em;
+  height: 1em;
   display: inline-block;
   margin-left: 2px;
-  color: var(--accent);
+  vertical-align: -0.15em;
+  border-radius: 999px;
+  background: currentColor;
   animation: ah-blink 1s steps(2) infinite;
 }
 
@@ -73,4 +114,14 @@ html, body, #root {
 
 @media (prefers-reduced-motion: reduce) {
   .ah-streaming-caret::after { animation: none; }
+}
+
+[data-slot="toast-region"] {
+  z-index: 80;
+  top: 4rem;
+}
+
+[data-slot="toast"] {
+  border: 1px solid var(--border);
+  box-shadow: var(--overlay-shadow);
 }

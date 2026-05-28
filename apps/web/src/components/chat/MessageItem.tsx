@@ -1,6 +1,6 @@
 import { Avatar, Button, Card, Chip, Dropdown } from "@heroui/react";
 import type { MessageViewModel } from "../../types.ts";
-import { formatTime, initials, truncate } from "../../lib/format.ts";
+import { formatTime, initials } from "../../lib/format.ts";
 import { pendingTurnColor } from "../../lib/status.ts";
 import { CardRenderer } from "../cards/CardRenderer.tsx";
 
@@ -21,9 +21,12 @@ interface MessageItemProps {
 export function MessageItem(props: MessageItemProps) {
   const { message, isSelected, onSelect, onOpenRun, onQuote, onPin, onRegenerate, onDelete, onCancelPending, onEditPending, csrfFetch } = props;
 
-  const senderColor = message.senderType === "user" ? "accent" : message.senderType === "system" ? "default" : "success";
+  const isUser = message.senderType === "user";
+  const isSystem = message.senderType === "system";
+  const senderColor = isUser ? "accent" : isSystem ? "default" : "success";
   const isStreaming = message.status === "streaming";
   const isPending = !!message.pendingTurnId && (message.pendingTurnStatus === "queued" || message.pendingTurnStatus === "scheduled");
+  const testId = `message-bubble-${isUser ? "user" : isSystem ? "system" : "agent"}`;
 
   return (
     <div
@@ -37,19 +40,23 @@ export function MessageItem(props: MessageItemProps) {
         }
       }}
       className={[
-        "group mx-3 my-2 rounded-xl px-3 py-2 transition-colors",
-        isSelected ? "bg-accent-soft" : "hover:bg-surface-secondary"
+        "group mx-auto my-1.5 w-full max-w-[920px] px-4 py-1 transition-colors",
+        isSelected ? "rounded-2xl bg-accent-soft" : ""
       ].join(" ")}
       data-message-id={message.id}
+      data-testid={testId}
     >
-      <div className="flex items-start gap-2">
-        <Avatar size="sm">
-          <Avatar.Fallback>{initials(message.senderName)}</Avatar.Fallback>
-        </Avatar>
-        <div className="min-w-0 flex-1">
-          <header className="flex items-center gap-2 text-xs">
-            <span className="font-semibold text-sm">{message.senderName}</span>
-            <Chip size="sm" variant="soft" color={senderColor}>{message.role}</Chip>
+      <div className={["flex items-end gap-2", isUser ? "justify-end" : "justify-start"].join(" ")}>
+        {!isUser ? (
+          <Avatar size="sm" className="mb-1 shrink-0 shadow-sm ring-2 ring-background">
+            <Avatar.Fallback>{initials(message.senderName)}</Avatar.Fallback>
+          </Avatar>
+        ) : null}
+
+        <div className={["flex min-w-0 max-w-[min(78%,760px)] flex-col", isUser ? "items-end" : "items-start"].join(" ")}>
+          <header className={["mb-1 flex max-w-full items-center gap-2 text-xs", isUser ? "justify-end" : "justify-start"].join(" ")}>
+            {!isUser ? <span className="truncate font-semibold text-foreground">{message.senderName}</span> : null}
+            {isSystem ? <Chip size="sm" variant="soft" color={senderColor}>{message.role}</Chip> : null}
             {message.pendingTurnStatus ? (
               <Chip
                 size="sm"
@@ -60,10 +67,14 @@ export function MessageItem(props: MessageItemProps) {
                 {message.pendingTurnStatus}{message.pendingTurnPosition ? ` #${message.pendingTurnPosition}` : ""}
               </Chip>
             ) : null}
-            <span className="ml-auto text-muted">{formatTime(message.createdAt)}</span>
+            <span className="shrink-0 text-muted">{formatTime(message.createdAt)}</span>
             <Dropdown>
-              <Dropdown.Trigger className="ml-1 inline-flex h-7 w-7 items-center justify-center rounded-md text-muted hover:bg-default" aria-label="Message actions">
-                ⋯
+              <Dropdown.Trigger
+                className="inline-flex h-7 w-7 items-center justify-center rounded-full text-muted opacity-0 transition-opacity hover:bg-default group-hover:opacity-100 focus:opacity-100"
+                aria-label="Message actions"
+                data-testid={`message-menu-${message.id}`}
+              >
+                ...
               </Dropdown.Trigger>
               <Dropdown.Popover>
                 <Dropdown.Menu aria-label="Message actions">
@@ -83,39 +94,56 @@ export function MessageItem(props: MessageItemProps) {
             </Dropdown>
           </header>
 
-          {message.quotedMessageId ? (
-            <Card variant="transparent" className="my-1.5 border-l-2 border-accent pl-2">
-              <Card.Description className="text-xs">
-                Quoting {message.quotedMessageId.slice(0, 8)}…
-              </Card.Description>
-            </Card>
-          ) : null}
+          <div
+            className={[
+              "relative min-w-24 rounded-[20px] px-4 py-3 text-sm leading-6 shadow-sm",
+              isUser
+                ? "rounded-br-md bg-accent text-accent-foreground"
+                : isSystem
+                  ? "rounded-bl-md border border-border bg-surface-tertiary text-foreground"
+                  : "rounded-bl-md border border-border bg-surface text-foreground shadow-surface"
+            ].join(" ")}
+          >
+            {message.quotedMessageId ? (
+              <Card variant="transparent" className={["mb-2 border-l-2 pl-2", isUser ? "border-accent-foreground/70 bg-white/10" : "border-accent bg-accent-soft"].join(" ")}>
+                <Card.Description className={["text-xs", isUser ? "text-accent-foreground/85" : ""].join(" ")}>
+                  Quoting {message.quotedMessageId.slice(0, 8)}
+                </Card.Description>
+              </Card>
+            ) : null}
 
-          {message.text ? (
-            <p className={["text-sm whitespace-pre-wrap break-words", isStreaming ? "ah-streaming-caret" : ""].join(" ")}>
-              {message.text}
-            </p>
-          ) : null}
+            {message.text ? (
+              <p className={["whitespace-pre-wrap break-words", isStreaming ? "ah-streaming-caret" : ""].join(" ")}>
+                {message.text}
+              </p>
+            ) : null}
 
-          {message.parts.length > 0 ? (
-            <div className="mt-2 flex flex-col gap-2">
-              {message.parts.map((part, i) => (
-                <PartView key={i} part={part} csrfFetch={csrfFetch} />
-              ))}
-            </div>
-          ) : null}
+            {message.parts.length > 0 ? (
+              <div className="mt-3 flex flex-col gap-2">
+                {message.parts.map((part, i) => (
+                  <PartView key={i} part={part} csrfFetch={csrfFetch} />
+                ))}
+              </div>
+            ) : null}
 
-          {isPending ? (
-            <div className="mt-2 flex gap-2">
-              {onEditPending ? (
-                <Button size="sm" variant="secondary" onPress={onEditPending}>Edit</Button>
-              ) : null}
-              {onCancelPending ? (
-                <Button size="sm" variant="danger" onPress={onCancelPending}>Cancel</Button>
-              ) : null}
-            </div>
-          ) : null}
+            {isPending ? (
+              <div className="mt-3 flex gap-2">
+                {onEditPending ? (
+                  <Button size="sm" variant={isUser ? "secondary" : "outline"} onPress={onEditPending}>Edit</Button>
+                ) : null}
+                {onCancelPending ? (
+                  <Button size="sm" variant="danger" onPress={onCancelPending}>Cancel</Button>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
         </div>
+
+        {isUser ? (
+          <Avatar size="sm" className="mb-1 shrink-0 shadow-sm ring-2 ring-background">
+            <Avatar.Fallback>{initials(message.senderName)}</Avatar.Fallback>
+          </Avatar>
+        ) : null}
       </div>
     </div>
   );
@@ -135,7 +163,7 @@ function PartView({ part, csrfFetch }: { part: MessageViewModel["parts"][number]
       return (
         <Card variant="transparent" className="border border-border">
           <Card.Header>
-            <Card.Title className="text-xs">Tool call · {part.name}</Card.Title>
+            <Card.Title className="text-xs">Tool call - {part.name}</Card.Title>
           </Card.Header>
           <Card.Content>
             <pre className="ah-mono max-h-32 overflow-auto text-xs">{JSON.stringify(part.input, null, 2)}</pre>
@@ -158,7 +186,7 @@ function PartView({ part, csrfFetch }: { part: MessageViewModel["parts"][number]
     case "attachment":
       return (
         <Chip size="sm" variant="soft" color="default" className="ah-mono">
-          📎 {part.name} · {Math.round(part.sizeBytes / 1024)}kb
+          File {part.name} - {Math.round(part.sizeBytes / 1024)}kb
         </Chip>
       );
     case "card":
@@ -168,5 +196,3 @@ function PartView({ part, csrfFetch }: { part: MessageViewModel["parts"][number]
     }
   }
 }
-
-void truncate;
