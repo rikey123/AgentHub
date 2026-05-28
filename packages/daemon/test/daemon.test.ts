@@ -464,6 +464,39 @@ describe("daemon M1.4 composition", () => {
     expect(missing.status).toBe(404);
   });
 
+  it("expires generated role drafts after seven days and returns 404 after GC", async () => {
+    vi.useFakeTimers();
+    try {
+      const createdAt = new Date("2026-05-01T00:00:00.000Z");
+      vi.setSystemTime(createdAt);
+      const modelConfigId = `mc_role_expiry_${Date.now()}`;
+      daemon.database.sqlite.prepare("INSERT INTO model_configs (id, workspace_id, name, provider, model, base_url, api_key_ref, api_key_fingerprint, temperature, max_tokens, reasoning, extra, profile, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)").run(modelConfigId, "default-workspace", "Role Expiry Generator", "openai", "gpt-4o", Date.now(), Date.now());
+
+      const started = await fetch(`${baseUrl}/roles/generate`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ description: "Create a draft that should expire", modelConfigId })
+      });
+      const startedBody = await started.json() as { readonly jobId?: string };
+
+      expect(started.status).toBe(202);
+      const jobId = startedBody.jobId ?? "";
+      expect(jobId).not.toBe("");
+      expect(daemon.database.sqlite.prepare("SELECT expires_at FROM role_drafts WHERE job_id = ?").get(jobId)).toMatchObject({ expires_at: createdAt.getTime() + 7 * 24 * 60 * 60 * 1000 });
+
+      vi.setSystemTime(new Date(createdAt.getTime() + 7 * 24 * 60 * 60 * 1000 + 1));
+      expect(cleanExpiredRoleDrafts(daemon.database, Date.now())).toBe(1);
+      expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM role_drafts WHERE job_id = ?").get(jobId)).toMatchObject({ count: 0 });
+
+      const expired = await fetch(`${baseUrl}/roles/generate/jobs/${jobId}`);
+      expect(expired.status).toBe(404);
+      expect(await expired.json()).toMatchObject({ error: "role_generation_job_not_found" });
+      expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type LIKE 'role.generation.%'").get()).toMatchObject({ count: 0 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("emits ai_generated role.created events without prompt payload data", async () => {
     const role = await fetch(`${baseUrl}/roles`, {
       method: "POST",

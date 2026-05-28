@@ -227,3 +227,9 @@
 - Build gotcha: with `exactOptionalPropertyTypes`, do not pass `signal: undefined` in `RequestInit` and do not assign optional object fields as explicit `undefined`.
 - Verification: `pnpm.cmd test -- apps/web` passes (45 files, 330 passed, 1 skipped). `@agenthub/web` build now has no settings-local errors but remains blocked by existing daemon/native-runtime TypeScript issues from Wave 3.
 - GitNexus MCP returned `Not connected` for required impact checks; recorded in evidence and kept scope limited to settings UI files.
+
+## [2026-05-29T06:39:00Z] Task 3.9 settings and role generator test consolidation
+- Existing settings tests from tasks 3.1-3.8 already covered modal bootstrap, Roles/Runtimes/Models REST helper contracts, role generation save/cancel/failure normalization, deep links, EventSource-free flows, and fake API-key redaction after save.
+- Added only the missing daemon regression: generated role drafts get a seven-day expires_at, GC removes them after the boundary, polling returns 404, and no role.generation.* events are persisted.
+- Verification passed: pnpm.cmd test -- packages/daemon apps/web (45 files, 331 passed, 1 skipped).
+
