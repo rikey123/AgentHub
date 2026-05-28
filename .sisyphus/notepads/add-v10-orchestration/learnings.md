@@ -213,3 +213,9 @@
 - HeroUI v3 `TextArea` does not accept `minRows`; use sizing classes such as `className="min-h-44"` like existing cards.
 - Settings UI tests remain dependency-free Vitest contract tests around exported REST helpers instead of jsdom interaction tests.
 - Required `pnpm.cmd test -- apps/web` passes; web build is still blocked by unrelated daemon/native-runtime TS errors noted before, not by RolesTab.
+
+## [2026-05-29T07:10:00Z] Task 3.7 role generation jobs
+- Added REST job polling for role generation in `packages/daemon/src/index.ts` using `role_drafts` as the persistent store with 7-day expiry.
+- Kept generation event-free: there are still no `role.generation.*` EventBus types, and save-path `role.created` now carries `source: "ai_generated"` + `generationJobId` without prompt/description payload data.
+- The job handler uses a simple async stub flow (`pending` → `streaming` → `completed`) and GET omits `draftJson` for terminal cancelled/failed states.
+- Added daemon coverage for POST/GET/DELETE job polling plus the sanitized generated-role save event.

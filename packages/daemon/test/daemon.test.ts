@@ -424,6 +424,62 @@ describe("daemon M1.4 composition", () => {
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'runtime.test.result'").get()).toMatchObject({ count: 0 });
   });
 
+  it("creates, polls, and cancels role generation jobs without generation events", async () => {
+    const modelConfigId = `mc_role_gen_${Date.now()}`;
+    daemon.database.sqlite.prepare("INSERT INTO model_configs (id, workspace_id, name, provider, model, base_url, api_key_ref, api_key_fingerprint, temperature, max_tokens, reasoning, extra, profile, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)").run(modelConfigId, "default-workspace", "Role Generator", "openai", "gpt-4o", Date.now(), Date.now());
+
+    const started = await fetch(`${baseUrl}/roles/generate`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ description: "Create a reviewer for frontend refactors", targetWork: "code-review", preferredTone: "concise", capabilities: ["chat", "code.review"], modelConfigId })
+    });
+    const startedBody = await started.json() as { readonly jobId?: string };
+
+    expect(started.status).toBe(202);
+    expect(startedBody.jobId).toEqual(expect.any(String));
+    const jobId = startedBody.jobId ?? "";
+
+    let completed: { readonly status: number; readonly body: { readonly status?: string; readonly draftJson?: { readonly name?: string; readonly prompt?: string } } } | undefined;
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline) {
+      const response = await fetch(`${baseUrl}/roles/generate/jobs/${jobId}`);
+      const body = await response.json() as { readonly status?: string; readonly draftJson?: { readonly name?: string; readonly prompt?: string } };
+      completed = { status: response.status, body };
+      if (response.status === 200 && body.status === "completed") break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    if (completed === undefined) throw new Error("role generation job did not complete");
+
+    expect(completed.status).toBe(200);
+    expect(completed.body.draftJson).toMatchObject({ name: "Reviewer Assistant" });
+    expect(String(completed.body.draftJson?.prompt ?? "")).toContain("frontend refactors");
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type LIKE 'role.generation.%'").get()).toMatchObject({ count: 0 });
+
+    const deleted = await fetch(`${baseUrl}/roles/generate/jobs/${jobId}`, { method: "DELETE" });
+    expect(deleted.status).toBe(200);
+    expect(await deleted.json()).toEqual({ ok: true });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM role_drafts WHERE job_id = ?").get(jobId)).toMatchObject({ count: 0 });
+    const missing = await fetch(`${baseUrl}/roles/generate/jobs/${jobId}`);
+    expect(missing.status).toBe(404);
+  });
+
+  it("emits ai_generated role.created events without prompt payload data", async () => {
+    const role = await fetch(`${baseUrl}/roles`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Generated Reviewer", prompt: "Review frontend refactors", generationJobId: "job_ai_generated_1", capabilities: ["chat"] })
+    });
+    const body = await role.json() as { readonly id?: string };
+
+    expect(role.status).toBe(201);
+    const payload = daemon.database.sqlite.prepare("SELECT payload FROM events WHERE type = 'role.created' ORDER BY seq DESC LIMIT 1").get() as { readonly payload: string };
+    const eventPayload = JSON.parse(payload.payload) as { readonly roleId?: string; readonly workspaceId?: string; readonly source?: string; readonly generationJobId?: string; readonly prompt?: string; readonly description?: string };
+    expect(eventPayload).toMatchObject({ roleId: body.id, workspaceId: "default-workspace", source: "ai_generated", generationJobId: "job_ai_generated_1" });
+    expect(eventPayload).not.toHaveProperty("prompt");
+    expect(eventPayload).not.toHaveProperty("description");
+  });
+
   it("returns async runtime test job ids and polls terminal job status", async () => {
     daemon.database.sqlite.prepare("INSERT INTO runtimes (id, workspace_id, kind, name, command, args, env, detected_at, detected_path, detected_version, supported_caps, manifest_json, created_at, updated_at) VALUES (?, ?, 'native', ?, NULL, '[]', NULL, NULL, NULL, ?, '[]', ?, ?, ?)").run("runtime-test-job", "default-workspace", "Job Runtime", "native", JSON.stringify({ runtimeKind: "native" }), 1, 1);
 

@@ -649,6 +649,9 @@ async function route(ctx: RouteContext): Promise<void> {
     if (!normalized.ok) return json(ctx.res, normalized.status, { error: normalized.error });
     return dispatchCreated(ctx, normalized.body, "CreateRoom");
   }
+  if (ctx.req.method === "POST" && url.pathname === "/roles/generate") return createRoleGenerationJob(ctx, await body(ctx));
+  if (ctx.req.method === "GET" && parts[0] === "roles" && parts[1] === "generate" && parts[2] === "jobs" && parts[3]) return getRoleGenerationJob(ctx, parts[3]);
+  if (ctx.req.method === "DELETE" && parts[0] === "roles" && parts[1] === "generate" && parts[2] === "jobs" && parts[3]) return cancelRoleGenerationJob(ctx, parts[3]);
   if (ctx.req.method === "GET" && url.pathname === "/roles") return roles(ctx, url);
   if (ctx.req.method === "POST" && url.pathname === "/roles") return createRole(ctx, await body(ctx));
   if (ctx.req.method === "DELETE" && parts[0] === "auth" && parts[1] === "tokens" && parts[2]) { if (!requireScope(auth, "write", ctx.res)) return; return revokeToken(ctx, parts[2]); }
@@ -1104,11 +1107,114 @@ function createRole(ctx: RouteContext, input: Record<string, unknown>): void {
   if (name === undefined || prompt === undefined) return json(ctx.res, 400, { error: "validation_failed", message: "name and prompt are required" });
   const roleId = randomUUID();
   const role = roleRow({ id: roleId, workspaceId, name, prompt, input, now });
+  const generationJobId = stringField(input["generationJobId"]);
   ctx.database.sqlite.transaction(() => {
     ctx.database.sqlite.prepare("INSERT INTO roles (id, workspace_id, name, avatar, description, prompt, capabilities, default_permission_profile_id, tags, is_builtin, source_path, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(role.id, role.workspace_id, role.name, role.avatar, role.description, role.prompt, role.capabilities, role.default_permission_profile_id, role.tags, role.is_builtin, role.source_path, role.version, role.created_at, role.updated_at);
-    ctx.eventBus.publish({ id: randomUUID(), type: "role.created", schemaVersion: 1, workspaceId, payload: { roleId, workspaceId }, createdAt: now });
+    ctx.eventBus.publish({ id: randomUUID(), type: "role.created", schemaVersion: 1, workspaceId, payload: { roleId, workspaceId, ...(generationJobId !== undefined ? { source: "ai_generated", generationJobId } : {}) }, createdAt: now });
   })();
   json(ctx.res, 201, normalizeRoleRow(role));
+}
+
+function createRoleGenerationJob(ctx: RouteContext, input: Record<string, unknown>): void {
+  const now = ctx.now?.() ?? Date.now();
+  const jobId = stringField(input["jobId"]) ?? randomUUID();
+  const description = stringField(input["description"]);
+  const modelConfigId = stringField(input["modelConfigId"]);
+  const targetWork = stringField(input["targetWork"]);
+  const preferredTone = stringField(input["preferredTone"]);
+  const capabilities = Array.isArray(input["capabilities"]) ? JSON.stringify(input["capabilities"].filter((value): value is string => typeof value === "string")) : null;
+  if (description === undefined || modelConfigId === undefined) return json(ctx.res, 400, { error: "validation_failed", message: "description and modelConfigId are required" });
+  const modelConfig = get(ctx.database, "SELECT * FROM model_configs WHERE id = ?", modelConfigId) as Record<string, unknown> | null;
+  if (modelConfig === null) return json(ctx.res, 404, { error: "model_config_not_found" });
+  const createdAt = now;
+  const expiresAt = createdAt + 7 * 24 * 60 * 60 * 1000;
+  ctx.database.sqlite.transaction(() => {
+    ctx.database.sqlite.prepare("INSERT INTO role_drafts (job_id, description, target_work, preferred_tone, capabilities, model_config_id, draft_json, status, failure_reason, created_at, updated_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(jobId, description, targetWork, preferredTone, capabilities, modelConfigId, null, "pending", null, createdAt, createdAt, expiresAt);
+  })();
+  void runRoleGenerationJob(ctx, jobId, modelConfigId);
+  json(ctx.res, 202, { jobId });
+}
+
+function getRoleGenerationJob(ctx: RouteContext, jobId: string): void {
+  const row = get(ctx.database, "SELECT * FROM role_drafts WHERE job_id = ?", jobId) as Record<string, unknown> | null;
+  if (row === null) return json(ctx.res, 404, { error: "role_generation_job_not_found" });
+  return json(ctx.res, 200, roleGenerationJobResponse(row));
+}
+
+function cancelRoleGenerationJob(ctx: RouteContext, jobId: string): void {
+  const row = get(ctx.database, "SELECT * FROM role_drafts WHERE job_id = ?", jobId) as Record<string, unknown> | null;
+  if (row === null) return json(ctx.res, 404, { error: "role_generation_job_not_found" });
+  ctx.database.sqlite.transaction(() => {
+    ctx.database.sqlite.prepare("DELETE FROM role_drafts WHERE job_id = ?").run(jobId);
+  })();
+  json(ctx.res, 200, { ok: true });
+}
+
+async function runRoleGenerationJob(ctx: RouteContext, jobId: string, modelConfigId: string): Promise<void> {
+  await Promise.resolve();
+  const startRow = get(ctx.database, "SELECT * FROM role_drafts WHERE job_id = ?", jobId) as Record<string, unknown> | null;
+  if (startRow === null) return;
+  const now = ctx.now?.() ?? Date.now();
+  ctx.database.sqlite.transaction(() => {
+    ctx.database.sqlite.prepare("UPDATE role_drafts SET status = ?, updated_at = ? WHERE job_id = ?").run("streaming", now, jobId);
+  })();
+  try {
+    await Promise.resolve();
+    const current = get(ctx.database, "SELECT * FROM role_drafts WHERE job_id = ?", jobId) as Record<string, unknown> | null;
+    if (current === null) return;
+    const modelConfig = get(ctx.database, "SELECT * FROM model_configs WHERE id = ?", modelConfigId) as Record<string, unknown> | null;
+    if (modelConfig === null) throw new Error("model_config_not_found");
+    const draftJson = buildRoleDraft(current, modelConfig);
+    const completedAt = ctx.now?.() ?? Date.now();
+    ctx.database.sqlite.transaction(() => {
+      ctx.database.sqlite.prepare("UPDATE role_drafts SET draft_json = ?, status = ?, failure_reason = NULL, updated_at = ? WHERE job_id = ?").run(JSON.stringify(draftJson), "completed", completedAt, jobId);
+    })();
+  } catch (error) {
+    const failedAt = ctx.now?.() ?? Date.now();
+    const failureReason = error instanceof Error ? error.message : "role_generation_failed";
+    ctx.database.sqlite.transaction(() => {
+      const current = get(ctx.database, "SELECT status FROM role_drafts WHERE job_id = ?", jobId) as Record<string, unknown> | null;
+      if (current === null) return;
+      if (String(current.status) === "cancelled") return;
+      ctx.database.sqlite.prepare("UPDATE role_drafts SET status = ?, failure_reason = ?, updated_at = ? WHERE job_id = ?").run("failed", failureReason, failedAt, jobId);
+    })();
+  }
+}
+
+function buildRoleDraft(row: Record<string, unknown>, modelConfig: Record<string, unknown>): { readonly name: string; readonly description: string; readonly prompt: string; readonly capabilities: readonly string[]; readonly suggestedPermissionProfileId: string | null } {
+  const description = stringField(row.description) ?? "AI generated role";
+  const preferredTone = stringField(row.preferred_tone) ?? "concise";
+  const targetWork = stringField(row.target_work) ?? "coding";
+  const capabilities = parseJsonField(row.capabilities, []) as unknown[];
+  const normalizedCapabilities = capabilities.filter((value): value is string => typeof value === "string");
+  const modelName = stringField(modelConfig.name) ?? "model";
+  const provider = stringField(modelConfig.provider) ?? "openai";
+  return {
+    name: `${targetWork === "code-review" ? "Reviewer" : targetWork === "planning" ? "Planner" : targetWork === "archiving" ? "Archivist" : "Builder"} Assistant`,
+    description,
+    prompt: `You are a ${preferredTone} role focused on ${description}. Use the ${provider}/${modelName} config to support ${targetWork}.`,
+    capabilities: normalizedCapabilities.length > 0 ? normalizedCapabilities : ["chat"],
+    suggestedPermissionProfileId: null
+  };
+}
+
+function roleGenerationJobResponse(row: Record<string, unknown>): Record<string, unknown> {
+  const status = String(row.status);
+  const response: Record<string, unknown> = {
+    jobId: String(row.job_id),
+    status,
+    description: row.description,
+    targetWork: row.target_work,
+    preferredTone: row.preferred_tone,
+    capabilities: parseJsonField(row.capabilities, []),
+    modelConfigId: row.model_config_id,
+    failureReason: row.failure_reason ?? null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    expiresAt: row.expires_at
+  };
+  if (status === "pending" || status === "streaming" || status === "completed") response.draftJson = parseJsonField(row.draft_json, null);
+  return response;
 }
 
 function updateRole(ctx: RouteContext, roleId: string, input: Record<string, unknown>): void {
