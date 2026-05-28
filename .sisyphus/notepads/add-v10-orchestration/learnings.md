@@ -219,3 +219,11 @@
 - Kept generation event-free: there are still no `role.generation.*` EventBus types, and save-path `role.created` now carries `source: "ai_generated"` + `generationJobId` without prompt/description payload data.
 - The job handler uses a simple async stub flow (`pending` → `streaming` → `completed`) and GET omits `draftJson` for terminal cancelled/failed states.
 - Added daemon coverage for POST/GET/DELETE job polling plus the sanitized generated-role save event.
+
+## [2026-05-29T06:31:00Z] Task 3.8 Role generator settings flow
+- Added `RoleGeneratorModal.tsx` as a REST-only settings modal: validates non-empty description/modelConfigId, starts `POST /roles/generate`, polls `GET /roles/generate/jobs/:jobId` every 500ms, previews editable drafts, saves via `POST /roles` with `generationJobId`, and deletes the draft job on save/cancel/close.
+- `SettingsModal` now passes already bootstrapped `modelConfigs` into `RolesTab`, so the generator selector does not issue an extra fetch or subscribe to SSE.
+- Settings UI tests still follow the dependency-free helper-contract style; `RoleGeneratorModal.test.ts` mocks fetch and fake timers rather than adding jsdom/Testing Library.
+- Build gotcha: with `exactOptionalPropertyTypes`, do not pass `signal: undefined` in `RequestInit` and do not assign optional object fields as explicit `undefined`.
+- Verification: `pnpm.cmd test -- apps/web` passes (45 files, 330 passed, 1 skipped). `@agenthub/web` build now has no settings-local errors but remains blocked by existing daemon/native-runtime TypeScript issues from Wave 3.
+- GitNexus MCP returned `Not connected` for required impact checks; recorded in evidence and kept scope limited to settings UI files.

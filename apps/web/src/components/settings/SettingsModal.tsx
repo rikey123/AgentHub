@@ -157,6 +157,7 @@ export function SettingsModal({ isOpen, selectedTab, onTabChange, onOpenChange, 
                       loading={loading}
                       error={error}
                       data={tab.endpoint ? data[tab.endpoint] : undefined}
+                      allData={data}
                       fetchImpl={fetchImpl}
                       onRolesChange={(roles) => setData((current) => ({ ...current, roles }))}
                       onRuntimesChange={(runtimes) => setData((current) => ({ ...current, runtimes }))}
@@ -178,6 +179,7 @@ function SettingsPanel({
   loading,
   error,
   data,
+  allData,
   fetchImpl,
   onRolesChange,
   onRuntimesChange,
@@ -187,13 +189,14 @@ function SettingsPanel({
   loading: boolean;
   error: string | undefined;
   data: unknown;
+  allData: SettingsData;
   fetchImpl: typeof fetch;
   onRolesChange: (roles: RoleConfig[]) => void;
   onRuntimesChange: (runtimes: RuntimeConfig[]) => void;
   onModelConfigsChange: (configs: ModelConfig[]) => void;
 }) {
   if (tab.id === "roles" && !loading && !error && data !== undefined) {
-    return <RolesTab roles={data} fetchImpl={fetchImpl} onRolesChange={onRolesChange} />;
+    return <RolesTab roles={data} modelConfigs={allData.modelConfigs} fetchImpl={fetchImpl} onRolesChange={onRolesChange} />;
   }
 
   if (tab.id === "runtimes" && !loading && !error && data !== undefined) {

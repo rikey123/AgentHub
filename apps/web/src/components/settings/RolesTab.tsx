@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Button, Card, Chip, Input, Label, Modal, TextArea, TextField } from "@heroui/react";
+import { RoleGeneratorModal } from "./RoleGeneratorModal.tsx";
 
 export interface RoleConfig {
   id: string;
@@ -19,6 +20,7 @@ export interface RoleInput {
 
 interface RolesTabProps {
   roles: unknown;
+  modelConfigs?: unknown;
   fetchImpl?: typeof fetch;
   onRolesChange?: (roles: RoleConfig[]) => void;
 }
@@ -39,13 +41,14 @@ export class RoleApiError extends Error {
   }
 }
 
-export function RolesTab({ roles: initialRoles, fetchImpl = fetch, onRolesChange }: RolesTabProps) {
+export function RolesTab({ roles: initialRoles, modelConfigs, fetchImpl = fetch, onRolesChange }: RolesTabProps) {
   const [roles, setRoles] = useState<RoleConfig[]>(() => normalizeRoles(initialRoles));
   const [selectedId, setSelectedId] = useState<string | undefined>(() => normalizeRoles(initialRoles)[0]?.id);
   const [mode, setMode] = useState<"create" | "edit">("create");
   const [draft, setDraft] = useState<RoleDraft>(() => emptyDraft());
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<RoleConfig | undefined>();
+  const [generatorOpen, setGeneratorOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [message, setMessage] = useState<string | undefined>();
   const [error, setError] = useState<string | undefined>();
@@ -136,9 +139,14 @@ export function RolesTab({ roles: initialRoles, fetchImpl = fetch, onRolesChange
                 <Card.Title>Roles</Card.Title>
                 <Card.Description>Role templates and editable agent responsibilities.</Card.Description>
               </div>
-              <Button size="sm" variant="primary" onPress={startCreate} data-testid="roles-new-role">
-                New Role
-              </Button>
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button size="sm" variant="secondary" onPress={() => setGeneratorOpen(true)} data-testid="roles-generate-ai">
+                  Generate with AI
+                </Button>
+                <Button size="sm" variant="primary" onPress={startCreate} data-testid="roles-new-role">
+                  New Role
+                </Button>
+              </div>
             </div>
           </Card.Header>
           <Card.Content>
@@ -255,6 +263,24 @@ export function RolesTab({ roles: initialRoles, fetchImpl = fetch, onRolesChange
           </Modal.Dialog>
         </Modal.Container>
       </Modal.Backdrop>
+
+      <RoleGeneratorModal
+        isOpen={generatorOpen}
+        modelConfigs={modelConfigs}
+        roles={roles}
+        fetchImpl={fetchImpl}
+        onClose={() => setGeneratorOpen(false)}
+        onRoleSaved={(nextRoles) => {
+          updateRoles(nextRoles);
+          const saved = nextRoles.find((role) => !roles.some((existing) => existing.id === role.id));
+          if (saved) {
+            setMode("edit");
+            setSelectedId(saved.id);
+            setDraft(draftFromRole(saved));
+          }
+          setMessage("Role created.");
+        }}
+      />
     </section>
   );
 }
