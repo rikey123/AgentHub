@@ -13,6 +13,7 @@ import { AdapterRegistry } from "../src/adapters/registry.ts";
 import { seedBuiltinRoles } from "../src/builtin-roles.ts";
 import { migrateAgentProfilesToV10 } from "../src/migrations/0014_data.ts";
 import { createDaemon, loadAgentHubConfig, type DaemonApp, type DaemonStartupPhase } from "../src/index.ts";
+import { cleanExpiredRoleDrafts, startRoleDraftGC } from "../src/role-draft-gc.ts";
 import { CodexAdapterStub } from "../../adapters/codex/src/index.ts";
 
 const resolveProviderMock = vi.hoisted(() => vi.fn());
@@ -203,6 +204,58 @@ describe("daemon M1.4 composition", () => {
       expect(reopened.sqlite.prepare("SELECT adapter_session_id FROM room_participants WHERE room_id = 'room_close' AND participant_id = 'agent_close'").get()).toMatchObject({ adapter_session_id: null });
     } finally {
       reopened.sqlite.close();
+    }
+  });
+
+  it("cleans expired role drafts on startup and never emits role generation events", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-role-drafts-startup-"));
+    const databasePath = join(dir, "agenthub.sqlite");
+    const seeded = createDatabase({ path: databasePath, applyMigrations: true });
+    try {
+      seeded.sqlite.transaction(() => {
+        seeded.sqlite.prepare("INSERT INTO role_drafts (job_id, description, target_work, preferred_tone, capabilities, model_config_id, draft_json, status, failure_reason, created_at, updated_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run("job-expired", "Expired draft", null, null, null, "mc_1", null, "pending", null, 100, 100, 200);
+        seeded.sqlite.prepare("INSERT INTO role_drafts (job_id, description, target_work, preferred_tone, capabilities, model_config_id, draft_json, status, failure_reason, created_at, updated_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run("job-active", "Active draft", null, null, null, "mc_1", null, "pending", null, 100, 100, 10_000);
+      })();
+    } finally {
+      seeded.sqlite.close();
+    }
+
+    const seededDaemon = createDaemon({ databasePath, port: 0, modelTestFetch: modelTestFetchMock, now: () => 500 });
+    await seededDaemon.start();
+
+    expect(seededDaemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM role_drafts WHERE job_id = 'job-expired'").get()).toMatchObject({ count: 0 });
+    expect(seededDaemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM role_drafts WHERE job_id = 'job-active'").get()).toMatchObject({ count: 1 });
+    expect(seededDaemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type LIKE 'role.generation.%'").get()).toMatchObject({ count: 0 });
+
+    await seededDaemon.close();
+  });
+
+  it("runs hourly role draft GC and stops on cleanup", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-role-drafts-gc-"));
+    const databasePath = join(dir, "agenthub.sqlite");
+    const database = createDatabase({ path: databasePath, applyMigrations: true });
+    try {
+      database.sqlite.prepare("INSERT INTO role_drafts (job_id, description, target_work, preferred_tone, capabilities, model_config_id, draft_json, status, failure_reason, created_at, updated_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run("job-expired", "Expired draft", null, null, null, "mc_1", null, "pending", null, 100, 100, 200);
+      database.sqlite.prepare("INSERT INTO role_drafts (job_id, description, target_work, preferred_tone, capabilities, model_config_id, draft_json, status, failure_reason, created_at, updated_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run("job-active", "Active draft", null, null, null, "mc_1", null, "pending", null, 100, 100, 10_000_000);
+
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(500));
+      const onClose = vi.fn();
+      const cleanup = startRoleDraftGC(database, onClose);
+
+      await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+      expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM role_drafts WHERE job_id = 'job-expired'").get()).toMatchObject({ count: 0 });
+      expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM role_drafts WHERE job_id = 'job-active'").get()).toMatchObject({ count: 1 });
+
+      cleanup();
+      expect(onClose).toHaveBeenCalledTimes(1);
+
+      database.sqlite.prepare("INSERT INTO role_drafts (job_id, description, target_work, preferred_tone, capabilities, model_config_id, draft_json, status, failure_reason, created_at, updated_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run("job-expired-2", "Expired draft 2", null, null, null, "mc_1", null, "pending", null, 100, 100, 200);
+      await vi.advanceTimersByTimeAsync(60 * 60 * 1000);
+      expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM role_drafts WHERE job_id = 'job-expired-2'").get()).toMatchObject({ count: 1 });
+    } finally {
+      vi.useRealTimers();
+      database.sqlite.close();
     }
   });
 

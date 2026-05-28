@@ -20,6 +20,7 @@ import { AdapterRegistry } from "./adapters/registry.ts";
 import { defaultBuiltinRolesDir, seedBuiltinRoles } from "./builtin-roles.ts";
 import { normalizeRoomCreateCompat } from "./compat/agent-profile-compat.ts";
 import { migrateAgentProfilesToV10 } from "./migrations/0014_data.ts";
+import { cleanExpiredRoleDrafts, startRoleDraftGC } from "./role-draft-gc.ts";
 import { createDaemonCommandHandlers, seedDefaultData } from "./commands.ts";
 export { daemonPidPath, defaultConfigPath, ensureAgentHubHome, ensureParentDirectory, loadAgentHubConfig, redactConfig, type AgentHubConfig, type ConfigOverrides } from "./config.ts";
 import { openApiDocument } from "./openapi.ts";
@@ -73,6 +74,7 @@ type DaemonRuntime = {
   handlers: DurableHandlerRegistry;
   runQueue: RunQueue;
   agentProfiles: AgentProfileWatcher;
+  roleDraftGcCleanup: () => void;
   lifecycle: RunLifecycleService;
 };
 
@@ -132,6 +134,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     seedDefaultData(database, options.now?.() ?? Date.now());
     migrateAgentProfilesToV10(database, options.now?.() ?? Date.now());
     seedBuiltInPermissionProfiles(database, options.now?.() ?? Date.now());
+    cleanExpiredRoleDrafts(database, options.now?.() ?? Date.now());
     bootstrapBuiltInAgents();
 
     emitPhase("startup", PHASE_EVENT_STORE);
@@ -142,6 +145,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     seedBuiltinRoles(database, defaultBuiltinRolesDir(), eventBus, options.now?.() ?? Date.now());
     const agentProfiles = watchAgentProfiles({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
     await agentProfiles.ready;
+    const roleDraftGcCleanup = startRoleDraftGC(database, () => undefined);
 
     const now = options.now?.() ?? Date.now();
     database.sqlite.transaction(() => {
@@ -278,7 +282,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     // Start the TCP server so agents can reach room.* MCP tools via the stdio bridge.
     await roomMcpServer.startTcp();
     roomMcpServerRef.current = roomMcpServer;
-    runtime = { database, eventBus, commandBus, roomMcpServer, adapterRegistry, mockAdapter, artifactService, taskService, outbox, handlers, runQueue, agentProfiles, lifecycle };
+    runtime = { database, eventBus, commandBus, roomMcpServer, adapterRegistry, mockAdapter, artifactService, taskService, outbox, handlers, runQueue, agentProfiles, roleDraftGcCleanup, lifecycle };
 
     emitPhase("startup", PHASE_HTTP);
     return await new Promise<Server>((resolve) => {
@@ -304,6 +308,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
       } else if (phase === PHASE_OUTBOX) {
         await runtime?.outbox.drainPending();
       } else if (phase === PHASE_EVENT_BUS) {
+        runtime?.roleDraftGcCleanup();
         runtime?.eventBus.flushStatusLines?.();
         await runtime?.agentProfiles.close();
         runtime?.adapterRegistry.disposeAll();

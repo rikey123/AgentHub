@@ -118,6 +118,12 @@
 - Consolidated data-foundation test coverage in packages/daemon/test/daemon.test.ts without duplicating existing CRUD tests.
 - Added detail-only durable replay assertions for role/runtime/model_config/agent_binding write events.
 - Added expectNoPlaintextSecret guard to scan model-config responses, model_config event payloads, and relevant model_configs DB fields for fake API key plaintext.
+
+## [2026-05-29T06:11:30Z] Task 3.6
+- Added `packages/daemon/src/role-draft-gc.ts` to keep `role_drafts` ephemeral: startup clears expired rows and an hourly timer repeats cleanup until daemon close.
+- Wired GC cleanup into the daemon close path so the interval stops before SQLite shutdown.
+- Added daemon integration coverage for startup cleanup, active-draft preservation, timer execution, and cleanup cancellation.
+- Confirmed the role draft path remains event-free: no `role.generation.*` EventBus types or rows were introduced.
 - Runtime detect/async job tests now use the deterministic native runtime path to avoid flaky real process probes under package-wide parallel test load.
 - Verified pnpm.cmd test -- packages/daemon packages/db packages/orchestrator passes: 35 files, 284 passed, 1 skipped.
 
