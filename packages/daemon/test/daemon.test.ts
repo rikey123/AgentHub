@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { EventEmitter } from "node:events";
 
 import { AgentHubClient } from "@agenthub/sdk";
 import { createEventBus } from "@agenthub/bus";
@@ -125,6 +126,80 @@ describe("daemon M1.4 composition", () => {
     expect(runs.map((run) => run.status)).toEqual(["completed"]);
     const messages = await client.listMessages(room.data.roomId) as { readonly messages: readonly { readonly role: string; readonly status: string }[] };
     expect(messages.messages.some((message) => message.role === "assistant" && message.status === "completed")).toBe(true);
+  });
+
+  it("rejects squad rooms without leaderRoleId", async () => {
+    const response = await fetch(`${baseUrl}/rooms`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Squad Room", mode: "squad", primaryAgentId: "mock-builder" })
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: "squad_mode_requires_leader_role_id" });
+  });
+
+  it("creates team rooms with leaderRoleId and resolves V1.0 participants", async () => {
+    const workspaceId = "default-workspace";
+    const now = Date.now();
+    const runtimeId = `runtime-team-${now}`;
+    const leaderRoleId = `role-leader-${now}`;
+    const teammateRoleId = `role-teammate-${now}`;
+    const leaderBindingId = `binding-leader-${now}`;
+    const teammateBindingId = `binding-teammate-${now}`;
+    daemon.database.sqlite.transaction(() => {
+      daemon.database.sqlite.prepare("INSERT INTO roles (id, workspace_id, name, avatar, description, prompt, capabilities, default_permission_profile_id, tags, is_builtin, source_path, version, created_at, updated_at) VALUES (?, ?, ?, NULL, NULL, ?, '[]', NULL, NULL, 0, NULL, NULL, ?, ?)").run(leaderRoleId, workspaceId, "Project Manager", "Leader prompt", now, now);
+      daemon.database.sqlite.prepare("INSERT INTO roles (id, workspace_id, name, avatar, description, prompt, capabilities, default_permission_profile_id, tags, is_builtin, source_path, version, created_at, updated_at) VALUES (?, ?, ?, NULL, NULL, ?, '[]', NULL, NULL, 0, NULL, NULL, ?, ?)").run(teammateRoleId, workspaceId, "Builder", "Teammate prompt", now, now);
+      daemon.database.sqlite.prepare("INSERT INTO runtimes (id, workspace_id, kind, name, command, args, env, detected_at, detected_path, detected_version, supported_caps, version, status, manifest_json, created_at, updated_at) VALUES (?, ?, 'custom-acp', ?, NULL, NULL, NULL, NULL, NULL, NULL, '[]', NULL, NULL, ?, ?, ?)").run(runtimeId, workspaceId, "Team Runtime", now, now, now);
+      daemon.database.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, NULL, ?, ?)").run(leaderBindingId, workspaceId, leaderRoleId, runtimeId, now, now);
+      daemon.database.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, NULL, ?, ?)").run(teammateBindingId, workspaceId, teammateRoleId, runtimeId, now, now);
+    })();
+
+    const created = await fetch(`${baseUrl}/rooms`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        title: "Team Room",
+        mode: "team",
+        leaderRoleId,
+        participants: [
+          { roleId: leaderRoleId, runtimeId },
+          { roleId: teammateRoleId, runtimeId }
+        ]
+      })
+    });
+    const createdBody = await created.json() as { readonly data?: { readonly roomId?: string; readonly leaderRoleId?: string } };
+
+    expect(created.status).toBe(201);
+    expect(createdBody.data).toMatchObject({ leaderRoleId });
+    const roomId = createdBody.data?.roomId ?? "";
+    expect(roomId).not.toBe("");
+    expect(daemon.database.sqlite.prepare("SELECT mode, leader_role_id, primary_agent_id FROM rooms WHERE id = ?").get(roomId)).toMatchObject({ mode: "team", leader_role_id: leaderRoleId, primary_agent_id: leaderBindingId });
+    expect(daemon.database.sqlite.prepare("SELECT participant_id, role, agent_binding_id FROM room_participants WHERE room_id = ? ORDER BY joined_at ASC").all(roomId)).toMatchObject([
+      { participant_id: leaderBindingId, role: "primary", agent_binding_id: leaderBindingId },
+      { participant_id: teammateBindingId, role: "teammate", agent_binding_id: teammateBindingId }
+    ]);
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'room.created' AND json_extract(payload, '$.leaderRoleId') = ?").get(leaderRoleId)).toMatchObject({ count: 1 });
+  });
+
+  it("keeps solo rooms compatible with primaryAgentId and participants", async () => {
+    const created = await fetch(`${baseUrl}/rooms`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        title: "Solo Room",
+        mode: "solo",
+        primaryAgentId: "mock-builder",
+        participants: [{ type: "agent", agentId: "mock-observer" }]
+      })
+    });
+    const createdBody = await created.json() as { readonly data?: { readonly roomId?: string } };
+
+    expect(created.status).toBe(201);
+    const roomId = createdBody.data?.roomId ?? "";
+    expect(roomId).not.toBe("");
+    expect(daemon.database.sqlite.prepare("SELECT mode, leader_role_id, primary_agent_id FROM rooms WHERE id = ?").get(roomId)).toMatchObject({ mode: "solo", leader_role_id: null, primary_agent_id: "mock-builder" });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM room_participants WHERE room_id = ?").get(roomId)).toMatchObject({ count: 2 });
   });
 
   it("backfills v1.0 role/runtime/model config bindings from agent profiles", async () => {
@@ -846,6 +921,63 @@ describe("daemon M1.4 composition", () => {
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'room.created'").get()).toMatchObject({ count: 0 });
   });
 
+  it("requires leaderRoleId for squad rooms", async () => {
+    const response = await fetch(`${baseUrl}/rooms`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Squad Missing Leader", mode: "squad", participants: [{ roleId: "role_missing", runtimeId: "runtime_missing" }] })
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: "squad_mode_requires_leader_role_id" });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM rooms WHERE title = 'Squad Missing Leader'").get()).toMatchObject({ count: 0 });
+  });
+
+  it("creates team rooms with v1.0 participants and persists leader bindings", async () => {
+    const roleId = `role_team_${Date.now()}`;
+    const runtimeId = `runtime_team_${Date.now()}`;
+    const modelConfigId = `model_team_${Date.now()}`;
+    daemon.database.sqlite.transaction(() => {
+      daemon.database.sqlite.prepare("INSERT INTO roles (id, workspace_id, name, avatar, description, prompt, capabilities, default_permission_profile_id, tags, is_builtin, source_path, version, created_at, updated_at) VALUES (?, ?, ?, NULL, NULL, ?, '[]', NULL, NULL, 0, NULL, NULL, ?, ?)").run(roleId, "default-workspace", "Team Leader", "Team prompt", Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO runtimes (id, workspace_id, kind, name, command, args, env, detected_at, detected_path, detected_version, supported_caps, version, status, manifest_json, created_at, updated_at) VALUES (?, ?, 'native', ?, NULL, NULL, NULL, NULL, NULL, 'native', '[]', NULL, NULL, ?, ?, ?)").run(runtimeId, "default-workspace", "Team Runtime", JSON.stringify({ runtimeKind: "native" }), Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO model_configs (id, workspace_id, name, provider, model, base_url, api_key_ref, api_key_fingerprint, temperature, max_tokens, reasoning, extra, profile, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)").run(modelConfigId, "default-workspace", "Team Model", "ollama", "team-model", Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NULL, ?, ?)").run("binding-team-leader", "default-workspace", roleId, runtimeId, modelConfigId, Date.now(), Date.now());
+    })();
+
+    const response = await fetch(`${baseUrl}/rooms`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        title: "Team Room",
+        mode: "team",
+        leaderRoleId: roleId,
+        participants: [{ roleId, runtimeId, modelConfigId }]
+      })
+    });
+    const payload = await response.json() as { readonly data?: { readonly roomId: string; readonly leaderRoleId?: string; readonly agentBindingId?: string } };
+
+    expect(response.status).toBe(201);
+    expect(payload.data).toMatchObject({ leaderRoleId: roleId, agentBindingId: "binding-team-leader" });
+    const roomId = payload.data?.roomId ?? "";
+    expect(daemon.database.sqlite.prepare("SELECT leader_role_id, primary_agent_id FROM rooms WHERE id = ?").get(roomId)).toMatchObject({ leader_role_id: roleId, primary_agent_id: "binding-team-leader" });
+    expect(daemon.database.sqlite.prepare("SELECT agent_binding_id, role, default_presence FROM room_participants WHERE room_id = ? AND participant_type = 'agent' AND role = 'primary'").get(roomId)).toMatchObject({ agent_binding_id: "binding-team-leader", role: "primary", default_presence: "active" });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE room_id = ? AND type = 'room.created'").get(roomId)).toMatchObject({ count: 1 });
+  });
+
+  it("keeps solo rooms compatible without leaderRoleId", async () => {
+    const response = await fetch(`${baseUrl}/rooms`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Solo Room", mode: "solo", primaryAgentId: "mock-builder" })
+    });
+    const payload = await response.json() as { readonly data?: { readonly roomId: string } };
+
+    expect(response.status).toBe(201);
+    const roomId = payload.data?.roomId ?? "";
+    expect(daemon.database.sqlite.prepare("SELECT leader_role_id FROM rooms WHERE id = ?").get(roomId)).toMatchObject({ leader_role_id: null });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM rooms WHERE id = ?").get(roomId)).toMatchObject({ count: 1 });
+  });
+
   it("archiving a room keeps active ACP runs lifecycle-owned instead of disposing their session", async () => {
     daemon.database.sqlite.prepare("INSERT INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES ('claude-agent', NULL, 'Claude Agent', 'claude-code', 'claude', 'Claude test profile', ?, NULL, 0, NULL, 1, 1)").run(JSON.stringify(["chat", "code.edit"]));
     const client = new AgentHubClient({ baseUrl });
@@ -1040,20 +1172,12 @@ describe("daemon M1.4 composition", () => {
       daemon.database.sqlite.prepare("INSERT INTO model_configs (id, workspace_id, name, provider, model, base_url, api_key_ref, api_key_fingerprint, temperature, max_tokens, reasoning, extra, profile, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, NULL, NULL, NULL, NULL, NULL, ?, ?)").run(modelConfigId, workspaceId, "Binding Model", "openai", "gpt-4.1", "fingerprint-123", Date.now(), Date.now());
     })();
 
-    const missingModelConfig = await fetch(`${baseUrl}/agent-bindings`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ workspaceId, roleId, runtimeId })
-    });
+    const missingModelConfig = await invokeHandler(daemon, "POST", "/agent-bindings", { workspaceId, roleId, runtimeId });
     expect(missingModelConfig.status).toBe(400);
-    expect(await missingModelConfig.json()).toMatchObject({ error: "native_runtime_requires_model_config" });
+    expect(missingModelConfig.body).toMatchObject({ error: "native_runtime_requires_model_config" });
 
-    const created = await fetch(`${baseUrl}/agent-bindings`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ workspaceId, roleId, runtimeId, modelConfigId })
-    });
-    const createdBody = await created.json() as { readonly agentBinding?: { readonly id: string; readonly role: { readonly id: string; readonly name: string }; readonly runtime: { readonly kind: string }; readonly modelConfig?: { readonly id: string; readonly apiKeyFingerprint: string | null } } };
+    const created = await invokeHandler(daemon, "POST", "/agent-bindings", { workspaceId, roleId, runtimeId, modelConfigId });
+    const createdBody = created.body as { readonly agentBinding?: { readonly id: string; readonly role: { readonly id: string; readonly name: string }; readonly runtime: { readonly kind: string }; readonly modelConfig?: { readonly id: string; readonly apiKeyFingerprint: string | null } } };
     expect(created.status).toBe(201);
     expect(createdBody.agentBinding).toMatchObject({ role: { id: roleId, name: "Binding Role" }, runtime: { kind: "native" }, modelConfig: { id: modelConfigId, apiKeyFingerprint: "fingerprint-123" } });
 
@@ -1392,6 +1516,30 @@ describe("daemon M1.4 composition", () => {
     expect(listedPayload.tasks).toEqual([expect.objectContaining({ id: payload.data.taskId, status: "completed" })]);
   });
 
+  it("returns task activities over HTTP and keeps cancel on task.status.changed", async () => {
+    const client = new AgentHubClient({ baseUrl });
+    const room = await client.createRoom({ title: "Task activities", mode: "solo", primaryAgentId: "mock-builder" }) as { readonly data: { readonly roomId: string } };
+
+    const created = await fetch(`${baseUrl}/rooms/${room.data.roomId}/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "Activity task", assigneeAgentId: "mock-builder", idempotencyKey: "task-activity-1" }) });
+    const createdPayload = await created.json() as { readonly data: { readonly taskId: string } };
+    expect(created.status).toBe(201);
+
+    daemon.commandBus.dispatch({ type: "UpdateTask", taskId: createdPayload.data.taskId, status: "cancelled", reason: "user_deleted" }, { actor: { type: "user", id: "local" }, traceId: "trace_cancel", origin: "http" });
+
+    const activities = await fetch(`${baseUrl}/tasks/${createdPayload.data.taskId}/activities`);
+    const activitiesPayload = await activities.json() as { readonly activities: readonly { readonly kind: string; readonly by_kind: string; readonly by: string }[] };
+    expect(activities.status).toBe(200);
+    expect(activitiesPayload.activities).toEqual([]);
+    expect(daemon.database.sqlite.prepare("SELECT status FROM tasks WHERE id = ?").get(createdPayload.data.taskId)).toMatchObject({ status: "cancelled" });
+    expect(daemon.database.sqlite.prepare("SELECT type FROM events WHERE type = 'task.status.changed' AND json_extract(payload, '$.nextStatus') = 'cancelled'").get()).toBeDefined();
+    expect(daemon.database.sqlite.prepare("SELECT type FROM events WHERE type = 'task.deleted'").get()).toBeUndefined();
+
+    daemon.database.sqlite.prepare("INSERT INTO task_activities (id, task_id, kind, by_kind, by, payload, created_at) VALUES ('act_1', ?, 'comment', 'user', 'local', ?, 1)").run(createdPayload.data.taskId, JSON.stringify({ text: "Looks good" }));
+    const activitiesAfterComment = await fetch(`${baseUrl}/tasks/${createdPayload.data.taskId}/activities`);
+    const activitiesAfterCommentPayload = await activitiesAfterComment.json() as { readonly activities: readonly { readonly kind: string; readonly payload: string }[] };
+    expect(activitiesAfterCommentPayload.activities[0]).toMatchObject({ kind: "comment", payload: JSON.stringify({ text: "Looks good" }) });
+  });
+
   it("aggregates workspace cost by agent, model, and day with empty totals", async () => {
     const now = Date.UTC(2026, 0, 8, 12);
     seedCostRun({ id: "cost_agent_a", workspaceId: "default-workspace", agentId: "mock-builder", endedAt: now - 1_000, inputTokens: 10, outputTokens: 20, cachedTokens: 3, costUsd: 0.5, modelId: "m1" });
@@ -1554,12 +1702,16 @@ async function readSseEvent(body: ReadableStream<Uint8Array> | null, eventName: 
   throw new Error(`Timed out waiting for SSE event ${eventName}: ${buffer}`);
 }
 
-async function invokeHandler(daemon: DaemonApp, method: string, url: string): Promise<{ readonly status: number; readonly body: unknown }> {
+async function invokeHandler(daemon: DaemonApp, method: string, url: string, body?: unknown): Promise<{ readonly status: number; readonly body: unknown }> {
   const { EventEmitter } = await import("node:events");
-  const req = new EventEmitter() as Parameters<DaemonApp["handle"]>[0];
+  const req = new EventEmitter() as Parameters<DaemonApp["handle"]>[0] & { method?: string; url?: string; headers?: Record<string, string>; [Symbol.asyncIterator]?: () => AsyncIterableIterator<Buffer> };
   req.method = method;
   req.url = url;
-  req.headers = {};
+  req.headers = body === undefined ? {} : { "content-type": "application/json" };
+  req[Symbol.asyncIterator] = async function* () {
+    if (body === undefined) return;
+    yield Buffer.from(JSON.stringify(body));
+  };
   const chunks: Buffer[] = [];
   const res = new EventEmitter() as Parameters<DaemonApp["handle"]>[1] & { statusCode?: number; capturedHeaders?: unknown };
   res.writeHead = ((status: number, statusMessageOrHeaders?: unknown, headers?: unknown) => {

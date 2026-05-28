@@ -422,6 +422,10 @@ describe("TaskService and RoomMcpServer", () => {
     expect(currentDatabase().sqlite.prepare("SELECT type FROM events WHERE type = 'task.status.changed.rejected'").get()).toBeUndefined();
     expect(await mcp.callTool("room.update_task", { taskId: created.data.taskId, status: "in_progress" }, { roomId: "room_1", runId: "run_1", agentId: "agent_1" })).toMatchObject({ ok: true });
     expect(await mcp.callTool("room.update_task", { taskId: created.data.taskId, status: "done" }, { roomId: "room_1", runId: "run_1", agentId: "agent_1" })).toMatchObject({ ok: true });
+    expect(await mcp.callTool("room.update_task", { taskId: created.data.taskId, addComment: "Found a blocker" }, { roomId: "room_1", runId: "run_1", agentId: "agent_1" })).toMatchObject({ ok: true });
+    expect(await mcp.callTool("room.update_task", { taskId: created.data.taskId, setBlocker: "Waiting on API contract" }, { roomId: "room_1", runId: "run_1", agentId: "agent_1" })).toMatchObject({ ok: true });
+    expect(await mcp.callTool("room.update_task", { taskId: created.data.taskId, linkArtifact: "artifact_1" }, { roomId: "room_1", runId: "run_1", agentId: "agent_1" })).toMatchObject({ ok: true });
+    expect(await mcp.callTool("room.update_task", { taskId: created.data.taskId, priority: 3 }, { roomId: "room_1", runId: "run_1", agentId: "agent_1" })).toMatchObject({ ok: true });
     service.create({ roomId: "room_2", title: "Other room", createdBy: "user", assigneeAgentId: "agent_2" });
 
     const listed = await mcp.callTool("room.list_tasks", {}, { roomId: "room_1", runId: "run_1", agentId: "agent_1" });
@@ -429,6 +433,16 @@ describe("TaskService and RoomMcpServer", () => {
     if (!listed.ok || !isRecord(listed.data) || !Array.isArray(listed.data.tasks)) throw new Error("expected task list");
     expect(listed.data.tasks).toHaveLength(1);
     expect(listed.data.tasks[0]).toMatchObject({ title: "MCP task", status: "completed" });
+    const activities = currentDatabase().sqlite.prepare("SELECT kind, by_kind, by, payload FROM task_activities WHERE task_id = ?").all(created.data.taskId) as Array<{ readonly kind: string; readonly by_kind: string; readonly by: string; readonly payload: string | null }>;
+    expect(activities.map((activity) => activity.kind).sort()).toEqual(["artifact_linked", "blocker_set", "comment", "priority_change"]);
+    expect(activities).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "comment", by_kind: "user", by: "agent_1", payload: JSON.stringify({ text: "Found a blocker" }) }),
+      expect.objectContaining({ kind: "blocker_set", by_kind: "user", by: "agent_1", payload: JSON.stringify({ text: "Waiting on API contract" }) }),
+      expect.objectContaining({ kind: "artifact_linked", by_kind: "user", by: "agent_1", payload: JSON.stringify({ artifactId: "artifact_1" }) }),
+      expect.objectContaining({ kind: "priority_change", by_kind: "user", by: "agent_1", payload: JSON.stringify({ priority: "3" }) })
+    ]));
+    expect(eventTypes()).toEqual(expect.arrayContaining(["task.activity.added", "task.status.changed"]));
+    expect(currentDatabase().sqlite.prepare("SELECT type FROM events WHERE type = 'task.deleted'").get()).toBeUndefined();
     expect(await mcp.callTool("unknown_tool", {}, { roomId: "room_1", runId: "run_1", agentId: "agent_1" })).toMatchObject({ ok: false, error: { code: "tool_not_found" } });
     expect(await mcp.callTool("room.update_task", { taskId: created.data.taskId, status: "in_progress" }, { roomId: "room_1", runId: "run_1", agentId: "agent_1" })).toMatchObject({ ok: false, error: { code: "conflict" } });
     unsubscribe();

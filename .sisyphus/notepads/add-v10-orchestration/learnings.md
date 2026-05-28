@@ -198,6 +198,12 @@
 ## [2026-05-29T05:48:00Z] Task 3.4 Models tab
 
 - `GET /model-configs` currently returns snake_case rows (`base_url`, `api_key_fingerprint`), while create/update requests expect camelCase payload fields (`baseUrl`, `apiKey`); UI helpers should normalize responses defensively but write daemon-native camelCase.
+
+## [2026-05-29T07:14:13Z] Task 4.8 room leader validation
+- `POST /rooms` now requires `leaderRoleId` for `team` and `squad` modes; the daemon returns `400` with `validation_failed` / `squad_mode_requires_leader_role_id` when it is missing.
+- V1.0 room participants can be passed as `{ roleId, runtimeId, modelConfigId? }` and are resolved to `agent_binding_id` before insert; legacy `agentProfileId` compatibility remains unchanged.
+- `rooms.leader_role_id` is persisted alongside `primary_agent_id`, and the room-created event includes `leaderRoleId` for the new modes.
+- Verified with `pnpm.cmd test -- packages/daemon` (all passing).
 - The web Settings test style remains dependency-free: export pure REST/payload helpers from UI components and test those with mocked `fetch` instead of adding Testing Library/jsdom mid-wave.
 - HeroUI Cards in this repo use `Card.Content` rather than `Card.Body`; using the latter passes LSP but fails package `tsc`.
 - Ollama should always omit `apiKey` and send `http://localhost:11434/v1` when no custom baseURL is entered.
@@ -238,6 +244,12 @@
 - The legacy `assigneeAgentId` compatibility field remains populated from the resolved binding participant when available.
 - Verification passed: `pnpm.cmd test -- packages/orchestrator packages/daemon`.
 
+## [2026-05-29T07:23:55Z] Task 4.6 task activities
+- `TaskService.addTaskActivity()` now writes `task_activities` and publishes `task.activity.added` inside the same SQLite transaction.
+- `room.update_task` uses status-only dispatch for transitions, and non-status updates (`addComment`, `setBlocker`, `linkArtifact`, `priority`) route through task activities instead of `task.updated`.
+- `GET /tasks/:id/activities` is exposed from the daemon for timeline fetches.
+- Test harness note: daemon POST route regression helpers need an async-iterable request body; `Readable.from(...)` was not enough for `body(ctx)` in this suite.
+
 ## [2026-05-29T06:39:00Z] Task 3.9 settings and role generator test consolidation
 - Existing settings tests from tasks 3.1-3.8 already covered modal bootstrap, Roles/Runtimes/Models REST helper contracts, role generation save/cancel/failure normalization, deep links, EventSource-free flows, and fake API-key redaction after save.
 - Added only the missing daemon regression: generated role drafts get a seven-day expires_at, GC removes them after the boundary, polling returns 404, and no role.generation.* events are persisted.
@@ -245,3 +257,6 @@
 
 - Role generation jobs now normalize the daemon response from draftJson; the UI should not expect legacy draft/esult shapes.\n- Failed role generation jobs should be deleted after failure handling, not just marked failed, so stale ole_drafts rows do not linger.\n- A deterministic failure regression test is easier when cleanup is factored into a small helper that can be exercised directly.
 
+- `POST /rooms` validation should happen after compatibility normalization so legacy payloads still flow through unchanged.
+- The daemon test suite file contains a helper (`invokeHandler`) for in-process route calls; using it avoids flaky `bad port` fetch behavior in package-wide Vitest runs.
+- `pnpm.cmd test -- packages/daemon` currently expands to the repo-wide Vitest runner; the daemon test file passes in isolation with `pnpm.cmd exec vitest run packages/daemon/test/daemon.test.ts`.

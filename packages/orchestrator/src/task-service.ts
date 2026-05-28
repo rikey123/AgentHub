@@ -88,6 +88,19 @@ export type UpdateTaskStatusInput = {
   readonly reason?: string;
 };
 
+export type TaskActivityKind = "comment" | "artifact_linked" | "blocker_set" | "priority_change";
+
+export type TaskActivityByKind = "user" | "role" | "system";
+
+export type AddTaskActivityInput = {
+  readonly taskId: string;
+  readonly kind: TaskActivityKind;
+  readonly byKind: TaskActivityByKind;
+  readonly by: string;
+  readonly payload?: unknown;
+  readonly nextPriority?: string;
+};
+
 export class TaskService {
   constructor(private readonly options: { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly now?: () => number }) {}
 
@@ -172,6 +185,34 @@ export class TaskService {
     if (!existing) return failed("not_found", `Task '${taskId}' not found`);
     if (existing.status !== "in_progress" && existing.status !== "review") return this.rejectTransition(existing, "completed", reason);
     return this.updateStatus({ taskId, status: "completed", reason });
+  }
+
+  addTaskActivity(input: AddTaskActivityInput): CommandResult<{ readonly task: TaskView; readonly taskId: string; readonly activityId: string }> {
+    if (input.by.trim().length === 0) return failed("validation_failed", "by is required");
+    if (input.kind.trim().length === 0) return failed("validation_failed", "kind is required");
+    if (input.byKind !== "user" && input.byKind !== "role" && input.byKind !== "system") return failed("validation_failed", "invalid activity actor kind");
+
+    const existing = this.task(input.taskId);
+    if (!existing) return failed("not_found", `Task '${input.taskId}' not found`);
+
+    const now = this.options.now?.() ?? Date.now();
+    const activityId = randomUUID();
+    const payloadJson = input.payload === undefined ? null : JSON.stringify(input.payload);
+    this.options.database.sqlite.transaction(() => {
+      this.options.database.sqlite
+        .prepare("INSERT INTO task_activities (id, task_id, kind, by_kind, by, payload, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+        .run(activityId, input.taskId, input.kind, input.byKind, input.by, payloadJson, now);
+
+      if (input.kind === "priority_change" && input.nextPriority !== undefined) {
+        this.options.database.sqlite.prepare("UPDATE tasks SET priority = ?, updated_at = ? WHERE id = ?").run(input.nextPriority, now, input.taskId);
+      }
+
+      this.options.eventBus.publish(taskEvent("task.activity.added", existing.workspace_id, existing.room_id ?? "", input.taskId, { taskId: input.taskId, kind: input.kind, byKind: input.byKind, by: input.by, payload: input.payload }, now));
+    })();
+
+    const task = this.task(input.taskId);
+    if (!task) return failed("internal_error", `Task '${input.taskId}' was not persisted`);
+    return { ok: true, data: { task: taskView(task), taskId: input.taskId, activityId }, emittedEvents: latestTaskEvents(this.options.database, input.taskId) };
   }
 
   list(input: { readonly roomId: string; readonly runId?: string }): TaskView[] {
@@ -302,8 +343,14 @@ function taskView(row: TaskRow): TaskView {
   };
 }
 
-function taskEvent(type: "task.created" | "task.assigned" | "task.status.changed" | "task.status.changed.rejected", workspaceId: string, roomId: string, taskId: string, payload: Record<string, unknown>, createdAt: number): PublishInput {
+function taskEvent(type: "task.created" | "task.assigned" | "task.status.changed" | "task.status.changed.rejected" | "task.activity.added", workspaceId: string, roomId: string, taskId: string, payload: Record<string, unknown>, createdAt: number): PublishInput {
   return { id: randomUUID(), type, schemaVersion: 1, workspaceId, roomId, taskId, payload: withoutUndefined(payload), createdAt };
+}
+
+export function normalizeTaskPriority(value: unknown): string | undefined {
+  if (typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 3) return String(value);
+  if (typeof value === "string" && ["0", "1", "2", "3"].includes(value)) return value;
+  return undefined;
 }
 
 function latestTaskEvents(database: AgentHubDatabase, taskId: string): { readonly seq: number; readonly type: string }[] {

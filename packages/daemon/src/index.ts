@@ -647,6 +647,9 @@ async function route(ctx: RouteContext): Promise<void> {
     const requestBody = await body(ctx);
     const normalized = normalizeRoomCreateCompat(ctx.database, requestBody);
     if (!normalized.ok) return json(ctx.res, normalized.status, { error: normalized.error });
+    const mode = typeof normalized.body.mode === "string" ? normalized.body.mode : "solo";
+    const leaderRoleId = typeof normalized.body.leaderRoleId === "string" && normalized.body.leaderRoleId.length > 0 ? normalized.body.leaderRoleId : undefined;
+    if ((mode === "team" || mode === "squad") && leaderRoleId === undefined) return json(ctx.res, 400, { error: "squad_mode_requires_leader_role_id" });
     return dispatchCreated(ctx, normalized.body, "CreateRoom");
   }
   if (ctx.req.method === "POST" && url.pathname === "/roles/generate") return createRoleGenerationJob(ctx, await body(ctx));
@@ -658,6 +661,7 @@ async function route(ctx: RouteContext): Promise<void> {
   if (ctx.req.method === "GET" && parts[0] === "rooms" && parts.length === 1) return json(ctx.res, 200, { rooms: all(ctx.database, "SELECT * FROM rooms ORDER BY created_at ASC") });
   if (ctx.req.method === "GET" && parts[0] === "rooms" && parts.length === 2) return json(ctx.res, 200, { room: get(ctx.database, "SELECT * FROM rooms WHERE id = ?", parts[1]) });
   if (ctx.req.method === "GET" && parts[0] === "rooms" && parts[2] === "tasks") return tasks(ctx, parts[1] as string, url);
+  if (ctx.req.method === "GET" && parts[0] === "tasks" && parts[1] && parts[2] === "activities") return taskActivities(ctx, parts[1] as string);
   if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "tasks") return dispatchCreated(ctx, { ...(await body(ctx)), roomId: parts[1] }, "CreateTask");
   if (ctx.req.method === "POST" && parts[0] === "tasks" && parts[2] === "complete") return dispatch(ctx, { taskId: parts[1] }, "CompleteTask");
   if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "archive") return dispatch(ctx, { roomId: parts[1] }, "ArchiveRoom");
@@ -899,6 +903,13 @@ function artifacts(ctx: RouteContext, url: URL): void {
 function tasks(ctx: RouteContext, roomId: string, url: URL): void {
   const runId = url.searchParams.get("runId") ?? undefined;
   json(ctx.res, 200, { tasks: ctx.taskService.list({ roomId, ...(runId !== undefined ? { runId } : {}) }) });
+}
+
+function taskActivities(ctx: RouteContext, taskId: string): void {
+  const task = get(ctx.database, "SELECT id FROM tasks WHERE id = ?", taskId);
+  if (task === null) return json(ctx.res, 404, { error: "task_not_found" });
+  const activities = all(ctx.database, "SELECT * FROM task_activities WHERE task_id = ? ORDER BY created_at DESC, id DESC", taskId);
+  json(ctx.res, 200, { activities });
 }
 
 function interventions(ctx: RouteContext, url: URL): void {

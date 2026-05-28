@@ -8,7 +8,7 @@ import type { AgentHubDatabase } from "@agenthub/db";
 
 import { nameToSlug } from "../mention-parser.ts";
 import { MailboxService } from "../mailbox-service.ts";
-import { TaskService, normalizeStatus } from "../task-service.ts";
+import { TaskService, normalizeStatus, normalizeTaskPriority } from "../task-service.ts";
 import { writeTcpMessage, createTcpMessageReader } from "./tcp-helpers.ts";
 
 export type RoomMcpToolName = "room.create_task" | "room.update_task" | "room.list_tasks" | "room.read_mailbox" | "room.send_message" | "room.list_members" | "room.spawn_agent" | string;
@@ -381,16 +381,38 @@ export class RoomMcpServer {
   }
 
   private async updateTask(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): Promise<RoomMcpToolResult> {
-    if (!isRecord(input) || typeof input.taskId !== "string" || normalizeStatus(input.status) === undefined) return failure("validation_failed", "taskId and valid status are required");
+    if (!isRecord(input) || typeof input.taskId !== "string") return failure("validation_failed", "taskId is required");
     const runId = this.requireRunId(session, context);
-    const result = await this.dispatch({
-      type: "UpdateTask",
-      taskId: input.taskId,
-      status: input.status,
-      reason: typeof input.reason === "string" ? input.reason : "mcp_update",
-      idempotencyKey: typeof input.idempotencyKey === "string" ? input.idempotencyKey : `mcp:update-task:${runId}:${input.taskId}:${input.status}:${randomUUID()}`
-    }, session, context);
-    return commandResult(result);
+    if (typeof input.status === "string") {
+      if (normalizeStatus(input.status) === undefined) return failure("validation_failed", "taskId and valid status are required");
+      const result = await this.dispatch({
+        type: "UpdateTask",
+        taskId: input.taskId,
+        status: input.status,
+        reason: typeof input.reason === "string" ? input.reason : "mcp_update",
+        idempotencyKey: typeof input.idempotencyKey === "string" ? input.idempotencyKey : `mcp:update-task:${runId}:${input.taskId}:${input.status}:${randomUUID()}`
+      }, session, context);
+      return commandResult(result);
+    }
+
+    if (typeof input.addComment === "string" && input.addComment.trim().length > 0) {
+      return commandResult(this.options.taskService.addTaskActivity({ taskId: input.taskId, kind: "comment", byKind: "user", by: session.agentId, payload: { text: input.addComment } }));
+    }
+
+    if (typeof input.setBlocker === "string" && input.setBlocker.trim().length > 0) {
+      return commandResult(this.options.taskService.addTaskActivity({ taskId: input.taskId, kind: "blocker_set", byKind: "user", by: session.agentId, payload: { text: input.setBlocker } }));
+    }
+
+    if (typeof input.linkArtifact === "string" && input.linkArtifact.trim().length > 0) {
+      return commandResult(this.options.taskService.addTaskActivity({ taskId: input.taskId, kind: "artifact_linked", byKind: "user", by: session.agentId, payload: { artifactId: input.linkArtifact } }));
+    }
+
+    const priority = normalizeTaskPriority(input.priority);
+    if (priority !== undefined) {
+      return commandResult(this.options.taskService.addTaskActivity({ taskId: input.taskId, kind: "priority_change", byKind: "user", by: session.agentId, payload: { priority }, nextPriority: priority }));
+    }
+
+    return failure("validation_failed", "taskId and a supported update are required");
   }
 
   // ---------------------------------------------------------------------------
