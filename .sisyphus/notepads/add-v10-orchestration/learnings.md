@@ -123,3 +123,8 @@
 
 - Model-config delete regressions are easiest to verify with a hoisted test-time keychain mock: that lets the daemon use the real delete path while the test asserts `modelConfigSecrets.delete` is never called on 409 conflicts.
 - The daemon already uses `null`-aware not-found checks for model-config GET/PATCH/DELETE, so the regression coverage should assert all three methods against the same missing ID for consistency.
+
+## Wave 2 Oracle Gate Re-Review — add-v10-orchestration
+- Model-config delete conflict path should keep the database row, emit no delete event, and skip keychain deletion until after conflict is ruled out and the row is deleted.
+- Model-config not-found checks should compare `get()` results with `null`, not `undefined`.
+- Verification passed: targeted tests, `ai-sdk-provider:check`, and `check:all`.
