@@ -8,6 +8,7 @@ import { createDatabase } from "@agenthub/db";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { AdapterRegistry } from "../src/adapters/registry.ts";
+import { migrateAgentProfilesToV10 } from "../src/migrations/0014_data.ts";
 import { createDaemon, loadAgentHubConfig, type DaemonApp, type DaemonStartupPhase } from "../src/index.ts";
 
 let currentDaemon: DaemonApp | undefined;
@@ -44,6 +45,42 @@ describe("daemon M1.4 composition", () => {
     expect(runs.map((run) => run.status)).toEqual(["completed"]);
     const messages = await client.listMessages(room.data.roomId) as { readonly messages: readonly { readonly role: string; readonly status: string }[] };
     expect(messages.messages.some((message) => message.role === "assistant" && message.status === "completed")).toBe(true);
+  });
+
+  it("backfills v1.0 role/runtime/model config bindings from agent profiles", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-v10-data-"));
+    const databasePath = join(dir, "agenthub.sqlite");
+    const seeded = createDatabase({ path: databasePath, applyMigrations: true });
+    try {
+      seeded.sqlite.transaction(() => {
+        seeded.sqlite.prepare("INSERT INTO workspaces (id, name, root_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run("ws_v10", "Workspace", dir, 1, 1);
+        seeded.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)").run("room_v10", "ws_v10", "Room", "solo", "conversation", "agent_a", 1, 1);
+        seeded.sqlite.prepare("INSERT INTO agent_profiles (id, workspace_id, name, description, avatar, version, provider, default_presence, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, NULL, 0, NULL, ?, ?)").run("agent_a", "ws_v10", "Agent A", "First profile", "openai", "active", "claude-code", "gpt-4.1", "Prompt A", JSON.stringify(["chat", "code.edit"]), 1, 1);
+        seeded.sqlite.prepare("INSERT INTO agent_profiles (id, workspace_id, name, description, avatar, version, provider, default_presence, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, NULL, 0, NULL, ?, ?)").run("agent_b", "ws_v10", "Agent B", "Second profile", "openai", "active", "claude-code", "gpt-4.1", "Prompt B", JSON.stringify(["chat", "code.review"]), 2, 2);
+        seeded.sqlite.prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, default_presence, joined_at) VALUES (?, ?, ?, ?, ?, NULL, ?, ?)").run("room_v10", "agent_a", "agent", "primary", "claude-code", "active", 1);
+        seeded.sqlite.prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, default_presence, joined_at) VALUES (?, ?, ?, ?, ?, NULL, ?, ?)").run("room_v10", "agent_b", "agent", "teammate", "claude-code", "active", 2);
+        seeded.sqlite.prepare("INSERT INTO tasks (id, workspace_id, room_id, parent_task_id, title, description, status, assignee_agent_id, source_run_id, source_message_id, dependencies, priority, delegation_chain, expects_review, due_at, created_by, created_at, updated_at) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, NULL, NULL, ?, NULL, NULL, 0, NULL, ?, ?, ?)").run("task_v10_a", "ws_v10", "room_v10", "Task A", "First task", "open", "agent_a", "[]", "system", 1, 1);
+        seeded.sqlite.prepare("INSERT INTO tasks (id, workspace_id, room_id, parent_task_id, title, description, status, assignee_agent_id, source_run_id, source_message_id, dependencies, priority, delegation_chain, expects_review, due_at, created_by, created_at, updated_at) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, NULL, NULL, ?, NULL, NULL, 0, NULL, ?, ?, ?)").run("task_v10_b", "ws_v10", "room_v10", "Task B", "Second task", "open", "agent_b", "[]", "system", 2, 2);
+      })();
+      migrateAgentProfilesToV10(seeded, 99);
+
+      expect(seeded.sqlite.prepare("SELECT COUNT(*) AS count FROM roles").get()).toMatchObject({ count: 2 });
+      expect(seeded.sqlite.prepare("SELECT COUNT(*) AS count FROM runtimes").get()).toMatchObject({ count: 1 });
+      expect(seeded.sqlite.prepare("SELECT COUNT(*) AS count FROM model_configs").get()).toMatchObject({ count: 1 });
+      expect(seeded.sqlite.prepare("SELECT COUNT(*) AS count FROM agent_bindings").get()).toMatchObject({ count: 2 });
+      expect(seeded.sqlite.prepare("SELECT agent_binding_id FROM room_participants WHERE participant_id = 'agent_a'").get()).toMatchObject({ agent_binding_id: "agent_a" });
+      expect(seeded.sqlite.prepare("SELECT agent_binding_id FROM room_participants WHERE participant_id = 'agent_b'").get()).toMatchObject({ agent_binding_id: "agent_b" });
+      expect(seeded.sqlite.prepare("SELECT assignee_role_id, assignee_binding_id FROM tasks WHERE id = 'task_v10_a'").get()).toMatchObject({ assignee_role_id: "agent_a", assignee_binding_id: "agent_a" });
+      expect(seeded.sqlite.prepare("SELECT assignee_role_id, assignee_binding_id FROM tasks WHERE id = 'task_v10_b'").get()).toMatchObject({ assignee_role_id: "agent_b", assignee_binding_id: "agent_b" });
+
+      migrateAgentProfilesToV10(seeded, 100);
+      expect(seeded.sqlite.prepare("SELECT COUNT(*) AS count FROM roles").get()).toMatchObject({ count: 2 });
+      expect(seeded.sqlite.prepare("SELECT COUNT(*) AS count FROM runtimes").get()).toMatchObject({ count: 1 });
+      expect(seeded.sqlite.prepare("SELECT COUNT(*) AS count FROM model_configs").get()).toMatchObject({ count: 1 });
+      expect(seeded.sqlite.prepare("SELECT COUNT(*) AS count FROM agent_bindings").get()).toMatchObject({ count: 2 });
+    } finally {
+      seeded.sqlite.close();
+    }
   });
 
   it("starts and shuts down daemon phases in spec order", async () => {

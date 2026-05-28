@@ -16,6 +16,7 @@ import { attachmentMaxBytes, authenticateBrowserRequest, issueBrowserSession, re
 import { Effect } from "effect";
 
 import { AdapterRegistry } from "./adapters/registry.ts";
+import { migrateAgentProfilesToV10 } from "./migrations/0014_data.ts";
 import { createDaemonCommandHandlers, seedDefaultData } from "./commands.ts";
 export { daemonPidPath, defaultConfigPath, ensureAgentHubHome, ensureParentDirectory, loadAgentHubConfig, redactConfig, type AgentHubConfig, type ConfigOverrides } from "./config.ts";
 import { openApiDocument } from "./openapi.ts";
@@ -118,6 +119,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     emitPhase("startup", PHASE_SQLITE);
     const database = createDatabase({ path: options.databasePath, applyMigrations: true });
     seedDefaultData(database, options.now?.() ?? Date.now());
+    migrateAgentProfilesToV10(database, options.now?.() ?? Date.now());
     seedBuiltInPermissionProfiles(database, options.now?.() ?? Date.now());
     bootstrapBuiltInAgents();
 
