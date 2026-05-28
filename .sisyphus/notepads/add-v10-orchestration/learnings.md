@@ -128,3 +128,8 @@
 - Model-config delete conflict path should keep the database row, emit no delete event, and skip keychain deletion until after conflict is ruled out and the row is deleted.
 - Model-config not-found checks should compare `get()` results with `null`, not `undefined`.
 - Verification passed: targeted tests, `ai-sdk-provider:check`, and `check:all`.
+## task 2.1 provider registry
+
+- `packages/native-agent-runtime` follows the repo’s package convention: private ESM package, `exports` to `src/`, `scripts/run-tests.mjs`, and a `tsconfig.json` that extends from the repo root.
+- Vercel AI SDK 5 explicit provider factories work cleanly with `provider.chatModel(modelId)`; the package test should mock the factory module and assert the model instance comes from the provider object, not a string ID.
+- The new package needed `../../tsconfig.base.json` from its location; the first attempt used the adapter package path and broke Vitest tsconfig resolution.
