@@ -58,6 +58,13 @@
 - The daemon data migration had one leftover `agent_bindings.name` seed path; it now uses `override_permission_profile_id`.
 - The daemon test fixture for migrated bindings also needed the renamed column and now passes.
 
+## [2026-05-29T03:00:00Z] Task 1.5
+- The daemon already had a real `KeychainBridge` in `packages/security/src/keychain.ts`; I reused it instead of inventing a new secret store.
+- `createKeychainAccount()` gives a stable account name for model-config secrets; SQLite keeps only `api_key_ref` + `api_key_fingerprint`.
+- Model-config responses deliberately omit `api_key_ref`; the API surface only returns fingerprint metadata.
+- The delete path checks `agent_bindings.model_config_id` first and returns `409` without publishing `model_config.deleted` when bindings exist.
+- Ollama/local configs intentionally persist `NULL` for both key fields.
+
 ## [2026-05-29T02:32:02Z] Task 1.1
 - Implemented REST role CRUD directly in `packages/daemon/src/index.ts` with same-transaction durable publishes for `role.created`, `role.updated`, and `role.deleted`.
 - Added a response normalizer so role API replies decode stored JSON strings for `capabilities` and `tags` before returning them to clients.
@@ -78,3 +85,10 @@
 - Implemented transaction+publish on every runtime write with durable detail events: `runtime.detected`, `runtime.updated`, and `runtime.removed`.
 - Added daemon startup UPSERT for `native-default` (`kind = native`, `name = AgentHub Native`, `supported_caps = []`, `manifest_json = {"runtimeKind":"native"}`) before the context/permission engines are built.
 - Added daemon tests covering native runtime seeding, CRUD event emission, and the 409 delete path when `agent_bindings` exist.
+
+## [2026-05-29T02:41:30Z] Task 1.7
+- Added /agent-bindings CRUD in packages/daemon/src/index.ts with expanded GET rows for role/runtime/modelConfig summaries and no api_key_ref plaintext exposure.
+- Enforced native-runtime bindings to require model_config_id on create/update, validated referenced role/runtime/model_config rows, and used same-transaction durable detail events for create/update/remove.
+- DELETE now returns 409 when room_participants references exist and emits no event in that branch.
+- Added daemon regression tests for native binding creation, native missing model_config rejection, and delete conflict with room participants.
+- Verified `pnpm.cmd test -- packages/daemon` passes.

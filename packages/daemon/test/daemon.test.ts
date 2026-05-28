@@ -172,6 +172,75 @@ describe("daemon M1.4 composition", () => {
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM runtimes WHERE id = 'runtime-bound'").get()).toMatchObject({ count: 1 });
   });
 
+  it("stores model config API keys in keychain and omits plaintext from responses", async () => {
+    const workspaceId = `ws_model_${Date.now()}`;
+    daemon.database.sqlite.prepare("INSERT OR IGNORE INTO workspaces (id, name, root_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run(workspaceId, workspaceId, `/tmp/${workspaceId}`, Date.now(), Date.now());
+
+    const apiKey = "sk-ant-example-secret-key";
+    const created = await fetch(`${baseUrl}/model-configs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workspaceId, name: "OpenAI Config", provider: "openai", model: "gpt-4o", apiKey })
+    });
+    const createdBody = await created.json() as { readonly modelConfig?: { readonly id: string; readonly api_key_ref?: string | null; readonly api_key_fingerprint?: string | null } };
+    expect(created.status).toBe(201);
+    expect(createdBody.modelConfig).toMatchObject({ api_key_fingerprint: "sk-a...-key" });
+    expect(createdBody.modelConfig).not.toHaveProperty("api_key_ref");
+    expect(JSON.stringify(createdBody)).not.toContain(apiKey);
+
+    const rows = daemon.database.sqlite.prepare("SELECT api_key_ref, api_key_fingerprint FROM model_configs WHERE workspace_id = ? ORDER BY created_at ASC").all(workspaceId) as { readonly api_key_ref: string | null; readonly api_key_fingerprint: string | null }[];
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ api_key_ref: expect.any(String), api_key_fingerprint: "sk-a...-key" });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'model_config.created' AND json_extract(payload, '$.modelConfigId') = ?").get(createdBody.modelConfig?.id)).toMatchObject({ count: 1 });
+
+    const listed = await fetch(`${baseUrl}/model-configs?workspaceId=${encodeURIComponent(workspaceId)}`);
+    const listedBody = await listed.json() as readonly Array<{ readonly api_key_ref?: string; readonly api_key_fingerprint?: string | null }>;
+    expect(listed.status).toBe(200);
+    expect(Array.isArray(listedBody)).toBe(true);
+    expect(listedBody[0]).toMatchObject({ api_key_fingerprint: "sk-a...-key" });
+    expect(listedBody[0]).not.toHaveProperty("api_key_ref");
+
+    const fetched = await fetch(`${baseUrl}/model-configs/${createdBody.modelConfig?.id ?? ""}`);
+    const fetchedBody = await fetched.json() as { readonly modelConfig?: { readonly api_key_ref?: string; readonly api_key_fingerprint?: string | null } };
+    expect(fetched.status).toBe(200);
+    expect(fetchedBody.modelConfig).toMatchObject({ api_key_fingerprint: "sk-a...-key" });
+    expect(fetchedBody.modelConfig).not.toHaveProperty("api_key_ref");
+  });
+
+  it("stores Ollama model configs without API key refs", async () => {
+    const workspaceId = `ws_ollama_${Date.now()}`;
+    daemon.database.sqlite.prepare("INSERT OR IGNORE INTO workspaces (id, name, root_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run(workspaceId, workspaceId, `/tmp/${workspaceId}`, Date.now(), Date.now());
+
+    const created = await fetch(`${baseUrl}/model-configs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workspaceId, name: "Local Ollama", provider: "ollama", model: "llama3.1", baseUrl: "http://localhost:11434/v1" })
+    });
+    const createdBody = await created.json() as { readonly modelConfig?: { readonly api_key_ref?: string | null; readonly api_key_fingerprint?: string | null; readonly provider?: string } };
+
+    expect(created.status).toBe(201);
+    expect(createdBody.modelConfig).toMatchObject({ provider: "ollama", api_key_fingerprint: null });
+    expect(createdBody.modelConfig).not.toHaveProperty("api_key_ref");
+    expect(daemon.database.sqlite.prepare("SELECT api_key_ref, api_key_fingerprint FROM model_configs WHERE workspace_id = ?").get(workspaceId)).toMatchObject({ api_key_ref: null, api_key_fingerprint: null });
+  });
+
+  it("rejects deleting a model config with bindings", async () => {
+    const workspaceId = `ws_model_bind_${Date.now()}`;
+    daemon.database.sqlite.transaction(() => {
+      daemon.database.sqlite.prepare("INSERT OR IGNORE INTO workspaces (id, name, root_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run(workspaceId, workspaceId, `/tmp/${workspaceId}`, Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO model_configs (id, workspace_id, name, provider, model, base_url, api_key_ref, api_key_fingerprint, temperature, max_tokens, reasoning, extra, profile, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)").run("mc_bound", workspaceId, "Bound Model", "openai", "gpt-4o", Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NULL, ?, ?)").run("binding_model_bound", workspaceId, "role_bound", "runtime_bound", "mc_bound", Date.now(), Date.now());
+    })();
+
+    const deleted = await fetch(`${baseUrl}/model-configs/mc_bound`, { method: "DELETE" });
+    const deletedBody = await deleted.json() as { readonly error?: string; readonly bindingCount?: number };
+
+    expect(deleted.status).toBe(409);
+    expect(deletedBody).toMatchObject({ error: "model_config_has_bindings", bindingCount: 1 });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM model_configs WHERE id = 'mc_bound'").get()).toMatchObject({ count: 1 });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'model_config.deleted' AND json_extract(payload, '$.modelConfigId') = 'mc_bound'").get()).toMatchObject({ count: 0 });
+  });
+
   it("starts on loopback without a token", async () => {
     await daemon.close();
     currentDaemon = undefined;
@@ -422,6 +491,88 @@ describe("daemon M1.4 composition", () => {
     expect(deletedBody).toMatchObject({ error: "role_has_bindings", bindingCount: 1 });
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM roles WHERE id = ?").get(roleId)).toMatchObject({ count: 1 });
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'role.deleted' AND json_extract(payload, '$.roleId') = ?").get(roleId)).toMatchObject({ count: 0 });
+  });
+
+  it("supports agent binding CRUD with native model config validation", async () => {
+    const workspaceId = `ws_bind_${Date.now()}`;
+    const roleId = `role_bind_${Date.now()}`;
+    const runtimeId = `runtime_native_${Date.now()}`;
+    const modelConfigId = `model_cfg_${Date.now()}`;
+    daemon.database.sqlite.transaction(() => {
+      daemon.database.sqlite.prepare("INSERT OR IGNORE INTO workspaces (id, name, root_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run(workspaceId, workspaceId, `/tmp/${workspaceId}`, Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO roles (id, workspace_id, name, avatar, description, prompt, capabilities, default_permission_profile_id, tags, is_builtin, source_path, version, created_at, updated_at) VALUES (?, ?, ?, NULL, NULL, ?, '[]', NULL, NULL, 0, NULL, NULL, ?, ?)").run(roleId, workspaceId, "Binding Role", "Prompt", Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO runtimes (id, workspace_id, kind, name, command, args, env, detected_at, detected_path, detected_version, supported_caps, version, status, manifest_json, created_at, updated_at) VALUES (?, ?, 'native', ?, NULL, NULL, NULL, NULL, NULL, ?, '[]', NULL, NULL, ?, ?, ?)").run(runtimeId, workspaceId, "Native Runtime", "1.2.3", JSON.stringify({ runtimeKind: "native" }), Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO model_configs (id, workspace_id, name, provider, model, base_url, api_key_ref, api_key_fingerprint, temperature, max_tokens, reasoning, extra, profile, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, NULL, NULL, NULL, NULL, NULL, ?, ?)").run(modelConfigId, workspaceId, "Binding Model", "openai", "gpt-4.1", "fingerprint-123", Date.now(), Date.now());
+    })();
+
+    const missingModelConfig = await fetch(`${baseUrl}/agent-bindings`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workspaceId, roleId, runtimeId })
+    });
+    expect(missingModelConfig.status).toBe(400);
+    expect(await missingModelConfig.json()).toMatchObject({ error: "native_runtime_requires_model_config" });
+
+    const created = await fetch(`${baseUrl}/agent-bindings`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workspaceId, roleId, runtimeId, modelConfigId })
+    });
+    const createdBody = await created.json() as { readonly agentBinding?: { readonly id: string; readonly role: { readonly id: string; readonly name: string }; readonly runtime: { readonly kind: string }; readonly modelConfig?: { readonly id: string; readonly apiKeyFingerprint: string | null } } };
+    expect(created.status).toBe(201);
+    expect(createdBody.agentBinding).toMatchObject({ role: { id: roleId, name: "Binding Role" }, runtime: { kind: "native" }, modelConfig: { id: modelConfigId, apiKeyFingerprint: "fingerprint-123" } });
+
+    const bindingId = createdBody.agentBinding?.id ?? "";
+    expect(bindingId).not.toBe("");
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'agent_binding.created' AND json_extract(payload, '$.bindingId') = ?").get(bindingId)).toMatchObject({ count: 1 });
+
+    const listed = await fetch(`${baseUrl}/agent-bindings?workspaceId=${encodeURIComponent(workspaceId)}`);
+    const listBody = await listed.json() as { readonly agentBindings: readonly { readonly id: string }[] };
+    expect(listed.status).toBe(200);
+    expect(listBody.agentBindings.map((binding) => binding.id)).toContain(bindingId);
+
+    const fetched = await fetch(`${baseUrl}/agent-bindings/${bindingId}`);
+    const fetchedBody = await fetched.json() as { readonly agentBinding?: { readonly id: string; readonly runtime: { readonly kind: string } } };
+    expect(fetched.status).toBe(200);
+    expect(fetchedBody.agentBinding).toMatchObject({ id: bindingId, runtime: { kind: "native" } });
+
+    const updated = await fetch(`${baseUrl}/agent-bindings/${bindingId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ overridePermissionProfileId: "profile-override" })
+    });
+    const updatedBody = await updated.json() as { readonly agentBinding?: { readonly override_permission_profile_id?: string | null } };
+    expect(updated.status).toBe(200);
+    expect(updatedBody.agentBinding).toMatchObject({ override_permission_profile_id: "profile-override" });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'agent_binding.updated' AND json_extract(payload, '$.bindingId') = ?").get(bindingId)).toMatchObject({ count: 1 });
+
+    const deleted = await fetch(`${baseUrl}/agent-bindings/${bindingId}`, { method: "DELETE" });
+    expect(deleted.status).toBe(200);
+    expect(await deleted.json()).toMatchObject({ ok: true });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'agent_binding.removed' AND json_extract(payload, '$.bindingId') = ?").get(bindingId)).toMatchObject({ count: 1 });
+  });
+
+  it("rejects deleting agent bindings referenced by room participants", async () => {
+    const workspaceId = `ws_bind_conflict_${Date.now()}`;
+    const roleId = `role_bind_conflict_${Date.now()}`;
+    const runtimeId = `runtime_bind_conflict_${Date.now()}`;
+    const bindingId = `binding_conflict_${Date.now()}`;
+    daemon.database.sqlite.transaction(() => {
+      daemon.database.sqlite.prepare("INSERT OR IGNORE INTO workspaces (id, name, root_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run(workspaceId, workspaceId, `/tmp/${workspaceId}`, Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO roles (id, workspace_id, name, avatar, description, prompt, capabilities, default_permission_profile_id, tags, is_builtin, source_path, version, created_at, updated_at) VALUES (?, ?, ?, NULL, NULL, ?, '[]', NULL, NULL, 0, NULL, NULL, ?, ?)").run(roleId, workspaceId, "Conflict Role", "Prompt", Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO runtimes (id, workspace_id, kind, name, command, args, env, detected_at, detected_path, detected_version, supported_caps, version, status, manifest_json, created_at, updated_at) VALUES (?, ?, 'custom-acp', ?, NULL, NULL, NULL, NULL, NULL, NULL, '[]', NULL, NULL, ?, ?, ?)").run(runtimeId, workspaceId, "Conflict Runtime", JSON.stringify({ runtimeKind: "custom-acp" }), Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, NULL, ?, ?)").run(bindingId, workspaceId, roleId, runtimeId, Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)").run(`room_${bindingId}`, workspaceId, "Conflict Room", "solo", "conversation", bindingId, Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)").run(`room_${bindingId}`, bindingId, "agent", "primary", "custom-acp", bindingId, "active", Date.now());
+    })();
+
+    const deleted = await fetch(`${baseUrl}/agent-bindings/${bindingId}`, { method: "DELETE" });
+    const deletedBody = await deleted.json() as { readonly error?: string; readonly participantCount?: number };
+
+    expect(deleted.status).toBe(409);
+    expect(deletedBody).toMatchObject({ error: "agent_binding_has_room_participants", participantCount: 1 });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE json_extract(payload, '$.bindingId') = ? AND type LIKE 'agent_binding.%'").get(bindingId)).toMatchObject({ count: 0 });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM agent_bindings WHERE id = ?").get(bindingId)).toMatchObject({ count: 1 });
   });
 
   it("enforces browser auth bootstrap, GET/SSE session auth, CSRF, and bearer-origin rules", async () => {

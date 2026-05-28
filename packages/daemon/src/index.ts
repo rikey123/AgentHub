@@ -12,7 +12,7 @@ import { createInterventionCommandHandlers, InterventionEngine } from "@agenthub
 import { ActiveWakesRegistry, createCancelRunHandler, createCompleteTaskHandler, createConsumePendingTurnHandler, createCreateTaskHandler, createUpdateTaskHandler, createWakeAgentHandler, MailboxService, PendingTurnService, ReclaimStaleClaimedRun, RoomMcpServer, RunLifecycleService, RunQueue, StartupRecovery, TaskService, type BriefResolver } from "@agenthub/orchestrator";
 import { createPermissionCommandHandlers, PermissionEngine, seedBuiltInPermissionProfiles } from "@agenthub/permissions";
 import type { EventEnvelope } from "@agenthub/protocol/events";
-import { attachmentMaxBytes, authenticateBrowserRequest, issueBrowserSession, redactAndTruncate, storeAttachment, type BrowserAuthResult } from "@agenthub/security";
+import { attachmentMaxBytes, authenticateBrowserRequest, createKeychain, createKeychainAccount, issueBrowserSession, redactAndTruncate, storeAttachment, type BrowserAuthResult, type KeychainBridge } from "@agenthub/security";
 import { Effect } from "effect";
 
 import { AdapterRegistry } from "./adapters/registry.ts";
@@ -84,6 +84,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
   let closed = false;
   let stopping = false;
   const sseClients = new Set<SseClient>();
+  const modelConfigSecrets = createKeychain("agenthub-model-configs");
 
   const emitPhase = (direction: "startup" | "shutdown", phase: DaemonStartupPhase): void => {
     options.onLifecyclePhase?.({ direction, phase });
@@ -100,7 +101,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     if (stopping) return json(res, 503, { error: "service_stopping" });
     if (!ready) return json(res, 503, { error: "service_starting", retryAfterMs: 500 });
     const app = requireRuntime();
-    void route({ req, res, database: app.database, eventBus: app.eventBus, commandBus: app.commandBus, artifactService: app.artifactService, taskService: app.taskService, outbox: app.outbox, registerSseClient: (client) => { sseClients.add(client); return () => sseClients.delete(client); }, ...(options.token !== undefined ? { token: options.token } : {}), ...(options.allowedOrigins !== undefined ? { allowedOrigins: options.allowedOrigins } : {}), host: `${options.host ?? "127.0.0.1"}:${options.port ?? 6677}`, ...(options.now !== undefined ? { now: options.now } : {}) });
+    void route({ req, res, database: app.database, eventBus: app.eventBus, commandBus: app.commandBus, artifactService: app.artifactService, taskService: app.taskService, outbox: app.outbox, modelConfigSecrets, registerSseClient: (client) => { sseClients.add(client); return () => sseClients.delete(client); }, ...(options.token !== undefined ? { token: options.token } : {}), ...(options.allowedOrigins !== undefined ? { allowedOrigins: options.allowedOrigins } : {}), host: `${options.host ?? "127.0.0.1"}:${options.port ?? 6677}`, ...(options.now !== undefined ? { now: options.now } : {}) });
   };
 
   const start = async (): Promise<Server> => {
@@ -374,7 +375,7 @@ function withStatusLineCoalescing(eventBus: EventBus): StatusLineEventBus {
   return wrapped;
 }
 
-type RouteContext = { readonly req: IncomingMessage; readonly res: ServerResponse; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly artifactService: ArtifactService; readonly taskService: TaskService; readonly outbox: { drainPending(): Promise<void> }; readonly registerSseClient: (client: SseClient) => () => void; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly host: string; readonly now?: () => number };
+type RouteContext = { readonly req: IncomingMessage; readonly res: ServerResponse; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly artifactService: ArtifactService; readonly taskService: TaskService; readonly outbox: { drainPending(): Promise<void> }; readonly modelConfigSecrets: KeychainBridge; readonly registerSseClient: (client: SseClient) => () => void; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly host: string; readonly now?: () => number };
 
 async function route(ctx: RouteContext): Promise<void> {
   const url = new URL(ctx.req.url ?? "/", "http://127.0.0.1");
@@ -387,6 +388,55 @@ async function route(ctx: RouteContext): Promise<void> {
   if (ctx.req.method === "POST" && url.pathname === "/attachments") return attachments(ctx);
   if (ctx.req.method === "GET" && url.pathname === "/healthz") return json(ctx.res, 200, { ok: true });
   if (ctx.req.method === "GET" && url.pathname === "/openapi.json") return json(ctx.res, 200, openApiDocument);
+  if (ctx.req.method === "GET" && url.pathname === "/model-configs") {
+    const workspaceId = url.searchParams.get("workspaceId");
+    const configs = all(
+      ctx.database,
+      workspaceId === null
+        ? "SELECT * FROM model_configs ORDER BY created_at ASC"
+        : "SELECT * FROM model_configs WHERE workspace_id = ? ORDER BY created_at ASC",
+      ...(workspaceId === null ? [] : [workspaceId])
+    ).map((row) => normalizeModelConfigRow(row as Record<string, unknown>));
+    return json(ctx.res, 200, configs);
+  }
+  if (ctx.req.method === "POST" && url.pathname === "/model-configs") {
+    const input = await body(ctx) as Record<string, unknown>;
+    const now = ctx.now?.() ?? Date.now();
+    const id = typeof input.id === "string" && input.id.length > 0 ? input.id : randomUUID();
+    const workspaceId = typeof input.workspaceId === "string" ? input.workspaceId : null;
+    const name = typeof input.name === "string" && input.name.length > 0 ? input.name : "Model Config";
+    const provider = typeof input.provider === "string" && input.provider.length > 0 ? input.provider : "openai";
+    const model = typeof input.model === "string" && input.model.length > 0 ? input.model : "";
+    const baseUrl = typeof input.baseUrl === "string" ? input.baseUrl : null;
+    const temperature = typeof input.temperature === "number" && Number.isFinite(input.temperature) ? input.temperature : null;
+    const maxTokens = typeof input.maxTokens === "number" && Number.isFinite(input.maxTokens) ? input.maxTokens : null;
+    const reasoning = input.reasoning === undefined || input.reasoning === null ? null : JSON.stringify(input.reasoning);
+    const extra = input.extra === undefined || input.extra === null ? null : JSON.stringify(input.extra);
+    const profile = typeof input.profile === "string" ? input.profile : null;
+    const keyInput = typeof input.apiKey === "string" && input.apiKey.length > 0 ? input.apiKey : null;
+    const keyRef = provider === "ollama" ? null : keyInput !== null ? createKeychainAccount({ workspaceId: workspaceId ?? "default", provider: "model-config", purpose: id }) : null;
+    const fingerprint = provider === "ollama" ? null : keyInput !== null ? modelConfigFingerprint(keyInput) : null;
+    try {
+      if (keyRef !== null && keyInput !== null) await ctx.modelConfigSecrets.set(keyRef, keyInput);
+      ctx.database.sqlite.transaction(() => {
+        ctx.database.sqlite.prepare(
+          "INSERT INTO model_configs (id, workspace_id, name, provider, model, base_url, api_key_ref, api_key_fingerprint, temperature, max_tokens, reasoning, extra, profile, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        ).run(id, workspaceId, name, provider, model, baseUrl, keyRef, fingerprint, temperature, maxTokens, reasoning, extra, profile, now, now);
+        ctx.eventBus.publish({
+          id: randomUUID(),
+          type: "model_config.created",
+          schemaVersion: 1,
+          workspaceId: workspaceId ?? "default-workspace",
+          payload: { modelConfigId: id, workspaceId, name, provider, model },
+          createdAt: now
+        });
+      })();
+    } catch {
+      if (keyRef !== null) await ctx.modelConfigSecrets.delete(keyRef).catch(() => undefined);
+      return json(ctx.res, 500, { error: "model_config_keychain_failed" });
+    }
+    return json(ctx.res, 201, { modelConfig: getModelConfig(ctx.database, id) });
+  }
   if (ctx.req.method === "GET" && url.pathname === "/runtimes") {
     const workspaceId = url.searchParams.get("workspaceId");
     const runtimes = all(
@@ -407,6 +457,11 @@ async function route(ctx: RouteContext): Promise<void> {
     });
     return json(ctx.res, 200, runtimes);
   }
+  if (ctx.req.method === "GET" && url.pathname === "/agent-bindings") return agentBindings(ctx, url);
+  if (ctx.req.method === "POST" && url.pathname === "/agent-bindings") return createAgentBinding(ctx, await body(ctx));
+  if (ctx.req.method === "GET" && parts[0] === "agent-bindings" && parts[1]) return agentBinding(ctx, parts[1]);
+  if (ctx.req.method === "PATCH" && parts[0] === "agent-bindings" && parts[1]) return updateAgentBinding(ctx, parts[1], await body(ctx));
+  if (ctx.req.method === "DELETE" && parts[0] === "agent-bindings" && parts[1]) return deleteAgentBinding(ctx, parts[1]);
   if (ctx.req.method === "POST" && url.pathname === "/runtimes") {
     const input = await body(ctx) as Record<string, unknown>;
     const now = ctx.now?.() ?? Date.now();
@@ -435,6 +490,80 @@ async function route(ctx: RouteContext): Promise<void> {
     })();
     const runtime = get(ctx.database, "SELECT * FROM runtimes WHERE id = ?", id) as Record<string, unknown> | undefined;
     return json(ctx.res, 201, runtime !== undefined ? { runtime } : { runtime: null });
+  }
+  if (ctx.req.method === "GET" && parts[0] === "model-configs" && parts[1]) {
+    const modelConfig = getModelConfig(ctx.database, parts[1]);
+    if (modelConfig === undefined) return json(ctx.res, 404, { error: "model_config_not_found" });
+    return json(ctx.res, 200, { modelConfig });
+  }
+  if (ctx.req.method === "PATCH" && parts[0] === "model-configs" && parts[1]) {
+    const input = await body(ctx) as Record<string, unknown>;
+    const existing = get(ctx.database, "SELECT * FROM model_configs WHERE id = ?", parts[1]) as Record<string, unknown> | undefined;
+    if (existing === undefined) return json(ctx.res, 404, { error: "model_config_not_found" });
+    const now = ctx.now?.() ?? Date.now();
+    const workspaceId = typeof input.workspaceId === "string" ? input.workspaceId : existing.workspace_id ?? null;
+    const name = typeof input.name === "string" ? input.name : String(existing.name);
+    const provider = typeof input.provider === "string" ? input.provider : String(existing.provider);
+    const model = typeof input.model === "string" ? input.model : String(existing.model);
+    const baseUrl = typeof input.baseUrl === "string" ? input.baseUrl : existing.base_url ?? null;
+    const temperature = typeof input.temperature === "number" && Number.isFinite(input.temperature) ? input.temperature : existing.temperature ?? null;
+    const maxTokens = typeof input.maxTokens === "number" && Number.isFinite(input.maxTokens) ? input.maxTokens : existing.max_tokens ?? null;
+    const reasoning = input.reasoning === undefined ? existing.reasoning ?? null : input.reasoning === null ? null : JSON.stringify(input.reasoning);
+    const extra = input.extra === undefined ? existing.extra ?? null : input.extra === null ? null : JSON.stringify(input.extra);
+    const profile = typeof input.profile === "string" ? input.profile : existing.profile ?? null;
+    const keyInput = typeof input.apiKey === "string" && input.apiKey.length > 0 ? input.apiKey : null;
+    const previousRef = typeof existing.api_key_ref === "string" ? existing.api_key_ref : null;
+    const keyRef = provider === "ollama"
+      ? null
+      : keyInput !== null
+        ? previousRef ?? createKeychainAccount({ workspaceId: workspaceId ?? "default", provider: "model-config", purpose: parts[1] })
+        : previousRef;
+    const fingerprint = provider === "ollama" ? null : keyInput !== null ? modelConfigFingerprint(keyInput) : existing.api_key_fingerprint ?? null;
+    try {
+      if (keyRef !== null && keyInput !== null) await ctx.modelConfigSecrets.set(keyRef, keyInput);
+      ctx.database.sqlite.transaction(() => {
+        ctx.database.sqlite.prepare("UPDATE model_configs SET workspace_id = ?, name = ?, provider = ?, model = ?, base_url = ?, api_key_ref = ?, api_key_fingerprint = ?, temperature = ?, max_tokens = ?, reasoning = ?, extra = ?, profile = ?, updated_at = ? WHERE id = ?").run(workspaceId, name, provider, model, baseUrl, keyRef, fingerprint, temperature, maxTokens, reasoning, extra, profile, now, parts[1]);
+        ctx.eventBus.publish({
+          id: randomUUID(),
+          type: "model_config.updated",
+          schemaVersion: 1,
+          workspaceId: workspaceId ?? "default-workspace",
+          payload: { modelConfigId: parts[1], workspaceId, name, provider, model },
+          createdAt: now
+        });
+      })();
+      if (provider === "ollama" && previousRef !== null) await ctx.modelConfigSecrets.delete(previousRef).catch(() => undefined);
+    } catch {
+      if (keyRef !== null && keyInput !== null) await ctx.modelConfigSecrets.delete(keyRef).catch(() => undefined);
+      return json(ctx.res, 500, { error: "model_config_keychain_failed" });
+    }
+    return json(ctx.res, 200, { modelConfig: getModelConfig(ctx.database, parts[1]) });
+  }
+  if (ctx.req.method === "DELETE" && parts[0] === "model-configs" && parts[1]) {
+    const existing = get(ctx.database, "SELECT * FROM model_configs WHERE id = ?", parts[1]) as Record<string, unknown> | undefined;
+    if (existing === undefined) return json(ctx.res, 404, { error: "model_config_not_found" });
+    const now = ctx.now?.() ?? Date.now();
+    let conflict = false;
+    ctx.database.sqlite.transaction(() => {
+      const bindings = get(ctx.database, "SELECT COUNT(*) AS count FROM agent_bindings WHERE model_config_id = ?", parts[1]) as { readonly count: number } | undefined;
+      if ((bindings?.count ?? 0) > 0) {
+        conflict = true;
+        return;
+      }
+      ctx.database.sqlite.prepare("DELETE FROM model_configs WHERE id = ?").run(parts[1]);
+      ctx.eventBus.publish({
+        id: randomUUID(),
+        type: "model_config.deleted",
+        schemaVersion: 1,
+        workspaceId: existing.workspace_id ?? "default-workspace",
+        payload: { modelConfigId: parts[1], workspaceId: existing.workspace_id ?? null, name: String(existing.name), provider: String(existing.provider), model: String(existing.model) },
+        createdAt: now
+      });
+    })();
+    const deletedRef = typeof existing.api_key_ref === "string" ? existing.api_key_ref : null;
+    if (deletedRef !== null) await ctx.modelConfigSecrets.delete(deletedRef).catch(() => undefined);
+    if (conflict) return json(ctx.res, 409, { error: "model_config_has_bindings", bindingCount: get(ctx.database, "SELECT COUNT(*) AS count FROM agent_bindings WHERE model_config_id = ?", parts[1])?.count ?? 0 });
+    return json(ctx.res, 200, { ok: true });
   }
   if (ctx.req.method === "PATCH" && parts[0] === "runtimes" && parts[1]) {
     const input = await body(ctx) as Record<string, unknown>;
@@ -884,6 +1013,188 @@ function deleteRole(ctx: RouteContext, roleId: string): void {
   json(ctx.res, 200, { ok: true });
 }
 
+function agentBindings(ctx: RouteContext, url: URL): void {
+  const workspaceId = url.searchParams.get("workspaceId");
+  const rows = all(
+    ctx.database,
+    `SELECT
+      agent_bindings.*,
+      roles.id AS role__id,
+      roles.name AS role__name,
+      roles.avatar AS role__avatar,
+      runtimes.id AS runtime__id,
+      runtimes.kind AS runtime__kind,
+      runtimes.name AS runtime__name,
+      runtimes.detected_version AS runtime__detected_version,
+      model_configs.id AS model_config__id,
+      model_configs.name AS model_config__name,
+      model_configs.provider AS model_config__provider,
+      model_configs.model AS model_config__model,
+      model_configs.api_key_fingerprint AS model_config__api_key_fingerprint
+    FROM agent_bindings
+    LEFT JOIN roles ON roles.id = agent_bindings.role_id
+    LEFT JOIN runtimes ON runtimes.id = agent_bindings.runtime_id
+    LEFT JOIN model_configs ON model_configs.id = agent_bindings.model_config_id
+    ${workspaceId === null ? "" : "WHERE agent_bindings.workspace_id = ?"}
+    ORDER BY agent_bindings.created_at ASC`,
+    ...(workspaceId === null ? [] : [workspaceId])
+  ).map((row) => normalizeAgentBindingRow(row as Record<string, unknown>));
+  json(ctx.res, 200, { agentBindings: rows });
+}
+
+function agentBinding(ctx: RouteContext, bindingId: string): void {
+  const row = get(
+    ctx.database,
+    `SELECT
+      agent_bindings.*,
+      roles.id AS role__id,
+      roles.name AS role__name,
+      roles.avatar AS role__avatar,
+      runtimes.id AS runtime__id,
+      runtimes.kind AS runtime__kind,
+      runtimes.name AS runtime__name,
+      runtimes.detected_version AS runtime__detected_version,
+      model_configs.id AS model_config__id,
+      model_configs.name AS model_config__name,
+      model_configs.provider AS model_config__provider,
+      model_configs.model AS model_config__model,
+      model_configs.api_key_fingerprint AS model_config__api_key_fingerprint
+    FROM agent_bindings
+    LEFT JOIN roles ON roles.id = agent_bindings.role_id
+    LEFT JOIN runtimes ON runtimes.id = agent_bindings.runtime_id
+    LEFT JOIN model_configs ON model_configs.id = agent_bindings.model_config_id
+    WHERE agent_bindings.id = ?`,
+    bindingId
+  ) as Record<string, unknown> | null;
+  if (row === null) return json(ctx.res, 404, { error: "agent_binding_not_found" });
+  return json(ctx.res, 200, { agentBinding: normalizeAgentBindingRow(row) });
+}
+
+function createAgentBinding(ctx: RouteContext, input: Record<string, unknown>): void {
+  const now = ctx.now?.() ?? Date.now();
+  const id = stringField(input["id"]) ?? randomUUID();
+  const workspaceId = stringField(input["workspaceId"]);
+  const roleId = stringField(input["roleId"]);
+  const runtimeId = stringField(input["runtimeId"]);
+  const modelConfigId = stringField(input["modelConfigId"]);
+  const overridePermissionProfileId = stringField(input["overridePermissionProfileId"]);
+  if (roleId === undefined || runtimeId === undefined) return json(ctx.res, 400, { error: "validation_failed", message: "roleId and runtimeId are required" });
+  const role = get(ctx.database, "SELECT * FROM roles WHERE id = ?", roleId) as Record<string, unknown> | null;
+  if (role === null) return json(ctx.res, 404, { error: "role_not_found" });
+  const runtime = get(ctx.database, "SELECT * FROM runtimes WHERE id = ?", runtimeId) as Record<string, unknown> | null;
+  if (runtime === null) return json(ctx.res, 404, { error: "runtime_not_found" });
+  if (String(runtime.kind) === "native" && modelConfigId === undefined) return json(ctx.res, 400, { error: "native_runtime_requires_model_config" });
+  const modelConfig = modelConfigId === undefined ? null : get(ctx.database, "SELECT * FROM model_configs WHERE id = ?", modelConfigId) as Record<string, unknown> | null;
+  if (modelConfigId !== undefined && modelConfig === null) return json(ctx.res, 404, { error: "model_config_not_found" });
+  const binding = agentBindingRow({
+    id,
+    workspaceId: workspaceId ?? stringField(role.workspace_id) ?? stringField(runtime.workspace_id) ?? stringField(modelConfig?.workspace_id),
+    role,
+    runtime,
+    modelConfig,
+    overridePermissionProfileId,
+    now
+  });
+  ctx.database.sqlite.transaction(() => {
+    ctx.database.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(binding.id, binding.workspace_id, binding.role_id, binding.runtime_id, binding.model_config_id, binding.override_permission_profile_id, binding.created_at, binding.updated_at);
+    ctx.eventBus.publish({ id: randomUUID(), type: "agent_binding.created", schemaVersion: 1, workspaceId: binding.workspace_id ?? "default-workspace", payload: { bindingId: binding.id, roleId: binding.role_id, runtimeId: binding.runtime_id, modelConfigId: binding.model_config_id, workspaceId: binding.workspace_id }, createdAt: now });
+  })();
+  json(ctx.res, 201, { agentBinding: agentBindingResponse(binding, role, runtime, modelConfig) });
+}
+
+function updateAgentBinding(ctx: RouteContext, bindingId: string, input: Record<string, unknown>): void {
+  const existing = get(ctx.database, "SELECT * FROM agent_bindings WHERE id = ?", bindingId) as Record<string, unknown> | null;
+  if (existing === null) return json(ctx.res, 404, { error: "agent_binding_not_found" });
+  const now = ctx.now?.() ?? Date.now();
+  const roleId = stringField(input["roleId"]) ?? stringField(existing.role_id);
+  const runtimeId = stringField(input["runtimeId"]) ?? stringField(existing.runtime_id);
+  const hasModelConfigId = Object.prototype.hasOwnProperty.call(input, "modelConfigId");
+  const hasOverridePermissionProfileId = Object.prototype.hasOwnProperty.call(input, "overridePermissionProfileId");
+  const hasWorkspaceId = Object.prototype.hasOwnProperty.call(input, "workspaceId");
+  const modelConfigId = hasModelConfigId ? (stringField(input["modelConfigId"]) ?? null) : stringField(existing.model_config_id);
+  const overridePermissionProfileId = hasOverridePermissionProfileId ? stringField(input["overridePermissionProfileId"]) : stringField(existing.override_permission_profile_id);
+  const workspaceId = hasWorkspaceId ? stringField(input["workspaceId"]) : stringField(existing.workspace_id);
+  if (roleId === undefined || runtimeId === undefined) return json(ctx.res, 400, { error: "validation_failed", message: "roleId and runtimeId are required" });
+  const role = get(ctx.database, "SELECT * FROM roles WHERE id = ?", roleId) as Record<string, unknown> | null;
+  if (role === null) return json(ctx.res, 404, { error: "role_not_found" });
+  const runtime = get(ctx.database, "SELECT * FROM runtimes WHERE id = ?", runtimeId) as Record<string, unknown> | null;
+  if (runtime === null) return json(ctx.res, 404, { error: "runtime_not_found" });
+  if (String(runtime.kind) === "native" && modelConfigId === null) return json(ctx.res, 400, { error: "native_runtime_requires_model_config" });
+  const modelConfig = modelConfigId === null ? null : get(ctx.database, "SELECT * FROM model_configs WHERE id = ?", modelConfigId) as Record<string, unknown> | null;
+  if (modelConfigId !== null && modelConfig === null) return json(ctx.res, 404, { error: "model_config_not_found" });
+  const binding = agentBindingRow({
+    id: bindingId,
+    workspaceId: workspaceId ?? stringField(role.workspace_id) ?? stringField(runtime.workspace_id) ?? stringField(modelConfig?.workspace_id) ?? stringField(existing.workspace_id),
+    role,
+    runtime,
+    modelConfig,
+    overridePermissionProfileId,
+    now
+  });
+  ctx.database.sqlite.transaction(() => {
+    ctx.database.sqlite.prepare("UPDATE agent_bindings SET workspace_id = ?, role_id = ?, runtime_id = ?, model_config_id = ?, override_permission_profile_id = ?, updated_at = ? WHERE id = ?").run(binding.workspace_id, binding.role_id, binding.runtime_id, binding.model_config_id, binding.override_permission_profile_id, binding.updated_at, bindingId);
+    ctx.eventBus.publish({ id: randomUUID(), type: "agent_binding.updated", schemaVersion: 1, workspaceId: binding.workspace_id ?? "default-workspace", payload: { bindingId: binding.id, roleId: binding.role_id, runtimeId: binding.runtime_id, modelConfigId: binding.model_config_id, workspaceId: binding.workspace_id }, createdAt: now });
+  })();
+  json(ctx.res, 200, { agentBinding: agentBindingResponse(binding, role, runtime, modelConfig) });
+}
+
+function deleteAgentBinding(ctx: RouteContext, bindingId: string): void {
+  const existing = get(ctx.database, "SELECT * FROM agent_bindings WHERE id = ?", bindingId) as Record<string, unknown> | null;
+  if (existing === null) return json(ctx.res, 404, { error: "agent_binding_not_found" });
+  const now = ctx.now?.() ?? Date.now();
+  const participantCount = scalar(ctx.database, "SELECT COUNT(*) AS count FROM room_participants WHERE participant_id = ? OR agent_binding_id = ?", bindingId, bindingId);
+  if (participantCount > 0) return json(ctx.res, 409, { error: "agent_binding_has_room_participants", participantCount });
+  ctx.database.sqlite.transaction(() => {
+    ctx.database.sqlite.prepare("DELETE FROM agent_bindings WHERE id = ?").run(bindingId);
+    ctx.eventBus.publish({ id: randomUUID(), type: "agent_binding.removed", schemaVersion: 1, workspaceId: stringField(existing.workspace_id) ?? "default-workspace", payload: { bindingId, roleId: stringField(existing.role_id), runtimeId: stringField(existing.runtime_id), modelConfigId: stringField(existing.model_config_id), workspaceId: stringField(existing.workspace_id) }, createdAt: now });
+  })();
+  json(ctx.res, 200, { ok: true });
+}
+
+function agentBindingRow(options: { readonly id: string; readonly workspaceId: string | null; readonly role: Record<string, unknown>; readonly runtime: Record<string, unknown>; readonly modelConfig: Record<string, unknown> | null; readonly overridePermissionProfileId: string | undefined; readonly now: number }): { readonly id: string; readonly workspace_id: string | null; readonly role_id: string; readonly runtime_id: string; readonly model_config_id: string | null; readonly override_permission_profile_id: string | null; readonly created_at: number; readonly updated_at: number } {
+  return {
+    id: options.id,
+    workspace_id: options.workspaceId,
+    role_id: String(options.role.id),
+    runtime_id: String(options.runtime.id),
+    model_config_id: options.modelConfig !== null ? String(options.modelConfig.id) : null,
+    override_permission_profile_id: options.overridePermissionProfileId ?? null,
+    created_at: options.now,
+    updated_at: options.now
+  };
+}
+
+function agentBindingResponse(binding: { readonly id: string; readonly workspace_id: string | null; readonly role_id: string; readonly runtime_id: string; readonly model_config_id: string | null; readonly override_permission_profile_id: string | null; readonly created_at: number; readonly updated_at: number }, role: Record<string, unknown>, runtime: Record<string, unknown>, modelConfig: Record<string, unknown> | null): Record<string, unknown> {
+  return {
+    ...binding,
+    role: { id: String(role.id), name: stringField(role.name) ?? "", avatar: stringOrNull(role.avatar) },
+    runtime: { id: String(runtime.id), kind: stringField(runtime.kind) ?? "", name: stringField(runtime.name) ?? "", detectedVersion: stringOrNull(runtime.detected_version) },
+    ...(modelConfig !== null ? { modelConfig: { id: String(modelConfig.id), name: stringField(modelConfig.name) ?? "", provider: stringField(modelConfig.provider) ?? "", model: stringField(modelConfig.model) ?? "", apiKeyFingerprint: stringOrNull(modelConfig.api_key_fingerprint) } } : {})
+  };
+}
+
+function normalizeAgentBindingRow(row: Record<string, unknown>): Record<string, unknown> {
+  const binding = {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    roleId: row.role_id,
+    runtimeId: row.runtime_id,
+    modelConfigId: row.model_config_id,
+    overridePermissionProfileId: row.override_permission_profile_id,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+  const modelConfig = row.model_config__id !== null && row.model_config__id !== undefined
+    ? { id: row.model_config__id, name: row.model_config__name, provider: row.model_config__provider, model: row.model_config__model, apiKeyFingerprint: row.model_config__api_key_fingerprint }
+    : undefined;
+  return {
+    ...binding,
+    role: { id: row.role__id, name: row.role__name, avatar: row.role__avatar },
+    runtime: { id: row.runtime__id, kind: row.runtime__kind, name: row.runtime__name, detectedVersion: row.runtime__detected_version },
+    ...(modelConfig !== undefined ? { modelConfig } : {})
+  };
+}
+
 function roleRow(options: { readonly id: string; readonly workspaceId: string; readonly name: string; readonly prompt: string; readonly input: Record<string, unknown>; readonly now: number; readonly existing?: Record<string, unknown> }): { readonly id: string; readonly workspace_id: string; readonly name: string; readonly avatar: string | null; readonly description: string | null; readonly prompt: string; readonly capabilities: string; readonly default_permission_profile_id: string | null; readonly tags: string | null; readonly is_builtin: number; readonly source_path: string | null; readonly version: string | null; readonly created_at: number; readonly updated_at: number } {
   const existing = options.existing ?? {};
   return {
@@ -1059,3 +1370,32 @@ function costGroupBy(value: string | null): "agent" | "model" | "day" { return v
 function parseScopes(value: unknown): readonly string[] { const scopes = Array.isArray(value) ? value.filter((scope): scope is string => typeof scope === "string") : ["read", "write"]; const allowed = scopes.filter((scope) => scope === "read" || scope === "write" || scope === "admin"); return allowed.length > 0 ? [...new Set(allowed)] : ["read"]; }
 function tokenFingerprint(token: string): string { return sha256(token).slice(0, 12); }
 function sha256(value: string): string { return createHash("sha256").update(value).digest("hex"); }
+
+function modelConfigFingerprint(apiKey: string): string {
+  if (apiKey.length <= 8) return apiKey;
+  return `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}`;
+}
+
+function getModelConfig(database: AgentHubDatabase, id: string): Record<string, unknown> | undefined {
+  const row = get(database, "SELECT * FROM model_configs WHERE id = ?", id) as Record<string, unknown> | undefined;
+  return row === undefined ? undefined : normalizeModelConfigRow(row);
+}
+
+function normalizeModelConfigRow(row: Record<string, unknown>): Record<string, unknown> {
+  return {
+    id: row.id,
+    workspace_id: row.workspace_id ?? null,
+    name: row.name,
+    provider: row.provider,
+    model: row.model,
+    base_url: row.base_url ?? null,
+    api_key_fingerprint: row.api_key_fingerprint ?? null,
+    temperature: row.temperature ?? null,
+    max_tokens: row.max_tokens ?? null,
+    reasoning: parseJsonField(row.reasoning),
+    extra: parseJsonField(row.extra),
+    profile: row.profile ?? null,
+    created_at: row.created_at,
+    updated_at: row.updated_at
+  };
+}
