@@ -164,13 +164,6 @@ export default function App() {
     if (m?.runId) setActiveRunId(m.runId);
   });
 
-  // Auto-pick the first room if nothing is selected and the user opens "Chat"
-  useEffect(() => {
-    if (!activeRoomId && rail === "chat" && rooms.length > 0) {
-      setActiveRoomId(rooms[0]!.id);
-    }
-  }, [activeRoomId, rail, rooms]);
-
   const commands = useMemo<PaletteCommand[]>(() => {
     const list: PaletteCommand[] = [
       { id: "new-room", label: "New room", group: "Rooms", perform: openNewRoom },

@@ -120,6 +120,22 @@ test.describe("main timeline and run detail projection", () => {
     expect(mutatingRequests.every((request) => request.contentType?.includes("application/json"))).toBe(true);
   });
 
+  test("home remains the default entry even when rooms already exist", async ({ page }) => {
+    await fetch(`${testUrl}/rooms`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Existing Room", mode: "solo", primaryAgentId: "mock-builder" })
+    });
+
+    await page.goto(testUrl);
+    await expect(page.getByRole("heading", { name: "AgentHub" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Open Latest" })).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Message" })).toHaveCount(0);
+
+    await page.locator("text=Existing Room").first().click();
+    await expect(page.getByRole("textbox", { name: "Message" })).toBeEnabled();
+  });
+
   test("run detail opens from side panel with 7 tabs", async ({ page }) => {
     const roomRes = await fetch(`${testUrl}/rooms`, {
       method: "POST",
@@ -192,8 +208,8 @@ test.describe("main timeline and run detail projection", () => {
     await new Promise((resolve) => setTimeout(resolve, 500));
 
     await page.goto(testUrl);
-    await page.waitForSelector("text=Raw Room");
-    await page.click("text=Raw Room");
+    await page.waitForSelector(`[data-testid="room-list-item-${roomId}"]`);
+    await page.locator(`[data-testid="room-list-item-${roomId}"]`).click();
     await page.waitForSelector("text=trigger raw");
 
     await page.locator('[data-testid="brief-card"]').first().click();

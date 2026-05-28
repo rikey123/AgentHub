@@ -38,6 +38,30 @@ const providerColor: Record<string, "default" | "accent" | "success" | "warning"
   "a2a": "accent"
 };
 
+function providerLabel(provider: string) {
+  switch (provider) {
+    case "claude-code": return "Claude";
+    case "opencode": return "OpenCode";
+    case "native": return "Native";
+    default: return provider;
+  }
+}
+
+function capabilitySummary(agent: AgentSummary) {
+  const labels = [
+    agent.capabilities.includes("code.edit") ? "builder" : undefined,
+    agent.capabilities.includes("code.review") ? "review" : undefined,
+    agent.capabilities.includes("task.delegate") ? "delegate" : undefined
+  ].filter(Boolean);
+  return labels.length > 0 ? labels.join(" / ") : agent.defaultPresence;
+}
+
+function roleForAgent(agent: AgentSummary | undefined): CreateRoomInput["participants"][number]["role"] {
+  if (agent?.capabilities.includes("code.review")) return "reviewer";
+  if (agent?.capabilities.includes("task.delegate")) return "specialist";
+  return "observer";
+}
+
 export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogProps) {
   const { agents, loading, error: agentsError } = useAgents();
   const [title, setTitle] = useState("");
@@ -47,7 +71,6 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
 
-  // Reset state on open / pick a sensible primary default
   useEffect(() => {
     if (isOpen) {
       setTitle(`Room ${new Date().toLocaleString([], { hour: "2-digit", minute: "2-digit", month: "short", day: "2-digit" })}`);
@@ -59,7 +82,6 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
 
   useEffect(() => {
     if (!primaryId && agents.length > 0) {
-      // Prefer a builder-capable agent if available, otherwise first agent.
       const builder = agents.find((a) => a.capabilities.includes("code.edit") || a.id.includes("builder"));
       setPrimaryId((builder ?? agents[0]!).id);
     }
@@ -67,13 +89,15 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
 
   const sortedAgents = useMemo(
     () => agents.slice().sort((a, b) => {
-      // Active presence and code-edit capable rise to the top.
       const score = (x: AgentSummary) => (x.defaultPresence === "active" ? 2 : 0) + (x.capabilities.includes("code.edit") ? 1 : 0);
       const diff = score(b) - score(a);
       return diff !== 0 ? diff : a.name.localeCompare(b.name);
     }),
     [agents]
   );
+
+  const primaryAgent = sortedAgents.find((agent) => agent.id === primaryId);
+  const selectedExtras = sortedAgents.filter((agent) => extraIds.has(agent.id) && agent.id !== primaryId);
 
   const toggleExtra = (id: string) => {
     setExtraIds((prev) => {
@@ -94,15 +118,10 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
       const participants = Array.from(extraIds)
         .filter((id) => id !== primaryId)
         .map((id) => {
-          const a = agents.find((x) => x.id === id);
-          const role: CreateRoomInput["participants"][number]["role"] =
-            a?.capabilities.includes("code.review") ? "reviewer" :
-            a?.capabilities.includes("task.delegate") ? "specialist" :
-            "observer";
-          const defaultPresence: "observing" | "active" = a?.defaultPresence === "active" ? "active" : "observing";
-          return { type: "agent" as const, agentId: id, role, defaultPresence };
+          const agent = agents.find((x) => x.id === id);
+          const defaultPresence: "observing" | "active" = agent?.defaultPresence === "active" ? "active" : "observing";
+          return { type: "agent" as const, agentId: id, role: roleForAgent(agent), defaultPresence };
         });
-      // Solo mode forbids extra agents
       const finalMode = mode === "solo" ? "solo" : "assisted";
       const finalParticipants = finalMode === "solo" ? [] : participants;
       await onCreate({
@@ -119,122 +138,168 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
     }
   };
 
-  const soloHasExtras = mode === "solo" && extraIds.size > 0;
-
   return (
     <Modal.Backdrop isOpen={isOpen} onOpenChange={onOpenChange}>
       <Modal.Container size="lg">
-        <Modal.Dialog>
+        <Modal.Dialog className="overflow-hidden">
           <Modal.CloseTrigger />
-          <Modal.Header>
-            <Modal.Heading>New room</Modal.Heading>
-          </Modal.Header>
-          <Modal.Body className="flex flex-col gap-4">
-            <TextField value={title} onChange={setTitle}>
-              <Label>Title</Label>
-              <Input placeholder="e.g. Refactor auth flow" />
-            </TextField>
-
-            <div>
-              <h3 className="mb-1 text-sm font-medium">Mode</h3>
-              <RadioGroup
-                value={mode}
-                onChange={(v: unknown) => setMode(v as "solo" | "assisted")}
-                aria-label="Room mode"
-              >
-                <div className="flex flex-col gap-2">
-                  <Radio value="assisted">
-                    <Radio.Control><Radio.Indicator /></Radio.Control>
-                    <Radio.Content>
-                      <span className="text-sm font-medium">Assisted</span>
-                      <span className="block text-xs text-muted">Multiple agents collaborate; observers can knock.</span>
-                    </Radio.Content>
-                  </Radio>
-                  <Radio value="solo">
-                    <Radio.Control><Radio.Indicator /></Radio.Control>
-                    <Radio.Content>
-                      <span className="text-sm font-medium">Solo</span>
-                      <span className="block text-xs text-muted">One primary agent only.</span>
-                    </Radio.Content>
-                  </Radio>
-                </div>
-              </RadioGroup>
+          <Modal.Header className="border-b border-border bg-[linear-gradient(135deg,var(--surface),var(--surface-secondary))] px-6 py-5">
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-accent text-sm font-black text-accent-foreground shadow-[0_14px_30px_color-mix(in_oklab,var(--accent)_24%,transparent)]">
+                AH
+              </div>
+              <div className="min-w-0">
+                <Modal.Heading>New room</Modal.Heading>
+                <p className="mt-1 max-w-xl text-sm text-muted">
+                  Set up a local agent workspace with one primary agent and optional collaborators.
+                </p>
+              </div>
             </div>
+          </Modal.Header>
 
-            <div className="flex flex-col gap-2">
-              <h3 className="text-sm font-medium">Primary agent</h3>
-              {agentsError ? <p className="text-xs text-danger">{agentsError}</p> : null}
-              {loading ? <p className="text-xs text-muted">Loading agents…</p> : null}
-              <ScrollShadow className="max-h-56 overflow-auto rounded border border-border" orientation="vertical">
-                <ul role="radiogroup" aria-label="Primary agent" className="flex flex-col">
-                  {sortedAgents.map((a) => {
-                    const selected = a.id === primaryId;
-                    return (
-                      <li key={a.id}>
+          <Modal.Body className="max-h-[72vh] gap-0 overflow-hidden p-0">
+            <ScrollShadow className="overflow-auto" orientation="vertical">
+              <div className="grid gap-4 p-5">
+                <section className="rounded-2xl border border-border bg-overlay p-4 shadow-[var(--surface-shadow)]">
+                  <div className="grid gap-4 md:grid-cols-[1.1fr_0.9fr]">
+                    <TextField value={title} onChange={setTitle}>
+                      <Label className="text-sm font-semibold">Title</Label>
+                      <Input placeholder="e.g. Refactor auth flow" />
+                    </TextField>
+
+                    <div>
+                      <h3 className="mb-2 text-sm font-semibold">Mode</h3>
+                      <RadioGroup
+                        value={mode}
+                        onChange={(v: unknown) => setMode(v as "solo" | "assisted")}
+                        aria-label="Room mode"
+                      >
+                        <div className="grid gap-2">
+                          <RoomModeOption
+                            value="assisted"
+                            title="Assisted"
+                            description="Multiple agents collaborate; observers can knock."
+                          />
+                          <RoomModeOption
+                            value="solo"
+                            title="Solo"
+                            description="One primary agent only."
+                          />
+                        </div>
+                      </RadioGroup>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="rounded-2xl border border-border bg-overlay p-4 shadow-[var(--surface-shadow)]">
+                  <div className="mb-3 flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-semibold">Primary agent</h3>
+                      <p className="text-xs text-muted">This agent receives the first turn and owns the main run.</p>
+                    </div>
+                    {primaryAgent ? (
+                      <Chip size="sm" variant="soft" color={providerColor[primaryAgent.provider] ?? "default"}>
+                        {providerLabel(primaryAgent.provider)}
+                      </Chip>
+                    ) : null}
+                  </div>
+
+                  {agentsError ? <p className="mb-2 text-xs text-danger">{agentsError}</p> : null}
+                  {loading ? <p className="mb-2 text-xs text-muted">Loading agents...</p> : null}
+
+                  <div role="radiogroup" aria-label="Primary agent" className="grid max-h-72 gap-2 overflow-auto pr-1 md:grid-cols-2">
+                    {sortedAgents.map((agent) => {
+                      const selected = agent.id === primaryId;
+                      return (
                         <button
+                          key={agent.id}
                           type="button"
-                          onClick={() => setPrimaryId(a.id)}
+                          onClick={() => setPrimaryId(agent.id)}
                           aria-checked={selected}
                           role="radio"
                           className={[
-                            "flex w-full items-center gap-3 px-3 py-2 text-left transition-colors",
-                            selected ? "bg-accent-soft" : "hover:bg-default"
+                            "flex min-h-24 w-full items-start gap-3 rounded-2xl border p-3 text-left transition-all",
+                            selected
+                              ? "border-accent bg-accent-soft shadow-[0_12px_26px_color-mix(in_oklab,var(--accent)_18%,transparent)]"
+                              : "border-border bg-surface hover:bg-surface-secondary"
                           ].join(" ")}
                         >
                           <Avatar size="sm">
-                            <Avatar.Fallback>{a.avatar ? a.avatar : initials(a.name)}</Avatar.Fallback>
+                            <Avatar.Fallback>{agent.avatar ? agent.avatar : initials(agent.name)}</Avatar.Fallback>
                           </Avatar>
                           <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2">
-                              <span className="truncate font-medium">{a.name}</span>
-                              <Chip size="sm" variant="soft" color={providerColor[a.provider] ?? "default"}>{a.provider}</Chip>
+                            <div className="flex min-w-0 flex-wrap items-center gap-2">
+                              <span className="truncate font-semibold">{agent.name}</span>
+                              <Chip size="sm" variant="soft" color={providerColor[agent.provider] ?? "default"}>{agent.provider}</Chip>
                             </div>
-                            <p className="truncate text-xs text-muted">{a.description ?? a.adapterId}</p>
+                            <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted">{agent.description ?? agent.adapterId}</p>
+                            <div className="mt-2 flex flex-wrap gap-1">
+                              <Chip size="sm" variant="soft" color="default">{capabilitySummary(agent)}</Chip>
+                              <Chip size="sm" variant="soft" color={agent.defaultPresence === "active" ? "success" : "default"}>{agent.defaultPresence}</Chip>
+                            </div>
                           </div>
                           {selected ? <Chip size="sm" variant="primary" color="accent">Primary</Chip> : null}
                         </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </ScrollShadow>
-            </div>
-
-            {mode === "assisted" ? (
-              <div className="flex flex-col gap-2">
-                <h3 className="text-sm font-medium">Additional agents</h3>
-                <p className="text-xs text-muted">Add observers, reviewers, or specialists. They join according to their default presence.</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {sortedAgents
-                    .filter((a) => a.id !== primaryId)
-                    .map((a) => {
-                      const checked = extraIds.has(a.id);
-                      return (
-                        <Checkbox
-                          key={a.id}
-                          isSelected={checked}
-                          onChange={() => toggleExtra(a.id)}
-                          className="rounded border border-border bg-surface px-2 py-1"
-                        >
-                          <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
-                          <Checkbox.Content>
-                            <span className="flex items-center gap-2 text-sm">
-                              <span aria-hidden="true">{a.avatar ?? "🤖"}</span>
-                              <span>{a.name}</span>
-                              <Chip size="sm" variant="soft" color={providerColor[a.provider] ?? "default"}>{a.provider}</Chip>
-                            </span>
-                          </Checkbox.Content>
-                        </Checkbox>
                       );
                     })}
-                </div>
-                {soloHasExtras ? <p className="text-xs text-warning">Solo rooms only allow the primary agent.</p> : null}
-              </div>
-            ) : null}
+                  </div>
+                </section>
 
-            {error ? <p className="text-xs text-danger" role="alert">{error}</p> : null}
+                {mode === "assisted" ? (
+                  <section className="rounded-2xl border border-border bg-overlay p-4 shadow-[var(--surface-shadow)]">
+                    <div className="mb-3 flex items-start justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-semibold">Additional agents</h3>
+                        <p className="text-xs text-muted">Add observers, reviewers, or specialists. They join according to their default presence.</p>
+                      </div>
+                      <Chip size="sm" variant="soft" color={selectedExtras.length > 0 ? "accent" : "default"}>
+                        {selectedExtras.length} selected
+                      </Chip>
+                    </div>
+
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {sortedAgents
+                        .filter((agent) => agent.id !== primaryId)
+                        .map((agent) => {
+                          const checked = extraIds.has(agent.id);
+                          return (
+                            <Checkbox
+                              key={agent.id}
+                              isSelected={checked}
+                              onChange={() => toggleExtra(agent.id)}
+                              className={[
+                                "rounded-2xl border bg-surface px-3 py-2 transition-colors",
+                                checked ? "border-accent bg-accent-soft" : "border-border hover:bg-surface-secondary"
+                              ].join(" ")}
+                            >
+                              <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
+                              <Checkbox.Content>
+                                <span className="flex min-w-0 items-center gap-2 text-sm">
+                                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-secondary text-xs font-semibold">
+                                    {agent.avatar ?? initials(agent.name)}
+                                  </span>
+                                  <span className="min-w-0 flex-1 truncate font-medium">{agent.name}</span>
+                                  <Chip size="sm" variant="soft" color={providerColor[agent.provider] ?? "default"}>{agent.provider}</Chip>
+                                </span>
+                              </Checkbox.Content>
+                            </Checkbox>
+                          );
+                        })}
+                    </div>
+                  </section>
+                ) : null}
+
+                {error ? <p className="text-xs text-danger" role="alert">{error}</p> : null}
+              </div>
+            </ScrollShadow>
           </Modal.Body>
-          <Modal.Footer>
+
+          <Modal.Footer className="border-t border-border bg-surface/90 px-5 py-4">
+            <div className="mr-auto hidden text-xs text-muted sm:block">
+              {mode === "solo"
+                ? "Solo rooms start with the primary agent only."
+                : `${selectedExtras.length + 1} agent${selectedExtras.length === 0 ? "" : "s"} will join this room.`}
+            </div>
             <Button slot="close" variant="tertiary">Cancel</Button>
             <Button
               variant="primary"
@@ -248,5 +313,17 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
         </Modal.Dialog>
       </Modal.Container>
     </Modal.Backdrop>
+  );
+}
+
+function RoomModeOption({ value, title, description }: { value: "solo" | "assisted"; title: string; description: string }) {
+  return (
+    <Radio value={value} className="rounded-xl border border-border bg-surface px-3 py-2 hover:bg-surface-secondary">
+      <Radio.Control><Radio.Indicator /></Radio.Control>
+      <Radio.Content>
+        <span className="text-sm font-semibold">{title}</span>
+        <span className="block text-xs text-muted">{description}</span>
+      </Radio.Content>
+    </Radio>
   );
 }
