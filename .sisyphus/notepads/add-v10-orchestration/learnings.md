@@ -92,3 +92,32 @@
 - DELETE now returns 409 when room_participants references exist and emits no event in that branch.
 - Added daemon regression tests for native binding creation, native missing model_config rejection, and delete conflict with room participants.
 - Verified `pnpm.cmd test -- packages/daemon` passes.
+
+## [2026-05-29T03:12:00Z] Task 1.2
+- Added `packages/daemon/src/builtin-roles.ts` with `seedBuiltinRoles(database, rolesDir, eventBus, now)` and five V1.0 builtin templates: project-manager, builder, reviewer, archivist, generalist.
+- Startup seeds builtin roles after EventBus creation so role table inserts and `role.created { isBuiltin: true }` publish in one SQLite transaction.
+- Filesystem rule: create all five markdown files only when the roles directory is empty; existing files are never overwritten. Older existing versions warn on stderr with the required reset command.
+- Existing route/test typing debt surfaced during full typecheck; fixed the async runtime settings job route to use `ctx.settingsJobs`, typed model test fetch mocks, and kept the forbidden `task.updated` bus test as a runtime-negative test via a narrow `never` cast.
+- Verified `pnpm.cmd test -- packages/daemon`, `pnpm.cmd typecheck`, and `pnpm.cmd build` pass.
+
+## [2026-05-29T03:00:00Z] Task 1.4
+- Added runtime detect/test routes in packages/daemon/src/index.ts without adding runtime.test.result to registry or EventBus output.
+- Runtime detection publishes runtime.detected only when persisted detected_path/detected_version/detected_at state changes; unchanged repeated detect calls return changed=false without a new event.
+- Runtime test results are REST-only: synchronous native tests return 200 { ok, version, latencyMs }, while async requests return 202 { jobId } and poll GET /settings/jobs/:jobId for flat pending/completed/failed status.
+- The daemon already had a model-config settings job endpoint; runtime jobs were integrated into that existing polling route instead of adding a competing route shape.
+- Verified pnpm.cmd test -- packages/daemon passes after the runtime route/test changes.
+
+## [2026-05-29T03:00:34Z] Task 1.6
+- Model-config test calls now resolve provider behavior explicitly in the daemon stub instead of passing string model IDs through the runtime path.
+- `/settings/jobs/:jobId` now serves both runtime async tests and model-config tests from the shared in-memory job store; runtime polling stayed compatible.
+- Successful model tests return `{ ok: true, model, latencyMs, inputTokens, outputTokens }`; failures redact provider details down to `invalid_api_key`, `model_not_found`, or `rate_limited`.
+- Ollama tests intentionally send no API key header and still use the same shared polling contract.
+- Verified `pnpm.cmd test -- packages/daemon` passes after the job-store bridge and route updates.
+
+## [2026-05-29T03:02:00Z] Task 1.8
+- Consolidated data-foundation test coverage in packages/daemon/test/daemon.test.ts without duplicating existing CRUD tests.
+- Added detail-only durable replay assertions for role/runtime/model_config/agent_binding write events.
+- Added expectNoPlaintextSecret guard to scan model-config responses, model_config event payloads, and relevant model_configs DB fields for fake API key plaintext.
+- Runtime detect/async job tests now use the deterministic native runtime path to avoid flaky real process probes under package-wide parallel test load.
+- Verified pnpm.cmd test -- packages/daemon packages/db packages/orchestrator passes: 35 files, 284 passed, 1 skipped.
+

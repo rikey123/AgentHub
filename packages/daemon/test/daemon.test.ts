@@ -1,25 +1,39 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { AgentHubClient } from "@agenthub/sdk";
+import { createEventBus } from "@agenthub/bus";
 import { createDatabase } from "@agenthub/db";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AdapterRegistry } from "../src/adapters/registry.ts";
+import { seedBuiltinRoles } from "../src/builtin-roles.ts";
 import { migrateAgentProfilesToV10 } from "../src/migrations/0014_data.ts";
 import { createDaemon, loadAgentHubConfig, type DaemonApp, type DaemonStartupPhase } from "../src/index.ts";
 
 let currentDaemon: DaemonApp | undefined;
+type TestFetch = typeof fetch & ReturnType<typeof vi.fn>;
 
 describe("daemon M1.4 composition", () => {
   let daemon: DaemonApp;
   let baseUrl: string;
+  let modelTestFetchMock: TestFetch;
 
   beforeEach(async () => {
     const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-test-"));
-    daemon = createDaemon({ databasePath: join(dir, "agenthub.sqlite"), port: 0 });
+    modelTestFetchMock = vi.fn(async (request: RequestInfo | URL) => {
+      const url = typeof request === "string" ? request : request instanceof URL ? request.toString() : request.url;
+      if (url.includes("/v1/chat/completions")) {
+        return new Response(JSON.stringify({ model: "gpt-4o", usage: { prompt_token_count: 1, completion_token_count: 1 } }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (url.includes("/api/chat")) {
+        return new Response(JSON.stringify({ model: "llama3.1", prompt_eval_count: 1, eval_count: 1 }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({ error: { message: "invalid api key" } }), { status: 401, headers: { "content-type": "application/json" } });
+    }) as TestFetch;
+    daemon = createDaemon({ databasePath: join(dir, "agenthub.sqlite"), port: 0, modelTestFetch: modelTestFetchMock });
     currentDaemon = daemon;
     const server = await daemon.start();
     const address = server.address();
@@ -89,7 +103,7 @@ describe("daemon M1.4 composition", () => {
     const phases: { readonly direction: "startup" | "shutdown"; readonly phase: DaemonStartupPhase }[] = [];
     const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-phases-"));
     const databasePath = join(dir, "agenthub.sqlite");
-    const phasedDaemon = createDaemon({ databasePath, port: 0, onLifecyclePhase: (event) => phases.push(event) });
+    const phasedDaemon = createDaemon({ databasePath, port: 0, modelTestFetch: modelTestFetchMock, onLifecyclePhase: (event) => phases.push(event) });
 
     await phasedDaemon.start();
     phasedDaemon.database.sqlite.prepare("INSERT INTO room_participants (room_id, participant_type, participant_id, role, default_presence, adapter_id, adapter_session_id, joined_at) VALUES ('room_close', 'agent', 'agent_close', 'primary', 'active', 'claude-code', 'stale-session', 1)").run();
@@ -133,6 +147,7 @@ describe("daemon M1.4 composition", () => {
     expect(native?.supported_caps).toBe("[]");
     expect(JSON.parse(native?.manifest_json ?? "{}") as { readonly runtimeKind?: string }).toMatchObject({ runtimeKind: "native" });
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'runtime.detected' AND json_extract(payload, '$.runtimeId') = 'native-default'").get()).toMatchObject({ count: 1 });
+    expectDetailOnlyEvent(daemon, "runtime.detected", "runtimeId", "native-default");
 
     const created = await fetch(`${baseUrl}/runtimes`, {
       method: "POST",
@@ -143,6 +158,7 @@ describe("daemon M1.4 composition", () => {
     expect(created.status).toBe(201);
     expect(createdPayload.runtime).toMatchObject({ id: "runtime-custom-1", name: "Custom Runtime", kind: "custom-acp" });
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'runtime.detected' AND json_extract(payload, '$.runtimeId') = 'runtime-custom-1'").get()).toMatchObject({ count: 1 });
+    expectDetailOnlyEvent(daemon, "runtime.detected", "runtimeId", "runtime-custom-1");
 
     const patched = await fetch(`${baseUrl}/runtimes/runtime-custom-1`, {
       method: "PATCH",
@@ -153,11 +169,13 @@ describe("daemon M1.4 composition", () => {
     expect(patched.status).toBe(200);
     expect(patchedPayload.runtime).toMatchObject({ name: "Custom Runtime Updated" });
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'runtime.updated' AND json_extract(payload, '$.runtimeId') = 'runtime-custom-1'").get()).toMatchObject({ count: 1 });
+    expectDetailOnlyEvent(daemon, "runtime.updated", "runtimeId", "runtime-custom-1");
 
     const deleted = await fetch(`${baseUrl}/runtimes/runtime-custom-1`, { method: "DELETE" });
     expect(deleted.status).toBe(200);
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM runtimes WHERE id = 'runtime-custom-1'").get()).toMatchObject({ count: 0 });
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'runtime.removed' AND json_extract(payload, '$.runtimeId') = 'runtime-custom-1'").get()).toMatchObject({ count: 1 });
+    expectDetailOnlyEvent(daemon, "runtime.removed", "runtimeId", "runtime-custom-1");
   });
 
   it("rejects deleting a runtime with existing bindings", async () => {
@@ -170,6 +188,62 @@ describe("daemon M1.4 composition", () => {
     expect(await deleted.json()).toMatchObject({ error: "runtime_has_bindings" });
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE json_extract(payload, '$.runtimeId') = 'runtime-bound' AND type = 'runtime.removed'").get()).toMatchObject({ count: 0 });
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM runtimes WHERE id = 'runtime-bound'").get()).toMatchObject({ count: 1 });
+  });
+
+  it("detects runtime binaries and emits runtime.detected only for persisted changes", async () => {
+    daemon.database.sqlite.prepare("INSERT INTO runtimes (id, workspace_id, kind, name, command, args, env, detected_at, detected_path, detected_version, supported_caps, manifest_json, created_at, updated_at) VALUES (?, ?, 'native', ?, NULL, '[]', NULL, NULL, NULL, NULL, '[]', ?, ?, ?)").run("runtime-detect", "default-workspace", "Detect Runtime", JSON.stringify({ runtimeKind: "native" }), 1, 1);
+    const before = daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'runtime.detected' AND json_extract(payload, '$.runtimeId') = 'runtime-detect'").get() as { readonly count: number };
+
+    const detected = await fetch(`${baseUrl}/runtimes/runtime-detect/detect`, { method: "POST" });
+    const detectedBody = await detected.json() as { readonly changed?: boolean; readonly runtime?: { readonly detected_path?: string | null; readonly detected_version?: string | null; readonly detected_at?: number | null } };
+
+    expect(detected.status).toBe(200);
+    expect(detectedBody.changed).toBe(true);
+    expect(detectedBody.runtime).toMatchObject({ detected_path: "agenthub-native", detected_version: "native" });
+    expect(typeof detectedBody.runtime?.detected_at).toBe("number");
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'runtime.detected' AND json_extract(payload, '$.runtimeId') = 'runtime-detect'").get()).toMatchObject({ count: before.count + 1 });
+
+    const detectedAgain = await fetch(`${baseUrl}/runtimes/runtime-detect/detect`, { method: "POST" });
+    const detectedAgainBody = await detectedAgain.json() as { readonly changed?: boolean };
+    expect(detectedAgain.status).toBe(200);
+    expect(detectedAgainBody.changed).toBe(false);
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'runtime.detected' AND json_extract(payload, '$.runtimeId') = 'runtime-detect'").get()).toMatchObject({ count: before.count + 1 });
+  });
+
+  it("returns runtime test results synchronously without emitting runtime.test.result", async () => {
+    const tested = await fetch(`${baseUrl}/runtimes/native-default/test`, { method: "POST" });
+    const testedBody = await tested.json() as { readonly ok?: boolean; readonly version?: string; readonly latencyMs?: number };
+
+    expect(tested.status).toBe(200);
+    expect(testedBody).toMatchObject({ ok: true, version: "native" });
+    expect(typeof testedBody.latencyMs).toBe("number");
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'runtime.test.result'").get()).toMatchObject({ count: 0 });
+  });
+
+  it("returns async runtime test job ids and polls terminal job status", async () => {
+    daemon.database.sqlite.prepare("INSERT INTO runtimes (id, workspace_id, kind, name, command, args, env, detected_at, detected_path, detected_version, supported_caps, manifest_json, created_at, updated_at) VALUES (?, ?, 'native', ?, NULL, '[]', NULL, NULL, NULL, ?, '[]', ?, ?, ?)").run("runtime-test-job", "default-workspace", "Job Runtime", "native", JSON.stringify({ runtimeKind: "native" }), 1, 1);
+
+    const started = await fetch(`${baseUrl}/runtimes/runtime-test-job/test`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ async: true }) });
+    const startedBody = await started.json() as { readonly jobId?: string };
+
+    expect(started.status).toBe(202);
+    expect(startedBody.jobId).toEqual(expect.any(String));
+    const jobId = startedBody.jobId ?? "";
+    let terminal: { readonly status: number; readonly body: { readonly status?: string; readonly result?: { readonly ok?: boolean; readonly version?: string } } } | undefined;
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline) {
+      const response = await fetch(`${baseUrl}/settings/jobs/${jobId}`);
+      terminal = { status: response.status, body: await response.json() as { readonly status?: string; readonly result?: { readonly ok?: boolean; readonly version?: string } } };
+      if (terminal.status === 200 && (terminal.body.status === "completed" || terminal.body.status === "failed")) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    expect(terminal).toBeDefined();
+    if (terminal === undefined) throw new Error("runtime test job did not reach terminal state");
+    expect(terminal.status).toBe(200);
+    expect(terminal.body).toMatchObject({ status: "completed", result: { ok: true } });
+    expect(terminal.body.result?.version).toBe("native");
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'runtime.test.result'").get()).toMatchObject({ count: 0 });
   });
 
   it("stores model config API keys in keychain and omits plaintext from responses", async () => {
@@ -187,14 +261,16 @@ describe("daemon M1.4 composition", () => {
     expect(createdBody.modelConfig).toMatchObject({ api_key_fingerprint: "sk-a...-key" });
     expect(createdBody.modelConfig).not.toHaveProperty("api_key_ref");
     expect(JSON.stringify(createdBody)).not.toContain(apiKey);
+    expectNoPlaintextSecret(daemon, apiKey, [createdBody]);
 
     const rows = daemon.database.sqlite.prepare("SELECT api_key_ref, api_key_fingerprint FROM model_configs WHERE workspace_id = ? ORDER BY created_at ASC").all(workspaceId) as { readonly api_key_ref: string | null; readonly api_key_fingerprint: string | null }[];
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ api_key_ref: expect.any(String), api_key_fingerprint: "sk-a...-key" });
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'model_config.created' AND json_extract(payload, '$.modelConfigId') = ?").get(createdBody.modelConfig?.id)).toMatchObject({ count: 1 });
+    expectDetailOnlyEvent(daemon, "model_config.created", "modelConfigId", createdBody.modelConfig?.id ?? "");
 
     const listed = await fetch(`${baseUrl}/model-configs?workspaceId=${encodeURIComponent(workspaceId)}`);
-    const listedBody = await listed.json() as readonly Array<{ readonly api_key_ref?: string; readonly api_key_fingerprint?: string | null }>;
+    const listedBody = await listed.json() as ReadonlyArray<{ readonly api_key_ref?: string; readonly api_key_fingerprint?: string | null }>;
     expect(listed.status).toBe(200);
     expect(Array.isArray(listedBody)).toBe(true);
     expect(listedBody[0]).toMatchObject({ api_key_fingerprint: "sk-a...-key" });
@@ -205,6 +281,7 @@ describe("daemon M1.4 composition", () => {
     expect(fetched.status).toBe(200);
     expect(fetchedBody.modelConfig).toMatchObject({ api_key_fingerprint: "sk-a...-key" });
     expect(fetchedBody.modelConfig).not.toHaveProperty("api_key_ref");
+    expectNoPlaintextSecret(daemon, apiKey, [createdBody, listedBody, fetchedBody]);
   });
 
   it("stores Ollama model configs without API key refs", async () => {
@@ -222,6 +299,60 @@ describe("daemon M1.4 composition", () => {
     expect(createdBody.modelConfig).toMatchObject({ provider: "ollama", api_key_fingerprint: null });
     expect(createdBody.modelConfig).not.toHaveProperty("api_key_ref");
     expect(daemon.database.sqlite.prepare("SELECT api_key_ref, api_key_fingerprint FROM model_configs WHERE workspace_id = ?").get(workspaceId)).toMatchObject({ api_key_ref: null, api_key_fingerprint: null });
+  });
+
+  it("tests model config calls with provider resolution and polls terminal jobs", async () => {
+    const workspaceId = `ws_model_test_${Date.now()}`;
+    daemon.database.sqlite.prepare("INSERT OR IGNORE INTO workspaces (id, name, root_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run(workspaceId, workspaceId, `/tmp/${workspaceId}`, Date.now(), Date.now());
+    const created = await fetch(`${baseUrl}/model-configs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workspaceId, id: "mc_test_openai", name: "OpenAI Test", provider: "openai", model: "gpt-4o", apiKey: "sk-test-openai" })
+    });
+    expect(created.status).toBe(201);
+
+    const success = await fetch(`${baseUrl}/model-configs/mc_test_openai/test`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ prompt: "Say ok" })
+    });
+    const successBody = await success.json() as { readonly jobId: string; readonly ok: true; readonly model: string; readonly latencyMs: number; readonly inputTokens: number; readonly outputTokens: number };
+    expect(success.status).toBe(200);
+    expect(successBody).toMatchObject({ ok: true, model: "gpt-4o", inputTokens: 1, outputTokens: 1 });
+    expect(successBody.latencyMs).toBeGreaterThanOrEqual(0);
+    expect(modelTestFetchMock).toHaveBeenCalled();
+
+    const job = await fetch(`${baseUrl}/settings/jobs/${successBody.jobId}`);
+    const jobBody = await job.json() as { readonly job?: { readonly status: string; readonly result?: { readonly ok: true } } };
+    expect(job.status).toBe(200);
+    expect(jobBody.job).toMatchObject({ status: "completed", result: { ok: true } });
+    expectNoPlaintextSecret(daemon, "sk-test-openai", [successBody, jobBody]);
+
+    const createdInvalid = await fetch(`${baseUrl}/model-configs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workspaceId, id: "mc_test_bad", name: "Bad Key", provider: "openai", model: "gpt-4o", apiKey: "sk-bad-secret" })
+    });
+    expect(createdInvalid.status).toBe(201);
+    modelTestFetchMock.mockImplementationOnce(async () => new Response(JSON.stringify({ error: { message: "invalid api key" } }), { status: 401, headers: { "content-type": "application/json" } }));
+    const invalid = await fetch(`${baseUrl}/model-configs/mc_test_bad/test`, { method: "POST", headers: { "content-type": "application/json" } });
+    const invalidBody = await invalid.json() as { readonly jobId: string; readonly ok: false; readonly error: string };
+    expect(invalid.status).toBe(400);
+    expect(invalidBody).toMatchObject({ ok: false, error: "invalid_api_key" });
+    expect(JSON.stringify(invalidBody)).not.toContain("sk-bad-secret");
+    const invalidJob = await fetch(`${baseUrl}/settings/jobs/${invalidBody.jobId}`);
+    expect(await invalidJob.json()).toMatchObject({ job: { status: "failed", result: { ok: false, error: "invalid_api_key" } } });
+
+    const createdOllama = await fetch(`${baseUrl}/model-configs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workspaceId, id: "mc_test_ollama", name: "Local Ollama", provider: "ollama", model: "llama3.1", baseUrl: "http://127.0.0.1:11434" })
+    });
+    expect(createdOllama.status).toBe(201);
+    await fetch(`${baseUrl}/model-configs/mc_test_ollama/test`, { method: "POST", headers: { "content-type": "application/json" } });
+    const ollamaCall = modelTestFetchMock.mock.calls.find((call) => String(call[0]).includes("/api/chat"));
+    expect(ollamaCall).toBeDefined();
+    expect((ollamaCall?.[1] as RequestInit | undefined)?.headers).toMatchObject({ "content-type": "application/json" });
   });
 
   it("rejects deleting a model config with bindings", async () => {
@@ -245,7 +376,7 @@ describe("daemon M1.4 composition", () => {
     await daemon.close();
     currentDaemon = undefined;
     const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-loopback-"));
-    const loopbackDaemon = createDaemon({ databasePath: join(dir, "agenthub.sqlite"), port: 0, host: "127.0.0.1" });
+    const loopbackDaemon = createDaemon({ databasePath: join(dir, "agenthub.sqlite"), port: 0, host: "127.0.0.1", modelTestFetch: modelTestFetchMock });
 
     const server = await loopbackDaemon.start();
     expect(server.listening).toBe(true);
@@ -257,7 +388,7 @@ describe("daemon M1.4 composition", () => {
     await daemon.close();
     currentDaemon = undefined;
     const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-remote-deny-"));
-    const remoteDaemon = createDaemon({ databasePath: join(dir, "agenthub.sqlite"), port: 0, host: "0.0.0.0" });
+    const remoteDaemon = createDaemon({ databasePath: join(dir, "agenthub.sqlite"), port: 0, host: "0.0.0.0", modelTestFetch: modelTestFetchMock });
     const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
     await expect(remoteDaemon.start()).rejects.toThrow("Remote binding requires token and allowRemote=true");
@@ -271,7 +402,7 @@ describe("daemon M1.4 composition", () => {
     await daemon.close();
     currentDaemon = undefined;
     const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-remote-allow-"));
-    const remoteDaemon = createDaemon({ databasePath: join(dir, "agenthub.sqlite"), port: 0, host: "0.0.0.0", token: "remote-token", allowRemote: true });
+    const remoteDaemon = createDaemon({ databasePath: join(dir, "agenthub.sqlite"), port: 0, host: "0.0.0.0", token: "remote-token", allowRemote: true, modelTestFetch: modelTestFetchMock });
 
     const server = await remoteDaemon.start();
     expect(server.listening).toBe(true);
@@ -283,7 +414,7 @@ describe("daemon M1.4 composition", () => {
     await daemon.close();
     currentDaemon = undefined;
     const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-starting-"));
-    const startingDaemon = createDaemon({ databasePath: join(dir, "agenthub.sqlite"), port: 0 });
+    const startingDaemon = createDaemon({ databasePath: join(dir, "agenthub.sqlite"), port: 0, modelTestFetch: modelTestFetchMock });
 
     const health = await invokeHandler(startingDaemon, "GET", "/healthz");
     const rooms = await invokeHandler(startingDaemon, "GET", "/rooms");
@@ -446,9 +577,10 @@ describe("daemon M1.4 composition", () => {
     expect(Array.isArray(createdBody.capabilities)).toBe(true);
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM roles WHERE id = ?").get(roleId)).toMatchObject({ count: 1 });
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'role.created' AND json_extract(payload, '$.roleId') = ?").get(roleId)).toMatchObject({ count: 1 });
+    expectDetailOnlyEvent(daemon, "role.created", "roleId", roleId);
 
     const listed = await fetch(`${baseUrl}/roles?workspaceId=${encodeURIComponent(workspaceId)}`);
-    const listBody = await listed.json() as readonly Array<{ readonly id: string; readonly name: string }>;
+    const listBody = await listed.json() as ReadonlyArray<{ readonly id: string; readonly name: string }>;
     expect(listed.status).toBe(200);
     expect(listBody.map((role) => role.id)).toContain(roleId);
 
@@ -466,6 +598,7 @@ describe("daemon M1.4 composition", () => {
     expect(updated.status).toBe(200);
     expect(updatedBody).toMatchObject({ id: roleId, name: "Role Beta", prompt: "Updated prompt" });
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'role.updated' AND json_extract(payload, '$.roleId') = ?").get(roleId)).toMatchObject({ count: 1 });
+    expectDetailOnlyEvent(daemon, "role.updated", "roleId", roleId);
 
     const deleted = await fetch(`${baseUrl}/roles/${roleId}`, { method: "DELETE" });
     const deletedBody = await deleted.json() as { readonly ok?: boolean };
@@ -473,6 +606,69 @@ describe("daemon M1.4 composition", () => {
     expect(deletedBody).toMatchObject({ ok: true });
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM roles WHERE id = ?").get(roleId)).toMatchObject({ count: 0 });
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'role.deleted' AND json_extract(payload, '$.roleId') = ?").get(roleId)).toMatchObject({ count: 1 });
+    expectDetailOnlyEvent(daemon, "role.deleted", "roleId", roleId);
+  });
+
+  it("seeds five builtin role templates and emits created events on first launch", () => {
+    const dir = mkdtempSync(join(tmpdir(), "agenthub-builtin-roles-"));
+    const rolesDir = join(dir, "roles");
+    const database = createDatabase({ path: join(dir, "agenthub.sqlite"), applyMigrations: true });
+    const eventBus = createEventBus({ database });
+    try {
+      seedBuiltinRoles(database, rolesDir, eventBus, 1234);
+
+      expect(readdirSync(rolesDir).filter((file) => file.endsWith(".md")).sort()).toEqual([
+        "archivist.md",
+        "builder.md",
+        "generalist.md",
+        "project-manager.md",
+        "reviewer.md"
+      ]);
+      expect(readFileSync(join(rolesDir, "builder.md"), "utf8")).toContain("version: 1.0.0");
+      expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM roles WHERE is_builtin = 1").get()).toMatchObject({ count: 5 });
+      expect(database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'role.created' AND json_extract(payload, '$.isBuiltin') = 1").get()).toMatchObject({ count: 5 });
+    } finally {
+      database.sqlite.close();
+    }
+  });
+
+  it("preserves existing newer builtin role files without overwriting", () => {
+    const dir = mkdtempSync(join(tmpdir(), "agenthub-builtin-roles-newer-"));
+    const rolesDir = join(dir, "roles");
+    const database = createDatabase({ path: join(dir, "agenthub.sqlite"), applyMigrations: true });
+    const eventBus = createEventBus({ database });
+    const newerBuilder = "---\nname: Custom Builder\nversion: 2.0.0\ncapabilities:\n  - chat\n---\n\nUser edited builder prompt.\n";
+    try {
+      mkdirSync(rolesDir, { recursive: true });
+      writeFileSync(join(rolesDir, "builder.md"), newerBuilder, "utf8");
+
+      seedBuiltinRoles(database, rolesDir, eventBus, 1234);
+
+      expect(readFileSync(join(rolesDir, "builder.md"), "utf8")).toBe(newerBuilder);
+    } finally {
+      database.sqlite.close();
+    }
+  });
+
+  it("warns for older builtin role files without overwriting", () => {
+    const dir = mkdtempSync(join(tmpdir(), "agenthub-builtin-roles-older-"));
+    const rolesDir = join(dir, "roles");
+    const database = createDatabase({ path: join(dir, "agenthub.sqlite"), applyMigrations: true });
+    const eventBus = createEventBus({ database });
+    const olderBuilder = "---\nname: Old Builder\nversion: 0.9.0\ncapabilities:\n  - chat\n---\n\nOld user edited builder prompt.\n";
+    const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      mkdirSync(rolesDir, { recursive: true });
+      writeFileSync(join(rolesDir, "builder.md"), olderBuilder, "utf8");
+
+      seedBuiltinRoles(database, rolesDir, eventBus, 1234);
+
+      expect(readFileSync(join(rolesDir, "builder.md"), "utf8")).toBe(olderBuilder);
+      expect(stderrSpy).toHaveBeenCalledWith("Builtin role 'builder' has an update; run `agenthub roles reset --id=builder` to overwrite\n");
+    } finally {
+      stderrSpy.mockRestore();
+      database.sqlite.close();
+    }
   });
 
   it("rejects role deletion when agent bindings exist", async () => {
@@ -525,6 +721,7 @@ describe("daemon M1.4 composition", () => {
     const bindingId = createdBody.agentBinding?.id ?? "";
     expect(bindingId).not.toBe("");
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'agent_binding.created' AND json_extract(payload, '$.bindingId') = ?").get(bindingId)).toMatchObject({ count: 1 });
+    expectDetailOnlyEvent(daemon, "agent_binding.created", "bindingId", bindingId);
 
     const listed = await fetch(`${baseUrl}/agent-bindings?workspaceId=${encodeURIComponent(workspaceId)}`);
     const listBody = await listed.json() as { readonly agentBindings: readonly { readonly id: string }[] };
@@ -545,11 +742,13 @@ describe("daemon M1.4 composition", () => {
     expect(updated.status).toBe(200);
     expect(updatedBody.agentBinding).toMatchObject({ override_permission_profile_id: "profile-override" });
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'agent_binding.updated' AND json_extract(payload, '$.bindingId') = ?").get(bindingId)).toMatchObject({ count: 1 });
+    expectDetailOnlyEvent(daemon, "agent_binding.updated", "bindingId", bindingId);
 
     const deleted = await fetch(`${baseUrl}/agent-bindings/${bindingId}`, { method: "DELETE" });
     expect(deleted.status).toBe(200);
     expect(await deleted.json()).toMatchObject({ ok: true });
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'agent_binding.removed' AND json_extract(payload, '$.bindingId') = ?").get(bindingId)).toMatchObject({ count: 1 });
+    expectDetailOnlyEvent(daemon, "agent_binding.removed", "bindingId", bindingId);
   });
 
   it("rejects deleting agent bindings referenced by room participants", async () => {
@@ -969,6 +1168,25 @@ function messagePayload(daemon: DaemonApp, messageId: string, type: string): unk
   const row = daemon.database.sqlite.prepare("SELECT payload FROM events WHERE type = ? AND json_extract(payload, '$.messageId') = ? ORDER BY seq DESC LIMIT 1").get(type, messageId) as { readonly payload: string } | undefined;
   if (!row) throw new Error(`event ${type} for message ${messageId} not found`);
   return JSON.parse(row.payload) as unknown;
+}
+
+function expectDetailOnlyEvent(daemon: DaemonApp, type: string, payloadKey: string, payloadValue: string): void {
+  const detailEvents = daemon.eventBus.replayDurableSinceSeq(0, { view: "detail" }).filter((event) => event.type === type && (event.payload as Record<string, unknown>)[payloadKey] === payloadValue);
+  const mainEvents = daemon.eventBus.replayDurableSinceSeq(0, { view: "main" }).filter((event) => event.type === type && (event.payload as Record<string, unknown>)[payloadKey] === payloadValue);
+
+  expect(detailEvents).toHaveLength(1);
+  expect(detailEvents[0]).toMatchObject({ durability: "durable", visibility: "detail" });
+  expect(mainEvents).toHaveLength(0);
+}
+
+function expectNoPlaintextSecret(daemon: DaemonApp, secret: string, responses: readonly unknown[]): void {
+  const responseJson = JSON.stringify(responses);
+  const eventRows = daemon.database.sqlite.prepare("SELECT payload FROM events WHERE type LIKE 'model_config.%' ORDER BY seq ASC").all() as { readonly payload: string }[];
+  const configRows = daemon.database.sqlite.prepare("SELECT id, workspace_id, name, provider, model, base_url, api_key_ref, api_key_fingerprint, profile FROM model_configs ORDER BY created_at ASC").all();
+
+  expect(responseJson).not.toContain(secret);
+  expect(JSON.stringify(eventRows)).not.toContain(secret);
+  expect(JSON.stringify(configRows)).not.toContain(secret);
 }
 
 async function readSseEvent(body: ReadableStream<Uint8Array> | null, eventName: string): Promise<string> {

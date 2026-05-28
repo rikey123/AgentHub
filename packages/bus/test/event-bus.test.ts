@@ -118,7 +118,7 @@ describe("EventBus", () => {
     expect(() =>
       currentBus().publish({
         id: "evt_task_updated",
-        type: forbiddenType,
+        type: forbiddenType as never,
         schemaVersion: 1,
         workspaceId: "ws_1",
         taskId: "task_1",

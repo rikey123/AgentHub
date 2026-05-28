@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { URL } from "node:url";
 
@@ -16,6 +17,7 @@ import { attachmentMaxBytes, authenticateBrowserRequest, createKeychain, createK
 import { Effect } from "effect";
 
 import { AdapterRegistry } from "./adapters/registry.ts";
+import { defaultBuiltinRolesDir, seedBuiltinRoles } from "./builtin-roles.ts";
 import { normalizeRoomCreateCompat } from "./compat/agent-profile-compat.ts";
 import { migrateAgentProfilesToV10 } from "./migrations/0014_data.ts";
 import { createDaemonCommandHandlers, seedDefaultData } from "./commands.ts";
@@ -32,7 +34,7 @@ export type DaemonStartupPhase =
   | "AdapterManager detect + register"
   | "CommandBus open"
   | "HTTP server bind + SSE accept";
-export type DaemonOptions = { readonly databasePath: string; readonly host?: string; readonly port?: number; readonly token?: string; readonly allowRemote?: boolean; readonly allowedOrigins?: readonly string[]; readonly adapterCommands?: { readonly claude?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv }; readonly opencode?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv } }; readonly now?: () => number; readonly onLifecyclePhase?: (event: { readonly direction: "startup" | "shutdown"; readonly phase: DaemonStartupPhase }) => void };
+export type DaemonOptions = { readonly databasePath: string; readonly host?: string; readonly port?: number; readonly token?: string; readonly allowRemote?: boolean; readonly allowedOrigins?: readonly string[]; readonly adapterCommands?: { readonly claude?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv }; readonly opencode?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv } }; readonly now?: () => number; readonly modelTestFetch?: typeof fetch; readonly onLifecyclePhase?: (event: { readonly direction: "startup" | "shutdown"; readonly phase: DaemonStartupPhase }) => void };
 export type DaemonCloseOptions = { readonly forceCancelAfterMs?: number };
 export type DaemonCloseResult = { readonly forced: boolean; readonly cancelledRunIds: readonly string[] };
 export type DaemonApp = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly roomMcpServer: RoomMcpServer; readonly adapterRegistry: AdapterRegistry; readonly mockAdapter: MockAdapterManager; readonly handle: (req: IncomingMessage, res: ServerResponse) => void; readonly inFlightRunIds: () => readonly string[]; start(): Promise<Server>; close(options?: DaemonCloseOptions): Promise<DaemonCloseResult> };
@@ -75,6 +77,12 @@ type DaemonRuntime = {
 };
 
 type SseClient = { readonly res: ServerResponse; readonly close: () => void };
+type SettingsJobStatus = "queued" | "pending" | "completed" | "failed";
+type SettingsJobRecord = { readonly id: string; readonly type: string; readonly status: SettingsJobStatus; readonly createdAt: number; readonly updatedAt: number; readonly result?: unknown; readonly modelConfigId?: string; readonly runtimeId?: string };
+type RuntimeJob = { status: "pending" | "completed" | "failed"; result?: RuntimeTestResult };
+type RuntimeTestResult = { readonly ok: boolean; readonly version?: string; readonly latencyMs: number; readonly error?: string };
+
+const runtimeTestJobs = new Map<string, RuntimeJob>();
 
 export function createDaemon(options: DaemonOptions): DaemonApp {
   let runtime: DaemonRuntime | undefined;
@@ -84,6 +92,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
   let closed = false;
   let stopping = false;
   const sseClients = new Set<SseClient>();
+  const settingsJobs = new Map<string, SettingsJobRecord>();
   const modelConfigSecrets = createKeychain("agenthub-model-configs");
 
   const emitPhase = (direction: "startup" | "shutdown", phase: DaemonStartupPhase): void => {
@@ -101,7 +110,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     if (stopping) return json(res, 503, { error: "service_stopping" });
     if (!ready) return json(res, 503, { error: "service_starting", retryAfterMs: 500 });
     const app = requireRuntime();
-    void route({ req, res, database: app.database, eventBus: app.eventBus, commandBus: app.commandBus, artifactService: app.artifactService, taskService: app.taskService, outbox: app.outbox, modelConfigSecrets, registerSseClient: (client) => { sseClients.add(client); return () => sseClients.delete(client); }, ...(options.token !== undefined ? { token: options.token } : {}), ...(options.allowedOrigins !== undefined ? { allowedOrigins: options.allowedOrigins } : {}), host: `${options.host ?? "127.0.0.1"}:${options.port ?? 6677}`, ...(options.now !== undefined ? { now: options.now } : {}) });
+    void route({ req, res, database: app.database, eventBus: app.eventBus, commandBus: app.commandBus, artifactService: app.artifactService, taskService: app.taskService, outbox: app.outbox, modelConfigSecrets, settingsJobs, modelTestFetch: options.modelTestFetch ?? globalThis.fetch.bind(globalThis), registerSseClient: (client) => { sseClients.add(client); return () => sseClients.delete(client); }, ...(options.token !== undefined ? { token: options.token } : {}), ...(options.allowedOrigins !== undefined ? { allowedOrigins: options.allowedOrigins } : {}), host: `${options.host ?? "127.0.0.1"}:${options.port ?? 6677}`, ...(options.now !== undefined ? { now: options.now } : {}) });
   };
 
   const start = async (): Promise<Server> => {
@@ -130,6 +139,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
 
     emitPhase("startup", PHASE_EVENT_BUS);
     const eventBus = withStatusLineCoalescing(createEventBus({ database }));
+    seedBuiltinRoles(database, defaultBuiltinRolesDir(), eventBus, options.now?.() ?? Date.now());
     const agentProfiles = watchAgentProfiles({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
     await agentProfiles.ready;
 
@@ -375,7 +385,7 @@ function withStatusLineCoalescing(eventBus: EventBus): StatusLineEventBus {
   return wrapped;
 }
 
-type RouteContext = { readonly req: IncomingMessage; readonly res: ServerResponse; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly artifactService: ArtifactService; readonly taskService: TaskService; readonly outbox: { drainPending(): Promise<void> }; readonly modelConfigSecrets: KeychainBridge; readonly registerSseClient: (client: SseClient) => () => void; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly host: string; readonly now?: () => number };
+type RouteContext = { readonly req: IncomingMessage; readonly res: ServerResponse; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly artifactService: ArtifactService; readonly taskService: TaskService; readonly outbox: { drainPending(): Promise<void> }; readonly modelConfigSecrets: KeychainBridge; readonly settingsJobs: Map<string, SettingsJobRecord>; readonly modelTestFetch: typeof fetch; readonly registerSseClient: (client: SseClient) => () => void; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly host: string; readonly now?: () => number };
 
 async function route(ctx: RouteContext): Promise<void> {
   const url = new URL(ctx.req.url ?? "/", "http://127.0.0.1");
@@ -399,6 +409,7 @@ async function route(ctx: RouteContext): Promise<void> {
     ).map((row) => normalizeModelConfigRow(row as Record<string, unknown>));
     return json(ctx.res, 200, configs);
   }
+  if (ctx.req.method === "POST" && parts[0] === "model-configs" && parts[1] && parts[2] === "test") return testModelConfig(ctx, parts[1], await body(ctx));
   if (ctx.req.method === "POST" && url.pathname === "/model-configs") {
     const input = await body(ctx) as Record<string, unknown>;
     const now = ctx.now?.() ?? Date.now();
@@ -496,12 +507,13 @@ async function route(ctx: RouteContext): Promise<void> {
     if (modelConfig === undefined) return json(ctx.res, 404, { error: "model_config_not_found" });
     return json(ctx.res, 200, { modelConfig });
   }
+  if (ctx.req.method === "GET" && parts[0] === "settings" && parts[1] === "jobs" && parts[2]) return getSettingsJob(ctx, parts[2]);
   if (ctx.req.method === "PATCH" && parts[0] === "model-configs" && parts[1]) {
     const input = await body(ctx) as Record<string, unknown>;
     const existing = get(ctx.database, "SELECT * FROM model_configs WHERE id = ?", parts[1]) as Record<string, unknown> | undefined;
     if (existing === undefined) return json(ctx.res, 404, { error: "model_config_not_found" });
     const now = ctx.now?.() ?? Date.now();
-    const workspaceId = typeof input.workspaceId === "string" ? input.workspaceId : existing.workspace_id ?? null;
+    const workspaceId = typeof input.workspaceId === "string" ? input.workspaceId : stringOrNull(existing.workspace_id);
     const name = typeof input.name === "string" ? input.name : String(existing.name);
     const provider = typeof input.provider === "string" ? input.provider : String(existing.provider);
     const model = typeof input.model === "string" ? input.model : String(existing.model);
@@ -513,12 +525,13 @@ async function route(ctx: RouteContext): Promise<void> {
     const profile = typeof input.profile === "string" ? input.profile : existing.profile ?? null;
     const keyInput = typeof input.apiKey === "string" && input.apiKey.length > 0 ? input.apiKey : null;
     const previousRef = typeof existing.api_key_ref === "string" ? existing.api_key_ref : null;
+    const modelConfigId = parts[1];
     const keyRef = provider === "ollama"
       ? null
       : keyInput !== null
-        ? previousRef ?? createKeychainAccount({ workspaceId: workspaceId ?? "default", provider: "model-config", purpose: parts[1] })
+        ? previousRef ?? createKeychainAccount({ workspaceId: workspaceId ?? "default", provider: "model-config", purpose: modelConfigId })
         : previousRef;
-    const fingerprint = provider === "ollama" ? null : keyInput !== null ? modelConfigFingerprint(keyInput) : existing.api_key_fingerprint ?? null;
+    const fingerprint = provider === "ollama" ? null : keyInput !== null ? modelConfigFingerprint(keyInput) : stringOrNull(existing.api_key_fingerprint);
     try {
       if (keyRef !== null && keyInput !== null) await ctx.modelConfigSecrets.set(keyRef, keyInput);
       ctx.database.sqlite.transaction(() => {
@@ -528,7 +541,7 @@ async function route(ctx: RouteContext): Promise<void> {
           type: "model_config.updated",
           schemaVersion: 1,
           workspaceId: workspaceId ?? "default-workspace",
-          payload: { modelConfigId: parts[1], workspaceId, name, provider, model },
+          payload: { modelConfigId, workspaceId, name, provider, model },
           createdAt: now
         });
       })();
@@ -537,7 +550,7 @@ async function route(ctx: RouteContext): Promise<void> {
       if (keyRef !== null && keyInput !== null) await ctx.modelConfigSecrets.delete(keyRef).catch(() => undefined);
       return json(ctx.res, 500, { error: "model_config_keychain_failed" });
     }
-    return json(ctx.res, 200, { modelConfig: getModelConfig(ctx.database, parts[1]) });
+    return json(ctx.res, 200, { modelConfig: getModelConfig(ctx.database, modelConfigId) });
   }
   if (ctx.req.method === "DELETE" && parts[0] === "model-configs" && parts[1]) {
     const existing = get(ctx.database, "SELECT * FROM model_configs WHERE id = ?", parts[1]) as Record<string, unknown> | undefined;
@@ -555,14 +568,14 @@ async function route(ctx: RouteContext): Promise<void> {
         id: randomUUID(),
         type: "model_config.deleted",
         schemaVersion: 1,
-        workspaceId: existing.workspace_id ?? "default-workspace",
-        payload: { modelConfigId: parts[1], workspaceId: existing.workspace_id ?? null, name: String(existing.name), provider: String(existing.provider), model: String(existing.model) },
+        workspaceId: stringOrNull(existing.workspace_id) ?? "default-workspace",
+        payload: { modelConfigId: parts[1], workspaceId: stringOrNull(existing.workspace_id), name: String(existing.name), provider: String(existing.provider), model: String(existing.model) },
         createdAt: now
       });
     })();
     const deletedRef = typeof existing.api_key_ref === "string" ? existing.api_key_ref : null;
     if (deletedRef !== null) await ctx.modelConfigSecrets.delete(deletedRef).catch(() => undefined);
-    if (conflict) return json(ctx.res, 409, { error: "model_config_has_bindings", bindingCount: get(ctx.database, "SELECT COUNT(*) AS count FROM agent_bindings WHERE model_config_id = ?", parts[1])?.count ?? 0 });
+    if (conflict) return json(ctx.res, 409, { error: "model_config_has_bindings", bindingCount: scalar(ctx.database, "SELECT COUNT(*) AS count FROM agent_bindings WHERE model_config_id = ?", parts[1]) });
     return json(ctx.res, 200, { ok: true });
   }
   if (ctx.req.method === "PATCH" && parts[0] === "runtimes" && parts[1]) {
@@ -576,7 +589,7 @@ async function route(ctx: RouteContext): Promise<void> {
     const env = input.env !== null && typeof input.env === "object" && !Array.isArray(input.env) ? JSON.stringify(input.env) : existing.env ?? null;
     const supportedCaps = Array.isArray(input.supportedCaps) ? JSON.stringify(input.supportedCaps) : existing.supported_caps ?? "[]";
     const manifestJson = typeof input.manifestJson === "string" ? input.manifestJson : String(existing.manifest_json);
-    const workspaceId = typeof input.workspaceId === "string" ? input.workspaceId : existing.workspace_id ?? null;
+    const workspaceId = typeof input.workspaceId === "string" ? input.workspaceId : stringOrNull(existing.workspace_id);
     const detectedAt = typeof input.detectedAt === "number" && Number.isFinite(input.detectedAt) ? input.detectedAt : existing.detected_at ?? null;
     const detectedPath = typeof input.detectedPath === "string" ? input.detectedPath : existing.detected_path ?? null;
     const detectedVersion = typeof input.detectedVersion === "string" ? input.detectedVersion : existing.detected_version ?? null;
@@ -597,6 +610,8 @@ async function route(ctx: RouteContext): Promise<void> {
     })();
     return json(ctx.res, 200, { runtime: get(ctx.database, "SELECT * FROM runtimes WHERE id = ?", parts[1]) });
   }
+  if (ctx.req.method === "POST" && parts[0] === "runtimes" && parts[1] && parts[2] === "detect") return detectRuntime(ctx, parts[1]);
+  if (ctx.req.method === "POST" && parts[0] === "runtimes" && parts[1] && parts[2] === "test") return testRuntime(ctx, parts[1], await body(ctx));
   if (ctx.req.method === "DELETE" && parts[0] === "runtimes" && parts[1]) {
     const existing = get(ctx.database, "SELECT * FROM runtimes WHERE id = ?", parts[1]) as Record<string, unknown> | undefined;
     if (existing === undefined) return json(ctx.res, 404, { error: "runtime_not_found" });
@@ -613,7 +628,7 @@ async function route(ctx: RouteContext): Promise<void> {
         id: randomUUID(),
         type: "runtime.removed",
         schemaVersion: 1,
-        workspaceId: existing.workspace_id ?? "default-workspace",
+        workspaceId: stringOrNull(existing.workspace_id) ?? "default-workspace",
         payload: { runtimeId: parts[1], kind: String(existing.kind), name: String(existing.name) },
         createdAt: now
       });
@@ -699,6 +714,111 @@ async function route(ctx: RouteContext): Promise<void> {
   if (ctx.req.method === "POST" && parts[0] === "workspaces" && parts[2] === "cost-budget") return json(ctx.res, 501, { error: "budget alerts are V1.5 (permission-dsl)" });
   if (ctx.req.method === "GET" && (url.pathname === "/board" || url.pathname === "/timeline")) return json(ctx.res, 404, { error: "not_found", capability: "v1-roadmap" });
   return json(ctx.res, 404, { error: "not_found" });
+}
+
+async function detectRuntime(ctx: RouteContext, runtimeId: string): Promise<void> {
+  const existing = get(ctx.database, "SELECT * FROM runtimes WHERE id = ?", runtimeId) as Record<string, unknown> | null;
+  if (existing === null) return json(ctx.res, 404, { error: "runtime_not_found" });
+  const detection = await runRuntimeDetection(existing);
+  if (!detection.ok) return json(ctx.res, 400, { ok: false, error: detection.error });
+  const now = ctx.now?.() ?? Date.now();
+  const changed = existing.detected_path !== detection.detectedPath || existing.detected_version !== detection.detectedVersion || existing.detected_at === null;
+  if (changed) {
+    ctx.database.sqlite.transaction(() => {
+      ctx.database.sqlite.prepare("UPDATE runtimes SET detected_at = ?, detected_path = ?, detected_version = ?, updated_at = ? WHERE id = ?").run(now, detection.detectedPath, detection.detectedVersion, now, runtimeId);
+      ctx.eventBus.publish({
+        id: randomUUID(),
+        type: "runtime.detected",
+        schemaVersion: 1,
+        workspaceId: stringOrNull(existing.workspace_id) ?? "default-workspace",
+        payload: { runtimeId, kind: String(existing.kind), name: String(existing.name), detectedPath: detection.detectedPath, detectedVersion: detection.detectedVersion },
+        createdAt: now
+      });
+    })();
+  }
+  return json(ctx.res, 200, { runtime: get(ctx.database, "SELECT * FROM runtimes WHERE id = ?", runtimeId), changed });
+}
+
+async function testRuntime(ctx: RouteContext, runtimeId: string, input: Record<string, unknown>): Promise<void> {
+  const runtime = get(ctx.database, "SELECT * FROM runtimes WHERE id = ?", runtimeId) as Record<string, unknown> | null;
+  if (runtime === null) return json(ctx.res, 404, { error: "runtime_not_found" });
+  if (input.async === true || input.slow === true) {
+    const jobId = randomUUID();
+    runtimeTestJobs.set(jobId, { status: "pending" });
+    void runRuntimeTest(runtime).then(
+      (result) => runtimeTestJobs.set(jobId, { status: result.ok ? "completed" : "failed", result }),
+      (error: unknown) => runtimeTestJobs.set(jobId, { status: "failed", result: { ok: false, error: error instanceof Error ? error.message : "runtime test failed", latencyMs: 0 } })
+    );
+    return json(ctx.res, 202, { jobId });
+  }
+  const result = await runRuntimeTest(runtime);
+  return json(ctx.res, 200, result);
+}
+
+async function runRuntimeDetection(runtime: Record<string, unknown>): Promise<{ readonly ok: true; readonly detectedPath: string | null; readonly detectedVersion: string | null } | { readonly ok: false; readonly error: string }> {
+  if (runtime.kind === "native") return { ok: true, detectedPath: "agenthub-native", detectedVersion: "native" };
+  const command = stringField(runtime.command);
+  if (command === undefined) return { ok: false, error: "binary not found" };
+  const args = parseStringArray(runtime.args);
+  const env = parseEnv(runtime.env);
+  const probe = await runCommandProbe(command, ["--version"], env);
+  if (!probe.ok) {
+    const fallback = await runCommandProbe(command, args, env);
+    if (!fallback.ok) return { ok: false, error: fallback.error };
+    return { ok: true, detectedPath: command, detectedVersion: firstOutputLine(fallback.output) };
+  }
+  return { ok: true, detectedPath: command, detectedVersion: firstOutputLine(probe.output) };
+}
+
+async function runRuntimeTest(runtime: Record<string, unknown>): Promise<RuntimeTestResult> {
+  const started = Date.now();
+  if (runtime.kind === "native") return { ok: true, version: stringOrNull(runtime.detected_version) ?? "native", latencyMs: Date.now() - started };
+  const command = stringField(runtime.command);
+  if (command === undefined) return { ok: false, error: "binary not found", latencyMs: Date.now() - started };
+  const probe = await runCommandProbe(command, ["--version"], parseEnv(runtime.env));
+  const latencyMs = Date.now() - started;
+  if (!probe.ok) return { ok: false, error: probe.error, latencyMs };
+  const version = firstOutputLine(probe.output) ?? stringOrNull(runtime.detected_version);
+  return version === null ? { ok: true, latencyMs } : { ok: true, version, latencyMs };
+}
+
+async function runCommandProbe(command: string, args: readonly string[], env: Record<string, string>, timeoutMs = 4_000): Promise<{ readonly ok: true; readonly output: string } | { readonly ok: false; readonly error: string }> {
+  return new Promise((resolve) => {
+    let settled = false;
+    let output = "";
+    const child = spawn(command, args, { env: { ...process.env, ...env }, windowsHide: true });
+    const finish = (result: { readonly ok: true; readonly output: string } | { readonly ok: false; readonly error: string }): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const timer = setTimeout(() => {
+      child.kill();
+      finish({ ok: false, error: "runtime test timed out" });
+    }, timeoutMs);
+    timer.unref?.();
+    child.stdout.on("data", (chunk) => { output += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk); });
+    child.stderr.on("data", (chunk) => { output += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk); });
+    child.on("error", () => finish({ ok: false, error: "binary not found" }));
+    child.on("close", (code) => finish(code === 0 ? { ok: true, output } : { ok: false, error: firstOutputLine(output) ?? `process exited ${code ?? "unknown"}` }));
+  });
+}
+
+function firstOutputLine(output: string): string | null {
+  const line = output.split(/\r?\n/u).map((part) => part.trim()).find((part) => part.length > 0);
+  return line ?? null;
+}
+
+function parseStringArray(value: unknown): readonly string[] {
+  const parsed = typeof value === "string" ? parseJsonField(value, []) : value;
+  return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+}
+
+function parseEnv(value: unknown): Record<string, string> {
+  const parsed = typeof value === "string" ? parseJsonField(value, {}) : value;
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+  return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
 }
 
 function authSession(ctx: RouteContext): void {
@@ -1088,7 +1208,7 @@ function createAgentBinding(ctx: RouteContext, input: Record<string, unknown>): 
   if (modelConfigId !== undefined && modelConfig === null) return json(ctx.res, 404, { error: "model_config_not_found" });
   const binding = agentBindingRow({
     id,
-    workspaceId: workspaceId ?? stringField(role.workspace_id) ?? stringField(runtime.workspace_id) ?? stringField(modelConfig?.workspace_id),
+    workspaceId: workspaceId ?? stringField(role.workspace_id) ?? stringField(runtime.workspace_id) ?? stringField(modelConfig?.workspace_id) ?? null,
     role,
     runtime,
     modelConfig,
@@ -1124,7 +1244,7 @@ function updateAgentBinding(ctx: RouteContext, bindingId: string, input: Record<
   if (modelConfigId !== null && modelConfig === null) return json(ctx.res, 404, { error: "model_config_not_found" });
   const binding = agentBindingRow({
     id: bindingId,
-    workspaceId: workspaceId ?? stringField(role.workspace_id) ?? stringField(runtime.workspace_id) ?? stringField(modelConfig?.workspace_id) ?? stringField(existing.workspace_id),
+    workspaceId: workspaceId ?? stringField(role.workspace_id) ?? stringField(runtime.workspace_id) ?? stringField(modelConfig?.workspace_id) ?? stringField(existing.workspace_id) ?? null,
     role,
     runtime,
     modelConfig,
@@ -1231,6 +1351,8 @@ function parseJsonField(value: unknown, fallback: unknown): unknown {
 
 function stringField(value: unknown): string | undefined { return typeof value === "string" && value.length > 0 ? value : undefined; }
 function stringOrNull(value: unknown): string | null { return typeof value === "string" ? value : null; }
+function stringOrJson(value: unknown, fallback: string): string;
+function stringOrJson(value: unknown, fallback: string | null): string | null;
 function stringOrJson(value: unknown, fallback: string | null): string | null { if (value === undefined) return fallback; if (value === null) return null; return typeof value === "string" ? value : JSON.stringify(value); }
 
 async function dispatch(ctx: RouteContext, data: Record<string, unknown>, type: CommandType): Promise<void> {
@@ -1381,6 +1503,133 @@ function getModelConfig(database: AgentHubDatabase, id: string): Record<string, 
   return row === undefined ? undefined : normalizeModelConfigRow(row);
 }
 
+async function testModelConfig(ctx: RouteContext, modelConfigId: string, input: Record<string, unknown>): Promise<void> {
+  const row = get(ctx.database, "SELECT * FROM model_configs WHERE id = ?", modelConfigId) as Record<string, unknown> | undefined;
+  if (row === undefined) return json(ctx.res, 404, { error: "model_config_not_found" });
+  const now = ctx.now?.() ?? Date.now();
+  const jobId = randomUUID();
+  ctx.settingsJobs.set(jobId, { id: jobId, type: "model_config.test", modelConfigId, status: "queued", createdAt: now, updatedAt: now });
+
+  const provider = stringField(row.provider) ?? "openai";
+  try {
+    const result = await runModelConfigTest({
+      provider,
+      model: stringField(row.model) ?? "",
+      baseUrl: stringOrNull(row.base_url),
+      apiKey: provider === "ollama" ? null : await resolveModelConfigApiKey(ctx, row),
+      fetchImpl: ctx.modelTestFetch,
+      prompt: typeof input.prompt === "string" && input.prompt.length > 0 ? input.prompt : "Say 'ok'"
+    });
+    ctx.settingsJobs.set(jobId, { id: jobId, type: "model_config.test", modelConfigId, status: "completed", createdAt: now, updatedAt: ctx.now?.() ?? Date.now(), result });
+    return json(ctx.res, 200, { jobId, ...result });
+  } catch (error) {
+    const mapped = mapModelTestError(error);
+    ctx.settingsJobs.set(jobId, { id: jobId, type: "model_config.test", modelConfigId, status: "failed", createdAt: now, updatedAt: ctx.now?.() ?? Date.now(), result: { ok: false, error: mapped } });
+    return json(ctx.res, 400, { jobId, ok: false, error: mapped });
+  }
+}
+
+function getSettingsJob(ctx: RouteContext, jobId: string): void {
+  const job = ctx.settingsJobs.get(jobId);
+  if (job === undefined) {
+    const runtimeJob = runtimeTestJobs.get(jobId);
+    if (runtimeJob === undefined) return json(ctx.res, 404, { error: "job_not_found" });
+    return json(ctx.res, 200, runtimeJob);
+  }
+  if (job.status === "pending") return json(ctx.res, 202, { jobId: job.id });
+  return json(ctx.res, 200, { job });
+}
+
+async function resolveModelConfigApiKey(ctx: RouteContext, row: Record<string, unknown>): Promise<string | null> {
+  const apiKeyRef = stringOrNull(row.api_key_ref);
+  if (apiKeyRef === null) return null;
+  return ctx.modelConfigSecrets.get(apiKeyRef);
+}
+
+async function runModelConfigTest(options: { readonly provider: string; readonly model: string; readonly baseUrl: string | null; readonly apiKey: string | null; readonly fetchImpl: typeof fetch; readonly prompt: string }): Promise<{ readonly ok: true; readonly model: string; readonly latencyMs: number; readonly inputTokens: number; readonly outputTokens: number }> {
+  const startedAt = Date.now();
+  const response = await resolveModelProvider(options.provider).test(options);
+  return { ok: true, model: response.model, latencyMs: Math.max(0, Date.now() - startedAt), inputTokens: response.inputTokens, outputTokens: response.outputTokens };
+}
+
+function resolveModelProvider(provider: string): { readonly test: (input: { readonly provider: string; readonly model: string; readonly baseUrl: string | null; readonly apiKey: string | null; readonly fetchImpl: typeof fetch; readonly prompt: string }) => Promise<{ readonly model: string; readonly inputTokens: number; readonly outputTokens: number }> } {
+  if (provider === "anthropic") return { test: testAnthropicModel };
+  if (provider === "google") return { test: testGoogleModel };
+  if (provider === "ollama") return { test: testOllamaModel };
+  return { test: testOpenAiCompatibleModel };
+}
+
+async function testOpenAiCompatibleModel(input: { readonly provider: string; readonly model: string; readonly baseUrl: string | null; readonly apiKey: string | null; readonly fetchImpl: typeof fetch; readonly prompt: string }): Promise<{ readonly model: string; readonly inputTokens: number; readonly outputTokens: number }> {
+  const root = input.baseUrl ?? "https://api.openai.com";
+  const response = await input.fetchImpl(new URL("/v1/chat/completions", root), {
+    method: "POST",
+    headers: { "content-type": "application/json", ...(input.apiKey !== null ? { authorization: `Bearer ${input.apiKey}` } : {}) },
+    body: JSON.stringify({ model: input.model, messages: [{ role: "user", content: input.prompt }], max_tokens: 1, temperature: 0 })
+  });
+  return handleProviderResponse(response, input.model, 1, 1);
+}
+
+async function testAnthropicModel(input: { readonly provider: string; readonly model: string; readonly baseUrl: string | null; readonly apiKey: string | null; readonly fetchImpl: typeof fetch; readonly prompt: string }): Promise<{ readonly model: string; readonly inputTokens: number; readonly outputTokens: number }> {
+  const root = input.baseUrl ?? "https://api.anthropic.com";
+  const response = await input.fetchImpl(new URL("/v1/messages", root), {
+    method: "POST",
+    headers: { "content-type": "application/json", ...(input.apiKey !== null ? { "x-api-key": input.apiKey } : {}), "anthropic-version": "2023-06-01" },
+    body: JSON.stringify({ model: input.model, max_tokens: 1, messages: [{ role: "user", content: input.prompt }] })
+  });
+  return handleProviderResponse(response, input.model, 1, 1);
+}
+
+async function testGoogleModel(input: { readonly provider: string; readonly model: string; readonly baseUrl: string | null; readonly apiKey: string | null; readonly fetchImpl: typeof fetch; readonly prompt: string }): Promise<{ readonly model: string; readonly inputTokens: number; readonly outputTokens: number }> {
+  const root = input.baseUrl ?? "https://generativelanguage.googleapis.com";
+  const url = new URL(`/v1beta/models/${encodeURIComponent(input.model)}:generateContent`, root);
+  if (input.apiKey !== null) url.searchParams.set("key", input.apiKey);
+  const response = await input.fetchImpl(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: input.prompt }] }], generationConfig: { maxOutputTokens: 1, temperature: 0 } })
+  });
+  return handleProviderResponse(response, input.model, 1, 1);
+}
+
+async function testOllamaModel(input: { readonly provider: string; readonly model: string; readonly baseUrl: string | null; readonly apiKey: string | null; readonly fetchImpl: typeof fetch; readonly prompt: string }): Promise<{ readonly model: string; readonly inputTokens: number; readonly outputTokens: number }> {
+  const root = input.baseUrl ?? "http://127.0.0.1:11434";
+  const response = await input.fetchImpl(new URL("/api/chat", root), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model: input.model, messages: [{ role: "user", content: input.prompt }], stream: false, options: { temperature: 0, num_predict: 1 } })
+  });
+  return handleProviderResponse(response, input.model, 1, 1);
+}
+
+async function handleProviderResponse(response: Response, model: string, inputTokensFallback: number, outputTokensFallback: number): Promise<{ readonly model: string; readonly inputTokens: number; readonly outputTokens: number }> {
+  if (response.ok) {
+    const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+    const usage = (payload.usage ?? payload.usage_metadata ?? payload.meta) as Record<string, unknown> | undefined;
+    return { model, inputTokens: numberField(usage?.input_tokens ?? usage?.prompt_token_count ?? inputTokensFallback), outputTokens: numberField(usage?.output_tokens ?? usage?.candidates_token_count ?? outputTokensFallback) };
+  }
+  throw new Error(await readProviderError(response));
+}
+
+async function readProviderError(response: Response): Promise<string> {
+  const raw = await response.text().catch(() => "");
+  try {
+    const parsed = JSON.parse(raw) as { readonly error?: { readonly message?: string; readonly type?: string; readonly code?: string }; readonly message?: string; readonly errorMessage?: string };
+    return parsed.error?.message ?? parsed.message ?? parsed.errorMessage ?? raw;
+  } catch {
+    return raw;
+  }
+}
+
+function mapModelTestError(error: unknown): string {
+  const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+  if (message.includes("rate limit") || message.includes("too many requests") || message.includes("429")) return "rate_limited";
+  if (message.includes("invalid api key") || message.includes("unauthorized") || message.includes("incorrect api key") || message.includes("forbidden") || message.includes("401") || message.includes("403")) return "invalid_api_key";
+  if (message.includes("model not found") || message.includes("unknown model") || message.includes("does not exist") || message.includes("404")) return "model_not_found";
+  return "model_test_failed";
+}
+
+function numberField(value: unknown): number { const parsed = Number(value); return Number.isFinite(parsed) ? parsed : 1; }
+
 function normalizeModelConfigRow(row: Record<string, unknown>): Record<string, unknown> {
   return {
     id: row.id,
@@ -1392,8 +1641,8 @@ function normalizeModelConfigRow(row: Record<string, unknown>): Record<string, u
     api_key_fingerprint: row.api_key_fingerprint ?? null,
     temperature: row.temperature ?? null,
     max_tokens: row.max_tokens ?? null,
-    reasoning: parseJsonField(row.reasoning),
-    extra: parseJsonField(row.extra),
+    reasoning: parseJsonField(row.reasoning, null),
+    extra: parseJsonField(row.extra, null),
     profile: row.profile ?? null,
     created_at: row.created_at,
     updated_at: row.updated_at
