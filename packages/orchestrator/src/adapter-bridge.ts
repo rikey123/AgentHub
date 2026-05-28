@@ -203,6 +203,7 @@ export class AdapterBridge {
         { actor: { type: "system" }, traceId: `watchdog:${this.input.runId}`, origin: "internal" }
       );
     } catch (err) {
+      // eslint-disable-next-line no-console -- watchdog last-resort fallback when CommandBus dispatch fails; intentional console to avoid silent loss
       console.warn("[AdapterBridge] watchdog notification failed:", err);
     }
   }

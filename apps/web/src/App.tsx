@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { AppShell } from "./components/shell/AppShell.tsx";
 import { TopBar } from "./components/shell/TopBar.tsx";

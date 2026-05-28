@@ -24,7 +24,7 @@
     "subscriptions:check": "node scripts/checks/subscriptions-check.mjs",
     "test": "vitest run --passWithNoTests",
     "test:e2e": "playwright test --pass-with-no-tests",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p apps/web/tsconfig.json --noEmit",
     "visibility:check": "node scripts/checks/visibility-check.mjs",
     "clean": "turbo run clean"
   },
