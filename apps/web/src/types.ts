@@ -85,6 +85,7 @@ export type RunViewModel = {
   readonly cost?: { readonly inputTokens: number; readonly outputTokens: number; readonly cachedTokens: number; readonly costUsd: number; readonly modelId: string } | undefined;
   readonly failureClass?: string | undefined;
   readonly error?: string | undefined;
+  readonly permissionSummary?: readonly { readonly resource: { readonly type: string; readonly provider?: string | undefined }; readonly decision: string; readonly modelConfigId: string }[] | undefined;
 };
 
 export type MailboxFailureViewModel = {

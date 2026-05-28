@@ -6,12 +6,14 @@ import { join } from "node:path";
 import { AgentHubClient } from "@agenthub/sdk";
 import { createEventBus } from "@agenthub/bus";
 import { createDatabase } from "@agenthub/db";
+import { Effect, Stream } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AdapterRegistry } from "../src/adapters/registry.ts";
 import { seedBuiltinRoles } from "../src/builtin-roles.ts";
 import { migrateAgentProfilesToV10 } from "../src/migrations/0014_data.ts";
 import { createDaemon, loadAgentHubConfig, type DaemonApp, type DaemonStartupPhase } from "../src/index.ts";
+import { CodexAdapterStub } from "../../adapters/codex/src/index.ts";
 
 let currentDaemon: DaemonApp | undefined;
 type TestKeychain = {
@@ -174,7 +176,7 @@ describe("daemon M1.4 composition", () => {
     expect(JSON.parse(native?.manifest_json ?? "{}") as { readonly runtimeKind?: string }).toMatchObject({ runtimeKind: "native" });
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'runtime.detected' AND json_extract(payload, '$.runtimeId') = 'native-default'").get()).toMatchObject({ count: 1 });
     expectDetailOnlyEvent(daemon, "runtime.detected", "runtimeId", "native-default");
-
+  
     const created = await fetch(`${baseUrl}/runtimes`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -202,6 +204,51 @@ describe("daemon M1.4 composition", () => {
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM runtimes WHERE id = 'runtime-custom-1'").get()).toMatchObject({ count: 0 });
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'runtime.removed' AND json_extract(payload, '$.runtimeId') = 'runtime-custom-1'").get()).toMatchObject({ count: 1 });
     expectDetailOnlyEvent(daemon, "runtime.removed", "runtimeId", "runtime-custom-1");
+  });
+
+  it("dispatches native runs through NativeAgentAdapter and keeps Codex stubbed", async () => {
+    const runtimeId = `runtime-native-${Date.now()}`;
+    const modelConfigId = `model-native-${Date.now()}`;
+    const roleId = `role-native-${Date.now()}`;
+    daemon.database.sqlite.transaction(() => {
+      daemon.database.sqlite.prepare("INSERT INTO roles (id, workspace_id, name, avatar, description, prompt, capabilities, default_permission_profile_id, tags, is_builtin, source_path, version, created_at, updated_at) VALUES (?, ?, ?, NULL, NULL, ?, '[]', NULL, NULL, 0, NULL, NULL, ?, ?)").run(roleId, "default-workspace", "Native Role", "Native prompt", Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO runtimes (id, workspace_id, kind, name, command, args, env, detected_at, detected_path, detected_version, supported_caps, version, status, manifest_json, created_at, updated_at) VALUES (?, ?, 'native', ?, NULL, NULL, NULL, NULL, NULL, 'native', '[]', NULL, NULL, ?, ?, ?)").run(runtimeId, "default-workspace", "Native Runtime", JSON.stringify({ runtimeKind: "native" }), Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO model_configs (id, workspace_id, name, provider, model, base_url, api_key_ref, api_key_fingerprint, temperature, max_tokens, reasoning, extra, profile, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)").run(modelConfigId, "default-workspace", "Native Model", "ollama", "native-model", Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NULL, ?, ?)").run("binding-native-test", "default-workspace", roleId, runtimeId, modelConfigId, Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 0, NULL, ?, ?)").run("native-agent", "default-workspace", "Native Agent", "native", "native-model", "Native prompt", JSON.stringify(["chat"]), Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)").run("room-native-test", "default-workspace", "Native Room", "solo", "conversation", "native-agent", Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)").run("room-native-test", "native-agent", "agent", "primary", "native", "binding-native-test", "active", Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO runs (id, workspace_id, task_id, room_id, agent_id, adapter_id, adapter_session_id, provider_conversation_id, parent_run_id, status, wake_reason, waiting_reason, workspace_path, work_dir, workspace_mode, context_version, target_files, mailbox_claim_count, pid_at_start, claimed_at, started_at, ended_at, input_tokens, output_tokens, cached_tokens, cost_usd, model_id, failure_class, error, created_at, updated_at) VALUES (?, ?, NULL, ?, ?, ?, NULL, NULL, NULL, 'queued', 'primary_turn', NULL, NULL, NULL, 'shadow_buffer', NULL, '[]', 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?) ").run("run-native-test", "default-workspace", "room-native-test", "native-agent", runtimeId, Date.now(), Date.now());
+    })();
+
+    const nativeRun = daemon.database.sqlite.prepare("SELECT * FROM runs WHERE id = 'run-native-test'").get() as { readonly id: string; readonly agent_id: string; readonly adapter_id: string | null };
+    const calls: string[] = [];
+    const lifecycle = {
+      read: () => nativeRun,
+      markCancelling: vi.fn(),
+      markClaimed: vi.fn(),
+      markStarting: vi.fn(),
+      fail: vi.fn(),
+      complete: vi.fn(),
+      cancelFinalized: vi.fn()
+    } as never;
+    const registry = new AdapterRegistry({
+      database: daemon.database,
+      eventBus: daemon.eventBus,
+      lifecycle,
+      mockAdapter: daemon.mockAdapter,
+      nativeAdapter: {
+        runManaged: async (run) => { calls.push(`run:${run.id}`); },
+        cancelManagedRun: async (runId) => { calls.push(`cancel:${runId}`); }
+      } as never
+    });
+
+    await registry.runAgent(nativeRun as never);
+    await registry.cancelRun("run-native-test");
+
+    expect(calls).toEqual(["run:run-native-test", "cancel:run-native-test"]);
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM runtimes WHERE id = 'native-default'").get()).toMatchObject({ count: 1 });
+    expect(() => Effect.runSync(Stream.runDrain(new CodexAdapterStub().runAgent({ runId: "run", message: { role: "user", content: "hi" } } as never)))).toThrow(/V1\.x \(post V1\.0\)/iu);
   });
 
   it("rejects deleting a runtime with existing bindings", async () => {

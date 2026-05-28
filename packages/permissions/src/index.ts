@@ -11,7 +11,8 @@ export type PermissionResource =
   | { readonly type: "shell"; readonly command: string }
   | { readonly type: "tool"; readonly toolName: string; readonly input?: unknown }
   | { readonly type: "context"; readonly contextId?: string; readonly operation: "read" | "write" | "share" | "memoryWrite" }
-  | { readonly type: "agent"; readonly targetAgentId: string; readonly operation: "mention" | "invoke" | "interrupt" | "control" };
+  | { readonly type: "agent"; readonly targetAgentId: string; readonly operation: "mention" | "invoke" | "interrupt" | "control" }
+  | { readonly type: "model.api_call"; readonly provider: "openai" | "anthropic" | "google" | "openai-compatible" | "ollama" };
 
 export type PermissionProfile = {
   readonly id: string;
@@ -255,10 +256,11 @@ export class PermissionEngine {
     const resource = input.resource;
     if (resource.type === "file") return evaluateFile(profile, input.workspaceRoot ?? this.workspaceRoot(input.workspaceId), resource);
     if (resource.type === "shell") return evaluateShell(profile, resource.command);
-    if (resource.type === "tool") return { action: profile.tool[resource.toolName] ?? profile.tool["*"] ?? "ask", reason: `tool.${resource.toolName}` };
-    if (resource.type === "context") return { action: profile.context[resource.operation], reason: `context.${resource.operation}` };
-    return { action: profile.agent[resource.operation], reason: `agent.${resource.operation}` };
-  }
+  if (resource.type === "tool") return { action: profile.tool[resource.toolName] ?? profile.tool["*"] ?? "ask", reason: `tool.${resource.toolName}` };
+  if (resource.type === "context") return { action: profile.context[resource.operation], reason: `context.${resource.operation}` };
+  if (resource.type === "agent") return { action: profile.agent[resource.operation], reason: `agent.${resource.operation}` };
+  return { action: "allow", reason: `model.api_call.${resource.provider}` };
+}
 
   private matchStoredRule(input: PermissionCheckInput, resourceType: string): RuleRow | undefined {
     const rows = this.options.database.sqlite.prepare("SELECT id, action, resource_match, resource_type FROM permission_rules WHERE workspace_id = ? AND resource_type = ? AND (agent_id IS NULL OR agent_id = ?) ORDER BY agent_id DESC, created_at DESC").all(input.workspaceId, resourceType, input.agentId ?? null) as RuleRow[];
@@ -384,6 +386,7 @@ function resourceTypeFor(resource: PermissionResource): string {
   if (resource.type === "context") return `context.${resource.operation}`;
   if (resource.type === "agent") return `agent.${resource.operation}`;
   if (resource.type === "tool") return `tool.${resource.toolName}`;
+  if (resource.type === "model.api_call") return `model.api_call.${resource.provider}`;
   return "shell";
 }
 
@@ -392,6 +395,7 @@ function resourceMatchFor(resource: PermissionResource): string {
   if (resource.type === "shell") return resource.command;
   if (resource.type === "tool") return resource.toolName;
   if (resource.type === "context") return resource.contextId ?? resource.operation;
+  if (resource.type === "model.api_call") return resource.provider;
   return resource.targetAgentId;
 }
 

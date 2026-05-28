@@ -14,6 +14,7 @@
     "@agenthub/adapter-claude-code": "workspace:*",
     "@agenthub/adapter-mock": "workspace:*",
     "@agenthub/adapter-opencode": "workspace:*",
+    "@agenthub/native-agent-runtime": "workspace:*",
     "@agenthub/agents": "workspace:*",
     "@agenthub/artifacts": "workspace:*",
     "@agenthub/bus": "workspace:*",

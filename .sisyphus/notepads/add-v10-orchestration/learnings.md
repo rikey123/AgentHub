@@ -134,3 +134,16 @@
 - Vercel AI SDK 5 explicit provider factories work cleanly with `provider.chatModel(modelId)`; the package test should mock the factory module and assert the model instance comes from the provider object, not a string ID.
 - The new package needed `../../tsconfig.base.json` from its location; the first attempt used the adapter package path and broke Vitest tsconfig resolution.
 - Native runtime adapter code needed source-relative imports for `@agenthub/*` internals during package tests; switching to direct `../../*/src/index.ts` imports kept Vitest resolution stable without changing repo-wide package wiring.
+- Task 2.5 wiring note: native dispatch is driven from the daemon registry, classified from `native` runtime/adapter ids, and the registry now lazy-loads the native adapter so unrelated daemon tests don’t eagerly pull AI SDK dependencies.
+- `native-default` startup seeding stayed intact; the daemon suite verified it still exists after startup.
+- Codex stayed a stub: the codex package’s own test still asserts the deterministic V1.x 501/not-implemented behavior.
+## 2026-05-29 — Task 2.3 MCP tool conversion
+- Added `packages/native-agent-runtime/src/mcp-tool-converter.ts` to turn MCP tool definitions into AI SDK `tools` entries without introducing a separate Native-only tool system.
+- `NativeAgentAdapter.runManaged()` now accepts MCP tools, converts them to AI SDK tools, and feeds them into `streamText()`.
+- Tool execution now emits `tool.call.requested` before execution and `tool.call.completed` after execution through `AdapterBridge`.
+- Tool failures are reported as failed tool completions and thrown so AI SDK can surface tool-error behavior while the overall run keeps going.
+- Learned that AI SDK helper imports can drag in hidden runtime dependencies; the final implementation uses plain tool objects to keep the package dependency-light.
+- Added model.api_call.* permission resources with default-allow evaluation.
+- Cached model permission decisions per run/model config and emitted permission.run_summary on terminal.
+- Extended the run detail permissions tab to render run-level permission summaries.
+- Added root zod devDependency so the AI SDK test path resolves cleanly in the workspace.

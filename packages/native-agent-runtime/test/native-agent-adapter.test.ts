@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const streamTextMock = vi.hoisted(() => vi.fn());
 const resolveProviderMock = vi.hoisted(() => vi.fn());
+const convertMcpToolsToAiSdkToolsMock = vi.hoisted(() => vi.fn());
+const permissionCheckMock = vi.hoisted(() => vi.fn());
 
 vi.mock("ai", () => ({
   streamText: streamTextMock
@@ -11,13 +13,20 @@ vi.mock("../src/provider-registry.ts", () => ({
   resolveProvider: resolveProviderMock
 }));
 
+vi.mock("../src/mcp-tool-converter.ts", () => ({
+  convertMcpToolsToAiSdkTools: convertMcpToolsToAiSdkToolsMock
+}));
+
 let NativeAgentAdapter: typeof import("../src/native-agent-adapter.ts").NativeAgentAdapter;
 
 beforeEach(async () => {
   streamTextMock.mockReset();
   resolveProviderMock.mockReset();
+  convertMcpToolsToAiSdkToolsMock.mockReset();
+  permissionCheckMock.mockReset();
   const model = { id: "resolved-model" };
   resolveProviderMock.mockReturnValue(model);
+  convertMcpToolsToAiSdkToolsMock.mockReturnValue({});
   ({ NativeAgentAdapter } = await import("../src/native-agent-adapter.ts"));
 });
 
@@ -25,29 +34,72 @@ describe("NativeAgentAdapter", () => {
   it("streams text, forwards tool calls, and maps cost usage", async () => {
     const publish = vi.fn();
     const lifecycle = createLifecycle();
+    permissionCheckMock.mockReturnValue({ status: "allow", reason: "default_allow" });
     const adapter = new NativeAgentAdapter({
       database: createDatabaseStub(),
       eventBus: { publish },
       lifecycle: lifecycle as never,
+      permissions: { check: permissionCheckMock } as never,
       modelConfig: { provider: "openai", model: "gpt-4o", base_url: null, api_key_ref: null },
       apiKey: "test-key"
     });
 
     streamTextMock.mockReturnValue({
       fullStream: asyncGenerator([
-        { type: "text-delta", text: "Hello " },
-        { type: "tool-call", toolCallId: "tool-1", toolName: "room.list_tasks", input: { roomId: "room-1" } },
-        { type: "tool-result", toolCallId: "tool-1", output: { ok: true } }
+        { type: "text-delta", text: "Hello " }
       ]),
       usage: Promise.resolve({ inputTokens: 120, outputTokens: 45, inputTokenDetails: { cacheReadTokens: 12 } })
     });
 
     await adapter.runManaged(runRow());
 
+    expect(permissionCheckMock).toHaveBeenCalledTimes(1);
     expect(resolveProviderMock).toHaveBeenCalledWith({ provider: "openai", model: "gpt-4o", base_url: null, api_key_ref: null }, "test-key");
-    expect(streamTextMock).toHaveBeenCalledWith(expect.objectContaining({ model: { id: "resolved-model" }, abortSignal: expect.any(AbortSignal) }));
+    expect(convertMcpToolsToAiSdkToolsMock).toHaveBeenCalled();
+    expect(streamTextMock).toHaveBeenCalledWith(expect.objectContaining({ model: { id: "resolved-model" }, abortSignal: expect.any(AbortSignal), tools: {} }));
     expect(publish).toHaveBeenCalledWith(expect.objectContaining({ type: "message.part.delta" }));
+    expect(publish).toHaveBeenCalledWith(expect.objectContaining({ type: "permission.run_summary" }));
     expect(lifecycle.complete).toHaveBeenCalledWith(null, "run-1", { inputTokens: 120, outputTokens: 45, cachedTokens: 12, costUsd: 0.001035, modelId: "gpt-4o" }, undefined);
+  });
+
+  it("denies before stream creation for model api calls", async () => {
+    const publish = vi.fn();
+    const lifecycle = createLifecycle();
+    permissionCheckMock.mockReturnValue({ status: "deny", reason: "stored rule" });
+    const adapter = new NativeAgentAdapter({
+      database: createDatabaseStub(),
+      eventBus: { publish },
+      lifecycle: lifecycle as never,
+      permissions: { check: permissionCheckMock } as never,
+      modelConfig: { provider: "anthropic", model: "claude-sonnet", base_url: null, api_key_ref: null }
+    });
+
+    await adapter.runManaged(runRow());
+
+    expect(permissionCheckMock).toHaveBeenCalledTimes(1);
+    expect(resolveProviderMock).not.toHaveBeenCalled();
+    expect(streamTextMock).not.toHaveBeenCalled();
+    expect(lifecycle.fail).toHaveBeenCalledWith(null, "run-1", "model_api_call_denied", "permission_denied", "model.api_call permission denied");
+    expect(publish).toHaveBeenCalledWith(expect.objectContaining({ type: "permission.run_summary" }));
+  });
+
+  it("caches the model permission decision per run and model config", async () => {
+    const publish = vi.fn();
+    const lifecycle = createLifecycle();
+    permissionCheckMock.mockReturnValue({ status: "allow", reason: "default_allow" });
+    streamTextMock.mockReturnValue({ fullStream: asyncGenerator([]), usage: Promise.resolve({ inputTokens: 0, outputTokens: 0 }) });
+    const adapter = new NativeAgentAdapter({
+      database: createDatabaseStub(),
+      eventBus: { publish },
+      lifecycle: lifecycle as never,
+      permissions: { check: permissionCheckMock } as never,
+      modelConfig: { provider: "openai", model: "gpt-4o", base_url: null, api_key_ref: null }
+    });
+
+    await adapter.runManaged(runRow());
+    await adapter.runManaged(runRow());
+
+    expect(permissionCheckMock).toHaveBeenCalledTimes(1);
   });
 
   it("aborts the active stream and finalizes as cancelled", async () => {
@@ -69,8 +121,11 @@ describe("NativeAgentAdapter", () => {
       database: createDatabaseStub(),
       eventBus: { publish },
       lifecycle: lifecycle as never,
+      permissions: { check: permissionCheckMock } as never,
       modelConfig: { provider: "openai", model: "gpt-4o", base_url: null, api_key_ref: null }
     });
+
+    permissionCheckMock.mockReturnValue({ status: "allow", reason: "default_allow" });
 
     const run = adapter.runManaged(runRow());
     await waitFor(() => abortSignal !== undefined);
@@ -93,8 +148,11 @@ describe("NativeAgentAdapter", () => {
       database: createDatabaseStub(),
       eventBus: { publish: vi.fn() },
       lifecycle: lifecycle as never,
+      permissions: { check: permissionCheckMock } as never,
       modelConfig: { provider: "openai", model: "gpt-4o", base_url: null, api_key_ref: null }
     });
+
+    permissionCheckMock.mockReturnValue({ status: "allow", reason: "default_allow" });
 
     await adapter.runManaged(runRow());
 

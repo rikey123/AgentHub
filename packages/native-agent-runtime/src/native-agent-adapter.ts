@@ -1,9 +1,12 @@
-import { streamText, type LanguageModel } from "ai";
+import { streamText, type LanguageModel, type ToolSet } from "ai";
 import type { EventBus } from "../../bus/src/index.ts";
 import type { AgentHubDatabase } from "../../db/src/index.ts";
 import { AdapterBridge, type AdapterArtifactFSBoundary, type RunLifecycleService, type RunRow } from "../../orchestrator/src/index.ts";
 import type { AgentAdapterManifest } from "../../protocol/src/index.ts";
+import type { PermissionEngine } from "../../permissions/src/index.ts";
 
+import { convertMcpToolsToAiSdkTools, type McpToolDefinition, type McpToolExecutor } from "./mcp-tool-converter.ts";
+import { roomMcpTools } from "./room-mcp-tools.ts";
 import { resolveProvider, type ModelConfigRow } from "./provider-registry.ts";
 
 export const nativeAgentManifest: AgentAdapterManifest = {
@@ -47,10 +50,13 @@ export type NativeAgentAdapterOptions = {
   readonly database: AgentHubDatabase;
   readonly eventBus: EventBus;
   readonly lifecycle: RunLifecycleService;
+  readonly permissions?: PermissionEngine;
   readonly modelConfig: ModelConfigRow;
   readonly apiKey?: string;
   readonly artifactFs?: AdapterArtifactFSBoundary;
-  readonly tools?: Record<string, unknown>;
+  readonly mcpTools?: readonly McpToolDefinition[];
+  readonly mcpToolExecutor?: McpToolExecutor;
+  readonly tools?: ToolSet;
   readonly now?: () => number;
 };
 
@@ -58,18 +64,26 @@ type ActiveRunState = {
   readonly controller: AbortController;
   readonly bridge: AdapterBridge;
   readonly run: RunRow;
+  readonly permissionSummary: PermissionDecisionSummary[];
+};
+
+type PermissionDecisionSummary = {
+  readonly resource: { readonly type: "model.api_call"; readonly provider: string };
+  readonly decision: "allowed" | "denied" | "expired";
+  readonly modelConfigId: string;
 };
 
 export class NativeAgentAdapter {
   readonly manifest = nativeAgentManifest;
   private readonly now: () => number;
   private readonly activeRuns = new Map<string, ActiveRunState>();
+  private readonly permissionCache = new Map<string, { readonly decision: "allowed" | "denied" | "expired"; readonly summary: PermissionDecisionSummary }>();
 
   constructor(private readonly options: NativeAgentAdapterOptions) {
     this.now = options.now ?? Date.now;
   }
 
-  async runManaged(run: RunRow): Promise<void> {
+  async runManaged(run: RunRow, mcpTools: readonly McpToolDefinition[] = this.options.mcpTools ?? roomMcpTools): Promise<void> {
     const controller = new AbortController();
     const bridge = new AdapterBridge({
       runId: run.id,
@@ -86,27 +100,37 @@ export class NativeAgentAdapter {
       terminalEnabled: false,
       ...(this.options.artifactFs !== undefined ? { artifactFs: this.options.artifactFs } : {})
     });
-    this.activeRuns.set(run.id, { controller, bridge, run });
+    this.activeRuns.set(run.id, { controller, bridge, run, permissionSummary: [] });
 
     try {
+      const permission = this.checkModelPermission(run);
+      if (permission.decision !== "allowed") {
+        this.failWithPermissionDenied(run, permission.decision);
+        return;
+      }
+
       const providerModel = resolveProvider(this.options.modelConfig, this.options.apiKey) as LanguageModel;
+      const mcpToolSet = convertMcpToolsToAiSdkTools(
+        mcpTools,
+        this.options.mcpToolExecutor ?? (async (name: string, input: unknown) => ({ ok: false as const, error: { code: "tool_not_found", message: `No MCP executor configured for '${name}'`, details: input } })),
+        bridge
+      );
+      const tools = {
+        ...(this.options.tools ?? {}),
+        ...mcpToolSet
+      } satisfies ToolSet;
       const result = streamText({
         model: providerModel,
         prompt: `Run ${run.id} for agent ${run.agent_id}`,
         abortSignal: controller.signal,
-        ...(this.options.tools !== undefined ? { tools: this.options.tools as never } : {})
+        tools
       });
 
-      const assistantMessageId = `msg_${run.id}`;
       for await (const chunk of result.fullStream) {
         if (chunk.type === "text-delta") {
           const delta = chunk.text;
           if (delta.length === 0) continue;
-          bridge.handle({ type: "message.part.delta", messageId: assistantMessageId, delta });
-        } else if (chunk.type === "tool-call") {
-          bridge.handle({ type: "tool.call.requested", toolCallId: chunk.toolCallId, name: chunk.toolName, input: chunk.input ?? {} });
-        } else if (chunk.type === "tool-result") {
-          bridge.handle({ type: "tool.call.completed", toolCallId: chunk.toolCallId, output: chunk.output, ok: true });
+          bridge.handle({ type: "message.part.delta", messageId: `msg_${run.id}`, delta });
         }
       }
 
@@ -120,6 +144,7 @@ export class NativeAgentAdapter {
       }
       this.options.lifecycle.fail(null, run.id, "native_agent_runtime_error", classifyFailureClass(error), error instanceof Error ? error.message : String(error));
     } finally {
+      this.publishPermissionSummary(run.id);
       this.activeRuns.delete(run.id);
     }
   }
@@ -129,6 +154,52 @@ export class NativeAgentAdapter {
     if (active === undefined) return;
     this.options.lifecycle.markCancelling(null, runId);
     active.controller.abort(new DOMException("Cancelled", "AbortError"));
+  }
+
+  private checkModelPermission(run: RunRow): { readonly decision: "allowed" | "denied" | "expired" } {
+    const cacheKey = `${run.id}:${this.options.modelConfig.provider}`;
+    const cached = this.permissionCache.get(cacheKey);
+    if (cached) {
+      const active = this.activeRuns.get(run.id);
+      if (active) active.permissionSummary.push(cached.summary);
+      return { decision: cached.decision };
+    }
+
+    const resource = { type: "model.api_call", provider: this.options.modelConfig.provider as "openai" | "anthropic" | "google" | "openai-compatible" | "ollama" };
+    const decided = this.options.permissions?.check({
+      workspaceId: run.workspace_id,
+      roomId: run.room_id ?? undefined,
+      agentId: run.agent_id ?? undefined,
+      runId: run.id,
+      resource
+    }) ?? { status: "allow", reason: "default_allow" };
+
+    const decision = decided.status === "allow" ? "allowed" : decided.status === "deny" ? "denied" : "expired";
+    const summary: PermissionDecisionSummary = { resource, decision, modelConfigId: this.options.modelConfig.model };
+    this.permissionCache.set(cacheKey, { decision, summary });
+    const active = this.activeRuns.get(run.id);
+    if (active) active.permissionSummary.push(summary);
+    return { decision };
+  }
+
+  private failWithPermissionDenied(run: RunRow, decision: "denied" | "expired"): void {
+    this.options.lifecycle.fail(null, run.id, "model_api_call_denied", decision === "denied" ? "permission_denied" : "permission_expired", "model.api_call permission denied");
+  }
+
+  private publishPermissionSummary(runId: string): void {
+    const active = this.activeRuns.get(runId);
+    if (!active || active.permissionSummary.length === 0) return;
+    this.options.eventBus.publish({
+      id: `permission-summary-${runId}`,
+      type: "permission.run_summary",
+      schemaVersion: 1,
+      workspaceId: active.run.workspace_id,
+      ...(active.run.room_id !== null ? { roomId: active.run.room_id } : {}),
+      ...(active.run.agent_id !== null ? { agentId: active.run.agent_id } : {}),
+      runId,
+      payload: { runId, decisions: active.permissionSummary },
+      createdAt: this.now()
+    });
   }
 }
 

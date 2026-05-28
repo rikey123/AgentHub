@@ -92,6 +92,10 @@ describe("PermissionEngine", () => {
     expect(currentDb().sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'permission.requested'").get()).toMatchObject({ count: 2 });
   });
 
+  it("defaults model api call resources to allow", () => {
+    expect(currentEngine().check({ workspaceId: "ws_1", profileId: "builder-strict", resource: { type: "model.api_call", provider: "openai" } })).toMatchObject({ status: "allow" });
+  });
+
   it("does not start normal timeout for queued requests until they are presented", () => {
     const first = currentEngine().check({ workspaceId: "ws_1", adapterSessionId: "sess_queue", idempotencyKey: "tc_first", profileId: "builder-strict", resource: { type: "shell", command: "npm install" } });
     const second = currentEngine().check({ workspaceId: "ws_1", adapterSessionId: "sess_queue", idempotencyKey: "tc_second", profileId: "builder-strict", resource: { type: "shell", command: "git push origin main" } });

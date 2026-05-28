@@ -6,7 +6,7 @@ import type { AdapterArtifactFSBoundary, ReclaimAdapter, RoomMcpServer, RunLifec
 import type { CommandBus, EventBus } from "@agenthub/bus";
 import type { PermissionEngine } from "@agenthub/permissions";
 
-export type RuntimeAdapterId = "mock" | "claude-code" | "opencode";
+export type RuntimeAdapterId = "mock" | "claude-code" | "opencode" | "native";
 
 export type AdapterRegistryOptions = {
   readonly database: AgentHubDatabase;
@@ -20,6 +20,7 @@ export type AdapterRegistryOptions = {
   readonly mockAdapter?: MockAdapterManager;
   readonly claudeAdapter?: WarmableManagedAdapter;
   readonly opencodeAdapter?: WarmableManagedAdapter;
+  readonly nativeAdapter?: NativeManagedAdapter;
   readonly adapterCommands?: {
     readonly claude?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv };
     readonly opencode?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv };
@@ -31,16 +32,32 @@ type WarmableManagedAdapter = Pick<ClaudeCodeACPAdapter, "runManaged" | "cancelM
   readonly debugSession?: ClaudeCodeACPAdapter["debugSession"];
 };
 
+type NativeManagedAdapter = Pick<NativeAgentAdapter, "runManaged" | "cancelManagedRun">;
+type NativeAgentAdapter = {
+  readonly runManaged: (run: RunRow) => Promise<void>;
+  readonly cancelManagedRun: (runId: string) => Promise<void>;
+  readonly disposeAllRuns?: () => void;
+};
+
+type ModelConfigRow = {
+  readonly provider: string;
+  readonly model: string;
+  readonly base_url?: string | null;
+  readonly api_key_ref?: string | null;
+};
+
 export class AdapterRegistry {
   readonly mockAdapter: MockAdapterManager;
   private readonly runAdapters = new Map<string, RuntimeAdapterId>();
   private claudeAdapter: WarmableManagedAdapter | undefined;
   private opencodeAdapter: WarmableManagedAdapter | undefined;
+  private nativeAdapter: NativeManagedAdapter | undefined;
 
   constructor(private readonly options: AdapterRegistryOptions) {
     this.mockAdapter = options.mockAdapter ?? new MockAdapterManager({ database: options.database, eventBus: options.eventBus, lifecycle: options.lifecycle, ...(options.artifactFs !== undefined ? { artifactFs: options.artifactFs } : {}), ...(options.now !== undefined ? { now: options.now } : {}) });
     this.claudeAdapter = options.claudeAdapter;
     this.opencodeAdapter = options.opencodeAdapter;
+    this.nativeAdapter = options.nativeAdapter;
   }
 
   async runAgent(run: RunRow): Promise<void> {
@@ -52,6 +69,10 @@ export class AdapterRegistry {
     }
     if (adapterId === "opencode") {
       await this.opencode().runManaged(run);
+      return;
+    }
+    if (adapterId === "native") {
+      await this.native().then((adapter) => adapter.runManaged(run));
       return;
     }
     await this.mockAdapter.runAgent(run);
@@ -70,6 +91,7 @@ export class AdapterRegistry {
     for (const row of rows) {
       const adapterId = this.classify(row.adapter_id, row.agent_id);
       if (adapterId === "mock") continue;
+      if (adapterId === "native") continue;
       const sessionId = this.warmSessionId(adapterId, roomId, row.agent_id);
       try {
         const workDir = row.root_path ?? process.cwd();
@@ -102,6 +124,10 @@ export class AdapterRegistry {
       await this.opencode().cancelManagedRun(runId);
       return;
     }
+    if (adapterId === "native") {
+      await this.native().then((adapter) => adapter.cancelManagedRun(runId));
+      return;
+    }
     this.mockAdapter.cancelRun(runId);
   }
 
@@ -119,6 +145,8 @@ export class AdapterRegistry {
   disposeAll(): void {
     this.claudeAdapter?.disposeAllSessions();
     this.opencodeAdapter?.disposeAllSessions();
+    this.nativeAdapter?.disposeAllRuns?.();
+    this.nativeAdapter = undefined;
     this.options.database.sqlite.prepare("UPDATE room_participants SET adapter_session_id = NULL WHERE adapter_session_id IS NOT NULL").run();
   }
 
@@ -165,6 +193,33 @@ export class AdapterRegistry {
     return this.opencodeAdapter;
   }
 
+  private async native(): Promise<NativeManagedAdapter> {
+    this.nativeAdapter ??= new (await import("../../../native-agent-runtime/src/native-agent-adapter.ts")).NativeAgentAdapter({
+      database: this.options.database,
+      eventBus: this.options.eventBus,
+      lifecycle: this.options.lifecycle,
+      modelConfig: this.nativeModelConfig(),
+      ...(this.options.artifactFs !== undefined ? { artifactFs: this.options.artifactFs } : {}),
+      ...(this.options.now !== undefined ? { now: this.options.now } : {})
+    } as never);
+    return this.nativeAdapter;
+  }
+
+  private nativeModelConfig(): ModelConfigRow {
+    const row = this.options.database.sqlite
+      .prepare(
+        `SELECT mc.provider AS provider, mc.model AS model, mc.base_url AS base_url, mc.api_key_ref AS api_key_ref
+         FROM room_participants rp
+         JOIN agent_bindings ab ON ab.id = rp.agent_binding_id
+         JOIN model_configs mc ON mc.id = ab.model_config_id
+         WHERE rp.adapter_id = 'native' AND rp.participant_type = 'agent' AND rp.agent_binding_id IS NOT NULL
+         ORDER BY rp.joined_at ASC LIMIT 1`
+      )
+      .get() as ModelConfigRow | undefined;
+    if (row !== undefined) return row;
+    return { provider: "ollama", model: "native-default", base_url: "http://localhost:11434/v1", api_key_ref: null };
+  }
+
   private clearWarmSession(input: { readonly roomId: string; readonly agentId: string; readonly adapterSessionId: string }): void {
     this.options.database.sqlite
       .prepare("UPDATE room_participants SET adapter_session_id = NULL WHERE room_id = ? AND participant_id = ? AND participant_type = 'agent' AND adapter_session_id = ?")
@@ -195,6 +250,7 @@ export class AdapterRegistry {
     if (adapterId !== null) {
       if (adapterId === "claude-code" || adapterId.startsWith("claude-code-")) return "claude-code";
       if (adapterId === "opencode" || adapterId.startsWith("opencode-")) return "opencode";
+      if (adapterId === "native" || adapterId.startsWith("native-")) return "native";
       if (adapterId === "mock" || adapterId.startsWith("mock-")) return "mock";
     }
     // Fall back to agent_profiles lookup if we were given a run.adapter_id that didn't match.
@@ -203,6 +259,7 @@ export class AdapterRegistry {
     if (profileId !== null && profileId !== undefined) {
       if (profileId === "claude-code" || profileId.startsWith("claude-code-")) return "claude-code";
       if (profileId === "opencode" || profileId.startsWith("opencode-")) return "opencode";
+      if (profileId === "native" || profileId.startsWith("native-")) return "native";
     }
     return "mock";
   }

@@ -441,6 +441,21 @@ class Projector {
         }
         break;
       }
+      case "permission.run_summary": {
+        if (payload && typeof payload.runId === "string" && Array.isArray(payload.decisions)) {
+          room = {
+            ...room,
+            runs: room.runs.map((r) =>
+              r.id === payload.runId
+                ? { ...r, permissionSummary: payload.decisions as RoomViewModel["runs"][number]["permissionSummary"] }
+                : r
+            )
+          };
+          this.rooms.set(roomId, room);
+          changed = true;
+        }
+        break;
+      }
       case "intervention.requested": {
         if (payload && typeof payload.interventionId === "string") {
           const intervention: InterventionViewModel = {
