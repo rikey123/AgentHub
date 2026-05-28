@@ -39,22 +39,22 @@ export function migrateAgentProfilesToV10(database: AgentHubDatabase, now = Date
   const modelConfigIdByKey = new Map<string, string>();
   const insertRole = database.sqlite.prepare(
     `INSERT INTO roles (
-      id, workspace_id, name, description, prompt, capabilities, permission_profile_id, is_builtin, source_path, version, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`
+      id, workspace_id, name, avatar, description, prompt, capabilities, default_permission_profile_id, tags, is_builtin, source_path, version, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`
   );
   const insertRuntime = database.sqlite.prepare(
     `INSERT INTO runtimes (
-      id, workspace_id, kind, name, command, args, env, detected_at, version, status, manifest, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)`
+      id, workspace_id, kind, name, command, args, env, detected_at, detected_path, detected_version, supported_caps, version, status, manifest_json, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, '[]', NULL, NULL, ?, ?, ?)`
   );
   const insertModelConfig = database.sqlite.prepare(
     `INSERT INTO model_configs (
-      id, workspace_id, provider, model, base_url, api_key_ref, api_key_fingerprint, profile, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)`
+      id, workspace_id, name, provider, model, base_url, api_key_ref, api_key_fingerprint, temperature, max_tokens, reasoning, extra, profile, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)`
   );
   const insertBinding = database.sqlite.prepare(
     `INSERT INTO agent_bindings (
-      id, workspace_id, role_id, runtime_id, model_config_id, name, created_at, updated_at
+      id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
   );
   const updateRoomParticipantBinding = database.sqlite.prepare(
@@ -80,12 +80,12 @@ export function migrateAgentProfilesToV10(database: AgentHubDatabase, now = Date
       runtimeIdByKey.set(key, row.id);
       return row.id;
     }
-    insertRuntime.run(key, workspaceId, adapterId, adapterId, now, now);
+    insertRuntime.run(key, workspaceId, adapterId, adapterId, "{}", now, now);
     runtimeIdByKey.set(key, key);
     return key;
   };
 
-  const resolveModelConfigId = (workspaceId: string | null, provider: string, model: string): string => {
+  const resolveModelConfigId = (workspaceId: string | null, provider: string, model: string, name: string): string => {
     const key = `${workspaceId ?? "global"}:${provider}:${model}`;
     const existing = modelConfigIdByKey.get(key);
     if (existing !== undefined) return existing;
@@ -96,7 +96,7 @@ export function migrateAgentProfilesToV10(database: AgentHubDatabase, now = Date
       modelConfigIdByKey.set(key, row.id);
       return row.id;
     }
-    insertModelConfig.run(key, workspaceId, provider, model, now, now);
+    insertModelConfig.run(key, workspaceId, name, provider, model, now, now);
     modelConfigIdByKey.set(key, key);
     return key;
   };
@@ -105,17 +105,19 @@ export function migrateAgentProfilesToV10(database: AgentHubDatabase, now = Date
     for (const profile of profiles) {
       const runtimeId = resolveRuntimeId(profile.workspace_id, profile.adapter_id);
       const modelConfigId = profile.provider !== null && profile.model !== null
-        ? resolveModelConfigId(profile.workspace_id, profile.provider, profile.model)
+        ? resolveModelConfigId(profile.workspace_id, profile.provider, profile.model, profile.name)
         : null;
 
       insertRole.run(
         profile.id,
         profile.workspace_id,
         profile.name,
+        profile.avatar,
         profile.description,
         profile.role_prompt,
         profile.capabilities,
         profile.permission_profile_id,
+        null,
         profile.source_path,
         profile.version,
         profile.created_at,
@@ -127,7 +129,7 @@ export function migrateAgentProfilesToV10(database: AgentHubDatabase, now = Date
         profile.id,
         runtimeId,
         modelConfigId,
-        profile.name,
+        profile.permission_profile_id,
         profile.created_at,
         profile.updated_at
       );

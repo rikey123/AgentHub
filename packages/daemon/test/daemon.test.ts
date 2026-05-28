@@ -230,7 +230,7 @@ describe("daemon M1.4 composition", () => {
   });
 
   it("resolves legacy agentProfileId room creation inputs to migrated bindings", async () => {
-    daemon.database.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, ?, ?, ?)").run("ap_legacy", "default-workspace", "role_builder", "runtime_claude", "Legacy Binding", 1, 1);
+    daemon.database.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, ?, ?, ?)").run("ap_legacy", "default-workspace", "role_builder", "runtime_claude", "Legacy Binding", 1, 1);
 
     const response = await fetch(`${baseUrl}/rooms`, {
       method: "POST",

@@ -88,8 +88,11 @@ const drizzleSmokeRows = {
   roles: {
     id: "role_drizzle",
     name: "Builder",
+    avatar: "🧱",
     prompt: "Build",
     capabilities: "[]",
+    defaultPermissionProfileId: "pp_drizzle",
+    tags: "[]",
     isBuiltin: 0,
     createdAt: 1,
     updatedAt: 1
@@ -98,13 +101,20 @@ const drizzleSmokeRows = {
     id: "runtime_drizzle",
     kind: "native",
     name: "Native",
+    supportedCaps: "[]",
+    manifestJson: "{}",
     createdAt: 1,
     updatedAt: 1
   },
   modelConfigs: {
     id: "model_config_drizzle",
+    name: "Default",
     provider: "openai",
     model: "gpt-4.1",
+    temperature: 0.2,
+    maxTokens: 1024,
+    reasoning: "{}",
+    extra: "{}",
     createdAt: 1,
     updatedAt: 1
   },
@@ -112,7 +122,7 @@ const drizzleSmokeRows = {
     id: "binding_drizzle",
     roleId: "role_drizzle",
     runtimeId: "runtime_drizzle",
-    name: "Default binding",
+    overridePermissionProfileId: "pp_drizzle",
     createdAt: 1,
     updatedAt: 1
   },
@@ -168,7 +178,10 @@ const drizzleSmokeRows = {
   taskActivities: {
     id: "activity_drizzle",
     taskId: "task_drizzle",
-    activityType: "created",
+    kind: "comment",
+    byKind: "user",
+    by: "user_drizzle",
+    payload: "{}",
     createdAt: 1
   },
   runs: {
@@ -481,21 +494,21 @@ describe("SQLite pragmas and migrations", () => {
       expect.arrayContaining(["assignee_role_id", "assignee_binding_id", "delegation_chain", "expects_review"])
     );
     expect(columnNames("tasks").filter((name) => name === "priority")).toHaveLength(1);
-    expect(columnNames("roles")).toEqual(expect.arrayContaining(["is_builtin", "permission_profile_id"]));
-    expect(columnNames("runtimes")).toEqual(expect.arrayContaining(["kind", "manifest", "status"]));
-    expect(columnNames("model_configs")).toEqual(expect.arrayContaining(["api_key_ref", "api_key_fingerprint", "profile"]));
+    expect(columnNames("roles")).toEqual(expect.arrayContaining(["avatar", "default_permission_profile_id", "is_builtin", "tags"]));
+    expect(columnNames("runtimes")).toEqual(expect.arrayContaining(["detected_path", "detected_version", "kind", "manifest_json", "status", "supported_caps"]));
+    expect(columnNames("model_configs")).toEqual(expect.arrayContaining(["api_key_ref", "api_key_fingerprint", "name", "profile", "temperature", "max_tokens", "reasoning", "extra"]));
     expect(columnNames("role_drafts")).toEqual(
-      expect.arrayContaining(["job_id", "description", "model_config_id", "draft_json", "status", "error", "expires_at"])
+      expect.arrayContaining(["job_id", "description", "model_config_id", "draft_json", "status", "failure_reason", "expires_at"])
     );
     expect(columnNames("task_activities")).toEqual(
-      expect.arrayContaining(["task_id", "activity_type", "actor_id", "actor_type", "payload"])
+      expect.arrayContaining(["task_id", "kind", "by_kind", "by", "payload"])
     );
     expect(indexNames("agent_bindings")).toEqual(
       expect.arrayContaining(["idx_agent_bindings_role", "idx_agent_bindings_runtime"])
     );
     expect(indexNames("role_drafts")).toContain("idx_role_drafts_expires_at");
     expect(indexSql("idx_role_drafts_expires_at")).toContain("expires_at");
-    expect(indexNames("task_activities")).toContain("idx_task_activities_task_id");
+    expect(indexNames("task_activities")).toContain("idx_task_activities_task_created");
 
     const modelConfigApiKeyRef = tableInfo("model_configs").find((column) => column.name === "api_key_ref");
     expect(modelConfigApiKeyRef?.notnull).toBe(0);

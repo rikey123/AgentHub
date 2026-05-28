@@ -49,3 +49,11 @@
 - Verified `pnpm.cmd visibility:check` still passes and confirms registered visibility for durable events.
 - Proved the negative path by adding a temporary scanned fixture containing `task.updated`; `events:check` rejected it with a source-location error, then the fixture was removed to keep the repo clean.
 - `events:check` only scans `packages/` and `apps/`, so rejection proofs must live in those trees to be detected.
+
+## [2026-05-29T01:48:00Z] Task 0.1 schema drift fix
+- Re-aligned `packages/db/migrations/0014_v10.sql` and `packages/db/src/schema.ts` with the V1.0 specs for roles, runtimes, model configs, task activities, and role drafts.
+- Added the missing workspace/name indexes for roles, runtimes, and model configs so the migration matches the spec SQL exactly.
+- Kept legacy compatibility where requested: `version` and `status` remain on `runtimes`, `profile` remains on `model_configs`, and the legacy `agent_profiles` table is untouched.
+- `task_activities` now uses the spec column names (`kind`, `by_kind`, `by`) and the task activity index name matches the spec.
+- The daemon data migration had one leftover `agent_bindings.name` seed path; it now uses `override_permission_profile_id`.
+- The daemon test fixture for migrated bindings also needed the renamed column and now passes.

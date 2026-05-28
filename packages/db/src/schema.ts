@@ -1,4 +1,4 @@
-import { integer, primaryKey, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const workspaces = sqliteTable("workspaces", {
   id: text("id").primaryKey(),
@@ -61,16 +61,18 @@ export const roles = sqliteTable("roles", {
   id: text("id").primaryKey(),
   workspaceId: text("workspace_id"),
   name: text("name").notNull(),
+  avatar: text("avatar"),
   description: text("description"),
   prompt: text("prompt").notNull(),
   capabilities: text("capabilities").notNull().default("[]"),
-  permissionProfileId: text("permission_profile_id"),
+  defaultPermissionProfileId: text("default_permission_profile_id"),
+  tags: text("tags"),
   isBuiltin: integer("is_builtin").notNull().default(0),
   sourcePath: text("source_path"),
   version: text("version"),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull()
-});
+}, (table) => [index("idx_roles_workspace").on(table.workspaceId, table.name)]);
 
 export const runtimes = sqliteTable("runtimes", {
   id: text("id").primaryKey(),
@@ -81,25 +83,33 @@ export const runtimes = sqliteTable("runtimes", {
   args: text("args"),
   env: text("env"),
   detectedAt: integer("detected_at"),
+  detectedPath: text("detected_path"),
+  detectedVersion: text("detected_version"),
+  supportedCaps: text("supported_caps").notNull().default("[]"),
   version: text("version"),
   status: text("status"),
-  manifest: text("manifest"),
+  manifestJson: text("manifest_json").notNull(),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull()
-});
+}, (table) => [index("idx_runtimes_workspace_kind").on(table.workspaceId, table.kind)]);
 
 export const modelConfigs = sqliteTable("model_configs", {
   id: text("id").primaryKey(),
   workspaceId: text("workspace_id"),
+  name: text("name").notNull(),
   provider: text("provider").notNull(),
   model: text("model").notNull(),
   baseUrl: text("base_url"),
   apiKeyRef: text("api_key_ref"),
   apiKeyFingerprint: text("api_key_fingerprint"),
+  temperature: real("temperature"),
+  maxTokens: integer("max_tokens"),
+  reasoning: text("reasoning"),
+  extra: text("extra"),
   profile: text("profile"),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull()
-});
+}, (table) => [index("idx_model_configs_workspace").on(table.workspaceId, table.provider)]);
 
 export const agentBindings = sqliteTable("agent_bindings", {
   id: text("id").primaryKey(),
@@ -107,7 +117,7 @@ export const agentBindings = sqliteTable("agent_bindings", {
   roleId: text("role_id").notNull(),
   runtimeId: text("runtime_id").notNull(),
   modelConfigId: text("model_config_id"),
-  name: text("name"),
+  overridePermissionProfileId: text("override_permission_profile_id"),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull()
 });
@@ -218,7 +228,7 @@ export const roleDrafts = sqliteTable("role_drafts", {
   modelConfigId: text("model_config_id").notNull(),
   draftJson: text("draft_json"),
   status: text("status").notNull(),
-  error: text("error"),
+  failureReason: text("failure_reason"),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
   expiresAt: integer("expires_at").notNull()
@@ -227,12 +237,12 @@ export const roleDrafts = sqliteTable("role_drafts", {
 export const taskActivities = sqliteTable("task_activities", {
   id: text("id").primaryKey(),
   taskId: text("task_id").notNull(),
-  activityType: text("activity_type").notNull(),
-  actorId: text("actor_id"),
-  actorType: text("actor_type"),
-  payload: text("payload").notNull().default("{}"),
+  kind: text("kind").notNull(),
+  byKind: text("by_kind").notNull(),
+  by: text("by").notNull(),
+  payload: text("payload"),
   createdAt: integer("created_at").notNull()
-});
+}, (table) => [index("idx_task_activities_task_created").on(table.taskId, table.createdAt)]);
 
 export const runs = sqliteTable("runs", {
   id: text("id").primaryKey(),
