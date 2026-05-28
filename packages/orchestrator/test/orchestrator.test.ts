@@ -334,6 +334,51 @@ describe("TaskService and RoomMcpServer", () => {
     expect(eventTypes()).toEqual(expect.arrayContaining(["task.created", "task.assigned"]));
   });
 
+  test("CreateTask resolves assignee role to bound room participant and keeps compatibility agent id", () => {
+    seedRoom("room_1", "agent_1");
+    currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO roles (id, workspace_id, name, prompt, capabilities, is_builtin, created_at, updated_at) VALUES ('role_builder', 'ws_1', 'Builder', '', '[]', 0, ?, ?)").run(now, now);
+    currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES ('binding_builder', 'ws_1', 'role_builder', 'runtime_1', NULL, NULL, ?, ?)").run(now, now);
+    currentDatabase().sqlite.prepare("UPDATE room_participants SET agent_binding_id = 'binding_builder' WHERE room_id = 'room_1' AND participant_id = 'agent_1'").run();
+    const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
+
+    const result = service.create({
+      roomId: "room_1",
+      title: "Role bound task",
+      assigneeRoleId: "role_builder",
+      expectsReview: true,
+      delegationChain: [{ byRoleId: "role_leader", atRunId: "run_1", atTimestamp: now }],
+      createdBy: "user"
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    if (!result.ok) throw new Error("expected task create success");
+    expect(currentDatabase().sqlite.prepare("SELECT assignee_role_id, assignee_binding_id, assignee_agent_id, expects_review, delegation_chain FROM tasks WHERE id = ?").get(result.data.taskId)).toMatchObject({
+      assignee_role_id: "role_builder",
+      assignee_binding_id: "binding_builder",
+      assignee_agent_id: "agent_1",
+      expects_review: 1,
+      delegation_chain: JSON.stringify([{ byRoleId: "role_leader", atRunId: "run_1", atTimestamp: now }])
+    });
+    expect(result.data.task).toMatchObject({
+      assigneeRoleId: "role_builder",
+      assigneeBindingId: "binding_builder",
+      assigneeAgentId: "agent_1",
+      expectsReview: true,
+      delegationChain: [{ byRoleId: "role_leader", atRunId: "run_1", atTimestamp: now }]
+    });
+  });
+
+  test("CreateTask rejects unbound assignee role", () => {
+    seedRoom("room_1", "agent_1");
+    currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO roles (id, workspace_id, name, prompt, capabilities, is_builtin, created_at, updated_at) VALUES ('role_unbound', 'ws_1', 'Unbound', '', '[]', 0, ?, ?)").run(now, now);
+    const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
+
+    const result = service.create({ roomId: "room_1", title: "Role missing binding", assigneeRoleId: "role_unbound", createdBy: "user" });
+
+    expect(result).toMatchObject({ ok: false, error: { code: "validation_failed" } });
+    expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM tasks WHERE title = 'Role missing binding'").get()).toMatchObject({ count: 0 });
+  });
+
   test("CompleteTask rejects terminal and inactive task states", () => {
     seedRoom("room_1", "agent_1");
     const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });

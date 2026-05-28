@@ -19,3 +19,10 @@
 - REJECTED Wave 3 despite passing tests/checks: AdapterRegistry.native() does not pass permissionEngine into NativeAgentAdapter, so real daemon-dispatched native runs default allow for model.api_call.
 - Permission cache is keyed by runId+provider and emits model name as modelConfigId; requirement is runId+modelConfigId with actual model config id.
 - mcp-tool-converter emits failed tool completion twice and throws; non-fatal MCP tool errors should return an error result without crashing the run.
+
+## 2026-05-29 — Wave 4 Oracle review
+
+- Review verdict written to `.sisyphus/evidence/wave-4-oracle-review.md`: REJECT.
+- Verification commands passed: `pnpm.cmd test -- packages/daemon apps/web` and `pnpm.cmd check:all`.
+- Key blocker: daemon returns completed role generation drafts as `draftJson`, but `RoleGeneratorModal.normalizeRoleGenerationJob` only reads `draft`, `roleDraft`, or `result`, so the real UI treats completed jobs as failure.
+- Secondary blocker: role generation failure path updates `role_drafts.status='failed'` and leaves the row, while the spec scenario expects failed jobs to be cleaned without generation events.

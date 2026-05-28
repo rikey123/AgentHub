@@ -5,19 +5,36 @@ import type { AgentHubDatabase } from "@agenthub/db";
 
 export type TaskStatus = "pending" | "in_progress" | "blocked" | "review" | "completed" | "cancelled";
 
+export type DelegationStep = {
+  readonly byRoleId: string;
+  readonly atRunId: string;
+  readonly atTimestamp: number;
+};
+
+type ResolvedRoleBinding = {
+  readonly id: string;
+  readonly role_id: string;
+  readonly participant_id: string;
+  readonly room_id: string;
+};
+
 export type TaskRow = {
   readonly id: string;
   readonly workspace_id: string;
   readonly room_id: string | null;
   readonly parent_task_id: string | null;
+  readonly delegation_chain: string | null;
   readonly title: string;
   readonly description: string | null;
   readonly status: TaskStatus;
   readonly assignee_agent_id: string | null;
+  readonly assignee_role_id: string | null;
+  readonly assignee_binding_id: string | null;
   readonly source_run_id: string | null;
   readonly source_message_id: string | null;
   readonly dependencies: string;
   readonly priority: string | null;
+  readonly expects_review: number;
   readonly due_at: number | null;
   readonly created_by: string | null;
   readonly created_at: number;
@@ -29,14 +46,18 @@ export type TaskView = {
   readonly workspaceId: string;
   readonly roomId: string;
   readonly parentTaskId?: string;
+  readonly delegationChain?: readonly DelegationStep[];
   readonly title: string;
   readonly description?: string;
   readonly status: TaskStatus;
   readonly assigneeAgentId?: string;
+  readonly assigneeRoleId?: string;
+  readonly assigneeBindingId?: string;
   readonly sourceRunId?: string;
   readonly sourceMessageId?: string;
   readonly dependencies: readonly string[];
   readonly priority?: string;
+  readonly expectsReview: boolean;
   readonly dueAt?: number;
   readonly createdBy?: string;
   readonly createdAt: number;
@@ -49,6 +70,10 @@ export type CreateTaskInput = {
   readonly parentTaskId?: string;
   readonly description?: string;
   readonly assigneeAgentId?: string;
+  readonly assigneeRoleId?: string;
+  readonly assigneeBindingId?: string;
+  readonly expectsReview?: boolean;
+  readonly delegationChain?: readonly DelegationStep[];
   readonly sourceRunId?: string;
   readonly sourceMessageId?: string;
   readonly dependencies?: readonly string[];
@@ -71,38 +96,54 @@ export class TaskService {
     const room = this.room(input.roomId);
     if (!room) return failed("not_found", `Room '${input.roomId}' not found`);
     if (input.assigneeAgentId !== undefined && !this.roomAgent(input.roomId, input.assigneeAgentId)) return failed("validation_failed", `Agent '${input.assigneeAgentId}' is not a room participant`);
+    const resolvedAssignee = input.assigneeRoleId !== undefined ? resolveRoleToBinding(this.options.database, input.roomId, input.assigneeRoleId) : undefined;
+    if (input.assigneeRoleId !== undefined && resolvedAssignee === null) return failed("validation_failed", `Role '${input.assigneeRoleId}' is not bound in room '${input.roomId}'`);
+    const assigneeBinding = resolvedAssignee ?? (input.assigneeBindingId !== undefined ? this.bindingInRoom(input.roomId, input.assigneeBindingId) : undefined);
+    if (input.assigneeBindingId !== undefined && assigneeBinding === undefined) return failed("validation_failed", `Binding '${input.assigneeBindingId}' is not a room participant in room '${input.roomId}'`);
+    if (resolvedAssignee !== undefined && input.assigneeBindingId !== undefined && resolvedAssignee.id !== input.assigneeBindingId) {
+      return failed("validation_failed", `Role '${input.assigneeRoleId}' is bound to '${resolvedAssignee.id}', not '${input.assigneeBindingId}'`);
+    }
+    const assigneeAgentId = input.assigneeAgentId ?? assigneeBinding?.participant_id ?? null;
     if (input.parentTaskId !== undefined && !this.task(input.parentTaskId)) return failed("not_found", `Task '${input.parentTaskId}' not found`);
     const now = this.options.now?.() ?? Date.now();
     const taskId = randomUUID();
     const dependencies = JSON.stringify(input.dependencies ?? []);
+    const delegationChain = input.delegationChain !== undefined ? JSON.stringify(input.delegationChain) : null;
+    const expectsReview = input.expectsReview ?? false;
     this.options.database.sqlite.transaction(() => {
       this.options.database.sqlite
         .prepare(
           `INSERT INTO tasks (
-            id, workspace_id, room_id, parent_task_id, title, description, status, assignee_agent_id,
-            source_run_id, source_message_id, dependencies, priority, due_at, created_by, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            id, workspace_id, room_id, parent_task_id, delegation_chain, title, description, status, assignee_agent_id,
+            assignee_role_id, assignee_binding_id, source_run_id, source_message_id, dependencies, priority, expects_review,
+            due_at, created_by, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           taskId,
           room.workspace_id,
           input.roomId,
           input.parentTaskId ?? null,
+          delegationChain,
           input.title,
           input.description ?? null,
-          input.assigneeAgentId ?? null,
+          "pending",
+          assigneeAgentId,
+          input.assigneeRoleId ?? null,
+          assigneeBinding?.id ?? input.assigneeBindingId ?? null,
           input.sourceRunId ?? null,
           input.sourceMessageId ?? null,
           dependencies,
           input.priority ?? null,
+          expectsReview ? 1 : 0,
           input.dueAt ?? null,
           input.createdBy,
           now,
           now
         );
-      this.options.eventBus.publish(taskEvent("task.created", room.workspace_id, input.roomId, taskId, { taskId, roomId: input.roomId, title: input.title, parentTaskId: input.parentTaskId, assigneeAgentId: input.assigneeAgentId, sourceRunId: input.sourceRunId, createdBy: input.createdBy }, now));
-      if (input.assigneeAgentId !== undefined) {
-        this.options.eventBus.publish(taskEvent("task.assigned", room.workspace_id, input.roomId, taskId, { taskId, prevAssignee: null, newAssignee: input.assigneeAgentId }, now));
+      this.options.eventBus.publish(taskEvent("task.created", room.workspace_id, input.roomId, taskId, { taskId, roomId: input.roomId, title: input.title, parentTaskId: input.parentTaskId, assigneeRoleId: input.assigneeRoleId, assigneeBindingId: assigneeBinding?.id ?? input.assigneeBindingId, assigneeAgentId, expectsReview, sourceRunId: input.sourceRunId, createdBy: input.createdBy }, now));
+      if (assigneeAgentId !== null) {
+        this.options.eventBus.publish(taskEvent("task.assigned", room.workspace_id, input.roomId, taskId, { taskId, prevAssignee: null, newAssignee: assigneeAgentId }, now));
       }
     })();
     const task = this.task(taskId);
@@ -155,6 +196,18 @@ export class TaskService {
     return this.options.database.sqlite.prepare("SELECT 1 FROM room_participants WHERE room_id = ? AND participant_id = ? AND participant_type = 'agent'").get(roomId, agentId) !== undefined;
   }
 
+  private bindingInRoom(roomId: string, bindingId: string): ResolvedRoleBinding | undefined {
+    return this.options.database.sqlite
+      .prepare(
+        `SELECT ab.id, ab.role_id, rp.participant_id, rp.room_id
+         FROM room_participants rp
+         INNER JOIN agent_bindings ab ON ab.id = rp.agent_binding_id
+         WHERE rp.room_id = ? AND ab.id = ? AND rp.participant_type = 'agent'
+         LIMIT 1`
+      )
+      .get(roomId, bindingId) as ResolvedRoleBinding | undefined;
+  }
+
   private rejectTransition<T = { readonly task: TaskView; readonly taskId: string }>(existing: TaskRow, nextStatus: TaskStatus, reason?: string): CommandResult<T> {
     const now = this.options.now?.() ?? Date.now();
     this.options.eventBus.publish(taskEvent("task.status.changed.rejected", existing.workspace_id, existing.room_id ?? "", existing.id, { taskId: existing.id, prevStatus: existing.status, nextStatus, ...(reason !== undefined ? { reason } : {}) }, now));
@@ -173,6 +226,10 @@ export function createCreateTaskHandler(service: TaskService): CommandHandler {
       ...(stringField(command, "parentTaskId") !== undefined ? { parentTaskId: stringField(command, "parentTaskId") as string } : {}),
       ...(stringField(command, "description") !== undefined ? { description: stringField(command, "description") as string } : {}),
       ...(stringField(command, "assigneeAgentId") !== undefined ? { assigneeAgentId: stringField(command, "assigneeAgentId") as string } : {}),
+      ...(stringField(command, "assigneeRoleId") !== undefined ? { assigneeRoleId: stringField(command, "assigneeRoleId") as string } : {}),
+      ...(stringField(command, "assigneeBindingId") !== undefined ? { assigneeBindingId: stringField(command, "assigneeBindingId") as string } : {}),
+      ...(booleanField(command, "expectsReview") !== undefined ? { expectsReview: booleanField(command, "expectsReview") as boolean } : {}),
+      ...(delegationChainField(command) !== undefined ? { delegationChain: delegationChainField(command) as readonly DelegationStep[] } : {}),
       ...(stringField(command, "sourceRunId") !== undefined ? { sourceRunId: stringField(command, "sourceRunId") as string } : {}),
       ...(stringField(command, "sourceMessageId") !== undefined ? { sourceMessageId: stringField(command, "sourceMessageId") as string } : {}),
       ...(dependenciesField(command) !== undefined ? { dependencies: dependenciesField(command) as readonly string[] } : {}),
@@ -226,14 +283,18 @@ function taskView(row: TaskRow): TaskView {
     workspaceId: row.workspace_id,
     roomId: row.room_id ?? "",
     ...(row.parent_task_id !== null ? { parentTaskId: row.parent_task_id } : {}),
+    ...(row.delegation_chain !== null ? { delegationChain: parseDelegationChain(row.delegation_chain) } : {}),
     title: row.title,
     ...(row.description !== null ? { description: row.description } : {}),
     status: row.status,
     ...(row.assignee_agent_id !== null ? { assigneeAgentId: row.assignee_agent_id } : {}),
+    ...(row.assignee_role_id !== null ? { assigneeRoleId: row.assignee_role_id } : {}),
+    ...(row.assignee_binding_id !== null ? { assigneeBindingId: row.assignee_binding_id } : {}),
     ...(row.source_run_id !== null ? { sourceRunId: row.source_run_id } : {}),
     ...(row.source_message_id !== null ? { sourceMessageId: row.source_message_id } : {}),
     dependencies: parseDependencies(row.dependencies),
     ...(row.priority !== null ? { priority: row.priority } : {}),
+    expectsReview: row.expects_review !== 0,
     ...(row.due_at !== null ? { dueAt: row.due_at } : {}),
     ...(row.created_by !== null ? { createdBy: row.created_by } : {}),
     createdAt: row.created_at,
@@ -258,6 +319,37 @@ function parseDependencies(value: string): readonly string[] {
   }
 }
 
+function parseDelegationChain(value: string): readonly DelegationStep[] {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is DelegationStep =>
+          typeof item === "object" &&
+          item !== null &&
+          typeof (item as { byRoleId?: unknown }).byRoleId === "string" &&
+          typeof (item as { atRunId?: unknown }).atRunId === "string" &&
+          typeof (item as { atTimestamp?: unknown }).atTimestamp === "number"
+        )
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+export function resolveRoleToBinding(database: AgentHubDatabase, roomId: string, roleId: string): ResolvedRoleBinding | null {
+  return (
+    database.sqlite
+    .prepare(
+      `SELECT ab.id, ab.role_id, rp.participant_id, rp.room_id
+       FROM room_participants rp
+       INNER JOIN agent_bindings ab ON ab.id = rp.agent_binding_id
+       WHERE rp.room_id = ? AND ab.role_id = ? AND rp.participant_type = 'agent'
+       LIMIT 1`
+    )
+    .get(roomId, roleId) as ResolvedRoleBinding | undefined
+  ) ?? null;
+}
+
 function dependenciesField(command: Command): readonly string[] | undefined {
   return Array.isArray(command.dependencies) && command.dependencies.every((item) => typeof item === "string") ? command.dependencies : undefined;
 }
@@ -270,6 +362,21 @@ function stringField(command: Command, key: string): string | undefined {
 function numberField(command: Command, key: string): number | undefined {
   const value = command[key];
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function booleanField(command: Command, key: string): boolean | undefined {
+  const value = command[key];
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function delegationChainField(command: Command): readonly DelegationStep[] | undefined {
+  const value = command.delegationChain;
+  if (!Array.isArray(value)) return undefined;
+  return value.every((item) => isDelegationStep(item)) ? (value as readonly DelegationStep[]) : undefined;
+}
+
+function isDelegationStep(value: unknown): value is DelegationStep {
+  return typeof value === "object" && value !== null && typeof (value as { byRoleId?: unknown }).byRoleId === "string" && typeof (value as { atRunId?: unknown }).atRunId === "string" && typeof (value as { atTimestamp?: unknown }).atTimestamp === "number";
 }
 
 function withoutUndefined(payload: Record<string, unknown>): Record<string, unknown> {

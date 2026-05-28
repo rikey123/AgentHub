@@ -232,6 +232,12 @@
 - Verification: `pnpm.cmd test -- apps/web` passes (45 files, 330 passed, 1 skipped). `@agenthub/web` build now has no settings-local errors but remains blocked by existing daemon/native-runtime TypeScript issues from Wave 3.
 - GitNexus MCP returned `Not connected` for required impact checks; recorded in evidence and kept scope limited to settings UI files.
 
+## [2026-05-29T07:09:12Z] Task 4.7 assignee resolve
+- `packages/orchestrator/src/task-service.ts` now carries the V1.0 task fields end-to-end: `assignee_role_id`, `assignee_binding_id`, `delegation_chain`, and `expects_review` are persisted and surfaced in `TaskRow`/`TaskView`.
+- Role delegation now resolves through room bindings before insert; unbound roles fail fast with `validation_failed` instead of creating a task without a concrete binding.
+- The legacy `assigneeAgentId` compatibility field remains populated from the resolved binding participant when available.
+- Verification passed: `pnpm.cmd test -- packages/orchestrator packages/daemon`.
+
 ## [2026-05-29T06:39:00Z] Task 3.9 settings and role generator test consolidation
 - Existing settings tests from tasks 3.1-3.8 already covered modal bootstrap, Roles/Runtimes/Models REST helper contracts, role generation save/cancel/failure normalization, deep links, EventSource-free flows, and fake API-key redaction after save.
 - Added only the missing daemon regression: generated role drafts get a seven-day expires_at, GC removes them after the boundary, polling returns 404, and no role.generation.* events are persisted.
