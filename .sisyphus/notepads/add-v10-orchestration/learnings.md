@@ -18,3 +18,9 @@
 - Confirmed `tasks.priority` already existed in `0004_runs_tasks.sql`, so the new migration intentionally did not add it again.
 - Updated `packages/db/src/schema.ts` and `packages/db/test/sqlite.test.ts` to cover the new tables, compatibility columns, and GC/index expectations.
 - Verified `pnpm.cmd test -- packages/db` and `pnpm.cmd schema:check` both pass.
+
+## [2026-05-29T00:??:??Z] Task 0.3
+- Extended `packages/protocol/src/events/registry.ts` with the 18 V1.0 events from the event-system delta: role/runtime/model_config/agent_binding/task.activity/task.delegation/team.dispatch/permission.run_summary.
+- Added the missing canonical categories to `EventCategory`: `role`, `runtime`, `model`, `binding`, and `team`.
+- Kept forbidden event types out of the registry; `task.updated` remains rejected by `EventBus` validation.
+- Added a regression test in `packages/bus/test/event-bus.test.ts` to prove `task.updated` throws `InvalidEventEnvelopeError`.

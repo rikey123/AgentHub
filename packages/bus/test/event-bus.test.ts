@@ -113,6 +113,21 @@ describe("EventBus", () => {
     expect(eventRowCount()).toBe(0);
   });
 
+  test("rejects forbidden task.updated publishes", () => {
+    const forbiddenType = ["task", "updated"].join(".");
+    expect(() =>
+      currentBus().publish({
+        id: "evt_task_updated",
+        type: forbiddenType,
+        schemaVersion: 1,
+        workspaceId: "ws_1",
+        taskId: "task_1",
+        payload: { taskId: "task_1" },
+        createdAt: 10
+      })
+    ).toThrow(InvalidEventEnvelopeError);
+  });
+
   test("propagates trace, causation, and correlation helper fields", () => {
     const parentResult = currentBus().publish({
       ...messageCreated("evt_parent", "room_1", "run_1"),
