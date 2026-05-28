@@ -21,12 +21,18 @@ const drizzleTables = [
   { exportName: "rooms", table: schema.rooms },
   { exportName: "roomParticipants", table: schema.roomParticipants },
   { exportName: "agentProfiles", table: schema.agentProfiles },
+  { exportName: "roles", table: schema.roles },
+  { exportName: "runtimes", table: schema.runtimes },
+  { exportName: "modelConfigs", table: schema.modelConfigs },
+  { exportName: "agentBindings", table: schema.agentBindings },
   { exportName: "agentPresence", table: schema.agentPresence },
   { exportName: "messages", table: schema.messages },
   { exportName: "messageParts", table: schema.messageParts },
   { exportName: "attachments", table: schema.attachments },
   { exportName: "events", table: schema.events },
   { exportName: "tasks", table: schema.tasks },
+  { exportName: "roleDrafts", table: schema.roleDrafts },
+  { exportName: "taskActivities", table: schema.taskActivities },
   { exportName: "runs", table: schema.runs },
   { exportName: "taskRuns", table: schema.taskRuns },
   { exportName: "contextItems", table: schema.contextItems },
@@ -79,6 +85,37 @@ const drizzleSmokeRows = {
     createdAt: 1,
     updatedAt: 1
   },
+  roles: {
+    id: "role_drizzle",
+    name: "Builder",
+    prompt: "Build",
+    capabilities: "[]",
+    isBuiltin: 0,
+    createdAt: 1,
+    updatedAt: 1
+  },
+  runtimes: {
+    id: "runtime_drizzle",
+    kind: "native",
+    name: "Native",
+    createdAt: 1,
+    updatedAt: 1
+  },
+  modelConfigs: {
+    id: "model_config_drizzle",
+    provider: "openai",
+    model: "gpt-4.1",
+    createdAt: 1,
+    updatedAt: 1
+  },
+  agentBindings: {
+    id: "binding_drizzle",
+    roleId: "role_drizzle",
+    runtimeId: "runtime_drizzle",
+    name: "Default binding",
+    createdAt: 1,
+    updatedAt: 1
+  },
   agentPresence: { roomId: "room_drizzle", agentId: "agent_drizzle", state: "observing", updatedAt: 1 },
   messages: {
     id: "msg_drizzle",
@@ -118,6 +155,21 @@ const drizzleSmokeRows = {
     dependencies: "[]",
     createdAt: 1,
     updatedAt: 1
+  },
+  roleDrafts: {
+    jobId: "job_drizzle",
+    description: "Generate a role",
+    modelConfigId: "model_config_drizzle",
+    status: "pending",
+    createdAt: 1,
+    updatedAt: 1,
+    expiresAt: 2
+  },
+  taskActivities: {
+    id: "activity_drizzle",
+    taskId: "task_drizzle",
+    activityType: "created",
+    createdAt: 1
   },
   runs: {
     id: "run_drizzle",
@@ -261,7 +313,8 @@ function applyAllMigrations(): void {
     "0010_auth.sql",
     "0011_bus_runtime.sql",
     "0012_v05.sql",
-    "0013_messages_pinned.sql"
+    "0013_messages_pinned.sql",
+    "0014_v10.sql"
   ]);
 }
 
@@ -284,6 +337,15 @@ function columnNames(tableName: string): string[] {
     .prepare(`PRAGMA table_info(${tableName})`)
     .all()
     .map((row) => (row as { name: string }).name);
+}
+
+function tableInfo(tableName: string): Array<{ name: string; type: string; notnull: number; dflt_value: string | null }> {
+  return currentDb().prepare(`PRAGMA table_info(${tableName})`).all() as Array<{
+    name: string;
+    type: string;
+    notnull: number;
+    dflt_value: string | null;
+  }>;
 }
 
 function indexNames(tableName: string): string[] {
@@ -339,11 +401,12 @@ describe("SQLite pragmas and migrations", () => {
 
   test("applies all migrations once and records them", () => {
     applyAllMigrations();
-    expect(countRows("__agenthub_migrations")).toBe(13);
+    expect(countRows("__agenthub_migrations")).toBe(14);
     expect(applyMigrations(currentDb())).toEqual([]);
 
     expect(tableNames()).toEqual([
       "__agenthub_migrations",
+      "agent_bindings",
       "agent_presence",
       "agent_profiles",
       "artifact_files",
@@ -361,24 +424,29 @@ describe("SQLite pragmas and migrations", () => {
       "mailbox_messages",
       "message_parts",
       "messages",
+      "model_configs",
       "outbox",
       "pending_turns",
       "permission_profiles",
       "permission_requests",
       "permission_rules",
+      "role_drafts",
+      "roles",
       "room_participants",
       "rooms",
       "run_locks",
       "run_next_turns",
       "runs",
+      "runtimes",
       "sessions",
+      "task_activities",
       "task_runs",
       "tasks",
       "workspaces"
     ]);
   });
 
-  test("creates core indexes and visibility schema exactly once", () => {
+  test("creates core and v1.0 indexes and columns exactly once", () => {
     applyAllMigrations();
 
     expect(columnNames("events")).toContain("visibility");
@@ -406,6 +474,36 @@ describe("SQLite pragmas and migrations", () => {
     expect(indexNames("mailbox_deliveries")).toContain("idx_mailbox_deliveries_run");
     expect(indexNames("outbox")).toContain("idx_outbox_pending");
     expect(indexSql("idx_outbox_pending")).toContain("WHERE status = 'pending'");
+
+    expect(columnNames("rooms")).toContain("leader_role_id");
+    expect(columnNames("room_participants")).toContain("agent_binding_id");
+    expect(columnNames("tasks")).toEqual(
+      expect.arrayContaining(["assignee_role_id", "assignee_binding_id", "delegation_chain", "expects_review"])
+    );
+    expect(columnNames("tasks").filter((name) => name === "priority")).toHaveLength(1);
+    expect(columnNames("roles")).toEqual(expect.arrayContaining(["is_builtin", "permission_profile_id"]));
+    expect(columnNames("runtimes")).toEqual(expect.arrayContaining(["kind", "manifest", "status"]));
+    expect(columnNames("model_configs")).toEqual(expect.arrayContaining(["api_key_ref", "api_key_fingerprint", "profile"]));
+    expect(columnNames("role_drafts")).toEqual(
+      expect.arrayContaining(["job_id", "description", "model_config_id", "draft_json", "status", "error", "expires_at"])
+    );
+    expect(columnNames("task_activities")).toEqual(
+      expect.arrayContaining(["task_id", "activity_type", "actor_id", "actor_type", "payload"])
+    );
+    expect(indexNames("agent_bindings")).toEqual(
+      expect.arrayContaining(["idx_agent_bindings_role", "idx_agent_bindings_runtime"])
+    );
+    expect(indexNames("role_drafts")).toContain("idx_role_drafts_expires_at");
+    expect(indexSql("idx_role_drafts_expires_at")).toContain("expires_at");
+    expect(indexNames("task_activities")).toContain("idx_task_activities_task_id");
+
+    const modelConfigApiKeyRef = tableInfo("model_configs").find((column) => column.name === "api_key_ref");
+    expect(modelConfigApiKeyRef?.notnull).toBe(0);
+
+    const rolesIsBuiltin = tableInfo("roles").find((column) => column.name === "is_builtin");
+    expect(rolesIsBuiltin?.type).toBe("INTEGER");
+    expect(rolesIsBuiltin?.notnull).toBe(1);
+    expect(rolesIsBuiltin?.dflt_value).toBe("0");
   });
 
   test("creates run_locks schema required by bus runtime", () => {

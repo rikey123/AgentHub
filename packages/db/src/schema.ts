@@ -15,6 +15,7 @@ export const rooms = sqliteTable("rooms", {
   mode: text("mode").notNull(),
   defaultContextScope: text("default_context_scope").notNull(),
   primaryAgentId: text("primary_agent_id"),
+  leaderRoleId: text("leader_role_id"),
   archivedAt: integer("archived_at"),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull()
@@ -29,6 +30,7 @@ export const roomParticipants = sqliteTable(
     role: text("role").notNull(),
     adapterId: text("adapter_id"),
     adapterSessionId: text("adapter_session_id"),
+    agentBindingId: text("agent_binding_id"),
     defaultPresence: text("default_presence").notNull(),
     joinedAt: integer("joined_at").notNull()
   },
@@ -51,6 +53,61 @@ export const agentProfiles = sqliteTable("agent_profiles", {
   permissionProfileId: text("permission_profile_id"),
   hidden: integer("hidden").notNull(),
   sourcePath: text("source_path"),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull()
+});
+
+export const roles = sqliteTable("roles", {
+  id: text("id").primaryKey(),
+  workspaceId: text("workspace_id"),
+  name: text("name").notNull(),
+  description: text("description"),
+  prompt: text("prompt").notNull(),
+  capabilities: text("capabilities").notNull().default("[]"),
+  permissionProfileId: text("permission_profile_id"),
+  isBuiltin: integer("is_builtin").notNull().default(0),
+  sourcePath: text("source_path"),
+  version: text("version"),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull()
+});
+
+export const runtimes = sqliteTable("runtimes", {
+  id: text("id").primaryKey(),
+  workspaceId: text("workspace_id"),
+  kind: text("kind").notNull(),
+  name: text("name").notNull(),
+  command: text("command"),
+  args: text("args"),
+  env: text("env"),
+  detectedAt: integer("detected_at"),
+  version: text("version"),
+  status: text("status"),
+  manifest: text("manifest"),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull()
+});
+
+export const modelConfigs = sqliteTable("model_configs", {
+  id: text("id").primaryKey(),
+  workspaceId: text("workspace_id"),
+  provider: text("provider").notNull(),
+  model: text("model").notNull(),
+  baseUrl: text("base_url"),
+  apiKeyRef: text("api_key_ref"),
+  apiKeyFingerprint: text("api_key_fingerprint"),
+  profile: text("profile"),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull()
+});
+
+export const agentBindings = sqliteTable("agent_bindings", {
+  id: text("id").primaryKey(),
+  workspaceId: text("workspace_id"),
+  roleId: text("role_id").notNull(),
+  runtimeId: text("runtime_id").notNull(),
+  modelConfigId: text("model_config_id"),
+  name: text("name"),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull()
 });
@@ -142,10 +199,39 @@ export const tasks = sqliteTable("tasks", {
   sourceMessageId: text("source_message_id"),
   dependencies: text("dependencies").notNull(),
   priority: text("priority"),
+  assigneeRoleId: text("assignee_role_id"),
+  assigneeBindingId: text("assignee_binding_id"),
+  delegationChain: text("delegation_chain"),
+  expectsReview: integer("expects_review").notNull().default(0),
   dueAt: integer("due_at"),
   createdBy: text("created_by"),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull()
+});
+
+export const roleDrafts = sqliteTable("role_drafts", {
+  jobId: text("job_id").primaryKey(),
+  description: text("description").notNull(),
+  targetWork: text("target_work"),
+  preferredTone: text("preferred_tone"),
+  capabilities: text("capabilities"),
+  modelConfigId: text("model_config_id").notNull(),
+  draftJson: text("draft_json"),
+  status: text("status").notNull(),
+  error: text("error"),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+  expiresAt: integer("expires_at").notNull()
+});
+
+export const taskActivities = sqliteTable("task_activities", {
+  id: text("id").primaryKey(),
+  taskId: text("task_id").notNull(),
+  activityType: text("activity_type").notNull(),
+  actorId: text("actor_id"),
+  actorType: text("actor_type"),
+  payload: text("payload").notNull().default("{}"),
+  createdAt: integer("created_at").notNull()
 });
 
 export const runs = sqliteTable("runs", {
