@@ -13,6 +13,7 @@ import { RunDetailDrawer } from "./components/run/RunDetailDrawer.tsx";
 import { CommandPalette, type PaletteCommand } from "./components/CommandPalette.tsx";
 import { KeymapModal } from "./components/KeymapModal.tsx";
 import { NewRoomDialog, type CreateRoomInput } from "./components/NewRoomDialog.tsx";
+import { SettingsModal } from "./components/settings/index.ts";
 import { useProjector } from "./hooks/useProjector.ts";
 import { useSdk, useCsrfFetch } from "./hooks/useSdk.ts";
 import { useTheme } from "./hooks/useTheme.ts";
@@ -25,6 +26,7 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [keymapOpen, setKeymapOpen] = useState(false);
   const [newRoomOpen, setNewRoomOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
   const [sidePanelTab, setSidePanelTab] = useState<"context" | "tasks" | "members" | "debug" | "cost">("context");
@@ -62,6 +64,7 @@ export default function App() {
   }, [sdk]);
 
   const openNewRoom = useCallback(() => setNewRoomOpen(true), []);
+  const openSettings = useCallback(() => setSettingsOpen(true), []);
 
   const handleSendMessage = useCallback(async (input: { text: string; quotedMessageId?: string; attachmentIds: string[]; mentions: string[] }) => {
     if (!activeRoomId) return;
@@ -167,6 +170,7 @@ export default function App() {
   const commands = useMemo<PaletteCommand[]>(() => {
     const list: PaletteCommand[] = [
       { id: "new-room", label: "New room", group: "Rooms", perform: openNewRoom },
+      { id: "open-settings", label: "Open Settings", group: "Settings", keywords: ["roles", "runtimes", "models", "permissions", "workspace", "mcp"], perform: openSettings },
       { id: "toggle-left", label: leftCollapsed ? "Show rooms panel" : "Hide rooms panel", group: "View", perform: () => setLeftCollapsed((v) => !v) },
       { id: "toggle-right", label: rightCollapsed ? "Show workbench panel" : "Hide workbench panel", group: "View", perform: () => setRightCollapsed((v) => !v) },
       { id: "panel-context", label: "Workbench: Context", group: "View", perform: () => { setRightCollapsed(false); setSidePanelTab("context"); } },
@@ -191,7 +195,7 @@ export default function App() {
       });
     }
     return list;
-  }, [rooms, openNewRoom, leftCollapsed, rightCollapsed, setTheme, setDensity]);
+  }, [rooms, openNewRoom, openSettings, leftCollapsed, rightCollapsed, setTheme, setDensity]);
 
   const center = activeRoom ? (
     <div className="flex h-full flex-col">
@@ -251,7 +255,7 @@ export default function App() {
             rightCollapsed={rightCollapsed}
           />
         }
-        rail={<FeatureRail active={rail} onSelect={setRail} />}
+        rail={<FeatureRail active={rail} onSelect={setRail} onOpenSettings={openSettings} />}
         rooms={
           <RoomList
             rooms={rooms}
@@ -268,6 +272,7 @@ export default function App() {
       <CommandPalette isOpen={paletteOpen} onOpenChange={setPaletteOpen} commands={commands} />
       <KeymapModal isOpen={keymapOpen} onOpenChange={setKeymapOpen} />
       <NewRoomDialog isOpen={newRoomOpen} onOpenChange={setNewRoomOpen} onCreate={handleCreateRoom} />
+      <SettingsModal isOpen={settingsOpen} onOpenChange={setSettingsOpen} />
       <RunDetailDrawer
         isOpen={!!activeRunId}
         onOpenChange={(open) => { if (!open) setActiveRunId(undefined); }}

@@ -170,3 +170,11 @@
 - Native model permission cache and permission.run_summary now use modelConfig.id rather than provider/model strings.
 - MCP tool converter should return structured tool error payloads and emit exactly one tool.call.completed on failures, not throw through the AI SDK tool execution path.
 
+## [2026-05-29T05:32:00Z] Task 3.1 Settings modal shell
+
+- AgentHub web currently has no jsdom/Testing Library dependency; settings UI tests should keep component-contract coverage dependency-free unless the test stack is added deliberately.
+- HeroUI `Modal.Backdrop` renders no useful server string output, so SSR string assertions are not a reliable way to prove modal contents.
+- Settings modal bootstrap is REST-only: `GET /roles`, `/runtimes`, `/model-configs`, and `/agent-bindings` run in parallel with one AbortController per open cycle; closing aborts and clears local state.
+- `FeatureRail` Settings should act as an entry point, not a persistent rail tab: call the settings opener and leave the active workbench rail unchanged.
+- Repo-wide/web build typecheck is currently blocked by native-runtime/daemon TS issues outside settings UI; targeted web settings tests pass.
+
