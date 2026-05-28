@@ -15,7 +15,7 @@ interface InputBoxProps {
   participants: ReadonlyArray<ParticipantViewModel>;
   connectionStatus: "connected" | "connecting" | "reconnecting" | "offline" | "disconnected";
   pendingCount: number;
-  /** Most recent pending-turn message id; ↑ key in an empty input jumps to editing it. */
+  /** Most recent pending-turn message id; ArrowUp in an empty input jumps to editing it. */
   latestPendingMessageId?: string | undefined;
   editingTurnId?: string | undefined;
   onCancelEdit?: () => void;
@@ -37,9 +37,12 @@ export function InputBox(props: InputBoxProps) {
   const [error, setError] = useState<string | undefined>(undefined);
   const [dragOver, setDragOver] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const canSend = props.connectionStatus === "connected" && (text.trim().length > 0 || attachments.length > 0);
   const queueFull = props.pendingCount >= 20;
+  const activeParticipants = props.participants.filter((p) => p.presence !== "offline");
+  const agentCount = props.participants.filter((p) => p.role !== "user").length;
 
   useEffect(() => {
     try {
@@ -52,7 +55,7 @@ export function InputBox(props: InputBoxProps) {
         if (Array.isArray(parsed.attachments)) setAttachments(parsed.attachments);
       }
     } catch {
-      // ignore
+      // ignore corrupt draft cache
     }
     const onStorage = (ev: StorageEvent) => {
       if (ev.key !== draftKey || ev.newValue === null) return;
@@ -63,7 +66,7 @@ export function InputBox(props: InputBoxProps) {
         setQuote(parsed.quotedMessageId ? { messageId: parsed.quotedMessageId, preview: parsed.quotePreview ?? "" } : undefined);
         setAttachments(Array.isArray(parsed.attachments) ? parsed.attachments : []);
       } catch {
-        // ignore
+        // ignore corrupt draft cache
       }
     };
     window.addEventListener("storage", onStorage);
@@ -77,7 +80,7 @@ export function InputBox(props: InputBoxProps) {
         JSON.stringify({ text, mentions, quotedMessageId: quote?.messageId, quotePreview: quote?.preview, attachments })
       );
     } catch {
-      // ignore
+      // ignore unavailable storage
     }
   }, [draftKey, text, mentions, quote, attachments]);
 
@@ -115,13 +118,27 @@ export function InputBox(props: InputBoxProps) {
     const after = text.slice(cursor);
     const at = before.lastIndexOf("@");
     if (at < 0) return;
-    // Insert the kebab slug so the backend parser can resolve it without quotes.
     const slug = p.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
     const newText = before.slice(0, at) + `@${slug} ` + after;
     setText(newText);
     setMentionQuery(undefined);
     setMentions((prev) => Array.from(new Set([...prev, p.id])));
     requestAnimationFrame(() => taRef.current?.focus());
+  };
+
+  const startMention = () => {
+    const cursor = taRef.current?.selectionStart ?? text.length;
+    const before = text.slice(0, cursor);
+    const after = text.slice(cursor);
+    const prefix = before.length === 0 || /\s$/.test(before) ? "@" : " @";
+    const next = before + prefix + after;
+    const nextCursor = before.length + prefix.length;
+    setText(next);
+    setMentionQuery("");
+    requestAnimationFrame(() => {
+      taRef.current?.focus();
+      taRef.current?.setSelectionRange(nextCursor, nextCursor);
+    });
   };
 
   const uploadFiles = async (files: FileList | File[]) => {
@@ -172,10 +189,9 @@ export function InputBox(props: InputBoxProps) {
       setMentions([]);
       try { sessionStorage.removeItem(draftKey); } catch { /* ignore */ }
     } catch (err) {
-      // Detect 409: pending turn was already consumed by an agent before the edit landed.
       const message = err instanceof Error ? err.message : String(err);
       if (/\b409\b|already (started|consumed|scheduled)/i.test(message)) {
-        setError("This message has already started processing — edit no longer applies.");
+        setError("This message has already started processing; edit no longer applies.");
       } else {
         setError(message);
       }
@@ -187,7 +203,7 @@ export function InputBox(props: InputBoxProps) {
   return (
     <div
       className={[
-        "border-t border-border bg-surface/90 p-3 shadow-[0_-10px_30px_color-mix(in_oklab,var(--background-inverse)_8%,transparent)] backdrop-blur",
+        "border-t border-border bg-[linear-gradient(180deg,color-mix(in_oklab,var(--surface)_86%,transparent),var(--surface-secondary))] px-4 py-3 shadow-[0_-16px_40px_color-mix(in_oklab,var(--accent)_10%,transparent)] backdrop-blur",
         dragOver ? "outline outline-2 outline-dashed outline-accent" : ""
       ].join(" ")}
       onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
@@ -200,129 +216,197 @@ export function InputBox(props: InputBoxProps) {
         }
       }}
     >
-      {props.editingTurnId ? (
-        <div className="mb-2 flex items-center gap-2 rounded bg-warning-soft px-2 py-1 text-xs">
-          <span>Editing queued message <span className="ah-mono text-muted">{props.editingTurnId?.slice(0, 8)}</span></span>
-          <Button size="sm" variant="ghost" onPress={() => props.onCancelEdit?.()}>Cancel edit</Button>
-        </div>
-      ) : null}
-
-      {quote ? (
-        <div className="mb-2 flex items-start gap-2 rounded border-l-2 border-accent bg-accent-soft px-2 py-1 text-xs">
-          <span className="flex-1 truncate">Quoting: {quote.preview || quote.messageId}</span>
-          <Button isIconOnly size="sm" variant="ghost" onPress={() => setQuote(undefined)} aria-label="Remove quote">×</Button>
-        </div>
-      ) : null}
-
-      {attachments.length > 0 ? (
-        <div className="mb-2 flex flex-wrap gap-1">
-          {attachments.map((att) => (
-            <Chip key={att.fileId} size="sm" variant="soft" color="default">
-              <span className="ah-mono">📎 {att.name} · {formatBytes(att.sizeBytes)}</span>
-              <button
-                type="button"
-                aria-label={`Remove ${att.name}`}
-                className="ml-1 text-muted hover:text-foreground"
-                onClick={() => setAttachments((prev) => prev.filter((a) => a.fileId !== att.fileId))}
-              >
-                ×
-              </button>
+      <div className="mx-auto max-w-[960px]">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-muted">
+          <div className="flex flex-wrap items-center gap-2">
+            <Chip size="sm" variant="soft" color={props.connectionStatus === "connected" ? "success" : "warning"}>
+              {props.connectionStatus === "connected" ? "Ready" : props.connectionStatus}
             </Chip>
-          ))}
+            <span>{activeParticipants.length} active</span>
+            <span>{agentCount} agents</span>
+            {props.pendingCount > 0 ? <span>{props.pendingCount} pending</span> : null}
+          </div>
+          {queueFull ? <span className="text-warning-soft-foreground">Queue limit reached</span> : null}
         </div>
-      ) : null}
 
-      {mentionQuery !== undefined && filteredMentions.length > 0 ? (
-        <ul role="listbox" aria-label="Mention participants" className="mb-2 flex max-h-40 flex-col gap-1 overflow-auto rounded border border-border bg-overlay p-1">
-          {filteredMentions.map((p, i) => {
-            const active = i === mentionHighlight;
-            return (
-              <li
-                key={p.id}
-                role="option"
-                aria-selected={active}
-                data-testid={`mention-candidate-${p.id}`}
-                onMouseEnter={() => setMentionHighlight(i)}
-                onClick={() => insertMention(p)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    insertMention(p);
-                  }
-                }}
-                tabIndex={0}
-                className={[
-                  "cursor-pointer rounded px-2 py-1 text-sm",
-                  active ? "bg-accent-soft text-accent-soft-foreground" : "hover:bg-default"
-                ].join(" ")}
-              >
-                <div className="font-medium">{p.name}</div>
-                <div className="text-xs text-muted">{p.role} · {p.id}</div>
-              </li>
-            );
-          })}
-        </ul>
-      ) : null}
+        {props.editingTurnId ? (
+          <div className="mb-2 flex items-center gap-2 rounded-xl border border-warning bg-warning-soft px-3 py-2 text-xs shadow-sm">
+            <span className="flex-1">Editing queued message <span className="ah-mono text-muted">{props.editingTurnId?.slice(0, 8)}</span></span>
+            <Button size="sm" variant="ghost" onPress={() => props.onCancelEdit?.()}>Cancel edit</Button>
+          </div>
+        ) : null}
 
-      <div className="mx-auto flex max-w-[920px] items-end gap-2">
-        <TextArea
-          ref={taRef as never}
-          value={text}
-          onChange={(e) => handleChange(e.currentTarget.value)}
-          aria-label="Message"
-          data-testid="message-input"
-          placeholder={
-            props.connectionStatus !== "connected" ? "Disconnected — cannot send" :
-            queueFull ? "Queue full — wait for messages to send" :
-            "Type a message. Use @ to mention. Drop files to attach."
-          }
-          className="min-h-[44px] max-h-32 flex-1"
-          disabled={props.connectionStatus !== "connected" || queueFull}
-          onKeyDown={(e) => {
-            const popoverOpen = mentionQuery !== undefined && filteredMentions.length > 0;
-            if (popoverOpen && e.key === "Tab") {
-              e.preventDefault();
-              const len = filteredMentions.length;
-              setMentionHighlight((h) => (e.shiftKey ? (h - 1 + len) % len : (h + 1) % len));
-              return;
-            }
-            if (popoverOpen && e.key === "Enter") {
-              e.preventDefault();
-              const target = filteredMentions[mentionHighlight];
-              if (target) insertMention(target);
-              return;
-            }
-            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-              e.preventDefault();
-              void send();
-            } else if (e.key === "Enter" && !e.shiftKey && mentionQuery === undefined) {
-              e.preventDefault();
-              void send();
-            } else if (e.key === "Escape" && mentionQuery !== undefined) {
-              setMentionQuery(undefined);
-            } else if (e.key === "ArrowUp" && text.length === 0 && !props.editingTurnId && props.latestPendingMessageId !== undefined && props.onRequestEdit !== undefined) {
-              // Quick-edit: empty input + ↑ jumps the user into editing the most recent
-              // queued pending turn so they don't have to mouse over to its edit button.
-              e.preventDefault();
-              props.onRequestEdit(props.latestPendingMessageId);
-            }
-          }}
-        />
-        <Button
-          variant="primary"
-          isPending={isSending}
-          isDisabled={!canSend || queueFull}
-          onPress={() => void send()}
-          data-testid="message-send"
+        {quote ? (
+          <div className="mb-2 flex items-start gap-2 rounded-xl border border-accent bg-accent-soft px-3 py-2 text-xs shadow-sm">
+            <span className="flex-1 truncate">Quoting: {quote.preview || quote.messageId}</span>
+            <Button isIconOnly size="sm" variant="ghost" onPress={() => setQuote(undefined)} aria-label="Remove quote">x</Button>
+          </div>
+        ) : null}
+
+        {attachments.length > 0 ? (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {attachments.map((att) => (
+              <Chip key={att.fileId} size="sm" variant="soft" color="default">
+                <span className="ah-mono">{att.name} / {formatBytes(att.sizeBytes)}</span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${att.name}`}
+                  className="ml-1 text-muted hover:text-foreground"
+                  onClick={() => setAttachments((prev) => prev.filter((a) => a.fileId !== att.fileId))}
+                >
+                  x
+                </button>
+              </Chip>
+            ))}
+          </div>
+        ) : null}
+
+        {mentionQuery !== undefined && filteredMentions.length > 0 ? (
+          <ul
+            role="listbox"
+            aria-label="Mention participants"
+            className="mb-2 grid max-h-48 gap-1 overflow-auto rounded-2xl border border-border bg-overlay p-1.5 shadow-[var(--overlay-shadow)] sm:grid-cols-2"
+          >
+            {filteredMentions.map((p, i) => {
+              const active = i === mentionHighlight;
+              return (
+                <li
+                  key={p.id}
+                  role="option"
+                  aria-selected={active}
+                  data-testid={`mention-candidate-${p.id}`}
+                  onMouseEnter={() => setMentionHighlight(i)}
+                  onClick={() => insertMention(p)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      insertMention(p);
+                    }
+                  }}
+                  tabIndex={0}
+                  className={[
+                    "cursor-pointer rounded-xl px-3 py-2 text-sm transition-colors",
+                    active ? "bg-accent-soft text-accent-soft-foreground" : "hover:bg-default"
+                  ].join(" ")}
+                >
+                  <div className="flex items-center gap-2 font-medium">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-full bg-surface-secondary text-xs uppercase text-muted">
+                      {p.name.slice(0, 2)}
+                    </span>
+                    <span className="truncate">{p.name}</span>
+                  </div>
+                  <div className="mt-0.5 truncate pl-9 text-xs text-muted">{p.role} / {p.presence}</div>
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
+
+        <div
+          className={[
+            "overflow-hidden rounded-2xl border bg-overlay shadow-[var(--surface-shadow)] transition-colors",
+            dragOver ? "border-accent bg-accent-soft" : "border-border"
+          ].join(" ")}
         >
-          {props.editingTurnId ? "Save" : "Send"}
-        </Button>
-      </div>
+          <div className="px-3 pt-3">
+            <TextArea
+              ref={taRef as never}
+              value={text}
+              onChange={(e) => handleChange(e.currentTarget.value)}
+              aria-label="Message"
+              data-testid="message-input"
+              placeholder={
+                props.connectionStatus !== "connected" ? "Disconnected" :
+                queueFull ? "Queue full" :
+                "Message this room..."
+              }
+              className="min-h-[72px] max-h-40 w-full"
+              disabled={props.connectionStatus !== "connected" || queueFull}
+              onKeyDown={(e) => {
+                const popoverOpen = mentionQuery !== undefined && filteredMentions.length > 0;
+                if (popoverOpen && e.key === "Tab") {
+                  e.preventDefault();
+                  const len = filteredMentions.length;
+                  setMentionHighlight((h) => (e.shiftKey ? (h - 1 + len) % len : (h + 1) % len));
+                  return;
+                }
+                if (popoverOpen && e.key === "Enter") {
+                  e.preventDefault();
+                  const target = filteredMentions[mentionHighlight];
+                  if (target) insertMention(target);
+                  return;
+                }
+                if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                  e.preventDefault();
+                  void send();
+                } else if (e.key === "Enter" && !e.shiftKey && mentionQuery === undefined) {
+                  e.preventDefault();
+                  void send();
+                } else if (e.key === "Escape" && mentionQuery !== undefined) {
+                  setMentionQuery(undefined);
+                } else if (e.key === "ArrowUp" && text.length === 0 && !props.editingTurnId && props.latestPendingMessageId !== undefined && props.onRequestEdit !== undefined) {
+                  e.preventDefault();
+                  props.onRequestEdit(props.latestPendingMessageId);
+                }
+              }}
+            />
+          </div>
 
-      {error ? <p className="mt-2 text-xs text-danger" role="alert">{error}</p> : null}
-      {props.connectionStatus !== "connected" ? (
-        <span className="ah-sr-only" aria-live="polite">Connection: {props.connectionStatus}</span>
-      ) : null}
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-surface/70 px-3 py-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                aria-label="Attach files"
+                className="ah-sr-only"
+                onChange={(event) => {
+                  const files = event.currentTarget.files;
+                  if (files && files.length > 0) void uploadFiles(files);
+                  event.currentTarget.value = "";
+                }}
+              />
+              <Button
+                size="sm"
+                variant="ghost"
+                onPress={() => fileInputRef.current?.click()}
+                isDisabled={props.connectionStatus !== "connected"}
+                aria-label="Attach files"
+              >
+                Attach
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onPress={startMention}
+                isDisabled={props.connectionStatus !== "connected" || queueFull}
+                aria-label="Mention agent"
+              >
+                @ Agent
+              </Button>
+              {attachments.length > 0 ? (
+                <Chip size="sm" variant="soft" color="accent">{attachments.length} files</Chip>
+              ) : null}
+            </div>
+            <Button
+              variant="primary"
+              size="md"
+              className="min-w-24 rounded-full"
+              isPending={isSending}
+              isDisabled={!canSend || queueFull}
+              onPress={() => void send()}
+              data-testid="message-send"
+            >
+              {props.editingTurnId ? "Save" : "Send"}
+            </Button>
+          </div>
+        </div>
+
+        {error ? <p className="mt-2 px-1 text-xs text-danger" role="alert">{error}</p> : null}
+        {props.connectionStatus !== "connected" ? (
+          <span className="ah-sr-only" aria-live="polite">Connection: {props.connectionStatus}</span>
+        ) : null}
+      </div>
     </div>
   );
 }

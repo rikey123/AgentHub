@@ -12,8 +12,8 @@ interface AppShellProps {
 
 export function AppShell({ topBar, rail, rooms, center, panel, panelCollapsed, roomsCollapsed }: AppShellProps) {
   const cols = [
-    "56px",
-    roomsCollapsed ? "0px" : "260px",
+    "60px",
+    roomsCollapsed ? "0px" : "304px",
     "1fr",
     panelCollapsed || !panel ? "0px" : "360px"
   ].join(" ");
