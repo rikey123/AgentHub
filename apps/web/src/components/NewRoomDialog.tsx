@@ -140,8 +140,8 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
 
   return (
     <Modal.Backdrop isOpen={isOpen} onOpenChange={onOpenChange}>
-      <Modal.Container size="lg" className="w-[min(96vw,1180px)] max-w-[1180px]">
-        <Modal.Dialog className="max-h-[92vh] overflow-hidden">
+      <Modal.Container size="full" className="items-center justify-center p-4">
+        <Modal.Dialog className="max-h-[92vh] w-[min(96vw,1180px)] max-w-[1180px] overflow-hidden">
           <Modal.CloseTrigger />
           <Modal.Header className="border-b border-border bg-[linear-gradient(135deg,var(--surface),var(--surface-secondary))] px-6 py-4">
             <div className="flex items-center gap-4">
@@ -161,7 +161,7 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
             <ScrollShadow className="overflow-auto" orientation="vertical">
               <div className="grid gap-4 p-5">
                 <section className="rounded-2xl border border-border bg-overlay p-4 shadow-sm">
-                  <div className="grid gap-4 lg:grid-cols-[minmax(320px,0.9fr)_minmax(420px,1.1fr)]">
+                  <div className="grid gap-4">
                     <TextField value={title} onChange={setTitle}>
                       <Label className="text-sm font-semibold">Title</Label>
                       <Input placeholder="e.g. Refactor auth flow" />
@@ -174,7 +174,7 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
                         onChange={(v: unknown) => setMode(v as "solo" | "assisted")}
                         aria-label="Room mode"
                       >
-                        <div className="grid gap-2 sm:grid-cols-2">
+                        <div className="grid gap-2 md:grid-cols-2">
                           <RoomModeOption
                             value="assisted"
                             title="Assisted"
