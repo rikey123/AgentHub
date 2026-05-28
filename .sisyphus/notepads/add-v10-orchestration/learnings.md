@@ -154,3 +154,13 @@
 - Permission allow/deny can be exercised deterministically by seeding `permission_rules` for `model.api_call.<provider>`; deny-before-stream should assert both `resolveProvider` and `streamText` were not called.
 - Cancel integration can use a real `CommandBus` + `createCancelRunHandler` wired to `NativeAgentAdapter.cancelManagedRun()` and a mocked stream that waits on `AbortSignal`.
 - Verified `pnpm.cmd test -- packages/native-agent-runtime packages/orchestrator packages/daemon` and `pnpm.cmd ai-sdk-provider:check` pass.
+
+## Wave 3 Oracle Gate Review - 2026-05-29T04:52:38
+- Passing direct adapter tests are insufficient for native runtime gates; verify daemon AdapterRegistry construction passes permission/keychain dependencies into real adapters.
+- Forbidden event grep should ignore plan/evidence text and focus on protocol registry/source emissions/tests asserting absence.
+
+## [2026-05-29T05:05:00Z] Wave 3 Oracle fixes
+- `AdapterRegistry.native()` now passes `permissionEngine` and the daemon keychain bridge into `NativeAgentAdapter`, so native dispatch no longer falls back to implicit allow.
+- Native permission summaries now use `modelConfig.id` for both cache keys and emitted `permission.run_summary` payloads; `nativeModelConfig()` now selects `mc.id`.
+- MCP tool failures now return an error result and emit exactly one `tool.call.completed` event instead of throwing twice.
+- Verification passed: `pnpm.cmd test -- packages/native-agent-runtime packages/orchestrator packages/daemon`, `pnpm.cmd ai-sdk-provider:check`, and `pnpm.cmd check:all`.

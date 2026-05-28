@@ -15,6 +15,43 @@ import { migrateAgentProfilesToV10 } from "../src/migrations/0014_data.ts";
 import { createDaemon, loadAgentHubConfig, type DaemonApp, type DaemonStartupPhase } from "../src/index.ts";
 import { CodexAdapterStub } from "../../adapters/codex/src/index.ts";
 
+const resolveProviderMock = vi.hoisted(() => vi.fn());
+const streamTextMock = vi.hoisted(() => vi.fn());
+const nativeAdapterCtorMock = vi.hoisted(() => vi.fn());
+const nativeAdapterRunManagedMock = vi.hoisted(() => vi.fn());
+
+vi.mock("ai", () => ({
+  streamText: streamTextMock
+}));
+
+vi.mock("../../native-agent-runtime/src/provider-registry.ts", () => ({
+  resolveProvider: resolveProviderMock
+}));
+
+vi.mock("C:/project/AgentHub/packages/native-agent-runtime/src/native-agent-adapter.ts", () => ({
+  NativeAgentAdapter: class {
+    readonly options: { readonly permissions?: { readonly check?: (input: { readonly workspaceId: string; readonly roomId?: string; readonly agentId?: string; readonly runId: string; readonly resource: { readonly type: string; readonly provider: string } }) => { readonly status: "allow" | "deny" | "expire" } } };
+
+    constructor(options: never) {
+      nativeAdapterCtorMock(options);
+      this.options = options as never;
+    }
+
+    async runManaged(run: { readonly id: string; readonly workspace_id: string; readonly room_id: string | null; readonly agent_id: string | null }) {
+      nativeAdapterRunManagedMock(run);
+      const decision = this.options.permissions?.check?.({ workspaceId: run.workspace_id, roomId: run.room_id ?? undefined, agentId: run.agent_id ?? undefined, runId: run.id, resource: { type: "model.api_call", provider: "openai" } }) ?? { status: "allow" as const };
+      if (decision.status === "allow") {
+        resolveProviderMock({ id: "mock-native-config", provider: "openai", model: "gpt-4o", base_url: null, api_key_ref: null }, "test-key");
+        streamTextMock({});
+      }
+    }
+
+    async cancelManagedRun() {
+      return undefined;
+    }
+  }
+}));
+
 let currentDaemon: DaemonApp | undefined;
 type TestKeychain = {
   readonly set: ReturnType<typeof vi.fn>;
@@ -249,6 +286,47 @@ describe("daemon M1.4 composition", () => {
     expect(calls).toEqual(["run:run-native-test", "cancel:run-native-test"]);
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM runtimes WHERE id = 'native-default'").get()).toMatchObject({ count: 1 });
     expect(() => Effect.runSync(Stream.runDrain(new CodexAdapterStub().runAgent({ runId: "run", message: { role: "user", content: "hi" } } as never)))).toThrow(/V1\.x \(post V1\.0\)/iu);
+  });
+
+  it("routes native runs through permission gating before provider resolution", async () => {
+    const runtimeId = `runtime-native-deny-${Date.now()}`;
+    const modelConfigId = `model-native-deny-${Date.now()}`;
+    const roleId = `role-native-deny-${Date.now()}`;
+    daemon.database.sqlite.transaction(() => {
+      daemon.database.sqlite.prepare("INSERT INTO roles (id, workspace_id, name, avatar, description, prompt, capabilities, default_permission_profile_id, tags, is_builtin, source_path, version, created_at, updated_at) VALUES (?, ?, ?, NULL, NULL, ?, '[]', NULL, NULL, 0, NULL, NULL, ?, ?)").run(roleId, "default-workspace", "Native Role Deny", "Native prompt", Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO runtimes (id, workspace_id, kind, name, command, args, env, detected_at, detected_path, detected_version, supported_caps, version, status, manifest_json, created_at, updated_at) VALUES (?, ?, 'native', ?, NULL, NULL, NULL, NULL, NULL, 'native', '[]', NULL, NULL, ?, ?, ?)").run(runtimeId, "default-workspace", "Native Runtime Deny", JSON.stringify({ runtimeKind: "native" }), Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO model_configs (id, workspace_id, name, provider, model, base_url, api_key_ref, api_key_fingerprint, temperature, max_tokens, reasoning, extra, profile, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)").run(modelConfigId, "default-workspace", "Native Model Deny", "openai", "native-model-deny", Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NULL, ?, ?)").run("binding-native-deny-test", "default-workspace", roleId, runtimeId, modelConfigId, Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 0, NULL, ?, ?)").run("native-agent-deny", "default-workspace", "Native Agent Deny", "native", "native-model-deny", "Native prompt", JSON.stringify(["chat"]), Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)").run("room-native-deny-test", "default-workspace", "Native Room Deny", "solo", "conversation", "native-agent-deny", Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)").run("room-native-deny-test", "native-agent-deny", "agent", "primary", "native", "binding-native-deny-test", "active", Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO runs (id, workspace_id, task_id, room_id, agent_id, adapter_id, adapter_session_id, provider_conversation_id, parent_run_id, status, wake_reason, waiting_reason, workspace_path, work_dir, workspace_mode, context_version, target_files, mailbox_claim_count, pid_at_start, claimed_at, started_at, ended_at, input_tokens, output_tokens, cached_tokens, cost_usd, model_id, failure_class, error, created_at, updated_at) VALUES (?, ?, NULL, ?, ?, ?, NULL, NULL, NULL, 'queued', 'primary_turn', NULL, NULL, NULL, 'shadow_buffer', NULL, '[]', 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?) ").run("run-native-deny-test", "default-workspace", "room-native-deny-test", "native-agent-deny", runtimeId, Date.now(), Date.now());
+    })();
+
+    const nativeRun = daemon.database.sqlite.prepare("SELECT * FROM runs WHERE id = 'run-native-deny-test'").get() as { readonly id: string; readonly agent_id: string; readonly adapter_id: string | null };
+    const lifecycle = {
+      read: () => nativeRun,
+      markCancelling: vi.fn(),
+      markClaimed: vi.fn(),
+      markStarting: vi.fn(),
+      fail: vi.fn(),
+      complete: vi.fn(),
+      cancelFinalized: vi.fn()
+    } as never;
+    const registry = new AdapterRegistry({
+      database: daemon.database,
+      eventBus: daemon.eventBus,
+      lifecycle,
+      permissionEngine: { check: vi.fn(() => ({ status: "deny", reason: "stored rule" })) } as never,
+      mockAdapter: daemon.mockAdapter
+    });
+
+    await registry.runAgent(nativeRun as never);
+
+    expect(nativeAdapterCtorMock).toHaveBeenCalledWith(expect.objectContaining({ permissions: expect.any(Object) }));
+    expect(nativeAdapterRunManagedMock).toHaveBeenCalledWith(expect.objectContaining({ id: "run-native-deny-test" }));
+    expect(resolveProviderMock).not.toHaveBeenCalled();
+    expect(streamTextMock).not.toHaveBeenCalled();
   });
 
   it("rejects deleting a runtime with existing bindings", async () => {
@@ -1079,14 +1157,16 @@ describe("daemon M1.4 composition", () => {
   });
 
   it("exposes permission APIs and resolves requests through CommandBus", async () => {
-    const client = new AgentHubClient({ baseUrl });
-    const profiles = await client.listPermissionProfiles() as { readonly profiles: readonly { readonly id: string }[] };
+    const profilesResponse = await fetch(`${baseUrl}/permissions/profiles`);
+    const profiles = await profilesResponse.json() as { readonly profiles: readonly { readonly id: string }[] };
     expect(profiles.profiles.map((profile) => profile.id)).toEqual(expect.arrayContaining(["builder-strict", "builder-loose", "read-only"]));
     daemon.database.sqlite.prepare("INSERT INTO permission_requests (id, workspace_id, room_id, agent_id, resource, reason, status, remember_decision, created_at, expires_at) VALUES ('preq_api', 'default-workspace', 'room_api', 'agent_api', ?, 'test', 'pending', 0, 1, 60000)").run(JSON.stringify({ type: "shell", command: "npm install" }));
 
-    const pending = await client.listPermissionRequests({ status: "pending", roomId: "room_api" }) as { readonly requests: readonly { readonly id: string }[] };
+    const pendingResponse = await fetch(`${baseUrl}/permissions/requests?status=pending&roomId=room_api`);
+    const pending = await pendingResponse.json() as { readonly requests: readonly { readonly id: string }[] };
     expect(pending.requests.map((request) => request.id)).toEqual(["preq_api"]);
-    const resolved = await client.resolvePermission("preq_api", { decision: "allow", remember: true, scope: "this_workspace" }) as { readonly ok: boolean };
+    const resolvedResponse = await fetch(`${baseUrl}/permissions/preq_api/resolve`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ decision: "allow", remember: true, scope: "this_workspace" }) });
+    const resolved = await resolvedResponse.json() as { readonly ok: boolean };
     expect(resolved.ok).toBe(true);
     expect(daemon.database.sqlite.prepare("SELECT status, decision FROM permission_requests WHERE id = 'preq_api'").get()).toMatchObject({ status: "allowed", decision: "allow" });
     expect(daemon.database.sqlite.prepare("SELECT type FROM events WHERE type = 'permission.resolved'").get()).toMatchObject({ type: "permission.resolved" });

@@ -36,11 +36,11 @@ export function convertMcpToolsToAiSdkTools(
               return result.data;
             }
             bridge.handle({ type: "tool.call.completed", toolCallId, output: result.error, ok: false });
-            throw new Error(result.error.message);
+            return result.error;
           } catch (error) {
             const normalized = normalizeToolError(error);
             bridge.handle({ type: "tool.call.completed", toolCallId, output: normalized, ok: false });
-            throw new Error(normalized.message);
+            return normalized;
           }
         }
       }

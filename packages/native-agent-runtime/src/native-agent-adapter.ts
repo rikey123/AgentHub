@@ -157,7 +157,7 @@ export class NativeAgentAdapter {
   }
 
   private checkModelPermission(run: RunRow): { readonly decision: "allowed" | "denied" | "expired" } {
-    const cacheKey = `${run.id}:${this.options.modelConfig.provider}`;
+    const cacheKey = `${run.id}:${this.options.modelConfig.id}`;
     const cached = this.permissionCache.get(cacheKey);
     if (cached) {
       const active = this.activeRuns.get(run.id);
@@ -175,7 +175,7 @@ export class NativeAgentAdapter {
     }) ?? { status: "allow", reason: "default_allow" };
 
     const decision = decided.status === "allow" ? "allowed" : decided.status === "deny" ? "denied" : "expired";
-    const summary: PermissionDecisionSummary = { resource, decision, modelConfigId: this.options.modelConfig.model };
+    const summary: PermissionDecisionSummary = { resource, decision, modelConfigId: this.options.modelConfig.id };
     this.permissionCache.set(cacheKey, { decision, summary });
     const active = this.activeRuns.get(run.id);
     if (active) active.permissionSummary.push(summary);

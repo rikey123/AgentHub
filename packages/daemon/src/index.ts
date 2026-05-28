@@ -208,7 +208,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
         return "";
       }
     };
-    const adapterRegistry = new AdapterRegistry({ database, eventBus, lifecycle, permissionEngine, artifactFs, briefResolver, getRoomMcpServer: () => currentRoomMcpServer(roomMcpServerRef), getCommandBus: () => commandBusRef.current, ...(options.adapterCommands !== undefined ? { adapterCommands: options.adapterCommands } : {}), ...(options.now !== undefined ? { now: options.now } : {}) });
+    const adapterRegistry = new AdapterRegistry({ database, eventBus, lifecycle, permissionEngine, keychain: modelConfigSecrets, artifactFs, briefResolver, getRoomMcpServer: () => currentRoomMcpServer(roomMcpServerRef), getCommandBus: () => commandBusRef.current, ...(options.adapterCommands !== undefined ? { adapterCommands: options.adapterCommands } : {}), ...(options.now !== undefined ? { now: options.now } : {}) });
 
     emitPhase("startup", PHASE_OUTBOX);
     const handlers = createDurableHandlerRegistry({ database, retryDelaysMs: [0] });

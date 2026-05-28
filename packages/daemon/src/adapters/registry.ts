@@ -5,6 +5,7 @@ import type { AgentHubDatabase } from "@agenthub/db";
 import type { AdapterArtifactFSBoundary, ReclaimAdapter, RoomMcpServer, RunLifecycleService, RunRow, BriefResolver } from "@agenthub/orchestrator";
 import type { CommandBus, EventBus } from "@agenthub/bus";
 import type { PermissionEngine } from "@agenthub/permissions";
+import type { KeychainBridge } from "@agenthub/security";
 
 export type RuntimeAdapterId = "mock" | "claude-code" | "opencode" | "native";
 
@@ -13,6 +14,7 @@ export type AdapterRegistryOptions = {
   readonly eventBus: EventBus;
   readonly lifecycle: RunLifecycleService;
   readonly permissionEngine?: PermissionEngine;
+  readonly keychain?: KeychainBridge;
   readonly artifactFs?: AdapterArtifactFSBoundary;
   readonly briefResolver?: BriefResolver;
   readonly getRoomMcpServer?: () => RoomMcpServer;
@@ -40,6 +42,7 @@ type NativeAgentAdapter = {
 };
 
 type ModelConfigRow = {
+  readonly id: string;
   readonly provider: string;
   readonly model: string;
   readonly base_url?: string | null;
@@ -198,7 +201,9 @@ export class AdapterRegistry {
       database: this.options.database,
       eventBus: this.options.eventBus,
       lifecycle: this.options.lifecycle,
+      ...(this.options.permissionEngine !== undefined ? { permissions: this.options.permissionEngine } : {}),
       modelConfig: this.nativeModelConfig(),
+      ...(this.options.keychain !== undefined ? { apiKey: await this.nativeApiKey() } : {}),
       ...(this.options.artifactFs !== undefined ? { artifactFs: this.options.artifactFs } : {}),
       ...(this.options.now !== undefined ? { now: this.options.now } : {})
     } as never);
@@ -208,16 +213,23 @@ export class AdapterRegistry {
   private nativeModelConfig(): ModelConfigRow {
     const row = this.options.database.sqlite
       .prepare(
-        `SELECT mc.provider AS provider, mc.model AS model, mc.base_url AS base_url, mc.api_key_ref AS api_key_ref
-         FROM room_participants rp
-         JOIN agent_bindings ab ON ab.id = rp.agent_binding_id
-         JOIN model_configs mc ON mc.id = ab.model_config_id
-         WHERE rp.adapter_id = 'native' AND rp.participant_type = 'agent' AND rp.agent_binding_id IS NOT NULL
-         ORDER BY rp.joined_at ASC LIMIT 1`
+        `SELECT mc.id AS id, mc.provider AS provider, mc.model AS model, mc.base_url AS base_url, mc.api_key_ref AS api_key_ref
+          FROM room_participants rp
+          JOIN agent_bindings ab ON ab.id = rp.agent_binding_id
+          JOIN model_configs mc ON mc.id = ab.model_config_id
+          WHERE rp.adapter_id = 'native' AND rp.participant_type = 'agent' AND rp.agent_binding_id IS NOT NULL
+          ORDER BY rp.joined_at ASC LIMIT 1`
       )
       .get() as ModelConfigRow | undefined;
     if (row !== undefined) return row;
-    return { provider: "ollama", model: "native-default", base_url: "http://localhost:11434/v1", api_key_ref: null };
+    return { id: "native-default-model-config", provider: "ollama", model: "native-default", base_url: "http://localhost:11434/v1", api_key_ref: null };
+  }
+
+  private async nativeApiKey(): Promise<string | undefined> {
+    const modelConfig = this.nativeModelConfig();
+    if (modelConfig.api_key_ref === null || modelConfig.api_key_ref === undefined) return undefined;
+    const apiKey = await this.options.keychain?.get(modelConfig.api_key_ref);
+    return apiKey === null ? undefined : apiKey;
   }
 
   private clearWarmSession(input: { readonly roomId: string; readonly agentId: string; readonly adapterSessionId: string }): void {

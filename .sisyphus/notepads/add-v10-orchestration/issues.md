@@ -14,3 +14,8 @@
 - REJECTED due to ModelConfig delete conflict path deleting Keychain secret before returning 409. Fix by moving secret deletion after conflict handling and covering bound config with non-null api_key_ref.
 - ModelConfig not-found handling is inconsistent with `get()` returning null; GET/PATCH/DELETE missing IDs can miss intended 404 behavior. Add not-found CRUD tests.
 - Verification commands all passed: scoped tests, ai-sdk-provider:check, check:all.
+
+## Wave 3 Oracle Gate Review - 2026-05-29T04:52:38
+- REJECTED Wave 3 despite passing tests/checks: AdapterRegistry.native() does not pass permissionEngine into NativeAgentAdapter, so real daemon-dispatched native runs default allow for model.api_call.
+- Permission cache is keyed by runId+provider and emits model name as modelConfigId; requirement is runId+modelConfigId with actual model config id.
+- mcp-tool-converter emits failed tool completion twice and throws; non-fatal MCP tool errors should return an error result without crashing the run.

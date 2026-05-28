@@ -43,6 +43,7 @@ beforeEach(async () => {
 describe("resolveProvider", () => {
   it.each<ProviderKind>(["openai", "anthropic", "google", "openai-compatible", "ollama"])("resolves %s to an explicit model instance", (provider) => {
     const modelConfig = {
+      id: "mc-1",
       provider,
       model: "gpt-4o",
       base_url: provider === "ollama" ? null : "https://example.invalid/v1",
@@ -60,6 +61,6 @@ describe("resolveProvider", () => {
   });
 
   it("throws a deterministic unsupported provider error", () => {
-    expect(() => resolveProvider({ provider: "unsupported", model: "gpt-4o", base_url: null, api_key_ref: null }, "test-key")).toThrow("unsupported-provider:unsupported");
+    expect(() => resolveProvider({ id: "mc-unsupported", provider: "unsupported", model: "gpt-4o", base_url: null, api_key_ref: null }, "test-key")).toThrow("unsupported-provider:unsupported");
   });
 });

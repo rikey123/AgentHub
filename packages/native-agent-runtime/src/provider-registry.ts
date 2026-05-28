@@ -5,6 +5,7 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { LanguageModel } from "ai";
 
 export type ModelConfigRow = {
+  id: string;
   provider: string;
   model: string;
   base_url?: string | null;

@@ -40,7 +40,7 @@ describe("NativeAgentAdapter", () => {
       eventBus: { publish },
       lifecycle: lifecycle as never,
       permissions: { check: permissionCheckMock } as never,
-      modelConfig: { provider: "openai", model: "gpt-4o", base_url: null, api_key_ref: null },
+      modelConfig: { id: "mc-1", provider: "openai", model: "gpt-4o", base_url: null, api_key_ref: null },
       apiKey: "test-key"
     });
 
@@ -54,11 +54,12 @@ describe("NativeAgentAdapter", () => {
     await adapter.runManaged(runRow());
 
     expect(permissionCheckMock).toHaveBeenCalledTimes(1);
-    expect(resolveProviderMock).toHaveBeenCalledWith({ provider: "openai", model: "gpt-4o", base_url: null, api_key_ref: null }, "test-key");
+    expect(resolveProviderMock).toHaveBeenCalledWith({ id: "mc-1", provider: "openai", model: "gpt-4o", base_url: null, api_key_ref: null }, "test-key");
     expect(convertMcpToolsToAiSdkToolsMock).toHaveBeenCalled();
     expect(streamTextMock).toHaveBeenCalledWith(expect.objectContaining({ model: { id: "resolved-model" }, abortSignal: expect.any(AbortSignal), tools: {} }));
     expect(publish).toHaveBeenCalledWith(expect.objectContaining({ type: "message.part.delta" }));
     expect(publish).toHaveBeenCalledWith(expect.objectContaining({ type: "permission.run_summary" }));
+    expect(publish).toHaveBeenCalledWith(expect.objectContaining({ type: "permission.run_summary", payload: expect.objectContaining({ decisions: [expect.objectContaining({ modelConfigId: "mc-1" })] }) }));
     expect(lifecycle.complete).toHaveBeenCalledWith(null, "run-1", { inputTokens: 120, outputTokens: 45, cachedTokens: 12, costUsd: 0.001035, modelId: "gpt-4o" }, undefined);
   });
 
@@ -71,7 +72,7 @@ describe("NativeAgentAdapter", () => {
       eventBus: { publish },
       lifecycle: lifecycle as never,
       permissions: { check: permissionCheckMock } as never,
-      modelConfig: { provider: "anthropic", model: "claude-sonnet", base_url: null, api_key_ref: null }
+      modelConfig: { id: "mc-deny", provider: "anthropic", model: "claude-sonnet", base_url: null, api_key_ref: null }
     });
 
     await adapter.runManaged(runRow());
@@ -93,13 +94,14 @@ describe("NativeAgentAdapter", () => {
       eventBus: { publish },
       lifecycle: lifecycle as never,
       permissions: { check: permissionCheckMock } as never,
-      modelConfig: { provider: "openai", model: "gpt-4o", base_url: null, api_key_ref: null }
+      modelConfig: { id: "mc-cache-1", provider: "openai", model: "gpt-4o", base_url: null, api_key_ref: null }
     });
 
     await adapter.runManaged(runRow());
+    adapter["options"].modelConfig.id = "mc-cache-2";
     await adapter.runManaged(runRow());
 
-    expect(permissionCheckMock).toHaveBeenCalledTimes(1);
+    expect(permissionCheckMock).toHaveBeenCalledTimes(2);
   });
 
   it("aborts the active stream and finalizes as cancelled", async () => {
@@ -122,7 +124,7 @@ describe("NativeAgentAdapter", () => {
       eventBus: { publish },
       lifecycle: lifecycle as never,
       permissions: { check: permissionCheckMock } as never,
-      modelConfig: { provider: "openai", model: "gpt-4o", base_url: null, api_key_ref: null }
+      modelConfig: { id: "mc-cancel", provider: "openai", model: "gpt-4o", base_url: null, api_key_ref: null }
     });
 
     permissionCheckMock.mockReturnValue({ status: "allow", reason: "default_allow" });
@@ -149,7 +151,7 @@ describe("NativeAgentAdapter", () => {
       eventBus: { publish: vi.fn() },
       lifecycle: lifecycle as never,
       permissions: { check: permissionCheckMock } as never,
-      modelConfig: { provider: "openai", model: "gpt-4o", base_url: null, api_key_ref: null }
+      modelConfig: { id: "mc-cost", provider: "openai", model: "gpt-4o", base_url: null, api_key_ref: null }
     });
 
     permissionCheckMock.mockReturnValue({ status: "allow", reason: "default_allow" });

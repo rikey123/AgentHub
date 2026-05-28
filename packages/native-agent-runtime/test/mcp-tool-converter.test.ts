@@ -36,8 +36,9 @@ describe("convertMcpToolsToAiSdkTools", () => {
       new (class { handle = bridgeHandle; })() as never
     );
 
-    await expect(toolSet["room.create_task"].execute?.({ title: "" })).rejects.toThrow("title is required");
+    await expect(toolSet["room.create_task"].execute?.({ title: "" })).resolves.toEqual({ code: "validation_failed", message: "title is required" });
 
     expect(bridgeHandle).toHaveBeenCalledWith(expect.objectContaining({ type: "tool.call.completed", ok: false, output: { code: "validation_failed", message: "title is required" } }));
+    expect(bridgeHandle).toHaveBeenCalledTimes(2);
   });
 });

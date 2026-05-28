@@ -111,7 +111,7 @@ describe("NativeAgentAdapter integration", () => {
     expect(currentLifecycle().read(run.id).status).toBe("completed");
     expect(eventPayload("permission.run_summary", run.id)).toMatchObject({
       runId: run.id,
-      decisions: [{ decision: "allowed", modelConfigId: "gpt-4o", resource: { type: "model.api_call", provider: "openai" } }]
+      decisions: [{ decision: "allowed", modelConfigId: "model_openai", resource: { type: "model.api_call", provider: "openai" } }]
     });
   });
 
@@ -125,7 +125,7 @@ describe("NativeAgentAdapter integration", () => {
     expect(streamTextMock).not.toHaveBeenCalled();
     expect(currentLifecycle().read(run.id)).toMatchObject({ status: "failed", failure_class: "permission_denied", error: "model.api_call permission denied" });
     expect(eventPayload("agent.run.failed", run.id)).toMatchObject({ reason: "model_api_call_denied", failureClass: "permission_denied" });
-    expect(eventPayload("permission.run_summary", run.id)).toMatchObject({ decisions: [{ decision: "denied", modelConfigId: "claude-sonnet" }] });
+    expect(eventPayload("permission.run_summary", run.id)).toMatchObject({ decisions: [{ decision: "denied", modelConfigId: "model_anthropic" }] });
   });
 
   test("CancelRun aborts the active native stream and finalizes cancellation", async () => {
