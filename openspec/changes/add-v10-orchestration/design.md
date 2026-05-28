@@ -139,7 +139,7 @@ import { createOpenAICompatible } from "@ai-sdk/openai-compatible"
 // import { createGateway } from "@ai-sdk/gateway"
 // import { createVercel } from "@ai-sdk/vercel"
 
-export function resolveProvider(modelConfig: ModelConfig, apiKey: string) {
+export function resolveProvider(modelConfig: ModelConfig, apiKey: string | undefined) {
   switch (modelConfig.provider) {
     case "openai":
       return createOpenAI({ apiKey, baseURL: modelConfig.base_url })
@@ -148,9 +148,16 @@ export function resolveProvider(modelConfig: ModelConfig, apiKey: string) {
     case "google":
       return createGoogleGenerativeAI({ apiKey, baseURL: modelConfig.base_url })
     case "openai-compatible":
-      // baseURL 必填；DeepSeek / OpenRouter / Groq / DeepInfra / Cerebras / Ollama
-      // 等都走这条（参考 OpenCode openai-compatible-profile.ts:10 的 profile 列表）
+      // DeepSeek / OpenRouter / Groq / DeepInfra / Cerebras 等（不含 Ollama，Ollama 有独立 case）
+      // 参考 OpenCode openai-compatible-profile.ts:10 的 profile 列表
       return createOpenAICompatible({ name: modelConfig.name, apiKey, baseURL: modelConfig.base_url! })
+    case "ollama":
+      // 本地 Ollama，无 API key；baseUrl 默认 http://localhost:11434/v1
+      return createOpenAICompatible({
+        name: "ollama",
+        apiKey: "ollama",                  // Ollama 接受任意非空字符串
+        baseURL: modelConfig.base_url ?? "http://localhost:11434/v1"
+      })
     case "vercel-gateway":
       // 仅在 V1.x 显式启用；V1.0 开关默认关闭，开启时 UI 提示"会经过 Vercel 网关"
       throw new Error("vercel-gateway provider is V1.x explicit opt-in")
@@ -709,7 +716,7 @@ ALTER TABLE room_participants ADD COLUMN agent_binding_id TEXT;
 //    c. UPSERT INTO model_configs (id=`${ap.adapter_id}-${ap.model}`, ...)
 //    d. INSERT INTO agent_bindings (role_id, runtime_id, model_config_id?)
 // 3. 扫描 room_participants：把 agent_id（指向 ap.id）改成对应 agent_binding_id
-// 4. 扫描 tasks：把 assignee_agent_id 反查 → assignee_role_id
+// 4. 扫描 tasks：把 assignee_agent_id 反查对应 agent_binding_id，并写入 assignee_binding_id + assignee_role_id
 // 5. 标记 schema_meta.version = '1.0'
 ```
 
