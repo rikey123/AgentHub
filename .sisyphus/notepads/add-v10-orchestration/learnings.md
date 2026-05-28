@@ -133,3 +133,4 @@
 - `packages/native-agent-runtime` follows the repo’s package convention: private ESM package, `exports` to `src/`, `scripts/run-tests.mjs`, and a `tsconfig.json` that extends from the repo root.
 - Vercel AI SDK 5 explicit provider factories work cleanly with `provider.chatModel(modelId)`; the package test should mock the factory module and assert the model instance comes from the provider object, not a string ID.
 - The new package needed `../../tsconfig.base.json` from its location; the first attempt used the adapter package path and broke Vitest tsconfig resolution.
+- Native runtime adapter code needed source-relative imports for `@agenthub/*` internals during package tests; switching to direct `../../*/src/index.ts` imports kept Vitest resolution stable without changing repo-wide package wiring.

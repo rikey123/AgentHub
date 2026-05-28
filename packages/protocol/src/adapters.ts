@@ -3,7 +3,7 @@ import { Schema } from "effect";
 import { ContextItemSchema, PermissionResourceSchema } from "./domains.ts";
 import { IdSchema, InjectionModeSchema } from "./primitives.ts";
 
-export const AgentRuntimeKindSchema = Schema.Literal("native_sdk", "cli", "server", "mcp", "acp", "a2a", "langgraph");
+export const AgentRuntimeKindSchema = Schema.Literal("native_sdk", "native", "cli", "server", "mcp", "acp", "a2a", "langgraph");
 export type AgentRuntimeKind = typeof AgentRuntimeKindSchema.Type;
 
 export const AgentAdapterManifestSchema = Schema.Struct({
@@ -40,7 +40,7 @@ export const AgentAdapterManifestSchema = Schema.Struct({
     canPullExternalContext: Schema.Boolean,
     canPushLedgerUpdates: Schema.Boolean
   }),
-  workspace: Schema.Struct({ mode: Schema.Literal("shared", "isolated_copy", "worktree", "external") })
+  workspace: Schema.Struct({ mode: Schema.Literal("shared", "isolated_copy", "worktree", "external", "shadow_buffer") })
 });
 export type AgentAdapterManifest = typeof AgentAdapterManifestSchema.Type;
 

@@ -4,12 +4,16 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/provider-registry.ts"
+    ".": "./src/index.ts"
   },
   "scripts": {
     "test": "node scripts/run-tests.mjs"
   },
   "dependencies": {
+    "@agenthub/bus": "workspace:*",
+    "@agenthub/db": "workspace:*",
+    "@agenthub/orchestrator": "workspace:*",
+    "@agenthub/protocol": "workspace:*",
     "ai": "^5.0.0",
     "@ai-sdk/anthropic": "^1.0.0",
     "@ai-sdk/google": "^1.0.0",
