@@ -131,6 +131,40 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     const eventBus = withStatusLineCoalescing(createEventBus({ database }));
     const agentProfiles = watchAgentProfiles({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
     await agentProfiles.ready;
+
+    const now = options.now?.() ?? Date.now();
+    database.sqlite.transaction(() => {
+      database.sqlite.prepare(
+        `INSERT INTO runtimes (
+          id, workspace_id, kind, name, command, args, env, detected_at, detected_path, detected_version,
+          supported_caps, version, status, manifest_json, created_at, updated_at
+        ) VALUES (?, NULL, 'native', ?, NULL, NULL, NULL, ?, NULL, NULL, ?, NULL, NULL, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           workspace_id = excluded.workspace_id,
+           kind = excluded.kind,
+           name = excluded.name,
+           command = NULL,
+           args = NULL,
+           env = NULL,
+           detected_at = excluded.detected_at,
+           detected_path = NULL,
+           detected_version = NULL,
+           supported_caps = excluded.supported_caps,
+           version = NULL,
+           status = NULL,
+           manifest_json = excluded.manifest_json,
+           updated_at = excluded.updated_at`
+      ).run("native-default", "AgentHub Native", now, "[]", JSON.stringify({ runtimeKind: "native" }), now, now);
+      eventBus.publish({
+        id: randomUUID(),
+        type: "runtime.detected",
+        schemaVersion: 1,
+        workspaceId: "default-workspace",
+        payload: { runtimeId: "native-default", kind: "native", name: "AgentHub Native" },
+        createdAt: now
+      });
+    })();
+
     const contextLedger = new ContextLedger({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
     const permissionEngine = new PermissionEngine({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
     const interventionEngine = new InterventionEngine({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
@@ -344,6 +378,7 @@ type RouteContext = { readonly req: IncomingMessage; readonly res: ServerRespons
 
 async function route(ctx: RouteContext): Promise<void> {
   const url = new URL(ctx.req.url ?? "/", "http://127.0.0.1");
+  const parts = url.pathname.split("/").filter(Boolean);
   const auth = authenticate(ctx, url);
   if (!auth.ok) return json(ctx.res, auth.status, { error: auth.error });
   if (ctx.req.method === "POST" && url.pathname === "/auth/session") return authSession(ctx);
@@ -352,6 +387,111 @@ async function route(ctx: RouteContext): Promise<void> {
   if (ctx.req.method === "POST" && url.pathname === "/attachments") return attachments(ctx);
   if (ctx.req.method === "GET" && url.pathname === "/healthz") return json(ctx.res, 200, { ok: true });
   if (ctx.req.method === "GET" && url.pathname === "/openapi.json") return json(ctx.res, 200, openApiDocument);
+  if (ctx.req.method === "GET" && url.pathname === "/runtimes") {
+    const workspaceId = url.searchParams.get("workspaceId");
+    const runtimes = all(
+      ctx.database,
+      workspaceId === null
+        ? "SELECT * FROM runtimes ORDER BY created_at ASC"
+        : "SELECT * FROM runtimes WHERE workspace_id = ? ORDER BY created_at ASC",
+      ...(workspaceId === null ? [] : [workspaceId])
+    ).map((row) => {
+      const runtime = row as Record<string, unknown>;
+      return {
+        ...runtime,
+        args: runtime.args !== null && runtime.args !== undefined ? JSON.parse(String(runtime.args)) as unknown : runtime.args,
+        env: runtime.env !== null && runtime.env !== undefined ? JSON.parse(String(runtime.env)) as unknown : runtime.env,
+        supported_caps: JSON.parse(String(runtime.supported_caps ?? "[]")) as unknown,
+        manifest_json: runtime.manifest_json !== null && runtime.manifest_json !== undefined ? JSON.parse(String(runtime.manifest_json)) as unknown : runtime.manifest_json
+      };
+    });
+    return json(ctx.res, 200, runtimes);
+  }
+  if (ctx.req.method === "POST" && url.pathname === "/runtimes") {
+    const input = await body(ctx) as Record<string, unknown>;
+    const now = ctx.now?.() ?? Date.now();
+    const id = typeof input.id === "string" && input.id.length > 0 ? input.id : randomUUID();
+    const name = typeof input.name === "string" && input.name.length > 0 ? input.name : "Custom ACP Runtime";
+    const command = typeof input.command === "string" ? input.command : null;
+    const args = Array.isArray(input.args) ? JSON.stringify(input.args) : null;
+    const env = input.env !== null && typeof input.env === "object" && !Array.isArray(input.env) ? JSON.stringify(input.env) : null;
+    const supportedCaps = Array.isArray(input.supportedCaps) ? JSON.stringify(input.supportedCaps) : JSON.stringify([]);
+    const manifestJson = typeof input.manifestJson === "string"
+      ? input.manifestJson
+      : JSON.stringify({ runtimeKind: "custom-acp" });
+    const workspaceId = typeof input.workspaceId === "string" ? input.workspaceId : null;
+    ctx.database.sqlite.transaction(() => {
+      ctx.database.sqlite.prepare(
+        "INSERT INTO runtimes (id, workspace_id, kind, name, command, args, env, detected_at, detected_path, detected_version, supported_caps, version, status, manifest_json, created_at, updated_at) VALUES (?, ?, 'custom-acp', ?, ?, ?, ?, NULL, NULL, NULL, ?, NULL, NULL, ?, ?, ?)"
+      ).run(id, workspaceId, name, command, args, env, supportedCaps, manifestJson, now, now);
+      ctx.eventBus.publish({
+        id: randomUUID(),
+        type: "runtime.detected",
+        schemaVersion: 1,
+        workspaceId: workspaceId ?? "default-workspace",
+        payload: { runtimeId: id, kind: "custom-acp", name },
+        createdAt: now
+      });
+    })();
+    const runtime = get(ctx.database, "SELECT * FROM runtimes WHERE id = ?", id) as Record<string, unknown> | undefined;
+    return json(ctx.res, 201, runtime !== undefined ? { runtime } : { runtime: null });
+  }
+  if (ctx.req.method === "PATCH" && parts[0] === "runtimes" && parts[1]) {
+    const input = await body(ctx) as Record<string, unknown>;
+    const existing = get(ctx.database, "SELECT * FROM runtimes WHERE id = ?", parts[1]) as Record<string, unknown> | undefined;
+    if (existing === undefined) return json(ctx.res, 404, { error: "runtime_not_found" });
+    const now = ctx.now?.() ?? Date.now();
+    const name = typeof input.name === "string" ? input.name : String(existing.name);
+    const command = typeof input.command === "string" ? input.command : existing.command ?? null;
+    const args = Array.isArray(input.args) ? JSON.stringify(input.args) : existing.args ?? null;
+    const env = input.env !== null && typeof input.env === "object" && !Array.isArray(input.env) ? JSON.stringify(input.env) : existing.env ?? null;
+    const supportedCaps = Array.isArray(input.supportedCaps) ? JSON.stringify(input.supportedCaps) : existing.supported_caps ?? "[]";
+    const manifestJson = typeof input.manifestJson === "string" ? input.manifestJson : String(existing.manifest_json);
+    const workspaceId = typeof input.workspaceId === "string" ? input.workspaceId : existing.workspace_id ?? null;
+    const detectedAt = typeof input.detectedAt === "number" && Number.isFinite(input.detectedAt) ? input.detectedAt : existing.detected_at ?? null;
+    const detectedPath = typeof input.detectedPath === "string" ? input.detectedPath : existing.detected_path ?? null;
+    const detectedVersion = typeof input.detectedVersion === "string" ? input.detectedVersion : existing.detected_version ?? null;
+    const version = typeof input.version === "string" ? input.version : existing.version ?? null;
+    const status = typeof input.status === "string" ? input.status : existing.status ?? null;
+    ctx.database.sqlite.transaction(() => {
+      ctx.database.sqlite.prepare(
+        "UPDATE runtimes SET workspace_id = ?, name = ?, command = ?, args = ?, env = ?, detected_at = ?, detected_path = ?, detected_version = ?, supported_caps = ?, version = ?, status = ?, manifest_json = ?, updated_at = ? WHERE id = ?"
+      ).run(workspaceId, name, command, args, env, detectedAt, detectedPath, detectedVersion, supportedCaps, version, status, manifestJson, now, parts[1]);
+      ctx.eventBus.publish({
+        id: randomUUID(),
+        type: "runtime.updated",
+        schemaVersion: 1,
+        workspaceId: workspaceId ?? "default-workspace",
+        payload: { runtimeId: parts[1], kind: String(existing.kind), name },
+        createdAt: now
+      });
+    })();
+    return json(ctx.res, 200, { runtime: get(ctx.database, "SELECT * FROM runtimes WHERE id = ?", parts[1]) });
+  }
+  if (ctx.req.method === "DELETE" && parts[0] === "runtimes" && parts[1]) {
+    const existing = get(ctx.database, "SELECT * FROM runtimes WHERE id = ?", parts[1]) as Record<string, unknown> | undefined;
+    if (existing === undefined) return json(ctx.res, 404, { error: "runtime_not_found" });
+    const now = ctx.now?.() ?? Date.now();
+    let conflict = false;
+    ctx.database.sqlite.transaction(() => {
+      const bindings = get(ctx.database, "SELECT COUNT(*) AS count FROM agent_bindings WHERE runtime_id = ?", parts[1]) as { readonly count: number } | undefined;
+      if ((bindings?.count ?? 0) > 0) {
+        conflict = true;
+        return;
+      }
+      ctx.database.sqlite.prepare("DELETE FROM runtimes WHERE id = ?").run(parts[1]);
+      ctx.eventBus.publish({
+        id: randomUUID(),
+        type: "runtime.removed",
+        schemaVersion: 1,
+        workspaceId: existing.workspace_id ?? "default-workspace",
+        payload: { runtimeId: parts[1], kind: String(existing.kind), name: String(existing.name) },
+        createdAt: now
+      });
+    })();
+    if (conflict) return json(ctx.res, 409, { error: "runtime_has_bindings" });
+    return json(ctx.res, 200, { ok: true });
+  }
   if (ctx.req.method === "GET" && url.pathname === "/event") return sse(ctx, url, auth.scopes);
   if (ctx.req.method === "GET" && url.pathname === "/rooms") return json(ctx.res, 200, { rooms: all(ctx.database, "SELECT * FROM rooms ORDER BY created_at ASC") });
   if (ctx.req.method === "POST" && url.pathname === "/rooms") {
@@ -360,7 +500,8 @@ async function route(ctx: RouteContext): Promise<void> {
     if (!normalized.ok) return json(ctx.res, normalized.status, { error: normalized.error });
     return dispatchCreated(ctx, normalized.body, "CreateRoom");
   }
-  const parts = url.pathname.split("/").filter(Boolean);
+  if (ctx.req.method === "GET" && url.pathname === "/roles") return roles(ctx, url);
+  if (ctx.req.method === "POST" && url.pathname === "/roles") return createRole(ctx, await body(ctx));
   if (ctx.req.method === "DELETE" && parts[0] === "auth" && parts[1] === "tokens" && parts[2]) { if (!requireScope(auth, "write", ctx.res)) return; return revokeToken(ctx, parts[2]); }
   if (ctx.req.method === "GET" && parts[0] === "rooms" && parts.length === 1) return json(ctx.res, 200, { rooms: all(ctx.database, "SELECT * FROM rooms ORDER BY created_at ASC") });
   if (ctx.req.method === "GET" && parts[0] === "rooms" && parts.length === 2) return json(ctx.res, 200, { room: get(ctx.database, "SELECT * FROM rooms WHERE id = ?", parts[1]) });
@@ -405,6 +546,15 @@ async function route(ctx: RouteContext): Promise<void> {
   if (ctx.req.method === "POST" && parts[0] === "interventions" && parts[2] === "ignore") return dispatch(ctx, { interventionId: parts[1] }, "IgnoreIntervention");
   if (ctx.req.method === "POST" && parts[0] === "interventions" && parts[2] === "reject") return dispatch(ctx, { ...(await body(ctx)), interventionId: parts[1] }, "RejectIntervention");
   if (ctx.req.method === "POST" && parts[0] === "interventions" && parts[2] === "later") return dispatch(ctx, { ...(await body(ctx)), interventionId: parts[1] }, "SnoozeIntervention");
+  if (parts[0] === "roles" && parts[1]) {
+    if (ctx.req.method === "GET" && parts.length === 2) {
+      const role = get(ctx.database, "SELECT * FROM roles WHERE id = ?", parts[1]);
+      if (role === null) return json(ctx.res, 404, { error: "role_not_found" });
+      return json(ctx.res, 200, role);
+    }
+    if (ctx.req.method === "PATCH" && parts.length === 2) return updateRole(ctx, parts[1], await body(ctx));
+    if (ctx.req.method === "DELETE" && parts.length === 2) return deleteRole(ctx, parts[1]);
+  }
   if (ctx.req.method === "GET" && url.pathname === "/artifacts") return artifacts(ctx, url);
   if (ctx.req.method === "POST" && url.pathname === "/artifacts") return dispatch(ctx, await body(ctx), "CreateArtifact");
   if (ctx.req.method === "GET" && parts[0] === "artifacts" && parts.length === 2) return json(ctx.res, 200, { artifact: ctx.artifactService.get(parts[1] as string) ?? null });
@@ -686,6 +836,91 @@ function permissionRules(ctx: RouteContext, url: URL): void {
   if (workspaceId === null) return json(ctx.res, 200, { rules: all(ctx.database, "SELECT * FROM permission_rules ORDER BY created_at ASC") });
   return json(ctx.res, 200, { rules: all(ctx.database, "SELECT * FROM permission_rules WHERE workspace_id = ? ORDER BY created_at ASC", workspaceId) });
 }
+
+function roles(ctx: RouteContext, url: URL): void {
+  const workspaceId = url.searchParams.get("workspaceId") ?? "default-workspace";
+   json(ctx.res, 200, all(ctx.database, "SELECT * FROM roles WHERE workspace_id IS NULL OR workspace_id = ? ORDER BY name ASC", workspaceId).map((row) => normalizeRoleRow(row as Record<string, unknown>)));
+}
+
+function createRole(ctx: RouteContext, input: Record<string, unknown>): void {
+  const now = ctx.now?.() ?? Date.now();
+  const workspaceId = stringField(input["workspaceId"]) ?? "default-workspace";
+  const name = stringField(input["name"]);
+  const prompt = stringField(input["prompt"]);
+  if (name === undefined || prompt === undefined) return json(ctx.res, 400, { error: "validation_failed", message: "name and prompt are required" });
+  const roleId = randomUUID();
+  const role = roleRow({ id: roleId, workspaceId, name, prompt, input, now });
+  ctx.database.sqlite.transaction(() => {
+    ctx.database.sqlite.prepare("INSERT INTO roles (id, workspace_id, name, avatar, description, prompt, capabilities, default_permission_profile_id, tags, is_builtin, source_path, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(role.id, role.workspace_id, role.name, role.avatar, role.description, role.prompt, role.capabilities, role.default_permission_profile_id, role.tags, role.is_builtin, role.source_path, role.version, role.created_at, role.updated_at);
+    ctx.eventBus.publish({ id: randomUUID(), type: "role.created", schemaVersion: 1, workspaceId, payload: { roleId, workspaceId }, createdAt: now });
+  })();
+  json(ctx.res, 201, normalizeRoleRow(role));
+}
+
+function updateRole(ctx: RouteContext, roleId: string, input: Record<string, unknown>): void {
+  const existing = get(ctx.database, "SELECT * FROM roles WHERE id = ?", roleId) as Record<string, unknown> | null;
+  if (existing === null) return json(ctx.res, 404, { error: "role_not_found" });
+  const now = ctx.now?.() ?? Date.now();
+  const workspaceId = stringField(input["workspaceId"]) ?? stringField(existing["workspace_id"]) ?? "default-workspace";
+  const role = roleRow({ id: roleId, workspaceId, name: stringField(input["name"]) ?? stringField(existing["name"]) ?? "", prompt: stringField(input["prompt"]) ?? stringField(existing["prompt"]) ?? "", input, existing, now });
+  ctx.database.sqlite.transaction(() => {
+    ctx.database.sqlite.prepare("UPDATE roles SET workspace_id = ?, name = ?, avatar = ?, description = ?, prompt = ?, capabilities = ?, default_permission_profile_id = ?, tags = ?, is_builtin = ?, source_path = ?, version = ?, updated_at = ? WHERE id = ?").run(role.workspace_id, role.name, role.avatar, role.description, role.prompt, role.capabilities, role.default_permission_profile_id, role.tags, role.is_builtin, role.source_path, role.version, role.updated_at, roleId);
+    ctx.eventBus.publish({ id: randomUUID(), type: "role.updated", schemaVersion: 1, workspaceId, payload: { roleId, workspaceId }, createdAt: now });
+  })();
+  json(ctx.res, 200, normalizeRoleRow(get(ctx.database, "SELECT * FROM roles WHERE id = ?", roleId) as Record<string, unknown>));
+}
+
+function deleteRole(ctx: RouteContext, roleId: string): void {
+  const existing = get(ctx.database, "SELECT * FROM roles WHERE id = ?", roleId) as Record<string, unknown> | null;
+  if (existing === null) return json(ctx.res, 404, { error: "role_not_found" });
+  const now = ctx.now?.() ?? Date.now();
+  const workspaceId = stringField(existing["workspace_id"]) ?? "default-workspace";
+  const bindingCount = scalar(ctx.database, "SELECT COUNT(*) AS count FROM agent_bindings WHERE role_id = ?", roleId);
+  if (bindingCount > 0) return json(ctx.res, 409, { error: "role_has_bindings", bindingCount });
+  ctx.database.sqlite.transaction(() => {
+    ctx.database.sqlite.prepare("DELETE FROM roles WHERE id = ?").run(roleId);
+    ctx.eventBus.publish({ id: randomUUID(), type: "role.deleted", schemaVersion: 1, workspaceId, payload: { roleId, workspaceId }, createdAt: now });
+  })();
+  json(ctx.res, 200, { ok: true });
+}
+
+function roleRow(options: { readonly id: string; readonly workspaceId: string; readonly name: string; readonly prompt: string; readonly input: Record<string, unknown>; readonly now: number; readonly existing?: Record<string, unknown> }): { readonly id: string; readonly workspace_id: string; readonly name: string; readonly avatar: string | null; readonly description: string | null; readonly prompt: string; readonly capabilities: string; readonly default_permission_profile_id: string | null; readonly tags: string | null; readonly is_builtin: number; readonly source_path: string | null; readonly version: string | null; readonly created_at: number; readonly updated_at: number } {
+  const existing = options.existing ?? {};
+  return {
+    id: options.id,
+    workspace_id: options.workspaceId,
+    name: options.name,
+    avatar: stringOrNull(options.input["avatar"] ?? existing["avatar"]),
+    description: stringOrNull(options.input["description"] ?? existing["description"]),
+    prompt: options.prompt,
+    capabilities: stringOrJson(options.input["capabilities"] ?? existing["capabilities"] ?? "[]", "[]"),
+    default_permission_profile_id: stringOrNull(options.input["defaultPermissionProfileId"] ?? options.input["default_permission_profile_id"] ?? existing["default_permission_profile_id"]),
+    tags: stringOrJson(options.input["tags"] ?? existing["tags"] ?? null, null),
+    is_builtin: options.input["isBuiltin"] === true ? 1 : Number(existing["is_builtin"] ?? 0),
+    source_path: stringOrNull(options.input["sourcePath"] ?? options.input["source_path"] ?? existing["source_path"]),
+    version: stringOrNull(options.input["version"] ?? existing["version"]),
+    created_at: Number(existing["created_at"] ?? options.now),
+    updated_at: options.now
+  };
+}
+
+function normalizeRoleRow(row: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...row,
+    capabilities: parseJsonField(row["capabilities"], []),
+    tags: parseJsonField(row["tags"], null)
+  };
+}
+
+function parseJsonField(value: unknown, fallback: unknown): unknown {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value !== "string") return value;
+  try { return JSON.parse(value); } catch { return fallback; }
+}
+
+function stringField(value: unknown): string | undefined { return typeof value === "string" && value.length > 0 ? value : undefined; }
+function stringOrNull(value: unknown): string | null { return typeof value === "string" ? value : null; }
+function stringOrJson(value: unknown, fallback: string | null): string | null { if (value === undefined) return fallback; if (value === null) return null; return typeof value === "string" ? value : JSON.stringify(value); }
 
 async function dispatch(ctx: RouteContext, data: Record<string, unknown>, type: CommandType): Promise<void> {
   const result = await ctx.commandBus.dispatch({ ...data, type, idempotencyKey: typeof data.idempotencyKey === "string" ? data.idempotencyKey : randomUUID() }, { actor: { type: "user", id: "local" }, traceId: randomUUID(), origin: "http" });

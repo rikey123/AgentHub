@@ -57,3 +57,24 @@
 - `task_activities` now uses the spec column names (`kind`, `by_kind`, `by`) and the task activity index name matches the spec.
 - The daemon data migration had one leftover `agent_bindings.name` seed path; it now uses `override_permission_profile_id`.
 - The daemon test fixture for migrated bindings also needed the renamed column and now passes.
+
+## [2026-05-29T02:32:02Z] Task 1.1
+- Implemented REST role CRUD directly in `packages/daemon/src/index.ts` with same-transaction durable publishes for `role.created`, `role.updated`, and `role.deleted`.
+- Added a response normalizer so role API replies decode stored JSON strings for `capabilities` and `tags` before returning them to clients.
+- Delete protection checks `agent_bindings` first and returns `409 { error: "role_has_bindings", bindingCount }` without publishing an event.
+- Added daemon regression coverage for create/get/update/delete happy path plus the binding conflict path.
+- Verified the isolated daemon suite passes: `pnpm.cmd --filter @agenthub/daemon test`.
+
+## 2026-05-29 — Wave 1 Oracle re-review after schema fix
+
+- Re-reviewed `0014_v10.sql`, `schema.ts`, `0014_data.ts`, and DB/daemon tests after the schema drift fix.
+- Verdict written to `.sisyphus/evidence/wave-1-oracle-review-2.md`: APPROVE; Wave 2 can proceed.
+- Focused verification passed: DB sqlite drift tests, `schema:check`, V10 data migration test, and legacy `agentProfileId` compatibility tests.
+- Note: broad `pnpm.cmd test -- packages/db packages/daemon` had one unrelated daemon auth-token test fail with `Error: bad port`; the Wave 1 schema/data-migration paths passed focused checks.
+
+## 2026-05-29 — Task 1.3 runtime CRUD + native-default startup
+
+- Added daemon-side runtime REST handling in `packages/daemon/src/index.ts` for `GET /runtimes`, `POST /runtimes`, `PATCH /runtimes/:id`, and `DELETE /runtimes/:id`.
+- Implemented transaction+publish on every runtime write with durable detail events: `runtime.detected`, `runtime.updated`, and `runtime.removed`.
+- Added daemon startup UPSERT for `native-default` (`kind = native`, `name = AgentHub Native`, `supported_caps = []`, `manifest_json = {"runtimeKind":"native"}`) before the context/permission engines are built.
+- Added daemon tests covering native runtime seeding, CRUD event emission, and the 409 delete path when `agent_bindings` exist.

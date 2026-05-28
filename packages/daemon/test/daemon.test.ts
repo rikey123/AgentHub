@@ -127,6 +127,51 @@ describe("daemon M1.4 composition", () => {
     }
   });
 
+  it("registers native-default runtime on startup and exposes runtime CRUD", async () => {
+    const native = daemon.database.sqlite.prepare("SELECT id, kind, name, supported_caps, manifest_json FROM runtimes WHERE id = 'native-default'").get() as { readonly id: string; readonly kind: string; readonly name: string; readonly supported_caps: string; readonly manifest_json: string } | undefined;
+    expect(native).toMatchObject({ id: "native-default", kind: "native", name: "AgentHub Native" });
+    expect(native?.supported_caps).toBe("[]");
+    expect(JSON.parse(native?.manifest_json ?? "{}") as { readonly runtimeKind?: string }).toMatchObject({ runtimeKind: "native" });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'runtime.detected' AND json_extract(payload, '$.runtimeId') = 'native-default'").get()).toMatchObject({ count: 1 });
+
+    const created = await fetch(`${baseUrl}/runtimes`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: "runtime-custom-1", name: "Custom Runtime", command: "custom-acp", args: ["--one"], env: { FOO: "bar" }, supportedCaps: ["chat"], manifestJson: JSON.stringify({ runtimeKind: "custom-acp" }) })
+    });
+    const createdPayload = await created.json() as { readonly runtime?: { readonly id: string; readonly name: string; readonly kind: string } | null };
+    expect(created.status).toBe(201);
+    expect(createdPayload.runtime).toMatchObject({ id: "runtime-custom-1", name: "Custom Runtime", kind: "custom-acp" });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'runtime.detected' AND json_extract(payload, '$.runtimeId') = 'runtime-custom-1'").get()).toMatchObject({ count: 1 });
+
+    const patched = await fetch(`${baseUrl}/runtimes/runtime-custom-1`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Custom Runtime Updated", args: ["--two"], env: { BAZ: "qux" }, status: "ready" })
+    });
+    const patchedPayload = await patched.json() as { readonly runtime?: { readonly name: string } | null };
+    expect(patched.status).toBe(200);
+    expect(patchedPayload.runtime).toMatchObject({ name: "Custom Runtime Updated" });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'runtime.updated' AND json_extract(payload, '$.runtimeId') = 'runtime-custom-1'").get()).toMatchObject({ count: 1 });
+
+    const deleted = await fetch(`${baseUrl}/runtimes/runtime-custom-1`, { method: "DELETE" });
+    expect(deleted.status).toBe(200);
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM runtimes WHERE id = 'runtime-custom-1'").get()).toMatchObject({ count: 0 });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'runtime.removed' AND json_extract(payload, '$.runtimeId') = 'runtime-custom-1'").get()).toMatchObject({ count: 1 });
+  });
+
+  it("rejects deleting a runtime with existing bindings", async () => {
+    daemon.database.sqlite.prepare("INSERT INTO runtimes (id, workspace_id, kind, name, supported_caps, manifest_json, created_at, updated_at) VALUES (?, ?, ?, ?, '[]', ?, ?, ?)").run("runtime-bound", "default-workspace", "custom-acp", "Bound Runtime", JSON.stringify({ runtimeKind: "custom-acp" }), 1, 1);
+    daemon.database.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, NULL, ?, ?)").run("binding-bound", "default-workspace", "role-bound", "runtime-bound", 1, 1);
+
+    const deleted = await fetch(`${baseUrl}/runtimes/runtime-bound`, { method: "DELETE" });
+
+    expect(deleted.status).toBe(409);
+    expect(await deleted.json()).toMatchObject({ error: "runtime_has_bindings" });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE json_extract(payload, '$.runtimeId') = 'runtime-bound' AND type = 'runtime.removed'").get()).toMatchObject({ count: 0 });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM runtimes WHERE id = 'runtime-bound'").get()).toMatchObject({ count: 1 });
+  });
+
   it("starts on loopback without a token", async () => {
     await daemon.close();
     currentDaemon = undefined;
@@ -312,6 +357,71 @@ describe("daemon M1.4 composition", () => {
     expect(replay.some((event) => event.type === "tool.call.requested")).toBe(false);
     const detail = daemon.eventBus.replayDurableSinceSeq(0, { view: "detail", roomId: room.data.roomId });
     expect(detail.some((event) => event.type === "tool.call.requested")).toBe(true);
+  });
+
+  it("supports roles CRUD with atomic detail events", async () => {
+    const workspaceId = `ws_roles_${Date.now()}`;
+    daemon.database.sqlite.prepare("INSERT OR IGNORE INTO workspaces (id, name, root_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run(workspaceId, workspaceId, `/tmp/${workspaceId}`, Date.now(), Date.now());
+
+    const created = await fetch(`${baseUrl}/roles`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workspaceId, name: "Role Alpha", prompt: "System prompt", capabilities: ["chat", "code.edit"], description: "Alpha" })
+    });
+    const createdBody = await created.json() as { readonly id?: string; readonly workspace_id?: string; readonly name?: string; readonly prompt?: string; readonly capabilities?: string[] };
+    expect(created.status).toBe(201);
+    expect(createdBody).toMatchObject({ workspace_id: workspaceId, name: "Role Alpha", prompt: "System prompt" });
+
+    const roleId = createdBody.id ?? "";
+    expect(roleId).not.toBe("");
+    expect(Array.isArray(createdBody.capabilities)).toBe(true);
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM roles WHERE id = ?").get(roleId)).toMatchObject({ count: 1 });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'role.created' AND json_extract(payload, '$.roleId') = ?").get(roleId)).toMatchObject({ count: 1 });
+
+    const listed = await fetch(`${baseUrl}/roles?workspaceId=${encodeURIComponent(workspaceId)}`);
+    const listBody = await listed.json() as readonly Array<{ readonly id: string; readonly name: string }>;
+    expect(listed.status).toBe(200);
+    expect(listBody.map((role) => role.id)).toContain(roleId);
+
+    const fetched = await fetch(`${baseUrl}/roles/${roleId}`);
+    const fetchedBody = await fetched.json() as { readonly id?: string; readonly name?: string; readonly prompt?: string };
+    expect(fetched.status).toBe(200);
+    expect(fetchedBody).toMatchObject({ id: roleId, name: "Role Alpha", prompt: "System prompt" });
+
+    const updated = await fetch(`${baseUrl}/roles/${roleId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Role Beta", prompt: "Updated prompt", capabilities: ["chat"], tags: ["tag-a"] })
+    });
+    const updatedBody = await updated.json() as { readonly id?: string; readonly name?: string; readonly prompt?: string };
+    expect(updated.status).toBe(200);
+    expect(updatedBody).toMatchObject({ id: roleId, name: "Role Beta", prompt: "Updated prompt" });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'role.updated' AND json_extract(payload, '$.roleId') = ?").get(roleId)).toMatchObject({ count: 1 });
+
+    const deleted = await fetch(`${baseUrl}/roles/${roleId}`, { method: "DELETE" });
+    const deletedBody = await deleted.json() as { readonly ok?: boolean };
+    expect(deleted.status).toBe(200);
+    expect(deletedBody).toMatchObject({ ok: true });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM roles WHERE id = ?").get(roleId)).toMatchObject({ count: 0 });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'role.deleted' AND json_extract(payload, '$.roleId') = ?").get(roleId)).toMatchObject({ count: 1 });
+  });
+
+  it("rejects role deletion when agent bindings exist", async () => {
+    const workspaceId = `ws_roles_block_${Date.now()}`;
+    const roleId = `role_${Date.now()}`;
+    daemon.database.sqlite.transaction(() => {
+      daemon.database.sqlite.prepare("INSERT OR IGNORE INTO workspaces (id, name, root_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run(workspaceId, workspaceId, `/tmp/${workspaceId}`, Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO roles (id, workspace_id, name, avatar, description, prompt, capabilities, default_permission_profile_id, tags, is_builtin, source_path, version, created_at, updated_at) VALUES (?, ?, ?, NULL, NULL, ?, '[]', NULL, NULL, 0, NULL, NULL, ?, ?)").run(roleId, workspaceId, "Blocked Role", "Prompt", Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, NULL, ?, ?)").run(`binding_${Date.now()}`, workspaceId, roleId, "runtime-blocked", Date.now(), Date.now());
+    })();
+
+    const deleted = await fetch(`${baseUrl}/roles/${roleId}`, { method: "DELETE" });
+    const deletedBody = await deleted.json() as { readonly error?: string; readonly bindingCount?: number };
+
+    expect(deleted.status).toBe(409);
+    expect(deletedBody).toMatchObject({ error: "role_has_bindings", bindingCount: 1 });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM roles WHERE id = ?").get(roleId)).toMatchObject({ count: 1 });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'role.deleted' AND json_extract(payload, '$.roleId') = ?").get(roleId)).toMatchObject({ count: 0 });
   });
 
   it("enforces browser auth bootstrap, GET/SSE session auth, CSRF, and bearer-origin rules", async () => {
