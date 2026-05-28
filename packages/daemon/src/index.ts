@@ -504,14 +504,14 @@ async function route(ctx: RouteContext): Promise<void> {
   }
   if (ctx.req.method === "GET" && parts[0] === "model-configs" && parts[1]) {
     const modelConfig = getModelConfig(ctx.database, parts[1]);
-    if (modelConfig === undefined) return json(ctx.res, 404, { error: "model_config_not_found" });
+    if (modelConfig === null) return json(ctx.res, 404, { error: "model_config_not_found" });
     return json(ctx.res, 200, { modelConfig });
   }
   if (ctx.req.method === "GET" && parts[0] === "settings" && parts[1] === "jobs" && parts[2]) return getSettingsJob(ctx, parts[2]);
   if (ctx.req.method === "PATCH" && parts[0] === "model-configs" && parts[1]) {
     const input = await body(ctx) as Record<string, unknown>;
-    const existing = get(ctx.database, "SELECT * FROM model_configs WHERE id = ?", parts[1]) as Record<string, unknown> | undefined;
-    if (existing === undefined) return json(ctx.res, 404, { error: "model_config_not_found" });
+    const existing = get(ctx.database, "SELECT * FROM model_configs WHERE id = ?", parts[1]) as Record<string, unknown> | null;
+    if (existing === null) return json(ctx.res, 404, { error: "model_config_not_found" });
     const now = ctx.now?.() ?? Date.now();
     const workspaceId = typeof input.workspaceId === "string" ? input.workspaceId : stringOrNull(existing.workspace_id);
     const name = typeof input.name === "string" ? input.name : String(existing.name);
@@ -553,12 +553,12 @@ async function route(ctx: RouteContext): Promise<void> {
     return json(ctx.res, 200, { modelConfig: getModelConfig(ctx.database, modelConfigId) });
   }
   if (ctx.req.method === "DELETE" && parts[0] === "model-configs" && parts[1]) {
-    const existing = get(ctx.database, "SELECT * FROM model_configs WHERE id = ?", parts[1]) as Record<string, unknown> | undefined;
-    if (existing === undefined) return json(ctx.res, 404, { error: "model_config_not_found" });
+    const existing = get(ctx.database, "SELECT * FROM model_configs WHERE id = ?", parts[1]) as Record<string, unknown> | null;
+    if (existing === null) return json(ctx.res, 404, { error: "model_config_not_found" });
     const now = ctx.now?.() ?? Date.now();
     let conflict = false;
     ctx.database.sqlite.transaction(() => {
-      const bindings = get(ctx.database, "SELECT COUNT(*) AS count FROM agent_bindings WHERE model_config_id = ?", parts[1]) as { readonly count: number } | undefined;
+      const bindings = get(ctx.database, "SELECT COUNT(*) AS count FROM agent_bindings WHERE model_config_id = ?", parts[1]) as { readonly count: number } | null;
       if ((bindings?.count ?? 0) > 0) {
         conflict = true;
         return;
@@ -573,9 +573,9 @@ async function route(ctx: RouteContext): Promise<void> {
         createdAt: now
       });
     })();
+    if (conflict) return json(ctx.res, 409, { error: "model_config_has_bindings", bindingCount: scalar(ctx.database, "SELECT COUNT(*) AS count FROM agent_bindings WHERE model_config_id = ?", parts[1]) });
     const deletedRef = typeof existing.api_key_ref === "string" ? existing.api_key_ref : null;
     if (deletedRef !== null) await ctx.modelConfigSecrets.delete(deletedRef).catch(() => undefined);
-    if (conflict) return json(ctx.res, 409, { error: "model_config_has_bindings", bindingCount: scalar(ctx.database, "SELECT COUNT(*) AS count FROM agent_bindings WHERE model_config_id = ?", parts[1]) });
     return json(ctx.res, 200, { ok: true });
   }
   if (ctx.req.method === "PATCH" && parts[0] === "runtimes" && parts[1]) {
@@ -1498,14 +1498,14 @@ function modelConfigFingerprint(apiKey: string): string {
   return `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}`;
 }
 
-function getModelConfig(database: AgentHubDatabase, id: string): Record<string, unknown> | undefined {
-  const row = get(database, "SELECT * FROM model_configs WHERE id = ?", id) as Record<string, unknown> | undefined;
-  return row === undefined ? undefined : normalizeModelConfigRow(row);
+function getModelConfig(database: AgentHubDatabase, id: string): Record<string, unknown> | null {
+  const row = get(database, "SELECT * FROM model_configs WHERE id = ?", id) as Record<string, unknown> | null;
+  return row === null ? null : normalizeModelConfigRow(row);
 }
 
 async function testModelConfig(ctx: RouteContext, modelConfigId: string, input: Record<string, unknown>): Promise<void> {
-  const row = get(ctx.database, "SELECT * FROM model_configs WHERE id = ?", modelConfigId) as Record<string, unknown> | undefined;
-  if (row === undefined) return json(ctx.res, 404, { error: "model_config_not_found" });
+  const row = get(ctx.database, "SELECT * FROM model_configs WHERE id = ?", modelConfigId) as Record<string, unknown> | null;
+  if (row === null) return json(ctx.res, 404, { error: "model_config_not_found" });
   const now = ctx.now?.() ?? Date.now();
   const jobId = randomUUID();
   ctx.settingsJobs.set(jobId, { id: jobId, type: "model_config.test", modelConfigId, status: "queued", createdAt: now, updatedAt: now });

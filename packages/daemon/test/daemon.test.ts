@@ -14,7 +14,32 @@ import { migrateAgentProfilesToV10 } from "../src/migrations/0014_data.ts";
 import { createDaemon, loadAgentHubConfig, type DaemonApp, type DaemonStartupPhase } from "../src/index.ts";
 
 let currentDaemon: DaemonApp | undefined;
+type TestKeychain = {
+  readonly set: ReturnType<typeof vi.fn>;
+  readonly get: ReturnType<typeof vi.fn>;
+  readonly delete: ReturnType<typeof vi.fn>;
+};
+let currentModelConfigKeychain: TestKeychain | undefined;
 type TestFetch = typeof fetch & ReturnType<typeof vi.fn>;
+
+vi.mock("@agenthub/security", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@agenthub/security")>();
+  return {
+    ...actual,
+    createKeychain: () => {
+      const secrets = new Map<string, string>();
+      const bridge: TestKeychain = {
+        set: vi.fn(async (account: string, secret: string) => {
+          secrets.set(account, secret);
+        }),
+        get: vi.fn(async (account: string) => secrets.get(account) ?? null),
+        delete: vi.fn(async (account: string) => secrets.delete(account))
+      };
+      currentModelConfigKeychain = bridge;
+      return bridge;
+    }
+  };
+});
 
 describe("daemon M1.4 composition", () => {
   let daemon: DaemonApp;
@@ -44,6 +69,7 @@ describe("daemon M1.4 composition", () => {
   afterEach(async () => {
     await daemon.close();
     currentDaemon = undefined;
+    currentModelConfigKeychain = undefined;
   });
 
   it("serves OpenAPI and runs Mock Solo through SDK", async () => {
@@ -370,6 +396,42 @@ describe("daemon M1.4 composition", () => {
     expect(deletedBody).toMatchObject({ error: "model_config_has_bindings", bindingCount: 1 });
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM model_configs WHERE id = 'mc_bound'").get()).toMatchObject({ count: 1 });
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'model_config.deleted' AND json_extract(payload, '$.modelConfigId') = 'mc_bound'").get()).toMatchObject({ count: 0 });
+  });
+
+  it("keeps the keychain secret and emits no delete event when a bound model config delete conflicts", async () => {
+    const workspaceId = `ws_model_bind_secret_${Date.now()}`;
+    daemon.database.sqlite.transaction(() => {
+      daemon.database.sqlite.prepare("INSERT OR IGNORE INTO workspaces (id, name, root_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run(workspaceId, workspaceId, `/tmp/${workspaceId}`, Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO model_configs (id, workspace_id, name, provider, model, base_url, api_key_ref, api_key_fingerprint, temperature, max_tokens, reasoning, extra, profile, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NULL, ?, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)").run("mc_bound_secret", workspaceId, "Bound Secret Model", "openai", "gpt-4o", "mc_secret_ref", Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NULL, ?, ?)").run("binding_model_bound_secret", workspaceId, "role_bound_secret", "runtime_bound_secret", "mc_bound_secret", Date.now(), Date.now());
+    })();
+
+    const deleted = await fetch(`${baseUrl}/model-configs/mc_bound_secret`, { method: "DELETE" });
+    const deletedBody = await deleted.json() as { readonly error?: string; readonly bindingCount?: number };
+
+    expect(deleted.status).toBe(409);
+    expect(deletedBody).toMatchObject({ error: "model_config_has_bindings", bindingCount: 1 });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM model_configs WHERE id = 'mc_bound_secret'").get()).toMatchObject({ count: 1 });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'model_config.deleted' AND json_extract(payload, '$.modelConfigId') = 'mc_bound_secret'").get()).toMatchObject({ count: 0 });
+    expect(currentModelConfigKeychain?.delete).not.toHaveBeenCalled();
+  });
+
+  it("returns model_config_not_found for missing model configs", async () => {
+    const missingGet = await fetch(`${baseUrl}/model-configs/nonexistent-id`);
+    expect(missingGet.status).toBe(404);
+    expect(await missingGet.json()).toMatchObject({ error: "model_config_not_found" });
+
+    const missingPatch = await fetch(`${baseUrl}/model-configs/nonexistent-id`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Still Missing" })
+    });
+    expect(missingPatch.status).toBe(404);
+    expect(await missingPatch.json()).toMatchObject({ error: "model_config_not_found" });
+
+    const missingDelete = await fetch(`${baseUrl}/model-configs/nonexistent-id`, { method: "DELETE" });
+    expect(missingDelete.status).toBe(404);
+    expect(await missingDelete.json()).toMatchObject({ error: "model_config_not_found" });
   });
 
   it("starts on loopback without a token", async () => {

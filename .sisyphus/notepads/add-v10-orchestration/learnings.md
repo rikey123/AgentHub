@@ -121,3 +121,5 @@
 - Runtime detect/async job tests now use the deterministic native runtime path to avoid flaky real process probes under package-wide parallel test load.
 - Verified pnpm.cmd test -- packages/daemon packages/db packages/orchestrator passes: 35 files, 284 passed, 1 skipped.
 
+- Model-config delete regressions are easiest to verify with a hoisted test-time keychain mock: that lets the daemon use the real delete path while the test asserts `modelConfigSecrets.delete` is never called on 409 conflicts.
+- The daemon already uses `null`-aware not-found checks for model-config GET/PATCH/DELETE, so the regression coverage should assert all three methods against the same missing ID for consistency.
