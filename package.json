@@ -11,6 +11,7 @@
   },
   "scripts": {
     "build": "turbo run build",
+    "ai-sdk-provider:check": "node scripts/checks/ai-sdk-provider-check.mjs",
     "check:all": "node scripts/checks/check-all.mjs",
     "check:bun-api": "node scripts/checks/bun-api-check.mjs",
     "check:deps": "node scripts/checks/deps-check.mjs",
