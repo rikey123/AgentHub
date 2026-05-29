@@ -16,9 +16,11 @@ type TeamDispatchRuntime = {
 export async function handleTeamDispatchReviewTerminal(runtime: TeamDispatchRuntime, runId: string): Promise<void> {
   const run = runtime.database.sqlite.prepare("SELECT id, workspace_id, room_id, agent_id, task_id, status FROM runs WHERE id = ?").get(runId) as { readonly id: string; readonly workspace_id: string; readonly room_id: string; readonly agent_id: string; readonly task_id: string | null; readonly status: string } | undefined;
   if (run === undefined || run.task_id === null) return;
+  if (run.room_id === null) return;
 
   const task = runtime.database.sqlite.prepare("SELECT * FROM tasks WHERE id = ?").get(run.task_id) as TaskRow | undefined;
   if (task === undefined || task.expects_review === 0) return;
+  if (task.room_id === null) return;
 
   const scope = taskDispatchScope(task);
   if (scope === undefined) return;
@@ -53,7 +55,8 @@ export async function handleTeamDispatchReviewTerminal(runtime: TeamDispatchRunt
   ));
   if (!wakeResult.ok) return;
 
-  const leaderRunId = "runId" in wakeResult.data ? wakeResult.data.runId : wakeResult.data.appendedToRunId;
+  const wakeData = wakeResult.data as { readonly runId?: string; readonly appendedToRunId?: string };
+  const leaderRunId = typeof wakeData.runId === "string" ? wakeData.runId : wakeData.appendedToRunId;
   if (typeof leaderRunId !== "string" || leaderRunId.length === 0) return;
 
   const dispatchId = `team-dispatch:${scope.kind}:${scope.value}`;
@@ -62,7 +65,7 @@ export async function handleTeamDispatchReviewTerminal(runtime: TeamDispatchRunt
     type: "team.dispatch.started",
     schemaVersion: 1,
     workspaceId: room.workspace_id,
-    roomId: task.room_id,
+      roomId: task.room_id,
     runId: leaderRunId,
     agentId: room.primary_agent_id,
     taskId: task.id,
@@ -75,6 +78,7 @@ export function maybePublishTeamDispatchCompleted(runtime: Pick<TeamDispatchRunt
   if (task.status !== "completed" || task.expects_review === 0) return;
   const scope = taskDispatchScope(task);
   if (scope === undefined) return;
+  if (task.room_id === null) return;
 
   const taskIds = teamDispatchTaskIds(runtime.database, task.room_id, scope);
   if (taskIds.length === 0) return;

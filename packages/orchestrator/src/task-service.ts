@@ -129,7 +129,7 @@ export class TaskService {
     if (input.assigneeRoleId !== undefined && resolvedAssignee === null) return failed("validation_failed", `Role '${input.assigneeRoleId}' is not bound in room '${input.roomId}'`);
     const assigneeBinding = resolvedAssignee ?? (input.assigneeBindingId !== undefined ? this.bindingInRoom(input.roomId, input.assigneeBindingId) : undefined);
     if (input.assigneeBindingId !== undefined && assigneeBinding === undefined) return failed("validation_failed", `Binding '${input.assigneeBindingId}' is not a room participant in room '${input.roomId}'`);
-    if (resolvedAssignee !== undefined && input.assigneeBindingId !== undefined && resolvedAssignee.id !== input.assigneeBindingId) {
+    if (resolvedAssignee !== undefined && resolvedAssignee !== null && input.assigneeBindingId !== undefined && resolvedAssignee.id !== input.assigneeBindingId) {
       return failed("validation_failed", `Role '${input.assigneeRoleId}' is bound to '${resolvedAssignee.id}', not '${input.assigneeBindingId}'`);
     }
     const assigneeAgentId = input.assigneeAgentId ?? assigneeBinding?.participant_id ?? null;
@@ -235,7 +235,7 @@ export class TaskService {
     this.options.database.sqlite.transaction(() => {
       this.options.database.sqlite.prepare("UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?").run("completed", now, taskId);
       this.options.eventBus.publish(taskEvent("task.status.changed", existing.workspace_id, existing.room_id ?? "", taskId, { taskId, prevStatus: existing.status, nextStatus: "completed", reason: "delegated_run_completed" }, now));
-      this.options.eventBus.publish(taskEvent("task.delegation.completed", existing.workspace_id, existing.room_id ?? "", taskId, { taskId, delegationId: taskId, byTeammateRunId: byRunId }, now));
+    this.options.eventBus.publish(taskEvent("task.delegation.completed", existing.workspace_id, existing.room_id ?? "", taskId, { taskId, delegationId: taskId, byTeammateRunId: byRunId }, now));
     })();
 
     const task = this.task(taskId);
@@ -461,7 +461,7 @@ function taskView(row: TaskRow): TaskView {
   };
 }
 
-function taskEvent(type: "task.created" | "task.assigned" | "task.status.changed" | "task.status.changed.rejected" | "task.activity.added", workspaceId: string, roomId: string, taskId: string, payload: Record<string, unknown>, createdAt: number): PublishInput {
+function taskEvent(type: "task.created" | "task.assigned" | "task.status.changed" | "task.status.changed.rejected" | "task.activity.added" | "task.delegation.completed", workspaceId: string, roomId: string, taskId: string, payload: Record<string, unknown>, createdAt: number): PublishInput {
   return { id: randomUUID(), type, schemaVersion: 1, workspaceId, roomId, taskId, payload: withoutUndefined(payload), createdAt };
 }
 
@@ -586,6 +586,6 @@ function withoutUndefined(payload: Record<string, unknown>): Record<string, unkn
   return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined));
 }
 
-function failed<T = unknown>(code: CommandErrorCode | string, message: string, details?: unknown): CommandResult<T> {
+function failed<T = unknown>(code: CommandErrorCode, message: string, details?: unknown): CommandResult<T> {
   return { ok: false, error: { code, message, ...(details !== undefined ? { details } : {}) } };
 }

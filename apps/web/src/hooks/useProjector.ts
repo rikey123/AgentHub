@@ -393,18 +393,20 @@ class Projector {
             "agent.run.failed": "failed",
             "agent.run.cancelled": "cancelled"
           };
+          const existing = runIndex >= 0 ? room.runs[runIndex] : undefined;
           const run: RunViewModel = {
+            ...(existing ?? { id: payload.runId, agentId: event.agentId ?? "", agentName: this.agentName(room, event.agentId ?? "") ?? "Agent", status: "unknown" }),
             id: payload.runId,
-            agentId: event.agentId ?? "",
-            agentName: this.agentName(room, event.agentId ?? "") ?? "Agent",
-            status: statusMap[event.type] ?? "unknown",
-            startedAt: typeof payload.startedAt === "number" ? payload.startedAt : undefined,
-            endedAt: typeof payload.endedAt === "number" ? payload.endedAt : undefined,
-            cost: typeof payload.cost === "object" && payload.cost !== null ? (payload.cost as RunViewModel["cost"]) : undefined,
-            failureClass: typeof payload.failureClass === "string" ? payload.failureClass : undefined,
-            error: typeof payload.error === "string" ? payload.error : undefined,
-            taskId: typeof payload.taskId === "string" ? payload.taskId : undefined,
-            parentRunId: typeof payload.parentRunId === "string" ? payload.parentRunId : undefined
+            agentId: event.agentId ?? existing?.agentId ?? "",
+            agentName: this.agentName(room, event.agentId ?? existing?.agentId ?? "") ?? existing?.agentName ?? "Agent",
+            status: statusMap[event.type] ?? existing?.status ?? "unknown",
+            startedAt: typeof payload.startedAt === "number" ? payload.startedAt : existing?.startedAt,
+            endedAt: typeof payload.endedAt === "number" ? payload.endedAt : existing?.endedAt,
+            cost: typeof payload.cost === "object" && payload.cost !== null ? (payload.cost as RunViewModel["cost"]) : existing?.cost,
+            failureClass: typeof payload.failureClass === "string" ? payload.failureClass : existing?.failureClass,
+            error: typeof payload.error === "string" ? payload.error : existing?.error,
+            taskId: typeof payload.taskId === "string" ? payload.taskId : existing?.taskId,
+            parentRunId: typeof payload.parentRunId === "string" ? payload.parentRunId : existing?.parentRunId
           };
           if (runIndex >= 0) {
             const updated = [...room.runs];
@@ -699,7 +701,7 @@ class Projector {
         if (payload && typeof payload.dispatchId === "string") {
           const brief: BriefViewModel = {
             kind: "dispatch_started",
-            runId: typeof payload.runId === "string" ? payload.runId : payload.dispatchId,
+            runId: typeof payload.leaderRunId === "string" ? payload.leaderRunId : payload.dispatchId,
             agentId: event.agentId ?? "",
             agentName: this.agentName(room, event.agentId ?? "") ?? "Agent",
             summary: typeof payload.summary === "string" ? payload.summary : "Dispatch started",
@@ -715,7 +717,7 @@ class Projector {
       }
       case "team.dispatch.completed": {
         if (payload && typeof payload.dispatchId === "string") {
-          const runId = typeof payload.runId === "string" ? payload.runId : payload.dispatchId;
+          const runId = typeof payload.leaderRunId === "string" ? payload.leaderRunId : payload.dispatchId;
           const brief: BriefViewModel = {
             kind: "dispatch_completed",
             runId,

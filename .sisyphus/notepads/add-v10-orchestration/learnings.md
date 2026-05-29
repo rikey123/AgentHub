@@ -132,6 +132,13 @@
 - `task.delegation.created` / `task.delegation.completed` update the task view model in-place and move status to `in_progress`, `review`, or `completed` as required.
 - `team.dispatch.started` / `team.dispatch.completed` are represented as main timeline briefs with explicit `dispatchId` for idempotent replay.
 
+## [2026-05-29T11:22:00Z] Task 5.1 Wave 6 fixes round 3
+- The projector must merge later `agent.run.*` lifecycle events into an existing run row so `taskId` and `parentRunId` survive completion/failure/cancel updates.
+- `team.dispatch.started/completed` consume `payload.leaderRunId`; `payload.runId` is not emitted by the producer.
+- `task.created` tests should only use fields emitted by `TaskService.createInTransaction()` and let missing optional fields default in the projector.
+- `packages/orchestrator/src/task-service.ts`, `packages/orchestrator/src/team-dispatch.ts`, and `packages/orchestrator/src/mcp/room-mcp-server.ts` were the only orchestrator files that needed fixes for this wave.
+- Targeted verification passed: `pnpm.cmd test -- packages/orchestrator packages/daemon apps/web`, `pnpm.cmd check:all`, and file diagnostics on all modified files.
+
 ## [2026-05-29T03:02:00Z] Task 1.8
 - Consolidated data-foundation test coverage in packages/daemon/test/daemon.test.ts without duplicating existing CRUD tests.
 - Added detail-only durable replay assertions for role/runtime/model_config/agent_binding write events.

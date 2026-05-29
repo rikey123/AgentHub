@@ -671,7 +671,7 @@ describe("TaskService and RoomMcpServer", () => {
     if (!first.ok || !isRecord(first.data) || typeof first.data.taskId !== "string") throw new Error("expected guarded task id");
     const taskIds = [first.data.taskId];
     for (let depth = 0; depth < 5; depth += 1) {
-      const created = service.create({ roomId: "room_delegate_guard", title: `Chain ${depth}`, parentTaskId: taskIds[depth] || undefined, createdBy: "agent_leader" });
+      const created = service.create({ roomId: "room_delegate_guard", title: `Chain ${depth}`, ...(taskIds[depth] !== undefined ? { parentTaskId: taskIds[depth] } : {}), createdBy: "agent_leader" });
       if (!created.ok) throw new Error("expected chain task create success");
       taskIds.push(created.data.taskId);
     }
