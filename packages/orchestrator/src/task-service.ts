@@ -225,17 +225,22 @@ export class TaskService {
   }
 
   completeDelegatedRun(taskId: string, byRunId: string): CommandResult<{ readonly task: TaskView; readonly taskId: string }> {
-    const result = this.transitionDelegatedTask(taskId, "completed", {
-      reason: "delegated_run_completed",
-      byRunId,
-      activityKind: "status_change",
-      activityPayload: { fromStatus: "in_progress", nextStatus: "completed", byRunId }
-    });
-    if (!result.ok) return result;
     const existing = this.task(taskId);
-    if (!existing) return failed("internal_error", `Task '${taskId}' was not persisted`);
-    this.options.eventBus.publish(taskEvent("task.delegation.completed", existing.workspace_id, existing.room_id ?? "", taskId, { taskId, byTeammateRunId: byRunId }, this.options.now?.() ?? Date.now()));
-    return result;
+    if (!existing) return failed("not_found", `Task '${taskId}' not found`);
+    if (existing.expects_review !== 0) return failed("conflict", `Task '${taskId}' is not a squad task`);
+    if (existing.status !== "in_progress" && existing.status !== "completed") return this.rejectTransition(existing, "completed", "delegated_run_completed");
+    if (existing.status === "completed") return { ok: true, data: { task: taskView(existing), taskId }, emittedEvents: latestTaskEvents(this.options.database, taskId) };
+
+    const now = this.options.now?.() ?? Date.now();
+    this.options.database.sqlite.transaction(() => {
+      this.options.database.sqlite.prepare("UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?").run("completed", now, taskId);
+      this.options.eventBus.publish(taskEvent("task.status.changed", existing.workspace_id, existing.room_id ?? "", taskId, { taskId, prevStatus: existing.status, nextStatus: "completed", reason: "delegated_run_completed" }, now));
+      this.options.eventBus.publish(taskEvent("task.delegation.completed", existing.workspace_id, existing.room_id ?? "", taskId, { taskId, byTeammateRunId: byRunId }, now));
+    })();
+
+    const task = this.task(taskId);
+    if (!task) return failed("internal_error", `Task '${taskId}' was not persisted`);
+    return { ok: true, data: { task: taskView(task), taskId }, emittedEvents: latestTaskEvents(this.options.database, taskId) };
   }
 
   blockDelegatedRun(taskId: string, byRunId: string): CommandResult<{ readonly task: TaskView; readonly taskId: string }> {
@@ -351,7 +356,6 @@ export class TaskService {
     this.options.database.sqlite.transaction(() => {
       this.options.database.sqlite.prepare("UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?").run(nextStatus, now, taskId);
       this.options.eventBus.publish(taskEvent("task.status.changed", existing.workspace_id, existing.room_id ?? "", taskId, { taskId, prevStatus: existing.status, nextStatus, reason: input.reason }, now));
-      this.options.eventBus.publish(taskEvent("task.activity.added", existing.workspace_id, existing.room_id ?? "", taskId, { taskId, kind: input.activityKind, byKind: "system", by: input.byRunId, payload: input.activityPayload }, now));
     })();
 
     const task = this.task(taskId);

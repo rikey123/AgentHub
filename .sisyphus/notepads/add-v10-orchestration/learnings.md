@@ -273,3 +273,10 @@
 - `POST /rooms` validation should happen after compatibility normalization so legacy payloads still flow through unchanged.
 - The daemon test suite file contains a helper (`invokeHandler`) for in-process route calls; using it avoids flaky `bad port` fetch behavior in package-wide Vitest runs.
 - `pnpm.cmd test -- packages/daemon` currently expands to the repo-wide Vitest runner; the daemon test file passes in isolation with `pnpm.cmd exec vitest run packages/daemon/test/daemon.test.ts`.
+## Wave 5 fix notes
+
+- Event literal scans must exclude MCP tool names; dotted strings are not always events.
+- Delegation failure cleanup should rely on transaction rollback, not manual event deletion.
+- Task completion events that reflect state changes belong inside the same SQLite transaction as the mutation.
+- If delegated status transitions do not create `task_activities` rows, they should not emit `task.activity.added`.
+- Timeout sweeps need to actively dispatch `WakeAgent`; returning wake metadata alone is not enough to resume the leader.

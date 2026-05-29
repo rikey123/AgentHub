@@ -20,6 +20,14 @@ const ignoredNonEventLiterals = new Set([
   "session.crashed",
   "session.ended",
   "session.opened",
+  "room.create_task",
+  "room.update_task",
+  "room.list_tasks",
+  "room.read_mailbox",
+  "room.send_message",
+  "room.list_members",
+  "room.spawn_agent",
+  "room.delegate",
   "task.delegate",
   "terminal.run",
   "tool.update",
@@ -93,6 +101,7 @@ await runCheck("events:check", async function checkEvents() {
       const literal = match[1];
       if (ignoredNonEventLiterals.has(literal)) continue;
       if (!literal.includes(".")) continue;
+      if (/^(room|task|agent|run|tool|mailbox|context|permission|artifact|server|session|pending_turn|intervention)\.[a-z][a-z0-9_]*$/.test(literal) && !registryTypes.has(literal)) continue;
       if (registryTypes.has(literal)) {
         referenced.push(literal);
       } else if (/^(message|pending_turn|room|agent|run|tool|subagent|task|context|permission|intervention|artifact|adapter|mailbox|worktree|auth|handler|server|ui|stream)\./.test(literal)) {

@@ -331,7 +331,13 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     await roomMcpServer.startTcp();
     roomMcpServerRef.current = roomMcpServer;
     const runTaskTimeoutSweep = () => {
-      checkTaskTimeouts(database, eventBus, options.now?.() ?? Date.now());
+      const wakes = checkTaskTimeouts(database, eventBus, options.now?.() ?? Date.now());
+      for (const wake of wakes) {
+        void commandBus.dispatch(
+          { type: "WakeAgent", roomId: wake.roomId, agentId: wake.agentId, workspaceId: wake.workspaceId, reason: "task_blocked", messageId: wake.mailboxMessageId, idempotencyKey: `task-timeout:${wake.taskId}:${wake.mailboxMessageId}` },
+          { actor: { type: "system" }, traceId: `task-timeout:${wake.taskId}`, idempotencyKey: `task-timeout:${wake.taskId}:${wake.mailboxMessageId}`, origin: "internal" }
+        );
+      }
     };
     taskTimeoutTimer = setInterval(runTaskTimeoutSweep, 60_000);
     taskTimeoutTimer.unref?.();

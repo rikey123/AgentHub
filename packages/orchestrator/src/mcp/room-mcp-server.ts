@@ -441,10 +441,7 @@ export class RoomMcpServer {
         delegateResult = { taskId: taskResult.data.taskId, runId: (dispatched.data as { readonly runId: string }).runId };
       })();
     } catch (error) {
-      if (error instanceof DelegateAbort) {
-        this.options.database.sqlite.prepare("DELETE FROM events WHERE room_id = ? AND type IN ('task.created', 'task.assigned', 'task.delegation.created')").run(session.roomId);
-        return error.result;
-      }
+      if (error instanceof DelegateAbort) return error.result;
       throw error;
     }
 
