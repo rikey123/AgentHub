@@ -333,3 +333,7 @@
 - The stale orchestrator regression test needed its delegation payload expectation updated to the new canonical JSON shape.
 - pnpm.cmd test -- packages/orchestrator packages/daemon apps/web and pnpm.cmd check:all both passed after the payload alignment.
 
+
+## Wave 6 Oracle re-review 3
+- Approved after projector now preserves run collaboration fields (`taskId`, `parentRunId`) across lifecycle payloads and maps team dispatch briefs from `leaderRunId`.
+- Focused verification passed: `pnpm.cmd test -- apps/web/src/hooks/useProjector.test.ts packages/orchestrator/test/orchestrator.test.ts` and `pnpm.cmd check:all`.
