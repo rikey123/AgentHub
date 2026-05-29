@@ -118,12 +118,19 @@
 - The daemon already had a model-config settings job endpoint; runtime jobs were integrated into that existing polling route instead of adding a competing route shape.
 - Verified pnpm.cmd test -- packages/daemon passes after the runtime route/test changes.
 
-## [2026-05-29T03:00:34Z] Task 1.6
+ ## [2026-05-29T03:00:34Z] Task 1.6
 - Model-config test calls now resolve provider behavior explicitly in the daemon stub instead of passing string model IDs through the runtime path.
 - `/settings/jobs/:jobId` now serves both runtime async tests and model-config tests from the shared in-memory job store; runtime polling stayed compatible.
 - Successful model tests return `{ ok: true, model, latencyMs, inputTokens, outputTokens }`; failures redact provider details down to `invalid_api_key`, `model_not_found`, or `rate_limited`.
 - Ollama tests intentionally send no API key header and still use the same shared polling contract.
 - Verified `pnpm.cmd test -- packages/daemon` passes after the job-store bridge and route updates.
+
+## [2026-05-29T09:57:20Z] Task 5.1 projector replay
+- `task.created` in `apps/web/src/hooks/useProjector.ts` now maps V1.0 fields directly and no longer falls back to legacy `todo` status.
+- `task.status.changed` is replay-safe because the projector upserts by `taskId`, so repeated SSE delivery keeps a single task row.
+- `task.activity.added` appends to `task.activities` and dedupes by activity id, which preserves the activity timeline across reconnect replay.
+- `task.delegation.created` / `task.delegation.completed` update the task view model in-place and move status to `in_progress`, `review`, or `completed` as required.
+- `team.dispatch.started` / `team.dispatch.completed` are represented as main timeline briefs with explicit `dispatchId` for idempotent replay.
 
 ## [2026-05-29T03:02:00Z] Task 1.8
 - Consolidated data-foundation test coverage in packages/daemon/test/daemon.test.ts without duplicating existing CRUD tests.

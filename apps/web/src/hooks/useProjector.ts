@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { EventEnvelope } from "@agenthub/protocol/events";
 import { EVENT_REGISTRY } from "@agenthub/protocol/events";
-import type { RoomViewModel, ProjectorState, MessageViewModel, BriefViewModel, RunViewModel, PermissionViewModel, InterventionViewModel } from "../types.ts";
+import type { RoomViewModel, ProjectorState, MessageViewModel, BriefViewModel, RunViewModel, PermissionViewModel, InterventionViewModel, TaskActivityViewModel, TaskDelegationViewModel, TaskViewModel } from "../types.ts";
 import { ensureAuthSession } from "./useSdk.ts";
 
 type ProjectorListener = (state: ProjectorState) => void;
@@ -28,6 +28,16 @@ class Projector {
   private connectionStatus: ProjectorState["connectionStatus"] = "disconnected";
   private connectionError: string | undefined;
   private deltaBatches = new Map<string, DeltaBatch>();
+
+  private upsertTask(room: RoomViewModel, task: TaskViewModel): RoomViewModel {
+    const existingIndex = room.tasks.findIndex((t) => t.id === task.id);
+    if (existingIndex >= 0) {
+      const updated = [...room.tasks];
+      updated[existingIndex] = { ...updated[existingIndex]!, ...task };
+      return { ...room, tasks: updated };
+    }
+    return { ...room, tasks: [...room.tasks, task] };
+  }
 
   connect(view: "main" | "detail", roomId?: string, runId?: string): void {
     // When the consumer changes view target (different room or different run), the projector's
@@ -517,22 +527,208 @@ class Projector {
         }
         break;
       }
-      case "task.created":
-      case "task.status.changed": {
+      case "task.created": {
         if (payload && typeof payload.taskId === "string") {
-          const existingIndex = room.tasks.findIndex((t) => t.id === payload.taskId);
-          const task = {
+          const task: TaskViewModel = {
             id: payload.taskId,
             title: typeof payload.title === "string" ? payload.title : "Task",
-            status: typeof payload.status === "string" ? payload.status : "todo",
-            assigneeAgentId: typeof payload.assigneeAgentId === "string" ? payload.assigneeAgentId : undefined
+            status: typeof payload.status === "string" ? payload.status : "pending",
+            description: typeof payload.description === "string" ? payload.description : undefined,
+            priority: typeof payload.priority === "string" ? payload.priority : undefined,
+            assigneeRoleId: typeof payload.assigneeRoleId === "string" ? payload.assigneeRoleId : undefined,
+            assigneeBindingId: typeof payload.assigneeBindingId === "string" ? payload.assigneeBindingId : undefined,
+            assigneeAgentId: typeof payload.assigneeAgentId === "string" ? payload.assigneeAgentId : undefined,
+            expectsReview: typeof payload.expectsReview === "boolean" ? payload.expectsReview : undefined,
+            parentTaskId: typeof payload.parentTaskId === "string" ? payload.parentTaskId : undefined,
+            delegationChain: Array.isArray(payload.delegationChain) ? payload.delegationChain : undefined,
+            sourceRunId: typeof payload.sourceRunId === "string" ? payload.sourceRunId : undefined,
+            activities: Array.isArray(payload.activities)
+              ? payload.activities
+                  .filter((activity) => activity && typeof activity === "object" && typeof (activity as { id?: unknown }).id === "string")
+                  .map((activity) => ({
+                    id: (activity as { id: string }).id,
+                    kind: typeof (activity as { kind?: unknown }).kind === "string" ? (activity as { kind: string }).kind : "status_change",
+                    byKind: typeof (activity as { byKind?: unknown }).byKind === "string" ? (activity as { byKind: string }).byKind : "system",
+                    by: typeof (activity as { by?: unknown }).by === "string" ? (activity as { by: string }).by : "system",
+                    payload: (activity as { payload?: unknown }).payload,
+                    createdAt: typeof (activity as { createdAt?: unknown }).createdAt === "number" ? (activity as { createdAt: number }).createdAt : undefined
+                  }))
+              : undefined,
+            delegations: Array.isArray(payload.delegations)
+              ? payload.delegations
+                  .filter((delegation) => delegation && typeof delegation === "object" && typeof (delegation as { id?: unknown }).id === "string")
+                  .map((delegation) => ({
+                    id: (delegation as { id: string }).id,
+                    status: typeof (delegation as { status?: unknown }).status === "string" ? (delegation as { status: string }).status : undefined,
+                    assigneeRoleId: typeof (delegation as { assigneeRoleId?: unknown }).assigneeRoleId === "string" ? (delegation as { assigneeRoleId: string }).assigneeRoleId : undefined,
+                    assigneeBindingId: typeof (delegation as { assigneeBindingId?: unknown }).assigneeBindingId === "string" ? (delegation as { assigneeBindingId: string }).assigneeBindingId : undefined,
+                    assigneeAgentId: typeof (delegation as { assigneeAgentId?: unknown }).assigneeAgentId === "string" ? (delegation as { assigneeAgentId: string }).assigneeAgentId : undefined,
+                    runId: typeof (delegation as { runId?: unknown }).runId === "string" ? (delegation as { runId: string }).runId : undefined,
+                    roleId: typeof (delegation as { roleId?: unknown }).roleId === "string" ? (delegation as { roleId: string }).roleId : undefined,
+                    completedAt: typeof (delegation as { completedAt?: unknown }).completedAt === "number" ? (delegation as { completedAt: number }).completedAt : undefined,
+                    createdAt: typeof (delegation as { createdAt?: unknown }).createdAt === "number" ? (delegation as { createdAt: number }).createdAt : undefined,
+                    payload: (delegation as { payload?: unknown }).payload
+                  }))
+              : undefined
           };
+          room = this.upsertTask(room, task);
+          this.rooms.set(roomId, room);
+          changed = true;
+        }
+        break;
+      }
+      case "task.status.changed": {
+        if (payload && typeof payload.taskId === "string") {
+          const existing = room.tasks.find((t) => t.id === payload.taskId);
+          const task = existing
+            ? {
+                ...existing,
+                status: typeof payload.nextStatus === "string" ? payload.nextStatus : (typeof payload.status === "string" ? payload.status : existing.status),
+                assigneeAgentId: typeof payload.assigneeAgentId === "string" ? payload.assigneeAgentId : existing.assigneeAgentId,
+                assigneeRoleId: typeof payload.assigneeRoleId === "string" ? payload.assigneeRoleId : existing.assigneeRoleId,
+                assigneeBindingId: typeof payload.assigneeBindingId === "string" ? payload.assigneeBindingId : existing.assigneeBindingId,
+                expectsReview: typeof payload.expectsReview === "boolean" ? payload.expectsReview : existing.expectsReview,
+                priority: typeof payload.priority === "string" ? payload.priority : existing.priority,
+                parentTaskId: typeof payload.parentTaskId === "string" ? payload.parentTaskId : existing.parentTaskId,
+                sourceRunId: typeof payload.sourceRunId === "string" ? payload.sourceRunId : existing.sourceRunId
+              }
+            : {
+                id: payload.taskId,
+                title: typeof payload.title === "string" ? payload.title : "Task",
+                status: typeof payload.nextStatus === "string" ? payload.nextStatus : (typeof payload.status === "string" ? payload.status : "pending"),
+                description: typeof payload.description === "string" ? payload.description : undefined,
+                priority: typeof payload.priority === "string" ? payload.priority : undefined,
+                assigneeRoleId: typeof payload.assigneeRoleId === "string" ? payload.assigneeRoleId : undefined,
+                assigneeBindingId: typeof payload.assigneeBindingId === "string" ? payload.assigneeBindingId : undefined,
+                assigneeAgentId: typeof payload.assigneeAgentId === "string" ? payload.assigneeAgentId : undefined,
+                expectsReview: typeof payload.expectsReview === "boolean" ? payload.expectsReview : undefined,
+                parentTaskId: typeof payload.parentTaskId === "string" ? payload.parentTaskId : undefined,
+                delegationChain: Array.isArray(payload.delegationChain) ? payload.delegationChain : undefined,
+                sourceRunId: typeof payload.sourceRunId === "string" ? payload.sourceRunId : undefined,
+                activities: undefined,
+                delegations: undefined
+              };
+          room = this.upsertTask(room, task);
+          this.rooms.set(roomId, room);
+          changed = true;
+        }
+        break;
+      }
+      case "task.activity.added": {
+        if (payload && typeof payload.taskId === "string" && typeof payload.activityId === "string") {
+          const existing = room.tasks.find((t) => t.id === payload.taskId);
+          if (existing) {
+            const activity: TaskActivityViewModel = {
+              id: payload.activityId,
+              kind: typeof payload.kind === "string" ? payload.kind : "status_change",
+              byKind: typeof payload.byKind === "string" ? payload.byKind : "system",
+              by: typeof payload.by === "string" ? payload.by : "system",
+              payload: payload.payload,
+              createdAt: typeof payload.createdAt === "number" ? payload.createdAt : event.createdAt
+            };
+            const activities = [...(existing.activities ?? [])];
+            const existingIndex = activities.findIndex((item) => item.id === activity.id);
+            if (existingIndex >= 0) {
+              activities[existingIndex] = activity;
+            } else {
+              activities.push(activity);
+            }
+            room = this.upsertTask(room, { ...existing, activities });
+            this.rooms.set(roomId, room);
+            changed = true;
+          }
+        }
+        break;
+      }
+      case "task.delegation.created": {
+        if (payload && typeof payload.taskId === "string" && typeof payload.delegationId === "string") {
+          const existing = room.tasks.find((t) => t.id === payload.taskId);
+          if (existing) {
+            const delegation: TaskDelegationViewModel = {
+              id: payload.delegationId,
+              status: typeof payload.status === "string" ? payload.status : "created",
+              assigneeRoleId: typeof payload.assigneeRoleId === "string" ? payload.assigneeRoleId : existing.assigneeRoleId,
+              assigneeBindingId: typeof payload.assigneeBindingId === "string" ? payload.assigneeBindingId : existing.assigneeBindingId,
+              assigneeAgentId: typeof payload.assigneeAgentId === "string" ? payload.assigneeAgentId : existing.assigneeAgentId,
+              runId: typeof payload.runId === "string" ? payload.runId : undefined,
+              roleId: typeof payload.roleId === "string" ? payload.roleId : undefined,
+              createdAt: typeof payload.createdAt === "number" ? payload.createdAt : event.createdAt,
+              payload: payload.payload
+            };
+            const delegations = [...(existing.delegations ?? [])];
+            const existingIndex = delegations.findIndex((item) => item.id === delegation.id);
+            if (existingIndex >= 0) {
+              delegations[existingIndex] = delegation;
+            } else {
+              delegations.push(delegation);
+            }
+            room = this.upsertTask(room, {
+              ...existing,
+              status: "in_progress",
+              delegations
+            });
+            this.rooms.set(roomId, room);
+            changed = true;
+          }
+        }
+        break;
+      }
+      case "task.delegation.completed": {
+        if (payload && typeof payload.taskId === "string" && typeof payload.delegationId === "string") {
+          const existing = room.tasks.find((t) => t.id === payload.taskId);
+          if (existing) {
+            const delegations = (existing.delegations ?? []).map((delegation) =>
+              delegation.id === payload.delegationId
+                ? { ...delegation, status: "completed", completedAt: typeof payload.completedAt === "number" ? payload.completedAt : event.createdAt }
+                : delegation
+            );
+            room = this.upsertTask(room, {
+              ...existing,
+              status: existing.expectsReview ? "review" : "completed",
+              delegations
+            });
+            this.rooms.set(roomId, room);
+            changed = true;
+          }
+        }
+        break;
+      }
+      case "team.dispatch.started": {
+        if (payload && typeof payload.dispatchId === "string") {
+          const brief: BriefViewModel = {
+            kind: "dispatch_started",
+            runId: typeof payload.runId === "string" ? payload.runId : payload.dispatchId,
+            agentId: event.agentId ?? "",
+            agentName: this.agentName(room, event.agentId ?? "") ?? "Agent",
+            summary: typeof payload.summary === "string" ? payload.summary : "Dispatch started",
+            dispatchId: payload.dispatchId
+          };
+          if (!room.briefs.some((item) => item.kind === brief.kind && item.dispatchId === brief.dispatchId)) {
+            room = { ...room, briefs: [...room.briefs, brief] };
+            this.rooms.set(roomId, room);
+            changed = true;
+          }
+        }
+        break;
+      }
+      case "team.dispatch.completed": {
+        if (payload && typeof payload.dispatchId === "string") {
+          const runId = typeof payload.runId === "string" ? payload.runId : payload.dispatchId;
+          const brief: BriefViewModel = {
+            kind: "dispatch_completed",
+            runId,
+            agentId: event.agentId ?? "",
+            agentName: this.agentName(room, event.agentId ?? "") ?? "Agent",
+            summary: typeof payload.summary === "string" ? payload.summary : "Dispatch completed",
+            dispatchId: payload.dispatchId
+          };
+          const existingIndex = room.briefs.findIndex((item) => item.kind === brief.kind && item.dispatchId === brief.dispatchId);
           if (existingIndex >= 0) {
-            const updated = [...room.tasks];
-            updated[existingIndex] = task;
-            room = { ...room, tasks: updated };
+            const updated = [...room.briefs];
+            updated[existingIndex] = brief;
+            room = { ...room, briefs: updated };
           } else {
-            room = { ...room, tasks: [...room.tasks, task] };
+            room = { ...room, briefs: [...room.briefs, brief] };
           }
           this.rooms.set(roomId, room);
           changed = true;
