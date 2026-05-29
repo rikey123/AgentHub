@@ -5,11 +5,23 @@ import type { AgentHubDatabase } from "@agenthub/db";
 
 export type TaskStatus = "pending" | "in_progress" | "blocked" | "review" | "completed" | "cancelled";
 
+export type TaskTimeoutWake = {
+  readonly taskId: string;
+  readonly roomId: string;
+  readonly workspaceId: string;
+  readonly agentId: string;
+  readonly mailboxMessageId: string;
+};
+
 export type DelegationStep = {
   readonly byRoleId: string;
   readonly atRunId: string;
   readonly atTimestamp: number;
 };
+
+export type TeamDispatchScope =
+  | { readonly kind: "source_run_id"; readonly value: string }
+  | { readonly kind: "parent_task_id"; readonly value: string };
 
 type ResolvedRoleBinding = {
   readonly id: string;
@@ -88,7 +100,7 @@ export type UpdateTaskStatusInput = {
   readonly reason?: string;
 };
 
-export type TaskActivityKind = "comment" | "artifact_linked" | "blocker_set" | "priority_change";
+export type TaskActivityKind = "comment" | "artifact_linked" | "blocker_set" | "priority_change" | "status_change";
 
 export type TaskActivityByKind = "user" | "role" | "system";
 
@@ -102,7 +114,7 @@ export type AddTaskActivityInput = {
 };
 
 export class TaskService {
-  constructor(private readonly options: { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly now?: () => number }) {}
+  constructor(private readonly options: { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly now?: () => number; readonly onTaskCompleted?: (task: TaskRow) => void }) {}
 
   create(input: CreateTaskInput): CommandResult<{ readonly task: TaskView; readonly taskId: string }> {
     return this.options.database.sqlite.transaction(() => this.createInTransaction(input))();
@@ -123,6 +135,9 @@ export class TaskService {
     const assigneeAgentId = input.assigneeAgentId ?? assigneeBinding?.participant_id ?? null;
     if (input.parentTaskId !== undefined && !this.task(input.parentTaskId)) return failed("not_found", `Task '${input.parentTaskId}' not found`);
     const now = this.options.now?.() ?? Date.now();
+    if (input.parentTaskId !== undefined && this.delegationDepth(input.parentTaskId) >= 5) return failed("delegation_too_deep", "delegation_too_deep", { maxDepth: 5 });
+    const duplicateTask = this.findDuplicateTask(input.roomId, input.title, input.description ?? null, now);
+    if (duplicateTask !== undefined) return failed("delegation_duplicate", "delegation_duplicate", { taskId: duplicateTask.id });
     const taskId = randomUUID();
     const dependencies = JSON.stringify(input.dependencies ?? []);
     const delegationChain = input.delegationChain !== undefined ? JSON.stringify(input.delegationChain) : null;
@@ -177,6 +192,10 @@ export class TaskService {
       this.options.database.sqlite.prepare("UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?").run(nextStatus, now, input.taskId);
       this.options.eventBus.publish(taskEvent("task.status.changed", existing.workspace_id, existing.room_id ?? "", input.taskId, { taskId: input.taskId, prevStatus: existing.status, nextStatus, ...(input.reason !== undefined ? { reason: input.reason } : {}) }, now));
     })();
+    if (nextStatus === "completed") {
+      const completedTask = this.task(input.taskId);
+      if (completedTask) this.options.onTaskCompleted?.(completedTask);
+    }
     const task = this.task(input.taskId);
     if (!task) return failed("internal_error", `Task '${input.taskId}' was not persisted`);
     return { ok: true, data: { task: taskView(task), taskId: input.taskId }, emittedEvents: latestTaskEvents(this.options.database, input.taskId) };
@@ -186,7 +205,41 @@ export class TaskService {
     const existing = this.task(taskId);
     if (!existing) return failed("not_found", `Task '${taskId}' not found`);
     if (existing.status !== "in_progress" && existing.status !== "review") return this.rejectTransition(existing, "completed", reason);
-    return this.updateStatus({ taskId, status: "completed", reason });
+    const result = this.updateStatus({ taskId, status: "completed", reason });
+    if (result.ok) {
+      const completedTask = this.task(taskId);
+      if (completedTask) this.options.onTaskCompleted?.(completedTask);
+    }
+    return result;
+  }
+
+  review(taskId: string): CommandResult<{ readonly task: TaskView; readonly taskId: string }> {
+    const existing = this.task(taskId);
+    if (!existing) return failed("not_found", `Task '${taskId}' not found`);
+    if (existing.status !== "pending" && existing.status !== "in_progress") return this.rejectTransition(existing, "review", "task_review");
+    return this.updateStatus({ taskId, status: "review", reason: "task_review" });
+  }
+
+  startDelegatedRun(taskId: string, byRunId: string): CommandResult<{ readonly task: TaskView; readonly taskId: string }> {
+    return this.transitionDelegatedTask(taskId, "in_progress", { reason: "delegated_run_started", byRunId, activityKind: "status_change", activityPayload: { fromStatus: "pending", nextStatus: "in_progress", byRunId } });
+  }
+
+  completeDelegatedRun(taskId: string, byRunId: string): CommandResult<{ readonly task: TaskView; readonly taskId: string }> {
+    const result = this.transitionDelegatedTask(taskId, "completed", {
+      reason: "delegated_run_completed",
+      byRunId,
+      activityKind: "status_change",
+      activityPayload: { fromStatus: "in_progress", nextStatus: "completed", byRunId }
+    });
+    if (!result.ok) return result;
+    const existing = this.task(taskId);
+    if (!existing) return failed("internal_error", `Task '${taskId}' was not persisted`);
+    this.options.eventBus.publish(taskEvent("task.delegation.completed", existing.workspace_id, existing.room_id ?? "", taskId, { taskId, byTeammateRunId: byRunId }, this.options.now?.() ?? Date.now()));
+    return result;
+  }
+
+  blockDelegatedRun(taskId: string, byRunId: string): CommandResult<{ readonly task: TaskView; readonly taskId: string }> {
+    return this.transitionDelegatedTask(taskId, "blocked", { reason: "delegated_run_failed", byRunId, activityKind: "status_change", activityPayload: { fromStatus: "in_progress", nextStatus: "blocked", byRunId } });
   }
 
   addTaskActivity(input: AddTaskActivityInput): CommandResult<{ readonly task: TaskView; readonly taskId: string; readonly activityId: string }> {
@@ -251,11 +304,70 @@ export class TaskService {
       .get(roomId, bindingId) as ResolvedRoleBinding | undefined;
   }
 
+  private delegationDepth(taskId: string): number {
+    let depth = 0;
+    let current = this.task(taskId);
+    const visited = new Set<string>();
+    while (current?.parent_task_id !== null && current?.parent_task_id !== undefined) {
+      if (visited.has(current.id)) break;
+      visited.add(current.id);
+      depth += 1;
+      if (depth >= 5) return depth;
+      current = this.task(current.parent_task_id);
+    }
+    return depth;
+  }
+
+  private findDuplicateTask(roomId: string, title: string, description: string | null, now: number): TaskRow | undefined {
+    return this.options.database.sqlite
+      .prepare(
+        `SELECT * FROM tasks
+         WHERE room_id = ? AND title = ? AND COALESCE(description, '') = COALESCE(?, '') AND created_at >= ?
+         ORDER BY created_at DESC, id DESC
+         LIMIT 1`
+      )
+      .get(roomId, title, description, now - 5 * 60 * 1000) as TaskRow | undefined;
+  }
+
   private rejectTransition<T = { readonly task: TaskView; readonly taskId: string }>(existing: TaskRow, nextStatus: TaskStatus, reason?: string): CommandResult<T> {
     const now = this.options.now?.() ?? Date.now();
     this.options.eventBus.publish(taskEvent("task.status.changed.rejected", existing.workspace_id, existing.room_id ?? "", existing.id, { taskId: existing.id, prevStatus: existing.status, nextStatus, ...(reason !== undefined ? { reason } : {}) }, now));
     return failed("conflict", "invalid_task_transition", { from: existing.status, to: nextStatus });
   }
+
+  private transitionDelegatedTask(
+    taskId: string,
+    nextStatus: "in_progress" | "blocked" | "completed",
+    input: { readonly reason: string; readonly byRunId: string; readonly activityKind: TaskActivityKind; readonly activityPayload: Record<string, unknown> }
+  ): CommandResult<{ readonly task: TaskView; readonly taskId: string }> {
+    const existing = this.task(taskId);
+    if (!existing) return failed("not_found", `Task '${taskId}' not found`);
+    if (existing.expects_review !== 0) return failed("conflict", `Task '${taskId}' is not a squad task`);
+    const allowedFrom: readonly TaskStatus[] = nextStatus === "in_progress" ? ["pending"] : ["pending", "in_progress"];
+    if (!allowedFrom.includes(existing.status)) return failed("conflict", "invalid_task_transition", { from: existing.status, to: nextStatus });
+    if (existing.status === nextStatus) return { ok: true, data: { task: taskView(existing), taskId }, emittedEvents: latestTaskEvents(this.options.database, taskId) };
+
+    const now = this.options.now?.() ?? Date.now();
+    this.options.database.sqlite.transaction(() => {
+      this.options.database.sqlite.prepare("UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?").run(nextStatus, now, taskId);
+      this.options.eventBus.publish(taskEvent("task.status.changed", existing.workspace_id, existing.room_id ?? "", taskId, { taskId, prevStatus: existing.status, nextStatus, reason: input.reason }, now));
+      this.options.eventBus.publish(taskEvent("task.activity.added", existing.workspace_id, existing.room_id ?? "", taskId, { taskId, kind: input.activityKind, byKind: "system", by: input.byRunId, payload: input.activityPayload }, now));
+    })();
+
+    const task = this.task(taskId);
+    if (!task) return failed("internal_error", `Task '${taskId}' was not persisted`);
+    return { ok: true, data: { task: taskView(task), taskId }, emittedEvents: latestTaskEvents(this.options.database, taskId) };
+  }
+}
+
+export function teamDispatchScope(task: TaskRow): TeamDispatchScope | undefined {
+  if (task.parent_task_id !== null) return { kind: "parent_task_id", value: task.parent_task_id };
+  if (task.source_run_id !== null) return { kind: "source_run_id", value: task.source_run_id };
+  return undefined;
+}
+
+export function isDelegatedTask(row: TaskRow): boolean {
+  return row.expects_review === 0;
 }
 
 export function createCreateTaskHandler(service: TaskService): CommandHandler {
@@ -310,7 +422,7 @@ export function normalizeStatus(value: unknown): TaskStatus | undefined {
 function canTransition(from: TaskStatus, to: TaskStatus): boolean {
   if (from === to) return false;
   const allowed: Record<TaskStatus, readonly TaskStatus[]> = {
-    pending: ["in_progress", "blocked", "cancelled"],
+    pending: ["in_progress", "review", "blocked", "cancelled"],
     in_progress: ["blocked", "review", "completed", "cancelled"],
     blocked: ["pending", "in_progress", "cancelled"],
     review: ["in_progress", "completed", "cancelled"],
@@ -349,10 +461,48 @@ function taskEvent(type: "task.created" | "task.assigned" | "task.status.changed
   return { id: randomUUID(), type, schemaVersion: 1, workspaceId, roomId, taskId, payload: withoutUndefined(payload), createdAt };
 }
 
+function ensureTaskTimeoutMailbox(database: AgentHubDatabase, eventBus: EventBus, workspaceId: string, roomId: string, agentId: string, taskId: string, now: number): string {
+  const existing = database.sqlite.prepare("SELECT id FROM mailbox_messages WHERE room_id = ? AND to_agent_id = ? AND kind = 'task_timeout' AND from_type = 'system' AND from_id = ? LIMIT 1").get(roomId, agentId, taskId) as { readonly id: string } | undefined;
+  if (existing !== undefined) return existing.id;
+
+  const mailboxMessageId = randomUUID();
+  database.sqlite.prepare("INSERT INTO mailbox_messages (id, workspace_id, room_id, from_type, from_id, to_agent_id, kind, content, files, read, claimed_run_id, claimed_at, delivery_batch_id, created_at, consumed_at) VALUES (?, ?, ?, 'system', ?, ?, 'task_timeout', ?, '[]', 0, NULL, NULL, NULL, ?, NULL)").run(mailboxMessageId, workspaceId, roomId, taskId, agentId, JSON.stringify({ taskId, reason: 'timeout' }), now);
+  eventBus.publish({ id: randomUUID(), type: "mailbox.message.created", schemaVersion: 1, workspaceId, roomId, agentId, payload: { mailboxMessageId, roomId, fromAgentId: null, targetAgentId: agentId, taskId, reason: "timeout" }, createdAt: now });
+  return mailboxMessageId;
+}
+
 export function normalizeTaskPriority(value: unknown): string | undefined {
   if (typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 3) return String(value);
   if (typeof value === "string" && ["0", "1", "2", "3"].includes(value)) return value;
   return undefined;
+}
+
+export function checkTaskTimeouts(database: AgentHubDatabase, eventBus: EventBus, now: number): readonly TaskTimeoutWake[] {
+  const cutoff = now - 30 * 60 * 1000;
+  const rows = database.sqlite
+    .prepare(
+      `SELECT t.id, t.room_id, t.workspace_id, t.status, r.primary_agent_id
+       FROM tasks t
+       INNER JOIN rooms r ON r.id = t.room_id
+       WHERE t.status IN ('pending', 'in_progress') AND t.updated_at < ?
+       ORDER BY t.updated_at ASC, t.id ASC`
+    )
+    .all(cutoff) as Array<{ readonly id: string; readonly room_id: string; readonly workspace_id: string; readonly status: TaskStatus; readonly primary_agent_id: string | null }>;
+
+  const wakes: TaskTimeoutWake[] = [];
+  if (rows.length === 0) return wakes;
+
+  database.sqlite.transaction(() => {
+    for (const row of rows) {
+      const updated = database.sqlite.prepare("UPDATE tasks SET status = 'blocked', updated_at = ? WHERE id = ? AND status IN ('pending', 'in_progress') AND updated_at < ?").run(now, row.id, cutoff);
+      if (updated.changes !== 1) continue;
+      eventBus.publish(taskEvent("task.status.changed", row.workspace_id, row.room_id, row.id, { taskId: row.id, prevStatus: row.status, nextStatus: "blocked", reason: "timeout" }, now));
+      if (row.primary_agent_id === null) continue;
+      wakes.push({ taskId: row.id, roomId: row.room_id, workspaceId: row.workspace_id, agentId: row.primary_agent_id, mailboxMessageId: ensureTaskTimeoutMailbox(database, eventBus, row.workspace_id, row.room_id, row.primary_agent_id, row.id, now) });
+    }
+  })();
+
+  return wakes;
 }
 
 function latestTaskEvents(database: AgentHubDatabase, taskId: string): { readonly seq: number; readonly type: string }[] {
@@ -432,6 +582,6 @@ function withoutUndefined(payload: Record<string, unknown>): Record<string, unkn
   return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined));
 }
 
-function failed<T = unknown>(code: CommandErrorCode, message: string, details?: unknown): CommandResult<T> {
+function failed<T = unknown>(code: CommandErrorCode | string, message: string, details?: unknown): CommandResult<T> {
   return { ok: false, error: { code, message, ...(details !== undefined ? { details } : {}) } };
 }

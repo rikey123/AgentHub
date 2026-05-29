@@ -186,6 +186,7 @@ const zeroMailboxAllowed = new Set<WakeReason>([
   "agent_crashed",
   "group_review",
   "knock_approved",
+  "task_review",
   "consume_pending_turn",
   "delegated_task",
   "mailbox_message"  // agent-to-agent messages via room.send_message MCP tool

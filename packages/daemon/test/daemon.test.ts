@@ -14,6 +14,7 @@ import { AdapterRegistry } from "../src/adapters/registry.ts";
 import { seedBuiltinRoles } from "../src/builtin-roles.ts";
 import { migrateAgentProfilesToV10 } from "../src/migrations/0014_data.ts";
 import { createDaemon, finalizeFailedRoleGenerationJob, loadAgentHubConfig, type DaemonApp, type DaemonStartupPhase } from "../src/index.ts";
+import { checkTaskTimeouts } from "@agenthub/orchestrator";
 import { cleanExpiredRoleDrafts, startRoleDraftGC } from "../src/role-draft-gc.ts";
 import { CodexAdapterStub } from "../../adapters/codex/src/index.ts";
 
@@ -1514,6 +1515,21 @@ describe("daemon M1.4 composition", () => {
     const listed = await fetch(`${baseUrl}/rooms/${room.data.roomId}/tasks`);
     const listedPayload = await listed.json() as { readonly tasks: readonly { readonly id: string; readonly status: string }[] };
     expect(listedPayload.tasks).toEqual([expect.objectContaining({ id: payload.data.taskId, status: "completed" })]);
+  });
+
+  it("marks stale pending tasks blocked once and wakes the leader idempotently", () => {
+    activeDaemon().database.sqlite.prepare("INSERT OR IGNORE INTO workspaces (id, name, root_path, created_at, updated_at) VALUES ('ws_timeout', 'ws_timeout', '/tmp/ws_timeout', 1, 1)").run();
+    activeDaemon().database.sqlite.prepare("INSERT OR IGNORE INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES ('room_timeout', 'ws_timeout', 'Timeout room', 'solo', 'conversation', 'mock-builder', NULL, 1, 1)").run();
+    activeDaemon().database.sqlite.prepare("INSERT OR IGNORE INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, default_presence, joined_at) VALUES ('room_timeout', 'mock-builder', 'agent', 'primary', 'mock', NULL, 'active', 1)").run();
+    activeDaemon().database.sqlite.prepare("INSERT OR IGNORE INTO tasks (id, workspace_id, room_id, parent_task_id, title, description, status, assignee_agent_id, source_run_id, source_message_id, dependencies, priority, due_at, created_by, created_at, updated_at) VALUES ('task_timeout_1', 'ws_timeout', 'room_timeout', NULL, 'Stale task', NULL, 'pending', 'mock-builder', NULL, NULL, '[]', NULL, NULL, 'local', ?, ?)").run(Date.now() - 31 * 60 * 1000, Date.now() - 31 * 60 * 1000);
+
+    const first = checkTaskTimeouts(activeDaemon().database, activeDaemon().eventBus, Date.now());
+    const second = checkTaskTimeouts(activeDaemon().database, activeDaemon().eventBus, Date.now());
+
+    expect(first).toHaveLength(1);
+    expect(second).toHaveLength(0);
+    expect(activeDaemon().database.sqlite.prepare("SELECT status FROM tasks WHERE id = 'task_timeout_1'").get()).toMatchObject({ status: "blocked" });
+    expect(activeDaemon().database.sqlite.prepare("SELECT COUNT(*) AS count FROM mailbox_messages WHERE room_id = 'room_timeout' AND to_agent_id = 'mock-builder' AND kind = 'task_timeout'").get()).toMatchObject({ count: 1 });
   });
 
   it("returns task activities over HTTP and keeps cancel on task.status.changed", async () => {

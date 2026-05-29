@@ -370,22 +370,24 @@ export class RoomMcpServer {
     if (!title) return failure("validation_failed", "title is required");
 
     const description = typeof input.description === "string" && input.description.trim().length > 0 ? input.description.trim() : undefined;
-    const expectsReview = typeof input.expectsReview === "boolean" ? input.expectsReview : false;
+    const parentTaskId = typeof input.parentTaskId === "string" && input.parentTaskId.trim().length > 0 ? input.parentTaskId.trim() : undefined;
+    const expectsReview = typeof input.expectsReview === "boolean" ? input.expectsReview : undefined;
     const runId = this.requireRunId(session, context);
 
     const room = this.options.database.sqlite
       .prepare(
-        `SELECT rooms.workspace_id, rooms.leader_role_id, ab.role_id AS caller_role_id
+        `SELECT rooms.workspace_id, rooms.leader_role_id, rooms.mode, ab.role_id AS caller_role_id
          FROM rooms
          INNER JOIN room_participants rp ON rp.room_id = rooms.id AND rp.participant_id = ? AND rp.participant_type = 'agent'
          LEFT JOIN agent_bindings ab ON ab.id = rp.agent_binding_id
          WHERE rooms.id = ? AND rooms.archived_at IS NULL`
       )
-      .get(session.agentId, session.roomId) as { readonly workspace_id: string; readonly leader_role_id: string | null; readonly caller_role_id: string | null } | undefined;
+      .get(session.agentId, session.roomId) as { readonly workspace_id: string; readonly leader_role_id: string | null; readonly mode: string; readonly caller_role_id: string | null } | undefined;
     if (!room) return failure("not_found", `Room '${session.roomId}' not found`);
     if (room.leader_role_id === null || room.caller_role_id !== room.leader_role_id) return failure("delegate_requires_leader_role", "delegate_requires_leader_role");
 
     const now = this.options.now?.() ?? Date.now();
+    const effectiveExpectsReview = expectsReview ?? (room.mode === "team");
     let delegateResult: { readonly taskId: string; readonly runId: string } | undefined;
     let createdTaskId: string | undefined;
     try {
@@ -395,13 +397,17 @@ export class RoomMcpServer {
           // no-transaction path here to keep task creation + WakeAgent atomic.
           roomId: session.roomId,
           title,
+          ...(parentTaskId !== undefined ? { parentTaskId } : {}),
           ...(description !== undefined ? { description } : {}),
           assigneeRoleId: toRoleId,
-          expectsReview,
+          expectsReview: effectiveExpectsReview,
           sourceRunId: runId,
           createdBy: session.agentId
         });
-        if (!taskResult.ok) throw new DelegateAbort(taskResult);
+        if (!taskResult.ok) {
+          if (taskResult.error.code === "delegation_too_deep" || taskResult.error.code === "delegation_duplicate") throw new DelegateAbort(taskResult);
+          throw new DelegateAbort(taskResult);
+        }
         createdTaskId = taskResult.data.taskId;
 
         const dispatched = this.dispatchInternal(
@@ -428,7 +434,7 @@ export class RoomMcpServer {
           workspaceId: room.workspace_id,
           roomId: session.roomId,
           taskId: taskResult.data.taskId,
-          payload: { taskId: taskResult.data.taskId, byRoleId: room.leader_role_id, atRunId: runId, expectsReview },
+          payload: { taskId: taskResult.data.taskId, byRoleId: room.leader_role_id, atRunId: runId, expectsReview: effectiveExpectsReview },
           createdAt: now
         });
 
@@ -469,13 +475,15 @@ export class RoomMcpServer {
     const runId = this.requireRunId(session, context);
     if (typeof input.status === "string") {
       if (normalizeStatus(input.status) === undefined) return failure("validation_failed", "taskId and valid status are required");
-      const result = await this.dispatch({
-        type: "UpdateTask",
-        taskId: input.taskId,
-        status: input.status,
-        reason: typeof input.reason === "string" ? input.reason : "mcp_update",
-        idempotencyKey: typeof input.idempotencyKey === "string" ? input.idempotencyKey : `mcp:update-task:${runId}:${input.taskId}:${input.status}:${randomUUID()}`
-      }, session, context);
+      const result = input.status === "completed"
+        ? await this.dispatch({ type: "CompleteTask", taskId: input.taskId, idempotencyKey: typeof input.idempotencyKey === "string" ? input.idempotencyKey : `mcp:complete-task:${runId}:${input.taskId}:${randomUUID()}` }, session, context)
+        : await this.dispatch({
+            type: "UpdateTask",
+            taskId: input.taskId,
+            status: input.status,
+            reason: typeof input.reason === "string" ? input.reason : "mcp_update",
+            idempotencyKey: typeof input.idempotencyKey === "string" ? input.idempotencyKey : `mcp:update-task:${runId}:${input.taskId}:${input.status}:${randomUUID()}`
+          }, session, context);
       return commandResult(result);
     }
 

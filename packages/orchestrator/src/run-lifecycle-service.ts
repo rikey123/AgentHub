@@ -31,6 +31,7 @@ export type WakeReason =
   | "primary_turn"
   | "user_mention"
   | "delegated_task"
+  | "task_review"
   | "rule_review"
   | "knock_approved"
   | "group_review"
@@ -105,6 +106,9 @@ export type RunRow = {
 };
 
 export type RunLifecycleSideEffects = {
+  readonly onRunning?: (runId: string) => void;
+  readonly onCompleted?: (runId: string) => void;
+  readonly onFailed?: (runId: string, failureClass: RunFailureClass) => void;
   readonly onTerminal?: (runId: string) => void;
   readonly finalizeNextTurns?: (tx: SqliteTx, runId: string, failureClass: RunFailureClass, now: number) => void;
   readonly onTargetUnavailable?: (tx: SqliteTx, runId: string) => void;
@@ -224,6 +228,7 @@ export class RunLifecycleService {
         this.publishRunEvent(db, "agent.run.resumed", runId, run.workspace_id, run.room_id, run.agent_id, { runId, adapterSessionId });
       }
     });
+    this.sideEffects.onRunning?.(runId);
   }
 
   markWaitingPermission(tx: SqliteTx | null, runId: string, permissionId: string): void {
@@ -260,6 +265,7 @@ export class RunLifecycleService {
       this.publishRunEvent(db, "agent.run.completed", runId, run.workspace_id, run.room_id, run.agent_id, { runId, cost });
       this.publishBriefEvent(db, runId, run.workspace_id, run.room_id, run.agent_id, briefText);
     });
+    this.sideEffects.onCompleted?.(runId);
     this.sideEffects.onTerminal?.(runId);
   }
 
@@ -281,6 +287,7 @@ export class RunLifecycleService {
       this.publishRunEvent(db, "agent.run.failed", runId, run.workspace_id, run.room_id, run.agent_id, { runId, reason, failureClass, error });
       this.publishBriefEvent(db, runId, run.workspace_id, run.room_id, run.agent_id, briefText);
     });
+    this.sideEffects.onFailed?.(runId, failureClass);
     this.sideEffects.onTerminal?.(runId);
   }
 

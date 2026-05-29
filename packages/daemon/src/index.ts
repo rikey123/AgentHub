@@ -10,7 +10,7 @@ import { ContextLedger, createContextCommandHandlers, HeuristicBriefGenerator } 
 import { createDatabase, type AgentHubDatabase } from "@agenthub/db";
 import { MockAdapterManager } from "@agenthub/adapter-mock";
 import { createInterventionCommandHandlers, InterventionEngine } from "@agenthub/interventions";
-import { ActiveWakesRegistry, createCancelRunHandler, createCompleteTaskHandler, createConsumePendingTurnHandler, createCreateTaskHandler, createUpdateTaskHandler, createWakeAgentHandler, MailboxService, PendingTurnService, ReclaimStaleClaimedRun, RoomMcpServer, RunLifecycleService, RunQueue, StartupRecovery, TaskService, type BriefResolver } from "@agenthub/orchestrator";
+import { ActiveWakesRegistry, checkTaskTimeouts, createCancelRunHandler, createCompleteTaskHandler, createConsumePendingTurnHandler, createCreateTaskHandler, createUpdateTaskHandler, createWakeAgentHandler, handleTeamDispatchReviewTerminal, MailboxService, maybePublishTeamDispatchCompleted, PendingTurnService, ReclaimStaleClaimedRun, RoomMcpServer, RunLifecycleService, RunQueue, StartupRecovery, TaskService, type BriefResolver } from "@agenthub/orchestrator";
 import { createPermissionCommandHandlers, PermissionEngine, seedBuiltInPermissionProfiles } from "@agenthub/permissions";
 import type { EventEnvelope } from "@agenthub/protocol/events";
 import { attachmentMaxBytes, authenticateBrowserRequest, createKeychain, createKeychainAccount, issueBrowserSession, redactAndTruncate, storeAttachment, type BrowserAuthResult, type KeychainBridge } from "@agenthub/security";
@@ -93,6 +93,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
   let starting: Promise<Server> | undefined;
   let closed = false;
   let stopping = false;
+  let taskTimeoutTimer: ReturnType<typeof setInterval> | undefined;
   const sseClients = new Set<SseClient>();
   const settingsJobs = new Map<string, SettingsJobRecord>();
   const modelConfigSecrets = createKeychain("agenthub-model-configs");
@@ -184,16 +185,37 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     const permissionEngine = new PermissionEngine({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
     const interventionEngine = new InterventionEngine({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
     const artifactService = new ArtifactService({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
-    const taskService = new TaskService({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
+    const taskService = new TaskService({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}), onTaskCompleted: (task) => maybePublishTeamDispatchCompleted({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) }, task) });
     const artifactFs = new ArtifactFSRunRegistry({ database, service: artifactService, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
     const activeWakes = new ActiveWakesRegistry();
     const mailbox = new MailboxService(database, options.now, eventBus);
     const commandBusRef: { current?: CommandBus } = {};
     const pendingTurns = new PendingTurnService({ database, eventBus, getCommandBus: () => currentCommandBus(commandBusRef), ...(options.now !== undefined ? { now: options.now } : {}) });
     const runQueueRef: { current?: RunQueue } = {};
+    const taskTerminalHooks = {
+      onRunStarted: (runId: string) => {
+        const run = database.sqlite.prepare("SELECT task_id, wake_reason FROM runs WHERE id = ?").get(runId) as { readonly task_id: string | null; readonly wake_reason: string | null } | undefined;
+        if (!run?.task_id || run.wake_reason !== "delegated_task") return;
+        taskService.startDelegatedRun(run.task_id, runId);
+      },
+      onRunCompleted: (runId: string) => {
+        const run = database.sqlite.prepare("SELECT task_id, workspace_id, room_id, wake_reason FROM runs WHERE id = ?").get(runId) as { readonly task_id: string | null; readonly workspace_id: string; readonly room_id: string; readonly wake_reason: string | null } | undefined;
+        if (!run?.task_id || run.wake_reason !== "delegated_task") return;
+        const taskResult = taskService.completeDelegatedRun(run.task_id, runId);
+        if (!taskResult.ok) return;
+        appendTaskMailboxWake(run.workspace_id, run.room_id, run.task_id, runId, "task_completed");
+      },
+      onRunFailed: (runId: string, _failureClass: string) => {
+        const run = database.sqlite.prepare("SELECT task_id, workspace_id, room_id, wake_reason FROM runs WHERE id = ?").get(runId) as { readonly task_id: string | null; readonly workspace_id: string; readonly room_id: string; readonly wake_reason: string | null } | undefined;
+        if (!run?.task_id || run.wake_reason !== "delegated_task") return;
+        const taskResult = taskService.blockDelegatedRun(run.task_id, runId);
+        if (!taskResult.ok) return;
+        appendTaskMailboxWake(run.workspace_id, run.room_id, run.task_id, runId, "task_blocked");
+      }
+    };
     const lifecycleOptions = {
       ...(options.now !== undefined ? { now: options.now } : {}),
-      sideEffects: { onTerminal: (runId: string) => { activeWakes.releaseRun(runId); runQueueRef.current?.releaseLocks(runId); pendingTurns.handleTerminal(runId); }, finalizeNextTurns: (tx: AgentHubDatabase["sqlite"], runId: string, failureClass: Parameters<MailboxService["finalizeForRun"]>[2], now: number) => mailbox.finalizeForRun(tx, runId, failureClass, now), onTargetUnavailable: (tx: AgentHubDatabase["sqlite"], runId: string) => {
+      sideEffects: { onRunning: (runId: string) => taskTerminalHooks.onRunStarted(runId), onCompleted: (runId: string) => taskTerminalHooks.onRunCompleted(runId), onFailed: (runId: string, failureClass: Parameters<MailboxService["finalizeForRun"]>[2]) => taskTerminalHooks.onRunFailed(runId, failureClass), onTerminal: (runId: string) => { activeWakes.releaseRun(runId); runQueueRef.current?.releaseLocks(runId); pendingTurns.handleTerminal(runId); void handleTeamDispatchReviewTerminal({ database, eventBus, commandBus: commandBusRef.current ?? commandBus, taskService, ...(options.now !== undefined ? { now: options.now } : {}) }, runId); }, finalizeNextTurns: (tx: AgentHubDatabase["sqlite"], runId: string, failureClass: Parameters<MailboxService["finalizeForRun"]>[2], now: number) => mailbox.finalizeForRun(tx, runId, failureClass, now), onTargetUnavailable: (tx: AgentHubDatabase["sqlite"], runId: string) => {
         const rows = tx.prepare("SELECT id FROM mailbox_messages WHERE claimed_run_id = ? AND delivery_failure_reason IS NULL").all(runId) as { readonly id: string }[];
         for (const row of rows) mailbox.publishTargetUnavailable(tx, row.id);
       } }
@@ -260,6 +282,25 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     emitPhase("startup", PHASE_ADAPTERS);
     const mockAdapter = adapterRegistry.mockAdapter;
 
+    function appendTaskMailboxWake(workspaceId: string, roomId: string, taskId: string, runId: string, reason: "task_completed" | "task_blocked"): void {
+      const now = options.now?.() ?? Date.now();
+      const room = database.sqlite.prepare("SELECT primary_agent_id FROM rooms WHERE id = ? AND archived_at IS NULL").get(roomId) as { readonly primary_agent_id: string | null } | undefined;
+      if (!room?.primary_agent_id) return;
+      const task = database.sqlite.prepare("SELECT title, status FROM tasks WHERE id = ?").get(taskId) as { readonly title: string; readonly status: string } | undefined;
+      if (!task) return;
+      const mailboxMessageId = randomUUID();
+      database.sqlite.transaction(() => {
+        database.sqlite
+          .prepare("INSERT INTO mailbox_messages (id, workspace_id, room_id, from_type, from_id, to_agent_id, kind, content, files, read, claimed_run_id, claimed_at, delivery_batch_id, delivery_failure_reason, attempt_count, created_at, consumed_at) VALUES (?, ?, ?, 'system', ?, ?, 'message', ?, '[]', 0, NULL, NULL, NULL, NULL, 0, ?, NULL)")
+          .run(mailboxMessageId, workspaceId, roomId, taskId, room.primary_agent_id, JSON.stringify({ text: `[${reason}] Task ${taskId}: ${task.title} (${task.status})` }), now);
+        eventBus.publish({ id: randomUUID(), type: "mailbox.message.created", schemaVersion: 1, workspaceId, roomId, agentId: room.primary_agent_id, payload: { mailboxMessageId, roomId, fromAgentId: taskId, targetAgentId: room.primary_agent_id, reason }, createdAt: now });
+      })();
+      void commandBusRef.current?.dispatch(
+        { type: "WakeAgent", roomId, agentId: room.primary_agent_id, workspaceId, reason: "mailbox_message", promptDelta: { kind: "delta_only", instructions: `Task ${reason === "task_completed" ? "completed" : "blocked"}: ${task.title}` }, idempotencyKey: `task-mailbox:${taskId}:${runId}:${reason}` },
+        { actor: { type: "system" }, traceId: `task-mailbox:${taskId}:${runId}`, idempotencyKey: `task-mailbox:${taskId}:${runId}:${reason}`, origin: "internal" }
+      );
+    }
+
     emitPhase("startup", PHASE_COMMAND_BUS);
     const commandBus = createCommandBus({
       database,
@@ -282,6 +323,11 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     // Start the TCP server so agents can reach room.* MCP tools via the stdio bridge.
     await roomMcpServer.startTcp();
     roomMcpServerRef.current = roomMcpServer;
+    const runTaskTimeoutSweep = () => {
+      checkTaskTimeouts(database, eventBus, options.now?.() ?? Date.now());
+    };
+    taskTimeoutTimer = setInterval(runTaskTimeoutSweep, 60_000);
+    taskTimeoutTimer.unref?.();
     runtime = { database, eventBus, commandBus, roomMcpServer, adapterRegistry, mockAdapter, artifactService, taskService, outbox, handlers, runQueue, agentProfiles, roleDraftGcCleanup, lifecycle };
 
     emitPhase("startup", PHASE_HTTP);
@@ -310,6 +356,8 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
       } else if (phase === PHASE_EVENT_BUS) {
         runtime?.roleDraftGcCleanup();
         runtime?.eventBus.flushStatusLines?.();
+        if (taskTimeoutTimer !== undefined) clearInterval(taskTimeoutTimer);
+        taskTimeoutTimer = undefined;
         await runtime?.agentProfiles.close();
         runtime?.adapterRegistry.disposeAll();
         runtime?.roomMcpServer.stopTcp();
@@ -348,6 +396,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     get database() { return requireRuntime().database; },
     get eventBus() { return requireRuntime().eventBus; },
     get commandBus() { return requireRuntime().commandBus; },
+    get lifecycle() { return requireRuntime().lifecycle; },
     get roomMcpServer() { return requireRuntime().roomMcpServer; },
     get adapterRegistry() { return requireRuntime().adapterRegistry; },
     get mockAdapter() { return requireRuntime().mockAdapter; },
