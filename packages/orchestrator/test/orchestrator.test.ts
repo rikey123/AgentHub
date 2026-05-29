@@ -480,7 +480,7 @@ describe("TaskService and RoomMcpServer", () => {
     expect(currentDatabase().sqlite.prepare("SELECT task_id, wake_reason FROM runs WHERE id = ?").get(result.data.runId)).toMatchObject({ task_id: result.data.taskId, wake_reason: "delegated_task" });
     expect(eventTypes()).toEqual(expect.arrayContaining(["task.created", "task.delegation.created", "agent.run.queued"]));
     expect(currentDatabase().sqlite.prepare("SELECT payload FROM events WHERE type = 'task.delegation.created' AND task_id = ?").get(result.data.taskId)).toMatchObject({
-      payload: JSON.stringify({ taskId: result.data.taskId, byRoleId: "role_leader", atRunId: "run_delegate", expectsReview: true })
+      payload: JSON.stringify({ taskId: result.data.taskId, delegationId: result.data.taskId, runId: result.data.runId, byRoleId: "role_leader", atRunId: "run_delegate", expectsReview: true })
     });
   });
 

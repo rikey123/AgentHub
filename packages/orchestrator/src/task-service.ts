@@ -235,7 +235,7 @@ export class TaskService {
     this.options.database.sqlite.transaction(() => {
       this.options.database.sqlite.prepare("UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?").run("completed", now, taskId);
       this.options.eventBus.publish(taskEvent("task.status.changed", existing.workspace_id, existing.room_id ?? "", taskId, { taskId, prevStatus: existing.status, nextStatus: "completed", reason: "delegated_run_completed" }, now));
-      this.options.eventBus.publish(taskEvent("task.delegation.completed", existing.workspace_id, existing.room_id ?? "", taskId, { taskId, byTeammateRunId: byRunId }, now));
+      this.options.eventBus.publish(taskEvent("task.delegation.completed", existing.workspace_id, existing.room_id ?? "", taskId, { taskId, delegationId: taskId, byTeammateRunId: byRunId }, now));
     })();
 
     const task = this.task(taskId);
@@ -267,7 +267,7 @@ export class TaskService {
         this.options.database.sqlite.prepare("UPDATE tasks SET priority = ?, updated_at = ? WHERE id = ?").run(input.nextPriority, now, input.taskId);
       }
 
-      this.options.eventBus.publish(taskEvent("task.activity.added", existing.workspace_id, existing.room_id ?? "", input.taskId, { taskId: input.taskId, kind: input.kind, byKind: input.byKind, by: input.by, payload: input.payload }, now));
+      this.options.eventBus.publish(taskEvent("task.activity.added", existing.workspace_id, existing.room_id ?? "", input.taskId, { taskId: input.taskId, activityId, kind: input.kind, byKind: input.byKind, by: input.by, payload: input.payload }, now));
     })();
 
     const task = this.task(input.taskId);

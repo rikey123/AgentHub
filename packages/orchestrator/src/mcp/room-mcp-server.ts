@@ -434,7 +434,7 @@ export class RoomMcpServer {
           workspaceId: room.workspace_id,
           roomId: session.roomId,
           taskId: taskResult.data.taskId,
-          payload: { taskId: taskResult.data.taskId, byRoleId: room.leader_role_id, atRunId: runId, expectsReview: effectiveExpectsReview },
+          payload: { taskId: taskResult.data.taskId, delegationId: taskResult.data.taskId, runId: (dispatched.data as { readonly runId: string }).runId, byRoleId: room.leader_role_id, atRunId: runId, expectsReview: effectiveExpectsReview },
           createdAt: now
         });
 

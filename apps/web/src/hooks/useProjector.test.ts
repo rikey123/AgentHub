@@ -103,4 +103,29 @@ describe("useProjector replay handling", () => {
     expect(task?.activities).toHaveLength(1);
     expect(task?.activities?.[0]).toMatchObject({ id: "activity-1", kind: "comment", byKind: "user", by: "user-1" });
   });
+
+  it("applies delegation, dispatch, and run collaboration payload ids", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "team" }));
+    projector.apply(makeEvent("task.created", roomId, { taskId: "task-4", title: "Delegate", status: "pending", expectsReview: true }));
+    projector.apply(makeEvent("task.delegation.created", roomId, {
+      taskId: "task-4",
+      delegationId: "task-4",
+      runId: "run-child-1",
+      status: "created",
+      assigneeRoleId: "role-1",
+      payload: { foo: "bar" }
+    }));
+    projector.apply(makeEvent("agent.run.started", roomId, { runId: "run-child-1", taskId: "task-4", parentRunId: "run-parent-1" }));
+    projector.apply(makeEvent("team.dispatch.started", roomId, { dispatchId: "team-dispatch:source_run_id:run-parent-1", runId: "run-lead-1", summary: "Dispatch started" }));
+
+    const task = emittedState.rooms.get(roomId)?.tasks.find((item) => item.id === "task-4");
+    const run = emittedState.rooms.get(roomId)?.runs.find((item) => item.id === "run-child-1");
+    const brief = emittedState.rooms.get(roomId)?.briefs.find((item) => item.kind === "dispatch_started");
+
+    expect(task?.delegations?.[0]).toMatchObject({ id: "task-4", runId: "run-child-1", status: "created" });
+    expect(run).toMatchObject({ id: "run-child-1", taskId: "task-4", parentRunId: "run-parent-1" });
+    expect(brief).toMatchObject({ dispatchId: "team-dispatch:source_run_id:run-parent-1", runId: "run-lead-1" });
+  });
 });

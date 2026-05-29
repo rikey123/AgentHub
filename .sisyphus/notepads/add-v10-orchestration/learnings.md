@@ -316,3 +316,13 @@
 - Timeout coverage now uses Vitest fake timers against `RunQueue` with a 30-minute lock timeout instead of mutating wall-clock state only.
 - `events:check` previously ignored unregistered two-segment task literals such as `task.updated`; adding an explicit forbidden-event set makes the checker reject the V1.0 banned names while still passing on clean source.
 - Required verification `pnpm.cmd test -- packages/orchestrator packages/daemon apps/web` passes after the additions; repo-wide `pnpm.cmd typecheck` remains blocked by pre-existing production/test typing debt outside this task.
+
+## Wave 6 Oracle review finding
+- 2026-05-29: Do not approve projector/UI replay work based only on synthetic frontend fixtures. Compare projector field guards with actual daemon/orchestrator event payloads; Wave 6 had handlers for V1.0 event names but dropped real `task.activity.added`, `task.delegation.*`, and `team.dispatch.*` payloads because expected ids were not emitted.
+
+## [2026-05-29T11:00:00Z] Task 5.1 Wave 6 Oracle fixes
+- Backend event producers now include the stable IDs the projector uses for dedupe and run-detail links: ctivityId, delegationId, dispatchId, 	askId, parentRunId, and the delegated unId.
+- The projector can now hydrate task activities, delegations, dispatch briefs, and run collaboration state directly from replayed events without fallback heuristics.
+- The stale orchestrator regression test needed its delegation payload expectation updated to the new canonical JSON shape.
+- pnpm.cmd test -- packages/orchestrator packages/daemon apps/web and pnpm.cmd check:all both passed after the payload alignment.
+

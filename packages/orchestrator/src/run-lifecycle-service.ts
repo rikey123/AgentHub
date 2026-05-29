@@ -216,7 +216,7 @@ export class RunLifecycleService {
       this.requireStatus(run, ["claimed"], "markStarting");
       const now = this.now();
       this.updateStatus(db, runId, "starting", { pid_at_start: pidAtStart, started_at: now });
-      this.publishRunEvent(db, "agent.run.started", runId, run.workspace_id, run.room_id, run.agent_id, { runId, pidAtStart });
+      this.publishRunEvent(db, "agent.run.started", runId, run.workspace_id, run.room_id, run.agent_id, { runId, pidAtStart, ...(run.task_id !== null ? { taskId: run.task_id } : {}), ...(run.parent_run_id !== null ? { parentRunId: run.parent_run_id } : {}) });
     });
   }
 

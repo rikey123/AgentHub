@@ -56,6 +56,7 @@ export async function handleTeamDispatchReviewTerminal(runtime: TeamDispatchRunt
   const leaderRunId = "runId" in wakeResult.data ? wakeResult.data.runId : wakeResult.data.appendedToRunId;
   if (typeof leaderRunId !== "string" || leaderRunId.length === 0) return;
 
+  const dispatchId = `team-dispatch:${scope.kind}:${scope.value}`;
   runtime.eventBus.publish({
     id: randomUUID(),
     type: "team.dispatch.started",
@@ -65,7 +66,7 @@ export async function handleTeamDispatchReviewTerminal(runtime: TeamDispatchRunt
     runId: leaderRunId,
     agentId: room.primary_agent_id,
     taskId: task.id,
-    payload: { leaderRunId, targetTaskIds: siblingState.taskIds, sourceRunId: scope.value },
+    payload: { dispatchId, leaderRunId, targetTaskIds: siblingState.taskIds, sourceRunId: scope.value },
     createdAt: runtime.now?.() ?? Date.now()
   });
 }
@@ -83,6 +84,7 @@ export function maybePublishTeamDispatchCompleted(runtime: Pick<TeamDispatchRunt
   const room = runtime.database.sqlite.prepare("SELECT workspace_id, primary_agent_id FROM rooms WHERE id = ?").get(task.room_id) as { readonly workspace_id: string; readonly primary_agent_id: string | null } | undefined;
   if (room === undefined || room.primary_agent_id === null) return;
 
+  const dispatchId = `team-dispatch:${scope.kind}:${scope.value}`;
   runtime.eventBus.publish({
     id: randomUUID(),
     type: "team.dispatch.completed",
@@ -92,7 +94,7 @@ export function maybePublishTeamDispatchCompleted(runtime: Pick<TeamDispatchRunt
     runId: task.source_run_id ?? scope.value,
     agentId: room.primary_agent_id,
     taskId: task.id,
-    payload: { leaderRunId: task.source_run_id ?? scope.value, taskIds, sourceRunId: scope.value, summary: `All ${taskIds.length} review tasks completed` },
+    payload: { dispatchId, leaderRunId: task.source_run_id ?? scope.value, taskIds, sourceRunId: scope.value, summary: `All ${taskIds.length} review tasks completed` },
     createdAt: runtime.now?.() ?? Date.now()
   });
 }

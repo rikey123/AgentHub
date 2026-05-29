@@ -402,7 +402,9 @@ class Projector {
             endedAt: typeof payload.endedAt === "number" ? payload.endedAt : undefined,
             cost: typeof payload.cost === "object" && payload.cost !== null ? (payload.cost as RunViewModel["cost"]) : undefined,
             failureClass: typeof payload.failureClass === "string" ? payload.failureClass : undefined,
-            error: typeof payload.error === "string" ? payload.error : undefined
+            error: typeof payload.error === "string" ? payload.error : undefined,
+            taskId: typeof payload.taskId === "string" ? payload.taskId : undefined,
+            parentRunId: typeof payload.parentRunId === "string" ? payload.parentRunId : undefined
           };
           if (runIndex >= 0) {
             const updated = [...room.runs];
