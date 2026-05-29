@@ -160,3 +160,7 @@
 - `rg` is still unavailable in this shell, so the repository’s fast glob/search helpers fail; direct file reads were the reliable way to inspect existing UI patterns.
 - The working tree already contained unrelated tracked edits in `.sisyphus/boulder.json`, `apps/web/vite.config.ts`, `package.json`, and `pnpm-lock.yaml`. They were intentionally left out of the feature commits.
 
+
+## Final code quality re-run — 2026-05-29
+
+- Green `pnpm.cmd test` and `pnpm.cmd lint` do not cover two event/state defects found in review: `PendingTurnService.finishConsume` silently reverts `scheduled -> queued` outside a transaction without event publish on wake failure, and `TaskService.complete` invokes `onTaskCompleted` twice via `updateStatus` plus local callback.

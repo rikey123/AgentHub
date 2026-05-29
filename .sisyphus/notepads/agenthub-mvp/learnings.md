@@ -197,6 +197,11 @@ ot_implemented result rather than a thrown HTTP route branch, preserving the thi
 - `RoomViewModel` already exposes everything needed for the dashboard cards: room title, mode, participants, briefs, runs, and unread count, so the homepage does not need a new projection shape.
 - The header required a layout-level height token and the run-detail overlay needed to be offset beneath it; otherwise the slide-over would cover the new app chrome.
 
+## 2026-05-29 Scope fidelity verification
+
+- `pnpm.cmd ai-sdk-provider:check`, `pnpm.cmd events:check`, and `pnpm.cmd check:all` all passed in this workspace, so the current tree satisfies the requested F4 scope-fidelity gates.
+- The custom check suite already covers the requested forbidden-event and visibility constraints, so a passing run is enough to approve the current scope without additional code inspection.
+
 ## 2026-05-23 P0-3 ACP crash propagation fix
 
 - ACP process supervision failures must cross the adapter boundary, not only mutate AcpAdapterSession.state. Use a single onSessionFailed hook for child error, child exit, and liveness timeout, and let ClaudeCodeACPAdapter translate that hook into AdapterBridge session.crashed so RunLifecycleService remains the durable terminal run-state writer.
@@ -249,3 +254,7 @@ Correction: Missing Origin is no longer an admin signal. authenticateBrowserRequ
 - \\ChatStream.tsx\\ places connection banners before the scroll container; active-run visibility belongs after those banners and before the virtualized message list so it does not disrupt message virtualization.
 
 Correction: The 2026-05-25 frontend visual polish note refers to --ah-* tokens, apps/web/src/styles/tokens.css, CommandPalette.tsx, shortcut, .ah-cmd-palette-item kbd, and ChatStream.tsx; PowerShell escaping added stray backslashes in the first note.
+
+## 2026-05-29 - Final code quality review pattern
+- For event-bus-sensitive fixes, verify both the mutation/event transaction boundary and the event registry entry before relying on tests.
+- `pnpm.cmd test` currently reports 368 passed tests and 1 skipped test for the full suite in this repo.

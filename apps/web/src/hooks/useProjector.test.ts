@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import { getProjector } from "./useProjector.ts";
 import type { ProjectorState } from "../types.ts";
+import type { EventType } from "@agenthub/protocol/events";
 
-function makeEvent(type: string, roomId: string, payload: Record<string, unknown>, createdAt = Date.now()) {
+function makeEvent<T extends EventType>(type: T, roomId: string, payload: Record<string, unknown>, createdAt = Date.now()) {
   return {
     id: randomUUID(),
     type,

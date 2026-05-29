@@ -63,7 +63,7 @@ describe("NativeAgentAdapter integration", () => {
     streamTextMock.mockImplementation(({ tools: aiTools }: { readonly tools: Record<string, { readonly execute: (input: unknown) => Promise<unknown> }> }) => ({
       fullStream: asyncGenerator([
         { type: "text-delta", text: "Hello " },
-        { type: "execute-tool", execute: () => aiTools["file.write"].execute({ path: "src/foo.ts", content: "hello" }) },
+        { type: "execute-tool", execute: () => aiTools["file.write"]!.execute({ path: "src/foo.ts", content: "hello" }) },
         { type: "text-delta", text: "world" }
       ]),
       usage: Promise.resolve({ inputTokens: 120, outputTokens: 45, inputTokenDetails: { cacheReadTokens: 12 } })
@@ -71,7 +71,7 @@ describe("NativeAgentAdapter integration", () => {
 
     await new NativeAgentAdapter({
       database: currentDatabase(),
-      eventBus: currentBus(),
+      eventBus: currentBus() as unknown as import("../../bus/src/index.ts").EventBus,
       lifecycle: currentLifecycle(),
       permissions: currentPermissions(),
       modelConfig: openAiModelConfig(),
@@ -105,7 +105,7 @@ describe("NativeAgentAdapter integration", () => {
     const run = createStartingRun("run_native_permission_allow");
     streamTextMock.mockReturnValue({ fullStream: asyncGenerator([{ type: "text-delta", text: "allowed" }]), usage: Promise.resolve({ inputTokens: 1, outputTokens: 2 }) });
 
-    await new NativeAgentAdapter({ database: currentDatabase(), eventBus: currentBus(), lifecycle: currentLifecycle(), permissions: currentPermissions(), modelConfig: openAiModelConfig(), now: () => now }).runManaged(run);
+    await new NativeAgentAdapter({ database: currentDatabase(), eventBus: currentBus() as unknown as import("../../bus/src/index.ts").EventBus, lifecycle: currentLifecycle(), permissions: currentPermissions(), modelConfig: openAiModelConfig(), now: () => now }).runManaged(run);
 
     expect(streamTextMock).toHaveBeenCalledTimes(1);
     expect(currentLifecycle().read(run.id).status).toBe("completed");
@@ -119,7 +119,7 @@ describe("NativeAgentAdapter integration", () => {
     seedPermissionRule("rule_deny_anthropic", "model.api_call.anthropic", "anthropic", "deny");
     const run = createStartingRun("run_native_permission_deny");
 
-    await new NativeAgentAdapter({ database: currentDatabase(), eventBus: currentBus(), lifecycle: currentLifecycle(), permissions: currentPermissions(), modelConfig: anthropicModelConfig(), now: () => now }).runManaged(run);
+    await new NativeAgentAdapter({ database: currentDatabase(), eventBus: currentBus() as unknown as import("../../bus/src/index.ts").EventBus, lifecycle: currentLifecycle(), permissions: currentPermissions(), modelConfig: anthropicModelConfig(), now: () => now }).runManaged(run);
 
     expect(resolveProviderMock).not.toHaveBeenCalled();
     expect(streamTextMock).not.toHaveBeenCalled();
@@ -135,7 +135,7 @@ describe("NativeAgentAdapter integration", () => {
       abortSignal = signal;
       return { fullStream: asyncGenerator([{ type: "text-delta", text: "working" }, { type: "wait-for-abort" }], signal), usage: Promise.resolve({ inputTokens: 0, outputTokens: 0 }) };
     });
-    const adapter = new NativeAgentAdapter({ database: currentDatabase(), eventBus: currentBus(), lifecycle: currentLifecycle(), permissions: currentPermissions(), modelConfig: openAiModelConfig(), now: () => now });
+    const adapter = new NativeAgentAdapter({ database: currentDatabase(), eventBus: currentBus() as unknown as import("../../bus/src/index.ts").EventBus, lifecycle: currentLifecycle(), permissions: currentPermissions(), modelConfig: openAiModelConfig(), now: () => now });
     const commandBus = new CommandBus({ database: currentDatabase(), handlers: { CancelRun: createCancelRunHandler({ lifecycle: currentLifecycle(), adapterManager: { cancelRun: (runId) => adapter.cancelManagedRun(runId) } }) as CommandHandler } });
 
     const running = adapter.runManaged(run);

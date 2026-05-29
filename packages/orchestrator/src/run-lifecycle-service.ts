@@ -23,6 +23,7 @@ export type RunFailureClass =
   | "retryable_visible"
   | "fresh_session_required"
   | "permission_denied"
+  | "permission_expired"
   | "user_cancelled"
   | "configuration"
   | "fatal";
@@ -409,6 +410,7 @@ function isFailureClass(value: unknown): value is RunFailureClass {
     value === "retryable_visible" ||
     value === "fresh_session_required" ||
     value === "permission_denied" ||
+    value === "permission_expired" ||
     value === "user_cancelled" ||
     value === "configuration" ||
     value === "fatal"

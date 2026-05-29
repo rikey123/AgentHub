@@ -37,7 +37,7 @@ describe("NativeAgentAdapter", () => {
     permissionCheckMock.mockReturnValue({ status: "allow", reason: "default_allow" });
     const adapter = new NativeAgentAdapter({
       database: createDatabaseStub(),
-      eventBus: { publish },
+      eventBus: { publish } as unknown as import("../../bus/src/index.ts").EventBus,
       lifecycle: lifecycle as never,
       permissions: { check: permissionCheckMock } as never,
       modelConfig: { id: "mc-1", provider: "openai", model: "gpt-4o", base_url: null, api_key_ref: null },
@@ -69,7 +69,7 @@ describe("NativeAgentAdapter", () => {
     permissionCheckMock.mockReturnValue({ status: "deny", reason: "stored rule" });
     const adapter = new NativeAgentAdapter({
       database: createDatabaseStub(),
-      eventBus: { publish },
+      eventBus: { publish } as unknown as import("../../bus/src/index.ts").EventBus,
       lifecycle: lifecycle as never,
       permissions: { check: permissionCheckMock } as never,
       modelConfig: { id: "mc-deny", provider: "anthropic", model: "claude-sonnet", base_url: null, api_key_ref: null }
@@ -91,7 +91,7 @@ describe("NativeAgentAdapter", () => {
     streamTextMock.mockReturnValue({ fullStream: asyncGenerator([]), usage: Promise.resolve({ inputTokens: 0, outputTokens: 0 }) });
     const adapter = new NativeAgentAdapter({
       database: createDatabaseStub(),
-      eventBus: { publish },
+      eventBus: { publish } as unknown as import("../../bus/src/index.ts").EventBus,
       lifecycle: lifecycle as never,
       permissions: { check: permissionCheckMock } as never,
       modelConfig: { id: "mc-cache-1", provider: "openai", model: "gpt-4o", base_url: null, api_key_ref: null }
@@ -121,7 +121,7 @@ describe("NativeAgentAdapter", () => {
 
     const adapter = new NativeAgentAdapter({
       database: createDatabaseStub(),
-      eventBus: { publish },
+      eventBus: { publish } as unknown as import("../../bus/src/index.ts").EventBus,
       lifecycle: lifecycle as never,
       permissions: { check: permissionCheckMock } as never,
       modelConfig: { id: "mc-cancel", provider: "openai", model: "gpt-4o", base_url: null, api_key_ref: null }
@@ -148,7 +148,7 @@ describe("NativeAgentAdapter", () => {
 
     const adapter = new NativeAgentAdapter({
       database: createDatabaseStub(),
-      eventBus: { publish: vi.fn() },
+      eventBus: { publish: vi.fn() } as unknown as import("../../bus/src/index.ts").EventBus,
       lifecycle: lifecycle as never,
       permissions: { check: permissionCheckMock } as never,
       modelConfig: { id: "mc-cost", provider: "openai", model: "gpt-4o", base_url: null, api_key_ref: null }

@@ -3,7 +3,7 @@ import type { EventBus } from "../../bus/src/index.ts";
 import type { AgentHubDatabase } from "../../db/src/index.ts";
 import { AdapterBridge, type AdapterArtifactFSBoundary, type RunLifecycleService, type RunRow } from "../../orchestrator/src/index.ts";
 import type { AgentAdapterManifest } from "../../protocol/src/index.ts";
-import type { PermissionEngine } from "../../permissions/src/index.ts";
+import type { PermissionEngine, PermissionResource } from "../../permissions/src/index.ts";
 
 import { convertMcpToolsToAiSdkTools, type McpToolDefinition, type McpToolExecutor } from "./mcp-tool-converter.ts";
 import { roomMcpTools } from "./room-mcp-tools.ts";
@@ -68,7 +68,7 @@ type ActiveRunState = {
 };
 
 type PermissionDecisionSummary = {
-  readonly resource: { readonly type: "model.api_call"; readonly provider: string };
+  readonly resource: PermissionResource;
   readonly decision: "allowed" | "denied" | "expired";
   readonly modelConfigId: string;
 };
@@ -156,6 +156,12 @@ export class NativeAgentAdapter {
     active.controller.abort(new DOMException("Cancelled", "AbortError"));
   }
 
+  disposeAllRuns(): void {
+    for (const active of this.activeRuns.values()) active.controller.abort(new DOMException("Cancelled", "AbortError"));
+    this.activeRuns.clear();
+    this.permissionCache.clear();
+  }
+
   private checkModelPermission(run: RunRow): { readonly decision: "allowed" | "denied" | "expired" } {
     const cacheKey = `${run.id}:${this.options.modelConfig.id}`;
     const cached = this.permissionCache.get(cacheKey);
@@ -165,11 +171,11 @@ export class NativeAgentAdapter {
       return { decision: cached.decision };
     }
 
-    const resource = { type: "model.api_call", provider: this.options.modelConfig.provider as "openai" | "anthropic" | "google" | "openai-compatible" | "ollama" };
+    const resource: PermissionResource = { type: "model.api_call", provider: this.options.modelConfig.provider as "openai" | "anthropic" | "google" | "openai-compatible" | "ollama" };
     const decided = this.options.permissions?.check({
       workspaceId: run.workspace_id,
-      roomId: run.room_id ?? undefined,
-      agentId: run.agent_id ?? undefined,
+      ...(run.room_id !== null ? { roomId: run.room_id } : {}),
+      ...(run.agent_id !== null ? { agentId: run.agent_id } : {}),
       runId: run.id,
       resource
     }) ?? { status: "allow", reason: "default_allow" };
