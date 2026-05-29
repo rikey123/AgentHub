@@ -35,7 +35,7 @@ type WarmableManagedAdapter = Pick<ClaudeCodeACPAdapter, "runManaged" | "cancelM
 };
 
 // NativeAgentAdapter is a real V1.0 runtime adapter, not a stub.
-type NativeManagedAdapter = Pick<NativeAgentAdapter, "runManaged" | "cancelManagedRun">;
+type NativeManagedAdapter = Pick<NativeAgentAdapter, "runManaged" | "cancelManagedRun" | "disposeAllRuns">;
 type NativeAgentAdapter = {
   readonly runManaged: (run: RunRow) => Promise<void>;
   readonly cancelManagedRun: (runId: string) => Promise<void>;

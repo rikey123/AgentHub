@@ -105,7 +105,7 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
       continue;
     }
     if (typeof participant.roleId === "string" && typeof participant.runtimeId === "string") {
-      const modelConfigId = stringField(participant, "modelConfigId");
+      const modelConfigId = stringField(participant as Record<string, unknown>, "modelConfigId");
       const binding = lookupBinding(participant.roleId, participant.runtimeId, modelConfigId);
       if (binding === undefined) return failed("not_found", "agent_binding_not_found");
       const role = isTeamMode ? "teammate" : (typeof participant.role === "string" ? participant.role : "observer");
@@ -477,12 +477,12 @@ function actorId(meta: CommandMeta): string {
   return meta.actor.type === "system" ? "system" : meta.actor.id;
 }
 
-function stringField(command: Command, key: string): string | undefined {
+function stringField(command: Record<string, unknown>, key: string): string | undefined {
   const value = command[key];
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-function stringArrayField(command: Command, ...keys: readonly string[]): string[] {
+function stringArrayField(command: Record<string, unknown>, ...keys: readonly string[]): string[] {
   for (const key of keys) {
     const value = command[key];
     if (!Array.isArray(value)) continue;

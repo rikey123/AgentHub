@@ -13,17 +13,28 @@ export type ModelConfigRow = {
 };
 
 export function resolveProvider(modelConfig: ModelConfigRow, apiKey?: string): LanguageModel {
+  const baseURL = modelConfig.base_url ?? undefined;
   switch (modelConfig.provider) {
-    case "openai":
-      return createOpenAI({ apiKey, baseURL: modelConfig.base_url ?? undefined }).chatModel(modelConfig.model);
-    case "anthropic":
-      return createAnthropic({ apiKey, baseURL: modelConfig.base_url ?? undefined }).chatModel(modelConfig.model);
-    case "google":
-      return createGoogleGenerativeAI({ apiKey, baseURL: modelConfig.base_url ?? undefined }).chatModel(modelConfig.model);
-    case "openai-compatible":
-      return createOpenAICompatible({ apiKey, baseURL: modelConfig.base_url ?? undefined }).chatModel(modelConfig.model);
-    case "ollama":
-      return createOpenAICompatible({ apiKey: "ollama", baseURL: modelConfig.base_url ?? "http://localhost:11434/v1" }).chatModel(modelConfig.model);
+    case "openai": {
+      const p = createOpenAI({ ...(apiKey !== undefined ? { apiKey } : {}), ...(baseURL !== undefined ? { baseURL } : {}) });
+      return p.languageModel(modelConfig.model) as unknown as LanguageModel;
+    }
+    case "anthropic": {
+      const p = createAnthropic({ ...(apiKey !== undefined ? { apiKey } : {}), ...(baseURL !== undefined ? { baseURL } : {}) });
+      return p.languageModel(modelConfig.model) as unknown as LanguageModel;
+    }
+    case "google": {
+      const p = createGoogleGenerativeAI({ ...(apiKey !== undefined ? { apiKey } : {}), ...(baseURL !== undefined ? { baseURL } : {}) });
+      return p.languageModel(modelConfig.model) as unknown as LanguageModel;
+    }
+    case "openai-compatible": {
+      const p = createOpenAICompatible({ name: "native-agent-runtime", baseURL: baseURL ?? "http://localhost:11434/v1", ...(apiKey !== undefined ? { apiKey } : {}) });
+      return p.languageModel(modelConfig.model) as unknown as LanguageModel;
+    }
+    case "ollama": {
+      const p = createOpenAICompatible({ name: "ollama", apiKey: "ollama", baseURL: baseURL ?? "http://localhost:11434/v1" });
+      return p.languageModel(modelConfig.model) as unknown as LanguageModel;
+    }
     default:
       throw new Error(`unsupported-provider:${modelConfig.provider}`);
   }

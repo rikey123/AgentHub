@@ -40,7 +40,7 @@ vi.mock("C:/project/AgentHub/packages/native-agent-runtime/src/native-agent-adap
 
     async runManaged(run: { readonly id: string; readonly workspace_id: string; readonly room_id: string | null; readonly agent_id: string | null }) {
       nativeAdapterRunManagedMock(run);
-      const decision = this.options.permissions?.check?.({ workspaceId: run.workspace_id, roomId: run.room_id ?? undefined, agentId: run.agent_id ?? undefined, runId: run.id, resource: { type: "model.api_call", provider: "openai" } }) ?? { status: "allow" as const };
+      const decision = this.options.permissions?.check?.({ workspaceId: run.workspace_id, ...(run.room_id !== null ? { roomId: run.room_id } : {}), ...(run.agent_id !== null ? { agentId: run.agent_id } : {}), runId: run.id, resource: { type: "model.api_call", provider: "openai" } }) ?? { status: "allow" as const };
       if (decision.status === "allow") {
         resolveProviderMock({ id: "mock-native-config", provider: "openai", model: "gpt-4o", base_url: null, api_key_ref: null }, "test-key");
         streamTextMock({});
@@ -402,8 +402,8 @@ describe("daemon M1.4 composition", () => {
       lifecycle,
       mockAdapter: daemon.mockAdapter,
       nativeAdapter: {
-        runManaged: async (run) => { calls.push(`run:${run.id}`); },
-        cancelManagedRun: async (runId) => { calls.push(`cancel:${runId}`); }
+      runManaged: async (run: import("../../orchestrator/src/index.ts").RunRow) => { calls.push(`run:${run.id}`); },
+      cancelManagedRun: async (runId: string) => { calls.push(`cancel:${runId}`); }
       } as never
     });
 

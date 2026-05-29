@@ -38,7 +38,7 @@ export type DaemonStartupPhase =
 export type DaemonOptions = { readonly databasePath: string; readonly host?: string; readonly port?: number; readonly token?: string; readonly allowRemote?: boolean; readonly allowedOrigins?: readonly string[]; readonly adapterCommands?: { readonly claude?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv }; readonly opencode?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv } }; readonly now?: () => number; readonly modelTestFetch?: typeof fetch; readonly onLifecyclePhase?: (event: { readonly direction: "startup" | "shutdown"; readonly phase: DaemonStartupPhase }) => void };
 export type DaemonCloseOptions = { readonly forceCancelAfterMs?: number };
 export type DaemonCloseResult = { readonly forced: boolean; readonly cancelledRunIds: readonly string[] };
-export type DaemonApp = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly roomMcpServer: RoomMcpServer; readonly adapterRegistry: AdapterRegistry; readonly mockAdapter: MockAdapterManager; readonly handle: (req: IncomingMessage, res: ServerResponse) => void; readonly inFlightRunIds: () => readonly string[]; start(): Promise<Server>; close(options?: DaemonCloseOptions): Promise<DaemonCloseResult> };
+export type DaemonApp = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly lifecycle: RunLifecycleService; readonly roomMcpServer: RoomMcpServer; readonly adapterRegistry: AdapterRegistry; readonly mockAdapter: MockAdapterManager; readonly handle: (req: IncomingMessage, res: ServerResponse) => void; readonly inFlightRunIds: () => readonly string[]; start(): Promise<Server>; close(options?: DaemonCloseOptions): Promise<DaemonCloseResult> };
 type StatusLineEventBus = EventBus & { flushStatusLines?: () => void };
 const PHASE_SQLITE: DaemonStartupPhase = "SQLite open + pragma + migrate";
 const PHASE_EVENT_STORE: DaemonStartupPhase = "EventStore readiness check";
@@ -201,28 +201,30 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
       onRunCompleted: (runId: string) => {
         const run = database.sqlite.prepare("SELECT task_id, workspace_id, room_id, wake_reason FROM runs WHERE id = ?").get(runId) as { readonly task_id: string | null; readonly workspace_id: string; readonly room_id: string; readonly wake_reason: string | null } | undefined;
         if (!run?.task_id || run.wake_reason !== "delegated_task") return;
-        const task = taskService.read(run.task_id);
-        if (task.expectsReview) {
-          const reviewResult = taskService.review(run.task_id);
+        const taskId = run.task_id;
+        const task = database.sqlite.prepare("SELECT expects_review FROM tasks WHERE id = ?").get(taskId) as { readonly expects_review: number } | undefined;
+        if (task?.expects_review === 1) {
+          const reviewResult = taskService.review(taskId);
           if (!reviewResult.ok) return;
           return;
         }
-        const taskResult = taskService.completeDelegatedRun(run.task_id, runId);
+        const taskResult = taskService.completeDelegatedRun(taskId, runId);
         if (!taskResult.ok) return;
-        appendTaskMailboxWake(run.workspace_id, run.room_id, run.task_id, runId, "task_completed");
+        appendTaskMailboxWake(run.workspace_id, run.room_id, taskId, runId, "task_completed");
       },
       onRunFailed: (runId: string) => {
         const run = database.sqlite.prepare("SELECT task_id, workspace_id, room_id, wake_reason FROM runs WHERE id = ?").get(runId) as { readonly task_id: string | null; readonly workspace_id: string; readonly room_id: string; readonly wake_reason: string | null } | undefined;
         if (!run?.task_id || run.wake_reason !== "delegated_task") return;
-        const taskResult = taskService.blockDelegatedRun(run.task_id, runId);
+        const taskId = run.task_id;
+        const taskResult = taskService.blockDelegatedRun(taskId, runId);
         if (!taskResult.ok) return;
         if (taskResult.data.task.expectsReview) return;
-        appendTaskMailboxWake(run.workspace_id, run.room_id, run.task_id, runId, "task_blocked");
+        appendTaskMailboxWake(run.workspace_id, run.room_id, taskId, runId, "task_blocked");
       }
     };
     const lifecycleOptions = {
       ...(options.now !== undefined ? { now: options.now } : {}),
-      sideEffects: { onRunning: (runId: string) => taskTerminalHooks.onRunStarted(runId), onCompleted: (runId: string) => taskTerminalHooks.onRunCompleted(runId), onFailed: (runId: string, failureClass: Parameters<MailboxService["finalizeForRun"]>[2]) => taskTerminalHooks.onRunFailed(runId, failureClass), onTerminal: (runId: string) => { activeWakes.releaseRun(runId); runQueueRef.current?.releaseLocks(runId); pendingTurns.handleTerminal(runId); void handleTeamDispatchReviewTerminal({ database, eventBus, commandBus: commandBusRef.current ?? commandBus, taskService, ...(options.now !== undefined ? { now: options.now } : {}) }, runId); }, finalizeNextTurns: (tx: AgentHubDatabase["sqlite"], runId: string, failureClass: Parameters<MailboxService["finalizeForRun"]>[2], now: number) => mailbox.finalizeForRun(tx, runId, failureClass, now), onTargetUnavailable: (tx: AgentHubDatabase["sqlite"], runId: string) => {
+      sideEffects: { onRunning: (runId: string) => taskTerminalHooks.onRunStarted(runId), onCompleted: (runId: string) => taskTerminalHooks.onRunCompleted(runId), onFailed: (runId: string) => taskTerminalHooks.onRunFailed(runId), onTerminal: (runId: string) => { activeWakes.releaseRun(runId); runQueueRef.current?.releaseLocks(runId); pendingTurns.handleTerminal(runId); void handleTeamDispatchReviewTerminal({ database, eventBus, commandBus: commandBusRef.current ?? commandBus, taskService, ...(options.now !== undefined ? { now: options.now } : {}) }, runId); }, finalizeNextTurns: (tx: AgentHubDatabase["sqlite"], runId: string, failureClass: Parameters<MailboxService["finalizeForRun"]>[2], now: number) => mailbox.finalizeForRun(tx, runId, failureClass, now), onTargetUnavailable: (tx: AgentHubDatabase["sqlite"], runId: string) => {
         const rows = tx.prepare("SELECT id FROM mailbox_messages WHERE claimed_run_id = ? AND delivery_failure_reason IS NULL").all(runId) as { readonly id: string }[];
         for (const row of rows) mailbox.publishTargetUnavailable(tx, row.id);
       } }
@@ -291,19 +293,20 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
 
     function appendTaskMailboxWake(workspaceId: string, roomId: string, taskId: string, runId: string, reason: "task_completed" | "task_blocked"): void {
       const now = options.now?.() ?? Date.now();
-      const room = database.sqlite.prepare("SELECT primary_agent_id FROM rooms WHERE id = ? AND archived_at IS NULL").get(roomId) as { readonly primary_agent_id: string | null } | undefined;
-      if (!room?.primary_agent_id) return;
+        const room = database.sqlite.prepare("SELECT primary_agent_id FROM rooms WHERE id = ? AND archived_at IS NULL").get(roomId) as { readonly primary_agent_id: string | null } | undefined;
+        const primaryAgentId = room?.primary_agent_id;
+        if (!primaryAgentId) return;
       const task = database.sqlite.prepare("SELECT title, status FROM tasks WHERE id = ?").get(taskId) as { readonly title: string; readonly status: string } | undefined;
       if (!task) return;
       const mailboxMessageId = randomUUID();
       database.sqlite.transaction(() => {
         database.sqlite
           .prepare("INSERT INTO mailbox_messages (id, workspace_id, room_id, from_type, from_id, to_agent_id, kind, content, files, read, claimed_run_id, claimed_at, delivery_batch_id, delivery_failure_reason, attempt_count, created_at, consumed_at) VALUES (?, ?, ?, 'system', ?, ?, 'message', ?, '[]', 0, NULL, NULL, NULL, NULL, 0, ?, NULL)")
-          .run(mailboxMessageId, workspaceId, roomId, taskId, room.primary_agent_id, JSON.stringify({ text: `[${reason}] Task ${taskId}: ${task.title} (${task.status})` }), now);
-        eventBus.publish({ id: randomUUID(), type: "mailbox.message.created", schemaVersion: 1, workspaceId, roomId, agentId: room.primary_agent_id, payload: { mailboxMessageId, roomId, fromAgentId: taskId, targetAgentId: room.primary_agent_id, reason }, createdAt: now });
+          .run(mailboxMessageId, workspaceId, roomId, taskId, primaryAgentId, JSON.stringify({ text: `[${reason}] Task ${taskId}: ${task.title} (${task.status})` }), now);
+        eventBus.publish({ id: randomUUID(), type: "mailbox.message.created", schemaVersion: 1, workspaceId, roomId, agentId: primaryAgentId, payload: { mailboxMessageId, roomId, fromAgentId: taskId, targetAgentId: primaryAgentId, reason }, createdAt: now });
       })();
       void commandBusRef.current?.dispatch(
-        { type: "WakeAgent", roomId, agentId: room.primary_agent_id, workspaceId, reason: "mailbox_message", promptDelta: { kind: "delta_only", instructions: `Task ${reason === "task_completed" ? "completed" : "blocked"}: ${task.title}` }, idempotencyKey: `task-mailbox:${taskId}:${runId}:${reason}` },
+        { type: "WakeAgent", roomId, agentId: primaryAgentId, workspaceId, reason: "mailbox_message", promptDelta: { kind: "delta_only", instructions: `Task ${reason === "task_completed" ? "completed" : "blocked"}: ${task.title}` }, idempotencyKey: `task-mailbox:${taskId}:${runId}:${reason}` },
         { actor: { type: "system" }, traceId: `task-mailbox:${taskId}:${runId}`, idempotencyKey: `task-mailbox:${taskId}:${runId}:${reason}`, origin: "internal" }
       );
     }
@@ -643,7 +646,7 @@ async function route(ctx: RouteContext): Promise<void> {
     if (conflict) return json(ctx.res, 409, { error: "model_config_has_bindings", bindingCount: scalar(ctx.database, "SELECT COUNT(*) AS count FROM agent_bindings WHERE model_config_id = ?", parts[1]) });
     const deletedRef = typeof existing.api_key_ref === "string" ? existing.api_key_ref : null;
     if (deletedRef !== null) await ctx.modelConfigSecrets.delete(deletedRef).catch(() => undefined);
-    return json(ctx.res, 200, { ok: true });
+      return json(ctx.res, 200, { ok: true });
   }
   if (ctx.req.method === "PATCH" && parts[0] === "runtimes" && parts[1]) {
     const input = await body(ctx) as Record<string, unknown>;

@@ -198,6 +198,13 @@
 
 ## [2026-05-29T05:05:00Z] Wave 3 Oracle fixes
 - `AdapterRegistry.native()` now passes `permissionEngine` and the daemon keychain bridge into `NativeAgentAdapter`, so native dispatch no longer falls back to implicit allow.
+
+## [2026-05-29T12:39:00Z] Typecheck repair pass
+- AI SDK provider factories in this repo expect provider objects with `.chatModel(...)`; using callable invocation broke runtime tests even though the type surface initially looked plausible.
+- `exactOptionalPropertyTypes` fixes were safest when I built option objects conditionally and only cast the settings object, not the returned model.
+- The daemon’s `lifecycle` getter must stay on `DaemonApp` because startup/runtime tests reach it through the public app object.
+- Web projector replay tests needed their event helper typed to the real `EventType` union; widening `type` to `string` caused a large cascade of false type failures.
+- Verification passed: `pnpm.cmd typecheck`, `pnpm.cmd lint`, and `pnpm.cmd test`.
 - Native permission summaries now use `modelConfig.id` for both cache keys and emitted `permission.run_summary` payloads; `nativeModelConfig()` now selects `mc.id`.
 - MCP tool failures now return an error result and emit exactly one `tool.call.completed` event instead of throwing twice.
 - Verification passed: `pnpm.cmd test -- packages/native-agent-runtime packages/orchestrator packages/daemon`, `pnpm.cmd ai-sdk-provider:check`, and `pnpm.cmd check:all`.
@@ -366,3 +373,8 @@
 - The squad/team checklist adds explicit three-way parallel dispatch (A.7), partial-completion leader-does-not-wake (B.3), and rejection/re-delegation path (B.7) as distinct steps.
 - Both checklists include a live-update invariant table mapping each SSE event type to the expected UI reaction, with a three-step debug guide (transaction publish, registry visibility, projector handler) for when refresh is required.
 - Task 6.4 completion requires only checklist creation; user execution is a non-blocking QA handoff.
+
+## F1 Plan Compliance Audit (2026-05-29)
+
+- Plan compliance must include `pnpm.cmd typecheck` because task 6.1 and the plan Definition of Done require it, even when a narrower verification prompt lists only test/check-all/lint.
+- `pnpm.cmd test`, `pnpm.cmd check:all`, and `pnpm.cmd lint` can all pass while strict TypeScript still catches Native Runtime and daemon contract mismatches.
