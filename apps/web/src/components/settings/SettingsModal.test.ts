@@ -31,7 +31,7 @@ describe("SettingsModal integration contract", () => {
     expect(onSelect).not.toHaveBeenCalledWith("settings");
   });
 
-  it("bootstraps settings with four parallel REST requests and no EventSource", async () => {
+  it("bootstraps settings with four parallel REST requests, then workspace metadata, and no EventSource", async () => {
     const previousEventSource = globalThis.EventSource;
     const eventSourceSpy = vi.fn();
     Object.defineProperty(globalThis, "EventSource", {
@@ -46,7 +46,13 @@ describe("SettingsModal integration contract", () => {
       calls.push({ path: String(input), signal: init?.signal ?? undefined });
       return new Promise<Response>((resolve) => {
         pendingResolvers.push(() => {
-          resolve(new Response(JSON.stringify({ path: String(input) }), {
+          const path = String(input);
+          const body = path === "/agent-bindings"
+            ? { agentBindings: [{ id: "binding_1", workspaceId: "ws_1", role: { name: "Reviewer" }, runtime: { kind: "native", name: "Native", detectedVersion: "native" }, modelConfig: { id: "model_1", name: "OpenAI", provider: "openai", model: "gpt-4o" } }] }
+            : path === "/workspaces/ws_1"
+              ? { workspace: { id: "ws_1", name: "Workspace", root_path: "." } }
+              : { path };
+          resolve(new Response(JSON.stringify(body), {
             status: 200,
             headers: { "content-type": "application/json" }
           }));
@@ -57,6 +63,7 @@ describe("SettingsModal integration contract", () => {
     const controller = new AbortController();
     const resultPromise = fetchSettingsBootstrap(fetchImpl, controller.signal);
 
+    // First 4 requests fire in parallel immediately
     expect(calls.map((call) => call.path).sort()).toEqual([
       "/agent-bindings",
       "/model-configs",
@@ -66,12 +73,28 @@ describe("SettingsModal integration contract", () => {
     expect(calls.every((call) => call.signal === controller.signal)).toBe(true);
     expect(eventSourceSpy).not.toHaveBeenCalled();
 
-    for (const resolve of pendingResolvers) resolve();
+    // Resolve all pending fetches (including the sequential workspace fetch that fires after the first 4)
+    // Need multiple rounds because workspace fetch fires after first 4 resolve + json() parse
+    for (let i = 0; i < 10; i++) {
+      const batch = pendingResolvers.splice(0, pendingResolvers.length);
+      for (const resolve of batch) resolve();
+      await Promise.resolve();
+    }
+
+    // After resolving, the workspace fetch should have been added
+    expect(calls.map((call) => call.path).sort()).toEqual([
+      "/agent-bindings",
+      "/model-configs",
+      "/roles",
+      "/runtimes",
+      "/workspaces/ws_1"
+    ]);
     await expect(resultPromise).resolves.toEqual({
       roles: { path: "/roles" },
       runtimes: { path: "/runtimes" },
       modelConfigs: { path: "/model-configs" },
-      agentBindings: { path: "/agent-bindings" }
+      agentBindings: { agentBindings: [{ id: "binding_1", workspaceId: "ws_1", role: { name: "Reviewer" }, runtime: { kind: "native", name: "Native", detectedVersion: "native" }, modelConfig: { id: "model_1", name: "OpenAI", provider: "openai", model: "gpt-4o" } }] },
+      workspace: { workspace: { id: "ws_1", name: "Workspace", root_path: "." } }
     });
 
     Object.defineProperty(globalThis, "EventSource", {

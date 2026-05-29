@@ -545,7 +545,8 @@ describe("daemon M1.4 composition", () => {
 
     finalizeFailedRoleGenerationJob({ database: daemon.database } as never, jobId, "model_config_not_found", failedAt + 1);
 
-    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM role_drafts WHERE job_id = ?").get(jobId)).toMatchObject({ count: 0 });
+    // Row is kept with status=failed so the UI can show the real error; GC cleans it up later
+    expect(daemon.database.sqlite.prepare("SELECT status, failure_reason FROM role_drafts WHERE job_id = ?").get(jobId)).toMatchObject({ status: "failed", failure_reason: "model_config_not_found" });
   });
 
   it("expires generated role drafts after seven days and returns 404 after GC", async () => {

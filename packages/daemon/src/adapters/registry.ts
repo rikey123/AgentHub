@@ -205,10 +205,38 @@ export class AdapterRegistry {
       ...(this.options.permissionEngine !== undefined ? { permissions: this.options.permissionEngine } : {}),
       modelConfig: this.nativeModelConfig(),
       ...(this.options.keychain !== undefined ? { apiKey: await this.nativeApiKey() } : {}),
+      getModelConfigForRun: (run: RunRow) => this.resolveRunModelConfig(run),
+      getApiKeyForRun: (run: RunRow) => this.resolveRunApiKey(run),
+      ...(this.options.getRoomMcpServer !== undefined ? { getRoomMcpServer: this.options.getRoomMcpServer } : {}),
       ...(this.options.artifactFs !== undefined ? { artifactFs: this.options.artifactFs } : {}),
       ...(this.options.now !== undefined ? { now: this.options.now } : {})
     } as never);
     return this.nativeAdapter;
+  }
+
+  private resolveRunModelConfig(run: RunRow): ModelConfigRow {
+    const row = run.room_id === null
+      ? undefined
+      : this.options.database.sqlite
+          .prepare(
+            `SELECT mc.id AS id, mc.provider AS provider, mc.model AS model, mc.base_url AS base_url, mc.api_key_ref AS api_key_ref
+             FROM room_participants rp
+             JOIN agent_bindings ab ON ab.id = rp.agent_binding_id
+             JOIN model_configs mc ON mc.id = ab.model_config_id
+             WHERE rp.room_id = ? AND rp.participant_id = ? AND rp.participant_type = 'agent'
+             LIMIT 1`
+          )
+          .get(run.room_id, run.agent_id) as ModelConfigRow | undefined;
+    if (row !== undefined) return row;
+    return this.nativeModelConfig();
+  }
+
+  private async resolveRunApiKey(run: RunRow): Promise<string | undefined> {
+    if (this.options.keychain === undefined) return undefined;
+    const modelConfig = this.resolveRunModelConfig(run);
+    if (modelConfig.api_key_ref === null || modelConfig.api_key_ref === undefined) return undefined;
+    const apiKey = await this.options.keychain.get(modelConfig.api_key_ref);
+    return apiKey === null ? undefined : apiKey;
   }
 
   private nativeModelConfig(): ModelConfigRow {

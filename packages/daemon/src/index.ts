@@ -789,6 +789,7 @@ async function route(ctx: RouteContext): Promise<void> {
   if (ctx.req.method === "GET" && url.pathname === "/debug/stats") return debugStats(ctx, auth);
   if (ctx.req.method === "GET" && parts[0] === "workspaces" && parts[2] === "cost-summary") { if (!requireScope(auth, "read", ctx.res)) return; return costSummary(ctx, parts[1] as string, url); }
   if (ctx.req.method === "POST" && parts[0] === "workspaces" && parts[2] === "cost-budget") return json(ctx.res, 501, { error: "budget alerts are V1.5 (permission-dsl)" });
+  if (ctx.req.method === "GET" && parts[0] === "workspaces" && parts[1]) return workspace(ctx, parts[1] as string);
   if (ctx.req.method === "GET" && (url.pathname === "/board" || url.pathname === "/timeline")) return json(ctx.res, 404, { error: "not_found", capability: "v1-roadmap" });
   return json(ctx.res, 404, { error: "not_found" });
 }
@@ -945,6 +946,12 @@ function costSummary(ctx: RouteContext, workspaceId: string, url: URL): void {
   const groups = rows.map(normalizeCostRow);
   const total = groups.reduce((acc, row) => ({ inputTokens: acc.inputTokens + row.inputTokens, outputTokens: acc.outputTokens + row.outputTokens, cachedTokens: acc.cachedTokens + row.cachedTokens, costUsd: acc.costUsd + row.costUsd, runCount: acc.runCount + row.runCount }), zeroCost());
   json(ctx.res, 200, { groupBy, from, to, groups, total });
+}
+
+function workspace(ctx: RouteContext, workspaceId: string): void {
+  const row = get(ctx.database, "SELECT * FROM workspaces WHERE id = ?", workspaceId) as Record<string, unknown> | null;
+  if (row === null) return json(ctx.res, 404, { error: "workspace_not_found" });
+  json(ctx.res, 200, { workspace: row });
 }
 
 async function attachments(ctx: RouteContext): Promise<void> {
@@ -1258,7 +1265,6 @@ export function finalizeFailedRoleGenerationJob(ctx: RouteContext, jobId: string
     if (current === null) return;
     if (String(current.status) === "cancelled") return;
     ctx.database.sqlite.prepare("UPDATE role_drafts SET status = ?, failure_reason = ?, updated_at = ? WHERE job_id = ?").run("failed", failureReason, failedAt, jobId);
-    ctx.database.sqlite.prepare("DELETE FROM role_drafts WHERE job_id = ?").run(jobId);
   })();
 }
 

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Drawer, Tabs, Chip, ScrollShadow, Skeleton } from "@heroui/react";
 import type { RoomViewModel, TaskViewModel } from "../../types.ts";
+import { useProjector } from "../../hooks/useProjector.ts";
 import { TranscriptTab } from "./tabs/TranscriptTab.tsx";
 import { ToolsTab } from "./tabs/ToolsTab.tsx";
 import { ContextTab } from "./tabs/ContextTab.tsx";
@@ -24,6 +25,9 @@ export function RunDetailDrawer(props: RunDetailDrawerProps) {
   const { room, runId } = props;
   const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>();
   const run = room && runId ? room.runs.find((r) => r.id === runId) : undefined;
+  const detailProjector = useProjector("detail", props.isOpen ? room?.id : undefined, props.isOpen ? runId ?? undefined : undefined);
+  const detailRoom = props.isOpen && room?.id ? detailProjector.rooms.get(room.id) : undefined;
+  const detailRun = detailRoom && runId ? detailRoom.runs.find((r) => r.id === runId) : undefined;
   const selectedTask = room && selectedTaskId ? room.tasks.find((task) => task.id === selectedTaskId) : undefined;
   const transcriptCount = room && runId ? room.messages.filter((m) => m.runId === runId).length : 0;
   const permissionCount = room && runId ? room.pendingPermissions.filter((p) => !p.runId || p.runId === runId).length : 0;
@@ -78,7 +82,7 @@ export function RunDetailDrawer(props: RunDetailDrawerProps) {
                     <Tabs.Panel id="transcript"><TranscriptTab room={room} runId={runId} /></Tabs.Panel>
                     <Tabs.Panel id="tools"><ToolsTab room={room} runId={runId} onOpenRun={handleOpenRun} onOpenTask={setSelectedTaskId} /></Tabs.Panel>
                     <Tabs.Panel id="context"><ContextTab room={room} runId={runId} /></Tabs.Panel>
-                    <Tabs.Panel id="perms"><PermissionsTab room={room} runId={runId} /></Tabs.Panel>
+                    <Tabs.Panel id="perms"><PermissionsTab room={room} runId={runId} permissionSummary={detailRun?.permissionSummary} /></Tabs.Panel>
                     <Tabs.Panel id="artifacts"><ArtifactsTab room={room} runId={runId} csrfFetch={props.csrfFetch} /></Tabs.Panel>
                     <Tabs.Panel id="raw"><RawStreamTab roomId={room.id} runId={runId} /></Tabs.Panel>
                     <Tabs.Panel id="cost">{run ? <CostTab run={run} csrfFetch={props.csrfFetch} /> : null}</Tabs.Panel>
