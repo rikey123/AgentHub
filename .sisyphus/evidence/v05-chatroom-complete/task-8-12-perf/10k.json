@@ -6,12 +6,12 @@
     "totalMemoryMB": 32581,
     "nodeVersion": "v24.11.1"
   },
-  "timestamp": "2026-05-25T04:26:12.083Z",
+  "timestamp": "2026-05-29T08:13:09.274Z",
   "note": "10k message render target was not directly tested in CI because seeding 10k messages via SQLite in a Playwright test is too slow. The harness seeded 100 messages and measured load time.",
   "actualMeasurement": {
     "seededMessages": 100,
-    "roomLoadMs": 212.4,
-    "roomSwitchMs": 252.1
+    "roomLoadMs": 1055.8,
+    "roomSwitchMs": 1069
   },
   "specTarget": {
     "messages": 10000,
