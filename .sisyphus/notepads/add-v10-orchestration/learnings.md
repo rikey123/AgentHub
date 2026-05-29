@@ -309,3 +309,10 @@
 - `team.dispatch.started` already arrives as a `dispatch_started` brief; rendering that brief as a `TaskStatusCard` keeps review readiness main-visible and avoids adding another projector branch.
 - The side panel tabs are internally uncontrolled; remounting `SidePanel` with a key containing `sidePanelTab` lets card actions force the Tasks tab open from `App`.
 - Current web/package build is blocked by pre-existing TypeScript errors in `useProjector.test.ts` and backend workspace packages, but `pnpm.cmd test -- apps/web` passes and modified files have zero LSP diagnostics.
+
+## [2026-05-29T10:33:00Z] Task 4.12 Squad/Team/Task integration tests
+- Existing coverage already handled Team review wake gating, blocked-sibling wake, approval completion, duplicate delegation guard, depth guard, and projector task.created/status/activity replay flows.
+- Added the missing Squad parallel regression by seeding three teammate bindings and delegating to all three via `Promise.all`; the assertion checks three unique queued delegated runs and zero `run_next_turns`, proving ActiveWakes did not collapse them as duplicates.
+- Timeout coverage now uses Vitest fake timers against `RunQueue` with a 30-minute lock timeout instead of mutating wall-clock state only.
+- `events:check` previously ignored unregistered two-segment task literals such as `task.updated`; adding an explicit forbidden-event set makes the checker reject the V1.0 banned names while still passing on clean source.
+- Required verification `pnpm.cmd test -- packages/orchestrator packages/daemon apps/web` passes after the additions; repo-wide `pnpm.cmd typecheck` remains blocked by pre-existing production/test typing debt outside this task.

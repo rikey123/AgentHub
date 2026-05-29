@@ -1,4 +1,5 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -483,11 +484,48 @@ describe("TaskService and RoomMcpServer", () => {
     });
   });
 
+  test("squad mode queues three teammate delegates without active wake conflicts", async () => {
+    seedSquadRoomWithTeammates("room_squad_parallel", [
+      { roleId: "role_builder_a", bindingId: "binding_builder_a", agentId: "agent_builder_a" },
+      { roleId: "role_builder_b", bindingId: "binding_builder_b", agentId: "agent_builder_b" },
+      { roleId: "role_builder_c", bindingId: "binding_builder_c", agentId: "agent_builder_c" }
+    ]);
+    createRun("run_squad_leader", { roomId: "room_squad_parallel", agentId: "agent_leader" });
+    const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const commandBus = commandBusWithHandlers();
+    const mcp = new RoomMcpServer({ commandBus, taskService: service, database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const leaderSession = { roomId: "room_squad_parallel", runId: "run_squad_leader", agentId: "agent_leader" };
+
+    const results = await Promise.all([
+      mcp.callTool("room.delegate", { toRoleId: "role_builder_a", title: "Parallel A" }, leaderSession),
+      mcp.callTool("room.delegate", { toRoleId: "role_builder_b", title: "Parallel B" }, leaderSession),
+      mcp.callTool("room.delegate", { toRoleId: "role_builder_c", title: "Parallel C" }, leaderSession)
+    ]);
+
+    expect(results).toEqual([expect.objectContaining({ ok: true }), expect.objectContaining({ ok: true }), expect.objectContaining({ ok: true })]);
+    const runIds = results.map((result) => {
+      if (!result.ok || !isRecord(result.data) || typeof result.data.runId !== "string") throw new Error("expected delegated run id");
+      return result.data.runId;
+    });
+    expect(new Set(runIds)).toHaveProperty("size", 3);
+    expect(
+      currentDatabase().sqlite
+        .prepare("SELECT agent_id, status, wake_reason, task_id FROM runs WHERE id IN (?, ?, ?) ORDER BY agent_id ASC")
+        .all(...runIds)
+    ).toEqual([
+      expect.objectContaining({ agent_id: "agent_builder_a", status: "queued", wake_reason: "delegated_task" }),
+      expect.objectContaining({ agent_id: "agent_builder_b", status: "queued", wake_reason: "delegated_task" }),
+      expect.objectContaining({ agent_id: "agent_builder_c", status: "queued", wake_reason: "delegated_task" })
+    ]);
+    expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM run_next_turns WHERE run_id IN (?, ?, ?)").get(...runIds)).toMatchObject({ count: 0 });
+    expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'task.delegation.created' AND room_id = 'room_squad_parallel'").get()).toMatchObject({ count: 3 });
+  });
+
   test("team mode wakes leader only after every sibling task is in review", async () => {
     seedDelegatedRoom("room_team_review", "agent_leader", "role_leader", "role_builder", "binding_leader", "binding_builder", "agent_builder");
     const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
     const dispatched: Array<{ readonly reason: string; readonly taskId: string; readonly idempotencyKey: string }> = [];
-    const commandBus = { dispatch: (command: { readonly reason: string; readonly taskId: string; readonly idempotencyKey: string }) => { dispatched.push(command); return { ok: true, data: { runId: `leader-${dispatched.length}` }, emittedEvents: [] }; } } as CommandBus;
+    const commandBus = { dispatch: (command: { readonly reason: string; readonly taskId: string; readonly idempotencyKey: string }) => { dispatched.push(command); return { ok: true, data: { runId: `leader-${dispatched.length}` }, emittedEvents: [] }; } } as unknown as CommandBus;
     const mcp = new RoomMcpServer({ commandBus, taskService: service, database: currentDatabase(), eventBus: currentBus(), now: () => now });
     const leaderSession = { roomId: "room_team_review", runId: "run_team_leader", agentId: "agent_leader" };
 
@@ -529,7 +567,7 @@ describe("TaskService and RoomMcpServer", () => {
     seedDelegatedRoom("room_team_blocked", "agent_leader", "role_leader", "role_builder", "binding_leader", "binding_builder", "agent_builder");
     const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
     const dispatched: Array<{ readonly reason: string; readonly taskId: string; readonly idempotencyKey: string }> = [];
-    const commandBus = { dispatch: (command: { readonly reason: string; readonly taskId: string; readonly idempotencyKey: string }) => { dispatched.push(command); return { ok: true, data: { runId: `leader-${dispatched.length}` }, emittedEvents: [] }; } } as CommandBus;
+    const commandBus = { dispatch: (command: { readonly reason: string; readonly taskId: string; readonly idempotencyKey: string }) => { dispatched.push(command); return { ok: true, data: { runId: `leader-${dispatched.length}` }, emittedEvents: [] }; } } as unknown as CommandBus;
     const leaderSession = { roomId: "room_team_blocked", runId: "run_team_blocked", agentId: "agent_leader" };
     const mcp = new RoomMcpServer({ commandBus, taskService: service, database: currentDatabase(), eventBus: currentBus(), now: () => now });
 
@@ -630,7 +668,8 @@ describe("TaskService and RoomMcpServer", () => {
     expect(duplicate).toMatchObject({ ok: false, error: { code: "delegation_duplicate" } });
     expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM tasks WHERE room_id = 'room_delegate_guard' AND title = 'Guarded task'").get()).toMatchObject({ count: 1 });
 
-    const taskIds = [first.ok ? first.data.taskId : ""];
+    if (!first.ok || !isRecord(first.data) || typeof first.data.taskId !== "string") throw new Error("expected guarded task id");
+    const taskIds = [first.data.taskId];
     for (let depth = 0; depth < 5; depth += 1) {
       const created = service.create({ roomId: "room_delegate_guard", title: `Chain ${depth}`, parentTaskId: taskIds[depth] || undefined, createdBy: "agent_leader" });
       if (!created.ok) throw new Error("expected chain task create success");
@@ -639,6 +678,20 @@ describe("TaskService and RoomMcpServer", () => {
     const deep = await mcp.callTool("room.delegate", { toRoleId: "role_builder", title: "Too deep", parentTaskId: taskIds[5], description: "depth test" }, { roomId: "room_delegate_guard", runId: "run_delegate_guard", agentId: "agent_leader" });
     expect(deep).toMatchObject({ ok: false, error: { code: "delegation_too_deep" } });
     expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM tasks WHERE room_id = 'room_delegate_guard' AND title = 'Too deep'").get()).toMatchObject({ count: 0 });
+  });
+
+  test("delegation lock timeout uses fake clock and fails stale waiting run after 30 minutes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    createRun("run_wait_fake_clock");
+    currentLifecycle().markWaiting(null, "run_wait_fake_clock", "agent_lock_held_by:run_blocker");
+    const queue = new RunQueue({ database: currentDatabase(), lifecycle: currentLifecycle(), lockTimeoutMs: 30 * 60 * 1000, now: Date.now });
+
+    await vi.advanceTimersByTimeAsync(30 * 60 * 1000 + 1);
+    await queue.scheduleTick();
+
+    expect(statusOf("run_wait_fake_clock")).toBe("failed");
+    expect(currentLifecycle().read("run_wait_fake_clock")).toMatchObject({ failure_class: "transient", error: "lock_timeout" });
   });
 
   test("room.read_mailbox atomically consumes current run mailbox and next turns", async () => {
@@ -953,6 +1006,29 @@ describe("RunQueue", () => {
   });
 });
 
+describe("events:check task event contract", () => {
+  const forbiddenFixture = join(process.cwd(), "packages", "orchestrator", "src", "__task_updated_events_check_fixture.ts");
+
+  afterEach(() => {
+    rmSync(forbiddenFixture, { force: true });
+  });
+
+  test("rejects forbidden task.updated literals from scanned source", () => {
+    mkdirSync(join(process.cwd(), "packages", "orchestrator", "src"), { recursive: true });
+    const forbiddenType = ["task", "updated"].join(".");
+    writeFileSync(forbiddenFixture, `export const forbiddenTaskEvent = "${forbiddenType}";\n`);
+
+    const result = spawnSync(process.execPath, [join(process.cwd(), "scripts", "checks", "events-check.mjs")], {
+      cwd: process.cwd(),
+      encoding: "utf8"
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(`event '${forbiddenType}' referenced`);
+    expect(result.stderr).toContain("forbidden by the V1.0 event contract");
+  }, 20_000);
+});
+
 describe("startup recovery and reclaim", () => {
   test("clears locks, preserves queued/waiting, fails stale claimed/starting, and finalizes cancelling", async () => {
     createRun("run_queued");
@@ -1147,6 +1223,24 @@ function seedDelegatedRoom(roomId: string, leaderAgentId: string, leaderRoleId: 
   currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES (?, ?, 'agent', 'teammate', 'mock', NULL, ?, 'active', ?)").run(roomId, teammateAgentId, teammateBindingId, now);
   currentDatabase().sqlite.prepare("INSERT OR REPLACE INTO agent_presence (room_id, agent_id, state, reason, status_line, updated_at) VALUES (?, ?, 'active', NULL, NULL, ?)").run(roomId, leaderAgentId, now);
   currentDatabase().sqlite.prepare("INSERT OR REPLACE INTO agent_presence (room_id, agent_id, state, reason, status_line, updated_at) VALUES (?, ?, 'active', NULL, NULL, ?)").run(roomId, teammateAgentId, now);
+}
+
+function seedSquadRoomWithTeammates(roomId: string, teammates: ReadonlyArray<{ readonly roleId: string; readonly bindingId: string; readonly agentId: string }>): void {
+  currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO workspaces (id, name, root_path, created_at, updated_at) VALUES ('ws_1', 'Workspace', '.', ?, ?)").run(now, now);
+  currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO roles (id, workspace_id, name, prompt, capabilities, is_builtin, created_at, updated_at) VALUES ('role_leader', 'ws_1', 'Leader', '', '[]', 0, ?, ?)").run(now, now);
+  currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES ('binding_leader', 'ws_1', 'role_leader', 'runtime_1', NULL, NULL, ?, ?)").run(now, now);
+  currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES ('agent_leader', 'ws_1', 'Leader', 'mock', NULL, '', '{}', NULL, 0, NULL, ?, ?)").run(now, now);
+  currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, leader_role_id, archived_at, created_at, updated_at) VALUES (?, 'ws_1', 'Squad', 'squad', 'conversation', 'agent_leader', 'role_leader', NULL, ?, ?)").run(roomId, now, now);
+  currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES (?, 'agent_leader', 'agent', 'primary', 'mock', NULL, 'binding_leader', 'active', ?)").run(roomId, now);
+  currentDatabase().sqlite.prepare("INSERT OR REPLACE INTO agent_presence (room_id, agent_id, state, reason, status_line, updated_at) VALUES (?, 'agent_leader', 'active', NULL, NULL, ?)").run(roomId, now);
+
+  for (const teammate of teammates) {
+    currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO roles (id, workspace_id, name, prompt, capabilities, is_builtin, created_at, updated_at) VALUES (?, 'ws_1', ?, '', '[]', 0, ?, ?)").run(teammate.roleId, teammate.roleId, now, now);
+    currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES (?, 'ws_1', ?, 'runtime_1', NULL, NULL, ?, ?)").run(teammate.bindingId, teammate.roleId, now, now);
+    currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES (?, 'ws_1', ?, 'mock', NULL, '', '{}', NULL, 0, NULL, ?, ?)").run(teammate.agentId, teammate.agentId, now, now);
+    currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES (?, ?, 'agent', 'teammate', 'mock', NULL, ?, 'active', ?)").run(roomId, teammate.agentId, teammate.bindingId, now);
+    currentDatabase().sqlite.prepare("INSERT OR REPLACE INTO agent_presence (room_id, agent_id, state, reason, status_line, updated_at) VALUES (?, ?, 'active', NULL, NULL, ?)").run(roomId, teammate.agentId, now);
+  }
 }
 
 function registeredContext(mcp: RoomMcpServer, input: { readonly roomId: string; readonly agentId: string; readonly adapterSessionId: string }) {

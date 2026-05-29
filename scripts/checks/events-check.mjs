@@ -1,6 +1,15 @@
 import { lineNumberFor, loadEventRegistry, readText, runCheck, unique, walkFiles } from "./lib.mjs";
 
 const eventLiteralPattern = /["`]([a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)+)["`]/g;
+const forbiddenEventLiterals = new Set([
+  "task.updated",
+  "task.deleted",
+  "role.generation.started",
+  "role.generation.completed",
+  "role.generation.failed",
+  "runtime.test.result",
+  "model_config.test.result"
+]);
 const ignoredNonEventLiterals = new Set([
   "agent.run.aborted",
   "agent.knock",
@@ -99,6 +108,10 @@ await runCheck("events:check", async function checkEvents() {
     const source = await readText(file);
     for (const match of source.matchAll(eventLiteralPattern)) {
       const literal = match[1];
+      if (forbiddenEventLiterals.has(literal)) {
+        errors.push(`event '${literal}' referenced from ${file}:${lineNumberFor(source, match.index)} but is forbidden by the V1.0 event contract`);
+        continue;
+      }
       if (ignoredNonEventLiterals.has(literal)) continue;
       if (!literal.includes(".")) continue;
       if (/^(room|task|agent|run|tool|mailbox|context|permission|artifact|server|session|pending_turn|intervention)\.[a-z][a-z0-9_]*$/.test(literal) && !registryTypes.has(literal)) continue;
