@@ -741,6 +741,13 @@ async function route(ctx: RouteContext): Promise<void> {
   if (ctx.req.method === "DELETE" && parts[0] === "messages" && parts[1]) return dispatch(ctx, { messageId: parts[1] }, "DeleteMessage");
   if (ctx.req.method === "GET" && url.pathname === "/agents") return json(ctx.res, 200, { agents: all(ctx.database, "SELECT * FROM agent_profiles ORDER BY name ASC") });
   if (ctx.req.method === "GET" && parts[0] === "agents" && parts[1]) return json(ctx.res, 200, { agent: get(ctx.database, "SELECT * FROM agent_profiles WHERE id = ?", parts[1]) });
+  if (ctx.req.method === "GET" && parts[0] === "runs" && parts[1] && parts[2] === "permission-summary") {
+    const runId = parts[1];
+    const events = all(ctx.database, "SELECT payload FROM events WHERE run_id = ? AND type = 'permission.run_summary' ORDER BY created_at DESC LIMIT 1", runId) as Array<{ readonly payload: string }>;
+    if (events.length === 0) return json(ctx.res, 200, { decisions: [] });
+    const payload = JSON.parse(events[0]!.payload) as { decisions?: unknown[] };
+    return json(ctx.res, 200, { decisions: payload.decisions ?? [] });
+  }
   if (ctx.req.method === "GET" && parts[0] === "runs" && parts[1]) return json(ctx.res, 200, { run: get(ctx.database, "SELECT * FROM runs WHERE id = ?", parts[1]) });
   if (ctx.req.method === "GET" && url.pathname === "/context") return contextItems(ctx, url);
   if (ctx.req.method === "POST" && url.pathname === "/context/propose") return dispatch(ctx, await body(ctx), "ProposeContextItem");

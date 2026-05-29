@@ -31,7 +31,7 @@ describe("SettingsModal integration contract", () => {
     expect(onSelect).not.toHaveBeenCalledWith("settings");
   });
 
-  it("bootstraps settings with four parallel REST requests, then workspace metadata, and no EventSource", async () => {
+  it("bootstraps settings with five parallel REST requests, then workspace metadata, and no EventSource", async () => {
     const previousEventSource = globalThis.EventSource;
     const eventSourceSpy = vi.fn();
     Object.defineProperty(globalThis, "EventSource", {
@@ -49,6 +49,8 @@ describe("SettingsModal integration contract", () => {
           const path = String(input);
           const body = path === "/agent-bindings"
             ? { agentBindings: [{ id: "binding_1", workspaceId: "ws_1", role: { name: "Reviewer" }, runtime: { kind: "native", name: "Native", detectedVersion: "native" }, modelConfig: { id: "model_1", name: "OpenAI", provider: "openai", model: "gpt-4o" } }] }
+            : path === "/permissions/profiles"
+              ? { profiles: [{ id: "profile_1", name: "Default Policy", description: "Shared defaults", rules: [] }] }
             : path === "/workspaces/ws_1"
               ? { workspace: { id: "ws_1", name: "Workspace", root_path: "." } }
               : { path };
@@ -63,18 +65,19 @@ describe("SettingsModal integration contract", () => {
     const controller = new AbortController();
     const resultPromise = fetchSettingsBootstrap(fetchImpl, controller.signal);
 
-    // First 4 requests fire in parallel immediately
+    // First 5 requests fire in parallel immediately
     expect(calls.map((call) => call.path).sort()).toEqual([
       "/agent-bindings",
       "/model-configs",
+      "/permissions/profiles",
       "/roles",
       "/runtimes"
     ]);
     expect(calls.every((call) => call.signal === controller.signal)).toBe(true);
     expect(eventSourceSpy).not.toHaveBeenCalled();
 
-    // Resolve all pending fetches (including the sequential workspace fetch that fires after the first 4)
-    // Need multiple rounds because workspace fetch fires after first 4 resolve + json() parse
+    // Resolve all pending fetches (including the sequential workspace fetch that fires after the first 5)
+    // Need multiple rounds because workspace fetch fires after first 5 resolve + json() parse
     for (let i = 0; i < 10; i++) {
       const batch = pendingResolvers.splice(0, pendingResolvers.length);
       for (const resolve of batch) resolve();
@@ -85,6 +88,7 @@ describe("SettingsModal integration contract", () => {
     expect(calls.map((call) => call.path).sort()).toEqual([
       "/agent-bindings",
       "/model-configs",
+      "/permissions/profiles",
       "/roles",
       "/runtimes",
       "/workspaces/ws_1"
@@ -94,6 +98,7 @@ describe("SettingsModal integration contract", () => {
       runtimes: { path: "/runtimes" },
       modelConfigs: { path: "/model-configs" },
       agentBindings: { agentBindings: [{ id: "binding_1", workspaceId: "ws_1", role: { name: "Reviewer" }, runtime: { kind: "native", name: "Native", detectedVersion: "native" }, modelConfig: { id: "model_1", name: "OpenAI", provider: "openai", model: "gpt-4o" } }] },
+      permissionProfiles: { profiles: [{ id: "profile_1", name: "Default Policy", description: "Shared defaults", rules: [] }] },
       workspace: { workspace: { id: "ws_1", name: "Workspace", root_path: "." } }
     });
 
@@ -117,7 +122,7 @@ describe("SettingsModal integration contract", () => {
     const resultPromise = fetchSettingsBootstrap(fetchImpl, controller.signal);
     controller.abort();
 
-    expect(signals).toHaveLength(4);
+    expect(signals).toHaveLength(5);
     expect(signals.every((signal) => signal.aborted)).toBe(true);
     await expect(resultPromise).rejects.toMatchObject({ name: "AbortError" });
   });

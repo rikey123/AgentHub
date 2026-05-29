@@ -10,12 +10,12 @@ export const SETTINGS_TABS: Array<{ id: SettingsTabId; label: string; endpoint?:
   { id: "roles", label: "Roles", endpoint: "roles" },
   { id: "runtimes", label: "Runtimes", endpoint: "runtimes" },
   { id: "models", label: "Models", endpoint: "modelConfigs" },
-  { id: "permissions", label: "Permissions", endpoint: "agentBindings" },
+  { id: "permissions", label: "Permissions", endpoint: "permissionProfiles" },
   { id: "workspace", label: "Workspace" },
   { id: "mcp", label: "MCP" }
 ];
 
-type SettingsEndpoint = "roles" | "runtimes" | "modelConfigs" | "agentBindings";
+type SettingsEndpoint = "roles" | "runtimes" | "modelConfigs" | "agentBindings" | "permissionProfiles";
 
 type SettingsData = Record<SettingsEndpoint, unknown> & { workspace: unknown };
 
@@ -33,7 +33,8 @@ const endpointPaths: Record<SettingsEndpoint, string> = {
   roles: "/roles",
   runtimes: "/runtimes",
   modelConfigs: "/model-configs",
-  agentBindings: "/agent-bindings"
+  agentBindings: "/agent-bindings",
+  permissionProfiles: "/permissions/profiles"
 };
 
 const emptySettingsData = (): SettingsData => ({
@@ -41,6 +42,7 @@ const emptySettingsData = (): SettingsData => ({
   runtimes: undefined,
   modelConfigs: undefined,
   agentBindings: undefined,
+  permissionProfiles: undefined,
   workspace: undefined
 });
 
@@ -134,7 +136,7 @@ export function SettingsModal({ isOpen, selectedTab, onTabChange, onOpenChange, 
                 </p>
               </div>
                 <Chip className="ml-auto" size="sm" variant="soft" color={status === "error" ? "danger" : loading ? "warning" : "success"}>
-                {loading ? "Loading" : status === "error" ? "REST error" : `${loadedCount}/5 loaded`}
+                {loading ? "Loading" : status === "error" ? "REST error" : `${loadedCount}/6 loaded`}
                 </Chip>
             </div>
           </Modal.Header>
@@ -217,7 +219,7 @@ function SettingsPanel({
   }
 
   if (tab.id === "permissions" && !loading && !error && data !== undefined) {
-    return <PermissionsSettingsTab agentBindings={data} />;
+    return <PermissionsSettingsTab permissionProfiles={data} />;
   }
 
   if (tab.id === "workspace" && !loading && !error && allData.workspace !== undefined) {
@@ -271,28 +273,24 @@ function PlaceholderState({ tab, data }: { tab: (typeof SETTINGS_TABS)[number]; 
   );
 }
 
-function PermissionsSettingsTab({ agentBindings }: { agentBindings: unknown }) {
-  const bindings = normalizeAgentBindings(agentBindings);
-  if (bindings.length === 0) return <PlaceholderState tab={{ id: "permissions", label: "Permissions" }} data={agentBindings} />;
+function PermissionsSettingsTab({ permissionProfiles }: { permissionProfiles: unknown }) {
+  const profiles = normalizePermissionProfiles(permissionProfiles);
+  if (profiles.length === 0) return <PlaceholderState tab={{ id: "permissions", label: "Permissions" }} data={permissionProfiles} />;
 
   return (
     <section className="grid gap-3 p-5" data-testid="settings-panel-permissions">
-      {bindings.map((binding) => (
-        <Card key={binding.id} variant="transparent" className="border border-border">
+      {profiles.map((profile) => (
+        <Card key={profile.id} variant="transparent" className="border border-border">
           <Card.Header>
             <div className="flex items-center gap-2">
-              <Card.Title className="text-sm">{binding.roleName}</Card.Title>
-              <Chip size="sm" variant="soft" color="accent">{binding.overridePermissionProfileId ?? "role profile"}</Chip>
+              <Card.Title className="text-sm">{profile.name}</Card.Title>
+              <Chip size="sm" variant="soft" color="accent">profile</Chip>
             </div>
-            <Card.Description className="text-xs">
-              Runtime {binding.runtimeKind} · Model {binding.modelProvider}/{binding.modelName}
-            </Card.Description>
+            <Card.Description className="text-xs">{profile.description ?? "No description provided."}</Card.Description>
           </Card.Header>
           <Card.Content className="grid gap-1 text-xs text-muted">
-            <div>Workspace: {binding.workspaceId}</div>
-            <div>Binding: {binding.id}</div>
-            <div>Runtime: {binding.runtimeName}{binding.runtimeVersion ? ` (${binding.runtimeVersion})` : ""}</div>
-            <div>Model config: {binding.modelConfigName ?? binding.modelConfigId}</div>
+            <div>Rules are configured per-agent-binding.</div>
+            <div className="ah-mono">Profile ID: {profile.id}</div>
           </Card.Content>
         </Card>
       ))}
@@ -337,48 +335,24 @@ function McpPlaceholder() {
   );
 }
 
-function normalizeAgentBindings(value: unknown): Array<{
+function normalizePermissionProfiles(value: unknown): Array<{
   readonly id: string;
-  readonly workspaceId: string;
-  readonly roleName: string;
-  readonly runtimeKind: string;
-  readonly runtimeName: string;
-  readonly runtimeVersion: string | undefined;
-  readonly modelProvider: string;
-  readonly modelName: string;
-  readonly modelConfigId: string;
-  readonly modelConfigName: string | undefined;
-  readonly overridePermissionProfileId: string | undefined;
+  readonly name: string;
+  readonly description: string | undefined;
 }> {
-  const bindings = value && typeof value === "object" && Array.isArray((value as { readonly agentBindings?: unknown }).agentBindings)
-    ? (value as { readonly agentBindings: unknown[] }).agentBindings
+  const profiles = value && typeof value === "object" && Array.isArray((value as { readonly profiles?: unknown }).profiles)
+    ? (value as { readonly profiles: unknown[] }).profiles
     : [];
-  return bindings.flatMap((binding) => {
-    if (!binding || typeof binding !== "object") return [];
-    const record = binding as Record<string, unknown>;
-    const role = record.role && typeof record.role === "object" ? record.role as Record<string, unknown> : undefined;
-    const runtime = record.runtime && typeof record.runtime === "object" ? record.runtime as Record<string, unknown> : undefined;
-    const modelConfig = record.modelConfig && typeof record.modelConfig === "object" ? record.modelConfig as Record<string, unknown> : undefined;
+  return profiles.flatMap((profile) => {
+    if (!profile || typeof profile !== "object") return [];
+    const record = profile as Record<string, unknown>;
     const id = typeof record.id === "string" ? record.id : undefined;
-    const workspaceId = typeof record.workspaceId === "string" ? record.workspaceId : undefined;
-    const roleName = typeof role?.name === "string" ? role.name : undefined;
-    const runtimeKind = typeof runtime?.kind === "string" ? runtime.kind : undefined;
-    const runtimeName = typeof runtime?.name === "string" ? runtime.name : undefined;
-    const modelProvider = typeof modelConfig?.provider === "string" ? modelConfig.provider : undefined;
-    const modelName = typeof modelConfig?.model === "string" ? modelConfig.model : undefined;
-    if (!id || !workspaceId || !roleName || !runtimeKind || !runtimeName || !modelProvider || !modelName) return [];
+    const name = typeof record.name === "string" ? record.name : undefined;
+    if (!id || !name) return [];
     return [{
       id,
-      workspaceId,
-      roleName,
-      runtimeKind,
-      runtimeName,
-      runtimeVersion: typeof runtime?.detectedVersion === "string" ? runtime.detectedVersion : undefined,
-      modelProvider,
-      modelName,
-      modelConfigId: typeof modelConfig?.id === "string" ? modelConfig.id : "unknown",
-      modelConfigName: typeof modelConfig?.name === "string" ? modelConfig.name : undefined,
-      overridePermissionProfileId: typeof record.overridePermissionProfileId === "string" ? record.overridePermissionProfileId : undefined
+      name,
+      description: typeof record.description === "string" ? record.description : undefined
     }];
   });
 }

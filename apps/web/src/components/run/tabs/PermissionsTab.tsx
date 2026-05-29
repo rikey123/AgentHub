@@ -1,11 +1,34 @@
+import { useEffect, useState } from "react";
 import type { RoomViewModel } from "../../../types.ts";
 import { Card, Chip } from "@heroui/react";
 import { permissionStatusColor } from "../../../lib/status.ts";
 
-export function PermissionsTab({ room, runId, permissionSummary }: { room: RoomViewModel; runId: string; permissionSummary?: RoomViewModel["runs"][number]["permissionSummary"] }) {
-  const run = room.runs.find((r) => r.id === runId);
+type PermissionDecision = {
+  readonly resource: { readonly type: string; readonly provider?: string };
+  readonly decision: "allowed" | "denied" | "expired";
+  readonly modelConfigId: string;
+};
+
+export function PermissionsTab({ room, runId, csrfFetch }: { room: RoomViewModel; runId: string; csrfFetch: typeof fetch }) {
+  const [summary, setSummary] = useState<PermissionDecision[]>([]);
   const perms = room.pendingPermissions.filter((p) => !p.runId || p.runId === runId);
-  const summary = permissionSummary ?? run?.permissionSummary ?? [];
+
+  useEffect(() => {
+    if (!runId) return;
+    let cancelled = false;
+    csrfFetch(`/runs/${encodeURIComponent(runId)}/permission-summary`, { credentials: "same-origin" })
+      .then((res) => (res.ok ? res.json() : { decisions: [] }))
+      .then((data: { decisions?: PermissionDecision[] }) => {
+        if (!cancelled) setSummary(data.decisions ?? []);
+      })
+      .catch(() => {
+        /* ignore */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [runId, csrfFetch]);
+
   if (perms.length === 0) {
     return summary.length === 0 ? <div className="p-6 text-center text-sm text-muted">No permissions for this run.</div> : (
       <div className="flex flex-col gap-3 p-3">
