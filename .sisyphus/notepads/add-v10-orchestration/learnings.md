@@ -139,6 +139,12 @@
 - `packages/orchestrator/src/task-service.ts`, `packages/orchestrator/src/team-dispatch.ts`, and `packages/orchestrator/src/mcp/room-mcp-server.ts` were the only orchestrator files that needed fixes for this wave.
 - Targeted verification passed: `pnpm.cmd test -- packages/orchestrator packages/daemon apps/web`, `pnpm.cmd check:all`, and file diagnostics on all modified files.
 
+## [2026-05-29T11:36:54Z] Task 5.3
+- Updated the v1-roadmap spec to treat Squad / Team as already implemented in V1.0 while keeping V1.1+ Board / Timeline explicitly out of scope.
+- Added daemon coverage for `/board` and `/timeline` staying `404` / `not_found` so the out-of-scope placeholder behavior is locked down.
+- Verified with `pnpm.cmd test -- packages/daemon`; the suite passed.
+- `openspec.cmd validate add-v10-orchestration --strict` could not be executed here because `openspec.cmd` is not installed/present in this workspace.
+
 ## [2026-05-29T03:02:00Z] Task 1.8
 - Consolidated data-foundation test coverage in packages/daemon/test/daemon.test.ts without duplicating existing CRUD tests.
 - Added detail-only durable replay assertions for role/runtime/model_config/agent_binding write events.
@@ -337,3 +343,8 @@
 ## Wave 6 Oracle re-review 3
 - Approved after projector now preserves run collaboration fields (`taskId`, `parentRunId`) across lifecycle payloads and maps team dispatch briefs from `leaderRunId`.
 - Focused verification passed: `pnpm.cmd test -- apps/web/src/hooks/useProjector.test.ts packages/orchestrator/test/orchestrator.test.ts` and `pnpm.cmd check:all`.
+# add-v10-orchestration learnings
+
+- NativeAgentAdapter is already treated as a real V1.0 runtime in the daemon registry and native runtime manifest; cleanup work should avoid relabeling it as a stub.
+- Codex remains intentionally stubbed via `AdapterNotImplementedError` / `notImplemented*`, and the reliable way to assert the 501 contract in tests is to inspect the flipped Effect error value.
+- The daemon test suite already covers native dispatch through `AdapterRegistry`, so the safest verification path is to tighten the Codex contract assertion rather than add duplicate native coverage.

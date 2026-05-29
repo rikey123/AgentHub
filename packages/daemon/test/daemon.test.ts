@@ -414,7 +414,7 @@ describe("daemon M1.4 composition", () => {
 
     expect(calls).toEqual(["run:run-native-test", "cancel:run-native-test"]);
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM runtimes WHERE id = 'native-default'").get()).toMatchObject({ count: 1 });
-    expect(() => Effect.runSync(Stream.runDrain(new CodexAdapterStub().runAgent({ runId: "run", message: { role: "user", content: "hi" } } as never)))).toThrow(/V1\.x \(post V1\.0\)/iu);
+    expect(() => Effect.runSync(Stream.runDrain(new CodexAdapterStub().runAgent({ runId: "run", message: { role: "user", content: "hi" } } as never)))).toThrow(/CodexAdapter is V1\.x \(post V1\.0\)/iu);
   });
 
   it("routes native runs through permission gating before provider resolution", async () => {
@@ -839,6 +839,16 @@ describe("daemon M1.4 composition", () => {
     expect(rooms.status).toBe(503);
     expect(rooms.body).toEqual({ error: "service_starting", retryAfterMs: 500 });
     await startingDaemon.close();
+  });
+
+  it("keeps board and timeline routes not found", async () => {
+    const board = await fetch(`${baseUrl}/board`);
+    const timeline = await fetch(`${baseUrl}/timeline`);
+
+    expect(board.status).toBe(404);
+    expect(timeline.status).toBe(404);
+    expect(await board.json()).toMatchObject({ error: "not_found" });
+    expect(await timeline.json()).toMatchObject({ error: "not_found" });
   });
 
   it("selects ClaudeCodeAdapter when the primary profile requests claude-code", async () => {

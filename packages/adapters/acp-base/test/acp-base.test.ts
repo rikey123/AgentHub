@@ -159,7 +159,12 @@ describe("ACPAdapter base", () => {
 
   it("returns deterministic 501 not implemented helpers", () => {
     expect(() => Effect.runSync(notImplementedEffect("OpenCodeAdapter", "V0.5"))).toThrow(/OpenCodeAdapter is V0.5/iu);
-    expect(() => Effect.runSync(Stream.runDrain(notImplementedStream("CodexAdapter", "V1.x")))).toThrow(/CodexAdapter is V1.x/iu);
+    const effectError = Effect.runSync(Effect.flip(notImplementedEffect("CodexAdapter", "V1.x")));
+    expect(effectError.message).toMatch(/CodexAdapter is V1\.x/iu);
+    expect(effectError.cause).toMatchObject({ status: 501, capability: "adapter-framework" });
+    const streamError = Effect.runSync(Effect.flip(Stream.runDrain(notImplementedStream("CodexAdapter", "V1.x"))));
+    expect(streamError.message).toMatch(/CodexAdapter is V1\.x/iu);
+    expect(streamError.cause).toMatchObject({ status: 501, capability: "adapter-framework" });
   });
 
   it("redacts and truncates raw output before event/log sinks", () => {
