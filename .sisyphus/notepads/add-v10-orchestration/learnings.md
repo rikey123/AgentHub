@@ -391,3 +391,9 @@
 - Failure is in `packages/native-agent-runtime/test/provider-registry.test.ts`: provider factory mocks do not return objects with `languageModel()`, while `resolveProvider()` calls `p.languageModel(modelConfig.model)`.
 - `pnpm.cmd lint` passes with zero warnings.
 - Reviewed diff did not add new SQLite mutations; `permission.run_summary` is durable/detail but summarizes permission decisions and is not paired to a new DB mutation in this diff.
+
+## 2026-05-29 final compliance audit 3
+- Final verification passed: `pnpm.cmd test` (49 files, 368 passed, 1 skipped), `pnpm.cmd typecheck`, `pnpm.cmd lint`, `pnpm.cmd check:all`, and `openspec.cmd validate add-v10-orchestration --strict`.
+- Checkbox audit confirmed all 50 top-level OpenSpec tasks and all 50 top-level plan tasks 0.1–6.6 are checked. The plan file still contains unchecked acceptance-criteria bullets, but those are not orchestrator task checkboxes.
+- Evidence coverage exists for every OpenSpec task id; task 6.5 now has evidence files.
+- Non-goal scan found no active Docker implementation, no forbidden event registry entries, REST-only Settings behavior, and no direct string AI SDK model IDs in AI SDK calls.
