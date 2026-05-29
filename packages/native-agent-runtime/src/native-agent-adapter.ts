@@ -203,10 +203,12 @@ export class NativeAgentAdapter {
   }
 }
 
-function costFromUsage(usage: any, modelId: string) {
-  const inputTokens = Number(usage?.inputTokens ?? 0);
-  const outputTokens = Number(usage?.outputTokens ?? 0);
-  const cachedTokens = Number(usage?.inputTokenDetails?.cacheReadTokens ?? usage?.cachedInputTokens ?? 0);
+function costFromUsage(usage: unknown, modelId: string) {
+  const record = usage as Record<string, unknown>;
+  const inputTokenDetails = record.inputTokenDetails as Record<string, unknown> | undefined;
+  const inputTokens = Number(record.inputTokens ?? 0);
+  const outputTokens = Number(record.outputTokens ?? 0);
+  const cachedTokens = Number(inputTokenDetails?.cacheReadTokens ?? record.cachedInputTokens ?? 0);
   const costUsd = Math.round((((inputTokens / 1_000_000) * 3) + ((outputTokens / 1_000_000) * 15)) * 1_000_000) / 1_000_000;
   return { inputTokens, outputTokens, cachedTokens, costUsd, modelId };
 }

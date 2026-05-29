@@ -178,7 +178,7 @@ function seedPermissionRule(id: string, resourceType: string, resourceMatch: str
 function openAiModelConfig() { return { id: "model_openai", workspace_id: "ws_1", name: "OpenAI", provider: "openai", model: "gpt-4o", base_url: null, api_key_ref: null, api_key_fingerprint: null, profile: null, created_at: now, updated_at: now }; }
 function anthropicModelConfig() { return { id: "model_anthropic", workspace_id: "ws_1", name: "Anthropic", provider: "anthropic", model: "claude-sonnet", base_url: null, api_key_ref: null, api_key_fingerprint: null, profile: null, created_at: now, updated_at: now }; }
 
-async function* asyncGenerator(parts: readonly unknown[], signal?: AbortSignal): AsyncGenerator<any> {
+async function* asyncGenerator(parts: readonly unknown[], signal?: AbortSignal): AsyncGenerator<unknown> {
   for (const part of parts) {
     if (signal?.aborted) throw new DOMException("Cancelled", "AbortError");
     if ((part as { readonly type?: string }).type === "wait-for-abort") {

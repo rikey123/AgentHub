@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Card, Chip, Input, Label, Modal, Spinner, TextArea, TextField } from "@heroui/react";
-import type { ModelConfig } from "./ModelsTab.tsx";
 import { normalizeModelConfigs } from "./ModelsTab.tsx";
 import type { RoleConfig, RoleInput } from "./RolesTab.tsx";
 import { parseCapabilities, upsertRole } from "./RolesTab.tsx";

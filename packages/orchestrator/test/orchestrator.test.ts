@@ -612,7 +612,7 @@ describe("TaskService and RoomMcpServer", () => {
     const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
     const commandBus = commandBusWithHandlers();
     const mcp = new RoomMcpServer({ commandBus, taskService: service, database: currentDatabase(), eventBus: currentBus(), now: () => now });
-    const wakeSpy = vi.spyOn(mcp as any, "dispatchInternal").mockImplementation(() => ({ ok: false, error: { code: "internal_error", message: "simulated wake failure" } }));
+    const wakeSpy = vi.spyOn(mcp as unknown as { dispatchInternal: (...args: readonly unknown[]) => unknown }, "dispatchInternal").mockImplementation(() => ({ ok: false, error: { code: "internal_error", message: "simulated wake failure" } }));
 
     const result = await mcp.callTool("room.delegate", { toRoleId: "role_builder", title: "Rollback me" }, { roomId: "room_delegate_fail", runId: "run_delegate_fail", agentId: "agent_leader" });
 

@@ -2,8 +2,6 @@ import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { EventEmitter } from "node:events";
-
 import { AgentHubClient } from "@agenthub/sdk";
 import { createEventBus } from "@agenthub/bus";
 import { createDatabase } from "@agenthub/db";

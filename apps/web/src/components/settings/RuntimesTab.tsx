@@ -396,7 +396,8 @@ function upsertRuntime(runtimes: RuntimeConfig[], runtime: RuntimeConfig): Runti
 }
 
 function omitKey<T>(record: Record<string, T>, key: string): Record<string, T> {
-  const { [key]: _removed, ...rest } = record;
+  const { [key]: removed, ...rest } = record;
+  void removed;
   return rest;
 }
 

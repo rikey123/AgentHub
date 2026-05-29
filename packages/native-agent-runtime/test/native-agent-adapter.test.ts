@@ -217,7 +217,7 @@ function runRow(): import("../../orchestrator/src/index.ts").RunRow {
   };
 }
 
-async function* asyncGenerator(parts: readonly unknown[], signal?: AbortSignal): AsyncGenerator<any> {
+async function* asyncGenerator(parts: readonly unknown[], signal?: AbortSignal): AsyncGenerator<unknown> {
   for (const part of parts) {
     if (signal?.aborted) throw new DOMException("Cancelled", "AbortError");
     if ((part as { readonly type?: string }).type === "wait-for-abort") {

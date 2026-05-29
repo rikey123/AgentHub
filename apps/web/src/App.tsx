@@ -144,7 +144,7 @@ export default function App() {
     setSidePanelTab("tasks");
   }, []);
 
-  const handleOpenTask = useCallback((_taskId: string) => {
+  const handleOpenTask = useCallback(() => {
     openTasksPanel();
   }, [openTasksPanel]);
 

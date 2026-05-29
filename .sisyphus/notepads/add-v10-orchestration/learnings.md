@@ -348,3 +348,6 @@
 - NativeAgentAdapter is already treated as a real V1.0 runtime in the daemon registry and native runtime manifest; cleanup work should avoid relabeling it as a stub.
 - Codex remains intentionally stubbed via `AdapterNotImplementedError` / `notImplemented*`, and the reliable way to assert the 501 contract in tests is to inspect the flipped Effect error value.
 - The daemon test suite already covers native dispatch through `AdapterRegistry`, so the safest verification path is to tighten the Codex contract assertion rather than add duplicate native coverage.
+- For unused destructured values, the smallest lint-safe fix was to rename the binding to a throwaway and explicitly `void` it when the pattern had to stay intact.
+- Replacing `any` with `unknown` worked cleanly in the native agent runtime tests; a tiny local cast to `Record<string, unknown>` kept the helper type-safe without changing behavior.
+- Removing dead imports/parameters was enough for the web and orchestrator files; the existing call sites tolerated the simpler signatures.

@@ -211,7 +211,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
         if (!taskResult.ok) return;
         appendTaskMailboxWake(run.workspace_id, run.room_id, run.task_id, runId, "task_completed");
       },
-      onRunFailed: (runId: string, _failureClass: string) => {
+      onRunFailed: (runId: string) => {
         const run = database.sqlite.prepare("SELECT task_id, workspace_id, room_id, wake_reason FROM runs WHERE id = ?").get(runId) as { readonly task_id: string | null; readonly workspace_id: string; readonly room_id: string; readonly wake_reason: string | null } | undefined;
         if (!run?.task_id || run.wake_reason !== "delegated_task") return;
         const taskResult = taskService.blockDelegatedRun(run.task_id, runId);

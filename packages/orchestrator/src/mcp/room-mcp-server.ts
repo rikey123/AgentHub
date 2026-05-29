@@ -389,7 +389,6 @@ export class RoomMcpServer {
     const now = this.options.now?.() ?? Date.now();
     const effectiveExpectsReview = expectsReview ?? (room.mode === "team");
     let delegateResult: { readonly taskId: string; readonly runId: string } | undefined;
-    let createdTaskId: string | undefined;
     try {
       this.options.database.sqlite.transaction(() => {
         const taskResult = this.options.taskService.createInTransaction({
@@ -408,8 +407,6 @@ export class RoomMcpServer {
           if (taskResult.error.code === "delegation_too_deep" || taskResult.error.code === "delegation_duplicate") throw new DelegateAbort(taskResult);
           throw new DelegateAbort(taskResult);
         }
-        createdTaskId = taskResult.data.taskId;
-
         const dispatched = this.dispatchInternal(
           {
             type: "WakeAgent",
