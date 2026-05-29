@@ -186,7 +186,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 > Implementation + Test = ONE task. Never separate.
 > EVERY task preserves OpenSpec task numbering and includes Agent Profile + Parallelization + QA Scenarios.
 
-- [ ] 0.1 Write migration `0014_v10.sql` — refs: `design/Migration Plan`
+- [x] 0.1 Write migration `0014_v10.sql` — refs: `design/Migration Plan`
 
   **What to do**: Add schema migration for `roles`, `runtimes`, `model_configs`, `agent_bindings`, `role_drafts`, `rooms.leader_role_id`, `tasks.assignee_role_id`, `tasks.assignee_binding_id`, `tasks.delegation_chain`, `tasks.expects_review`, `room_participants.agent_binding_id`, and `task_activities`. Update Drizzle schema exports to match. Keep `tasks.priority` as the existing baseline column; keep `tasks.assignee_agent_id` for V0.5 compatibility.
   **Must NOT do**: Do not drop `agent_profiles`; do not add `tasks.workspace_id` if the spec says it is derived; do not add deployment/V1.x schema.
@@ -229,7 +229,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(db): add v10 schema migration` | Files: `packages/db/migrations/0014_v10.sql`, `packages/db/src/schema.ts`, DB tests.
 
-- [ ] 0.2 Write `0014_data.ts` data migration — refs: `agents/AgentProfile 数据模型（MODIFIED）`
+- [x] 0.2 Write `0014_data.ts` data migration — refs: `agents/AgentProfile 数据模型（MODIFIED）`
 
   **What to do**: Add post-schema data migration that converts every `agent_profiles` row into one `roles` row, deduplicated `runtimes`, deduplicated `model_configs` where model data exists, and one `agent_bindings` row. Backfill `room_participants.agent_binding_id` and `tasks.assignee_role_id` / `tasks.assignee_binding_id`; mark schema/version metadata as V1.0 if such metadata exists.
   **Must NOT do**: Do not mutate or delete legacy `agent_profiles`; do not promise V0.5 daemon writes after upgrade; do not store API key material in SQLite.
@@ -270,7 +270,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(db): migrate agent profiles to bindings` | Files: `packages/db/migrations/0014_data.ts`, migration tests.
 
-- [ ] 0.3 Register 18 V1.0 events in the canonical registry — refs: `event-system/事件分级（durable / ephemeral）`
+- [x] 0.3 Register 18 V1.0 events in the canonical registry — refs: `event-system/事件分级（durable / ephemeral）`
 
   **What to do**: Update `packages/protocol/src/events/registry.ts` with all 18 V1.0 event types, categories, durability, visibility, and payload schemas where the repo convention requires schemas. Extend `EventCategory` for new categories (`role`, `runtime`, `model`, `binding`, `team`) if needed.
   **Must NOT do**: Do not register `task.updated`, `task.deleted`, `role.generation.*`, `runtime.test.result`, or `model_config.test.result`.
@@ -311,7 +311,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(protocol): register v10 events` | Files: `packages/protocol/src/events/registry.ts`, event/check tests.
 
-- [ ] 0.4 Add `ai-sdk-provider:check` CI script — refs: `native-agent-runtime/NativeAgentAdapter 实现`
+- [x] 0.4 Add `ai-sdk-provider:check` CI script — refs: `native-agent-runtime/NativeAgentAdapter 实现`
 
   **What to do**: Add a repo script that scans `packages/native-agent-runtime/**` and any AI SDK call sites for `streamText`, `generateText`, or `streamObject` usage with plain string model IDs or implicit gateway/default-provider patterns. Wire the script into `package.json`.
   **Must NOT do**: Do not hard-code provider API keys or call real providers in the check; do not block documented explicit providers.
@@ -352,7 +352,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `chore(checks): add ai sdk provider guard` | Files: `scripts/checks/*`, `package.json`, tests/fixtures.
 
-- [ ] 0.5 Update `events:check` / `visibility:check` / `check:all` coverage — refs: `event-system/events:check 与 visibility:check CI 校验`
+- [x] 0.5 Update `events:check` / `visibility:check` / `check:all` coverage — refs: `event-system/events:check 与 visibility:check CI 校验`
 
   **What to do**: Ensure existing event and visibility checks understand all V1.0 events and that `check:all` includes `ai-sdk-provider:check` plus existing checks. Verify 18 new events are accepted and forbidden events are rejected.
   **Must NOT do**: Do not weaken checks or add allowlists that bypass canonical registry.
@@ -392,7 +392,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `chore(checks): cover v10 event visibility` | Files: `scripts/checks/*`, `package.json`, check fixtures.
 
-- [ ] 0.6 Add compatibility middleware for legacy `agent_profile_id` inputs — refs: `agents/AgentProfile 数据模型（MODIFIED）`
+- [x] 0.6 Add compatibility middleware for legacy `agent_profile_id` inputs — refs: `agents/AgentProfile 数据模型（MODIFIED）`
 
   **What to do**: Add one HTTP/request normalization layer that resolves old `agent_profile_id` / `agentProfileId` inputs into `agent_binding_id` / `agentBindingId` for 3 months. Apply to room creation and other V0.5-compatible endpoints that still receive legacy profile ids. Include response compatibility where spec requires returning the new binding id while keeping old fields.
   **Must NOT do**: Do not scatter ad hoc profile resolution across handlers; do not write new `agent_profiles` rows; do not remove old `agent_profiles` table.
@@ -433,7 +433,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(daemon): resolve legacy agent profiles` | Files: `packages/daemon/src/index.ts`, `packages/daemon/src/commands.ts`, compatibility tests.
 
-- [ ] 1.1 Implement `roles` CRUD + REST API — refs: `role-system/Role 数据模型`
+- [x] 1.1 Implement `roles` CRUD + REST API — refs: `role-system/Role 数据模型`
 
   **What to do**: Implement Role persistence/API for `GET /roles`, `POST /roles`, `GET /roles/:id`, `PATCH /roles/:id`, `DELETE /roles/:id`. Use REST-only settings data flow. Emit `role.created`, `role.updated`, and `role.deleted` as durable detail events inside the same SQLite transaction as writes. Reject deletion when `agent_bindings` references the role.
   **Must NOT do**: Do not bind roles to runtime/model; do not auto-overwrite builtins; do not add projector handling for detail-only role events.
@@ -474,7 +474,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(roles): add role crud api` | Files: `packages/daemon/src/index.ts`, role service/module, tests.
 
-- [ ] 1.2 Implement builtin Role templates on first launch — refs: `role-system/内置 Role 模板首启写入`
+- [x] 1.2 Implement builtin Role templates on first launch — refs: `role-system/内置 Role 模板首启写入`
 
   **What to do**: Ship and bootstrap five builtin templates: `project-manager`, `builder`, `reviewer`, `archivist`, `generalist`. Write them into `~/.agenthub/roles/` on first launch when empty, insert/ensure matching builtin role rows, emit `role.created { isBuiltin: true }` for newly inserted rows, and warn to stderr when an existing template version is older without overwriting user edits.
   **Must NOT do**: Do not overwrite user-edited role files; do not block daemon startup on version warning; do not create more than the five specified templates.
@@ -514,7 +514,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(roles): seed builtin role templates` | Files: role bootstrap module, templates, daemon startup wiring, tests.
 
-- [ ] 1.3 Implement `runtimes` CRUD + detect on daemon startup — refs: `runtime-settings/Runtime 数据模型`
+- [x] 1.3 Implement `runtimes` CRUD + detect on daemon startup — refs: `runtime-settings/Runtime 数据模型`
 
   **What to do**: Implement Runtime persistence/API for `GET/POST/PATCH/DELETE /runtimes`, daemon startup detection/UPSERT for `native-default`, `claude-code-default`, and `opencode-default` as applicable, and durable detail events `runtime.detected`, `runtime.updated`, `runtime.removed` for writes/detection. `native-default` is always present.
   **Must NOT do**: Do not put API keys in runtime env; do not remove old runtime rows just because PATH detection fails unless spec-defined delete occurs.
@@ -554,7 +554,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(runtimes): add runtime settings api` | Files: runtime service/routes/startup wiring/tests.
 
-- [ ] 1.4 Implement runtime detect/test APIs — refs: `runtime-settings/Runtime CRUD + Test API`
+- [x] 1.4 Implement runtime detect/test APIs — refs: `runtime-settings/Runtime CRUD + Test API`
 
   **What to do**: Implement `POST /runtimes/:id/detect`, `POST /runtimes/:id/test`, and shared `GET /settings/jobs/:jobId` support for long-running runtime tests. Synchronous tests under 5s return direct result; longer tests return 202 job id and poll status every 500ms from UI.
   **Must NOT do**: Do not emit `runtime.test.result`; do not leave child processes open; do not run unapproved shell outside the runtime detect/test boundary.
@@ -594,7 +594,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(runtimes): add detect and test jobs` | Files: runtime routes/job service/tests.
 
-- [ ] 1.5 Implement `model_configs` CRUD + KeychainBridge storage — refs: `model-provider-settings/ModelConfig 数据模型`
+- [x] 1.5 Implement `model_configs` CRUD + KeychainBridge storage — refs: `model-provider-settings/ModelConfig 数据模型`
 
   **What to do**: Implement ModelConfig persistence/API for `GET/POST/PATCH/DELETE /model-configs`. Write API keys to OS Keychain via existing KeychainBridge or approved local equivalent; store only `api_key_ref` and `api_key_fingerprint` in SQLite. Support `api_key_ref=NULL` for local providers such as Ollama and hide/omit key data in GET responses.
   **Must NOT do**: Do not store plaintext API keys in DB/events/logs/responses/evidence; do not require API key for Ollama; do not emit full prompt/key in events.
@@ -634,7 +634,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(models): add model config storage` | Files: model config service/routes/keychain bridge/tests.
 
-- [ ] 1.6 Implement model test API + settings jobs — refs: `model-provider-settings/ModelConfig CRUD + Test API`
+- [x] 1.6 Implement model test API + settings jobs — refs: `model-provider-settings/ModelConfig CRUD + Test API`
 
   **What to do**: Implement `POST /model-configs/:id/test` and shared `GET /settings/jobs/:jobId` for model test calls. Use explicit provider resolution from model config and keychain, minimum prompt `Say 'ok'`, and direct result or job polling. Ensure test results do not enter EventBus.
   **Must NOT do**: Do not use string model IDs; do not emit `model_config.test.result`; do not call a real provider in unit tests without a mock server.
@@ -674,7 +674,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(models): add model test jobs` | Files: model test service/routes/jobs/tests.
 
-- [ ] 1.7 Implement `agent_bindings` CRUD + expanded GET — refs: `agents/AgentBinding CRUD API`
+- [x] 1.7 Implement `agent_bindings` CRUD + expanded GET — refs: `agents/AgentBinding CRUD API`
 
   **What to do**: Implement AgentBinding persistence/API for `GET/POST/PATCH/DELETE /agent-bindings`. Validate role/runtime/model_config references, require `model_config_id` for `runtime.kind='native'`, reject deletes referenced by `room_participants`, and expand GET rows with role/runtime/modelConfig summaries without API key plaintext.
   **Must NOT do**: Do not write new `agent_profiles`; do not allow native binding without model config; do not expose API key.
@@ -714,7 +714,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(agents): add agent binding api` | Files: binding service/routes/tests.
 
-- [ ] 1.8 Add data foundation unit tests — refs: `Role CRUD / bindings delete rejection / builtin templates / Runtime detect / ModelConfig keychain / AgentBinding three-layer assignee`
+- [x] 1.8 Add data foundation unit tests — refs: `Role CRUD / bindings delete rejection / builtin templates / Runtime detect / ModelConfig keychain / AgentBinding three-layer assignee`
 
   **What to do**: Add/extend Vitest coverage for Role CRUD, bound-role delete rejection, builtin role first launch/version warning, runtime detect/test basics, ModelConfig keychain/fingerprint/no plaintext behavior, AgentBinding validation, and Task assignee role/binding compatibility scaffolding.
   **Must NOT do**: Do not duplicate tests that belong to frontend UI integration tasks; do not require real provider network calls.
@@ -754,7 +754,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `test(settings): cover v10 data foundation` | Files: `packages/*/test/*`, daemon/db/orchestrator tests.
 
-- [ ] 2.1 Implement `packages/native-agent-runtime/src/provider-registry.ts` — refs: `native-agent-runtime/NativeAgentAdapter 实现`
+- [x] 2.1 Implement `packages/native-agent-runtime/src/provider-registry.ts` — refs: `native-agent-runtime/NativeAgentAdapter 实现`
 
   **What to do**: Create native runtime package provider registry using Vercel AI SDK 5.x explicit factories: `createOpenAI`, `createAnthropic`, `createGoogleGenerativeAI`, and `createOpenAICompatible`. Resolve `ModelConfig.provider/model/baseURL/apiKeyRef` into a concrete `LanguageModel` via provider `.chatModel(modelConfig.model)`. Support Ollama with default `http://localhost:11434/v1` and no real API key.
   **Must NOT do**: Do not pass plain string model IDs to AI SDK calls; do not implement Vercel gateway; do not make provider registration user-extensible beyond spec.
@@ -795,7 +795,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(native): add explicit provider registry` | Files: `packages/native-agent-runtime/**`, package manifests, tests.
 
-- [ ] 2.2 Implement `NativeAgentAdapter extends AgentRuntimeAdapter` — refs: `native-agent-runtime/NativeAgentAdapter 实现`
+- [x] 2.2 Implement `NativeAgentAdapter extends AgentRuntimeAdapter` — refs: `native-agent-runtime/NativeAgentAdapter 实现`
 
   **What to do**: Implement NativeAgentAdapter as the third real adapter with manifest `runtimeKind="native"`, `crashRecovery="restartable"`, streaming via `streamText`, tool calling, cost usage mapping, message deltas, session/open/end semantics through `AdapterBridge`, and AbortController cancellation. It must implement the same managed-run/cancel shape expected by `AdapterRegistry`.
   **Must NOT do**: Do not bypass `AdapterBridge`, `RunLifecycleService`, `PermissionEngine`, or `ArtifactFS`; do not add repo indexer/patch planner/web search/browser automation/memory.
@@ -836,7 +836,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(native): implement native agent adapter` | Files: `packages/native-agent-runtime/**`, adapter tests.
 
-- [ ] 2.3 Implement MCP tool → AI SDK tool conversion — refs: `native-agent-runtime/NativeAgentAdapter 实现`
+- [x] 2.3 Implement MCP tool → AI SDK tool conversion — refs: `native-agent-runtime/NativeAgentAdapter 实现`
 
   **What to do**: Add a thin adapter translating AgentHub Room MCP tool definitions/calls into Vercel AI SDK `tools` entries without changing the MCP protocol. Wire tool execution through existing RoomMcpServer/session context and AdapterBridge tool events.
   **Must NOT do**: Do not alter MCP protocol semantics; do not bypass PermissionEngine for file/shell/tool actions; do not create Native-only tool duplicates.
@@ -877,7 +877,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(native): bridge mcp tools to ai sdk` | Files: `packages/native-agent-runtime/**`, Room MCP integration tests.
 
-- [ ] 2.4 Implement `model.api_call.<provider>` permission checks + run summary — refs: `native-agent-runtime/model.api_call 权限检查`, `permissions/审批粒度`
+- [x] 2.4 Implement `model.api_call.<provider>` permission checks + run summary — refs: `native-agent-runtime/model.api_call 权限检查`, `permissions/审批粒度`
 
   **What to do**: Extend `PermissionResource` and evaluation logic for `model.api_call.<provider>` resources. In NativeAgentAdapter, perform permission check before provider/stream creation, cache decision per `(runId, modelConfigId)` for the run, fail deny before stream with `permission_denied`, and emit `permission.run_summary` on run terminal path. Define and implement the V1.0 read path for `permission.run_summary`: Run Detail Permissions tab MUST display the summary using detail SSE/projector state or a REST/audit endpoint feeding that tab. Debug/audit-only visibility is not acceptable under the current spec; if implementers want audit-only behavior, they must first change and validate the OpenSpec capability before coding.
   **Must NOT do**: Do not open `streamText` before permission allow; do not request permission repeatedly for same run/model; do not emit summary as main-visible event.
@@ -927,7 +927,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(permissions): guard native model calls` | Files: `packages/permissions/**`, `packages/native-agent-runtime/**`, tests.
 
-- [ ] 2.5 Register NativeAgentAdapter and auto-register `native-default` runtime — refs: `adapter-framework/Post-MVP Adapter Stub（MODIFIED）`
+- [x] 2.5 Register NativeAgentAdapter and auto-register `native-default` runtime — refs: `adapter-framework/Post-MVP Adapter Stub（MODIFIED）`
 
   **What to do**: Wire NativeAgentAdapter into AdapterRegistry as a real adapter, extend adapter/runtime id typing, daemon startup registration, cancel/dispose behavior, and `native-default` runtime availability. Keep Codex/LangGraph/A2A stubs unchanged and returning 501 where applicable.
   **Must NOT do**: Do not convert Codex/LangGraph/A2A to real implementations; do not make Native Runtime depend on external CLI.
@@ -968,7 +968,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(daemon): register native adapter` | Files: `packages/daemon/src/adapters/registry.ts`, daemon startup/runtime wiring, tests.
 
-- [ ] 2.6 NativeAgentAdapter integration tests — refs: `native-agent-runtime/NativeAgentAdapter 实现`
+- [x] 2.6 NativeAgentAdapter integration tests — refs: `native-agent-runtime/NativeAgentAdapter 实现`
 
   **What to do**: Add integration tests for NativeAgentAdapter Solo Run with streaming, tool calling, permission ask/deny, cancel, cost reporting, and explicit provider check. Use mock AI SDK/provider servers; no live network credentials.
   **Must NOT do**: Do not require real OpenAI/Anthropic/Google keys; do not skip permission/cancel failure cases.
@@ -1010,7 +1010,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `test(native): cover native adapter integration` | Files: native/orchestrator/daemon tests.
 
-- [ ] 3.1 Implement Settings modal six-tab architecture + entry points — refs: `settings-ui/Settings Modal 六页一级架构`
+- [x] 3.1 Implement Settings modal six-tab architecture + entry points — refs: `settings-ui/Settings Modal 六页一级架构`
 
   **What to do**: Build Settings modal using HeroUI modal/tabs/cards/buttons/loading states with tabs Roles, Runtimes, Models, Permissions, Workspace, MCP. Wire FeatureRail Settings icon, TopBar if needed, and Cmd+K `Open Settings`. On open, parallel fetch `GET /roles`, `/runtimes`, `/model-configs`, `/agent-bindings`; close aborts in-flight requests and clears local view state.
   **Must NOT do**: Do not add a route that replaces the workbench; do not subscribe to SSE; do not change backend contracts for UI convenience.
@@ -1053,7 +1053,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(web): add settings modal shell` | Files: `apps/web/src/components/settings/**`, shell/command palette files, frontend component/integration tests.
 
-- [ ] 3.2 Implement Roles tab — refs: `settings-ui/Roles tab`
+- [x] 3.2 Implement Roles tab — refs: `settings-ui/Roles tab`
 
   **What to do**: Add Roles tab showing builtin and user roles, search/list, selected role editor, create/edit/delete actions, builtin badge/protection banner, delete confirmation, and AI Generate entry point stub that opens the generator flow once task 3.8 lands. Use REST responses to update local state.
   **Must NOT do**: Do not wait for SSE `role.*` events; do not hide 409 delete errors; do not auto-save generated drafts.
@@ -1093,7 +1093,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(web): implement settings roles tab` | Files: Settings Roles components and frontend integration tests.
 
-- [ ] 3.3 Implement Runtimes tab — refs: `settings-ui/Runtimes tab`
+- [x] 3.3 Implement Runtimes tab — refs: `settings-ui/Runtimes tab`
 
   **What to do**: Add Runtimes tab with runtime cards, detected status, inline editor for command/args/env, native runtime read-only card, Add Custom ACP action, Detect, and Test Connection. Support synchronous results and job polling.
   **Must NOT do**: Do not store model API keys in runtime env; do not emit or consume runtime test events; do not make native runtime configurable beyond spec.
@@ -1133,7 +1133,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(web): implement settings runtimes tab` | Files: Settings Runtime components and frontend integration tests.
 
-- [ ] 3.4 Implement Models tab — refs: `settings-ui/Models tab`
+- [x] 3.4 Implement Models tab — refs: `settings-ui/Models tab`
 
   **What to do**: Add Models tab grouped by provider, model config rows, Add Model dialog, API key masked input, fingerprint display, baseURL/profile support, reset key action, and Test Model Call with sync/job response handling.
   **Must NOT do**: Do not display full API key after save; do not write key to localStorage/sessionStorage; do not emit/consume model test events.
@@ -1173,7 +1173,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(web): implement settings models tab` | Files: Settings Models components and frontend integration tests.
 
-- [ ] 3.5 Implement Settings URL deep link — refs: `settings-ui/Settings URL deep link`
+- [x] 3.5 Implement Settings URL deep link — refs: `settings-ui/Settings URL deep link`
 
   **What to do**: Support `?settings=roles|runtimes|models|permissions|workspace|mcp`. Opening Settings writes query param for current tab, closing removes it, and direct navigation opens modal on the requested tab.
   **Must NOT do**: Do not replace the workbench route; do not break room/event projector cursor behavior.
@@ -1212,7 +1212,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(web): add settings deep links` | Files: settings shell/router state integration tests.
 
-- [ ] 3.6 Implement `role_drafts` table + 7-day GC — refs: `role-generator/AI 生成角色草稿`
+- [x] 3.6 Implement `role_drafts` table + 7-day GC — refs: `role-generator/AI 生成角色草稿`
 
   **What to do**: Implement daemon/runtime behavior for the `role_drafts` table defined in 0.1: startup cleanup of expired drafts, hourly cleanup timer, and immediate cleanup hooks for save/cancel. Store only temporary draft data with `expires_at=created_at+7 days`.
   **Must NOT do**: Do not persist role drafts in events/outbox; do not keep expired drafts after startup/GC; do not include role draft data in durable audit events.
@@ -1252,7 +1252,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(roles): add role draft storage` | Files: schema/migration if needed, role draft service/startup tests.
 
-- [ ] 3.7 Implement role generation job REST API — refs: `role-generator/AI 生成角色草稿`
+- [x] 3.7 Implement role generation job REST API — refs: `role-generator/AI 生成角色草稿`
 
   **What to do**: Implement `POST /roles/generate → 202 { jobId }`, `GET /roles/generate/jobs/:jobId`, and `DELETE /roles/generate/jobs/:jobId`. Generate drafts via selected ModelConfig/Native Runtime path, update `role_drafts` status `pending|streaming|completed|failed|cancelled`, and use polling every 500ms from UI. Save occurs through `POST /roles`, not this endpoint.
   **Must NOT do**: Do not auto-save role; do not emit generation events; do not include original prompt/description in `role.created` payload except allowed `generationJobId` on save.
@@ -1293,7 +1293,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(roles): add role generation jobs` | Files: role generation service/routes/tests.
 
-- [ ] 3.8 Implement Settings UI role generation flow — refs: `role-generator/AI 生成角色草稿`
+- [x] 3.8 Implement Settings UI role generation flow — refs: `role-generator/AI 生成角色草稿`
 
   **What to do**: Add Roles tab `Generate with AI` flow: input dialog, model selection, polling progress every 500ms, draft preview with editable fields, Save through `POST /roles`, Cancel through `DELETE /roles/generate/jobs/:jobId`, and failure fallback to manual creation.
   **Must NOT do**: Do not auto-save; do not subscribe to SSE; do not leave cancelled jobs on modal close.
@@ -1334,7 +1334,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(web): add role generation flow` | Files: Settings role generation components and frontend integration tests.
 
-- [ ] 3.9 Add Settings and role generator tests — refs: `Settings REST-only / role generation polling / 7-day expiry / API key fingerprint`
+- [x] 3.9 Add Settings and role generator tests — refs: `Settings REST-only / role generation polling / 7-day expiry / API key fingerprint`
 
   **What to do**: Add unit/integration tests proving Settings UI is REST-only, role generation polling/cancel/save/failure works, drafts expire after 7 days, API key fingerprint is shown but plaintext is hidden, and no Settings/role-generation SSE dependency exists.
   **Must NOT do**: Do not use Playwright or browser E2E during development; do not rely only on manual verification for backend/API contracts; do not include real secrets in evidence.
@@ -1373,7 +1373,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `test(web): cover settings v10 flows` | Files: daemon/web unit and frontend integration tests.
 
-- [ ] 4.1 Implement `room.delegate` MCP tool — refs: `squad-mode/room.delegate MCP tool`
+- [x] 4.1 Implement `room.delegate` MCP tool — refs: `squad-mode/room.delegate MCP tool`
 
   **What to do**: Add `room.delegate` to RoomMcpServer. Only leader role may call it. It must atomically create a Task, resolve `toRoleId` to a room `agent_binding_id`, enqueue/dispatch `WakeAgent` with reason `delegated_task` and `taskId`, emit `task.created` and `task.delegation.created`, and return `{ taskId, runId }` or deterministic validation error.
   **Transaction boundary decision**: Before coding this task, define and document the exact atomic boundary. Preferred implementation: Task insert, run enqueue/WakeAgent durable state, `task.created`, and `task.delegation.created` all succeed or roll back in one SQLite/CommandBus transaction. If existing CommandBus cannot provide that boundary, implement deterministic rollback/compensation and an explicit failure response; silent half-success (`Task` exists but no delegated run) is forbidden.
@@ -1422,7 +1422,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(orchestrator): add room delegate tool` | Files: `packages/orchestrator/src/mcp/room-mcp-server.ts`, Task dispatch service/tests.
 
-- [ ] 4.2 Implement Squad mode dispatch — refs: `squad-mode/Squad 模式调度`
+- [x] 4.2 Implement Squad mode dispatch — refs: `squad-mode/Squad 模式调度`
 
   **What to do**: Implement Squad flow: Leader delegates with `expectsReview=false`; Task runs `pending → in_progress → completed`; teammate completion emits `task.delegation.completed`; mailbox notification wakes Leader with summary; projector-facing events remain visibility=both.
   **Must NOT do**: Do not implement mailbox-only dispatch; do not skip Task creation; do not require review for Squad.
@@ -1462,7 +1462,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(orchestrator): implement squad dispatch` | Files: orchestrator dispatch/task/mailbox services/tests.
 
-- [ ] 4.3 Implement Team mode dispatch — refs: `team-mode/Team 模式调度`
+- [x] 4.3 Implement Team mode dispatch — refs: `team-mode/Team 模式调度`
 
   **What to do**: Implement Team review flow: Leader delegates with `expectsReview=true`; teammate tasks move to `review` on run completion; when all sibling Tasks are in review/completed/cancelled, wake Leader with reason `task_review` and emit `team.dispatch.started`; Leader approval via `room.update_task` completes tasks; dispatch completion emits `team.dispatch.completed`.
   **Must NOT do**: Do not wake Leader before all siblings are ready; do not bypass Task status machine; do not complete review tasks automatically.
@@ -1502,7 +1502,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(orchestrator): implement team review dispatch` | Files: orchestrator team dispatch/terminal hook/tests.
 
-- [ ] 4.4 Implement sibling Task completion判定 — refs: `team-mode/Team 模式调度`
+- [x] 4.4 Implement sibling Task completion判定 — refs: `team-mode/Team 模式调度`
 
   **What to do**: Add terminal hook/helper based on multica `issue_child_done.go` pattern: each delegated teammate run terminal checks all sibling tasks from the same leader dispatch/parent/delegation group. Only wake Leader when all siblings are terminal/review-ready; blocked tasks wake Leader with task_blocked.
   **Must NOT do**: Do not use polling; observe remains passive and WakeAgent remains model-call entry point.
@@ -1542,7 +1542,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(orchestrator): add sibling task review gate` | Files: orchestrator terminal hook/tests.
 
-- [ ] 4.5 Implement Task loop guards — refs: `squad-mode/Squad 模式调度`, `task-workflow-core/最小 Task 数据模型`
+- [x] 4.5 Implement Task loop guards — refs: `squad-mode/Squad 模式调度`, `task-workflow-core/最小 Task 数据模型`
 
   **What to do**: Enforce parent depth max 5, duplicate same room+leader title+description within 5 minutes rejection, and timeout of pending/in_progress tasks after 30 minutes to blocked with `task.status.changed { reason: "timeout" }` and Leader wake.
   **Must NOT do**: Do not silently create over-depth/duplicate tasks; do not implement configurable thresholds unless spec is updated.
@@ -1582,7 +1582,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(tasks): enforce delegation loop guards` | Files: task guard service/tests.
 
-- [ ] 4.6 Implement `task_activities` + `task.activity.added` + `room.update_task` extensions — refs: `task-workflow-core/最小 Task 数据模型`
+- [x] 4.6 Implement `task_activities` + `task.activity.added` + `room.update_task` extensions — refs: `task-workflow-core/最小 Task 数据模型`
 
   **What to do**: Extend TaskService and Room MCP `room.update_task` for `addComment`, `setBlocker`, `linkArtifact`, `priority`, and status changes. Insert `task_activities` rows and emit `task.activity.added` for non-status activities. Continue using `task.status.changed` for status updates. Add `GET /tasks/:id/activities` and `POST /tasks/:id/activities` if not already exposed through MCP/API.
   **Must NOT do**: Do not emit `task.updated` or `task.deleted`; do not bypass transaction+publish.
@@ -1622,7 +1622,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(tasks): add activity timeline events` | Files: TaskService, RoomMcpServer, daemon task routes/tests.
 
-- [ ] 4.7 Implement Task three-layer assignee and role→binding resolve — refs: `task-workflow-core/最小 Task 数据模型`
+- [x] 4.7 Implement Task three-layer assignee and role→binding resolve — refs: `task-workflow-core/最小 Task 数据模型`
 
   **What to do**: Extend TaskService views/commands for `assignee_role_id`, `assignee_binding_id`, and compatibility `assignee_agent_id`. Resolve role to room binding during dispatch; populate both role and binding ids; maintain old assigneeAgentId for compatibility where required.
   **Must NOT do**: Do not dispatch by role without recording actual binding; do not remove `assignee_agent_id` during compatibility window.
@@ -1662,7 +1662,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(tasks): resolve role binding assignees` | Files: TaskService/dispatch/daemon types/tests.
 
-- [ ] 4.8 Implement `rooms.leader_role_id` and squad/team room validation — refs: `rooms/Room 数据模型（MODIFIED）`
+- [x] 4.8 Implement `rooms.leader_role_id` and squad/team room validation — refs: `rooms/Room 数据模型（MODIFIED）`
 
   **What to do**: Update room creation command/API to accept `leaderRoleId` and V1.0 participant shape `{ roleId, runtimeId, modelConfigId? }`. Require leaderRoleId for `mode=squad|team`; solo/assisted do not require it. Persist `rooms.leader_role_id`; create/resolve room participants with `agent_binding_id`.
   **Must NOT do**: Do not allow squad/team room without leaderRoleId; do not regress solo/assisted legacy room creation; do not return 501 for squad/team.
@@ -1702,7 +1702,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(rooms): support leader role rooms` | Files: `packages/daemon/src/commands.ts`, route/types/tests.
 
-- [ ] 4.9 Implement Side Panel Tasks tab — refs: `task-workflow-core/Task Workflow UI`, `web-ui/Side Panel 视图（MODIFIED）`
+- [x] 4.9 Implement Side Panel Tasks tab — refs: `task-workflow-core/Task Workflow UI`, `web-ui/Side Panel 视图（MODIFIED）`
 
   **What to do**: Upgrade Tasks tab from placeholder list to V1.0 Task view: status groups Backlog/In Progress/Blocked/Review/Done, priority chip, title, assignee role avatar/name, status badge, updated timestamp, detail slide-over with title/description/assignee/parent+children/activity timeline, and activity run links. Use HeroUI components and projector state.
   **Must NOT do**: Do not implement drag-and-drop Kanban, search/filter/agent grouping, dependency graph, or direct SQLite reads.
@@ -1743,7 +1743,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(web): implement task workflow panel` | Files: `apps/web/src/components/panels/TasksPanel.tsx`, task detail components, types/tests.
 
-- [ ] 4.10 Implement Run Detail Tools tab multi-agent collaboration view — refs: `web-ui/Main Timeline 与 Agent Run Detail 双视图（MODIFIED）`
+- [x] 4.10 Implement Run Detail Tools tab multi-agent collaboration view — refs: `web-ui/Main Timeline 与 Agent Run Detail 双视图（MODIFIED）`
 
   **What to do**: Extend Run Detail Tools tab for squad/team: show parent Leader Run, sibling delegated Runs from same dispatch, associated Task tree, task statuses, and links to sibling Run Detail and Task detail. Use existing Run Detail drawer/tabs and HeroUI chips/cards.
   **Must NOT do**: Do not replace existing Tools tab data; do not expose raw debug internals in main UI; do not create topology visualization (V1.1+).
@@ -1784,7 +1784,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(web): show run collaboration graph` | Files: Run Detail Tools tab/components/types/tests.
 
-- [ ] 4.11 Implement TaskStatusCard in main timeline — refs: `messaging/Card 类型清单（MODIFIED）`
+- [x] 4.11 Implement TaskStatusCard in main timeline — refs: `messaging/Card 类型清单（MODIFIED）`
 
   **What to do**: Add TaskStatusCard rendering in main timeline/brief surface for `task.delegation.created`, `team.dispatch.started`, and related dispatch/review events. Card shows leader dispatch summary, assignee role, status, and link to Task/Tasks tab.
   **Must NOT do**: Do not flood main chat with internal activity timeline entries; keep full details in Task detail/Run Detail.
@@ -1824,7 +1824,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(messages): add task status cards` | Files: message/timeline components, projector/types/tests.
 
-- [ ] 4.12 Add Squad/Team/Task integration tests — refs: `Squad 3 teammate 并行 / Team review / loop guards / timeout / task.updated rejected`
+- [x] 4.12 Add Squad/Team/Task integration tests — refs: `Squad 3 teammate 并行 / Team review / loop guards / timeout / task.updated rejected`
 
   **What to do**: Add integration tests covering Squad 3 teammate parallel dispatch, Team sibling tasks all in review before Leader wake, delegation depth guard, duplicate guard, 30-minute timeout to blocked, `task.updated` rejected by checks, and frontend/projector state coverage via unit/integration tests.
   **Must NOT do**: Do not use Playwright or browser E2E during development; do not rely on manual QA only for backend/task contracts; do not skip failure paths; do not make tests flaky with real time delays.
@@ -1866,7 +1866,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `test(orchestrator): cover squad team workflows` | Files: orchestrator/daemon/web integration tests.
 
-- [ ] 5.1 Update `useProjector.ts` for V1.0 Task replay model — refs: `event-system/事件分级（durable / ephemeral）`
+- [x] 5.1 Update `useProjector.ts` for V1.0 Task replay model — refs: `event-system/事件分级（durable / ephemeral）`
 
   **What to do**: Upgrade the full Task projector read model, not just the five new V1.0 event types. Existing handlers for `task.created` and `task.status.changed` must support V1.0 payload semantics and replay behavior: statuses `pending`, `in_progress`, `blocked`, `review`, `completed`, `cancelled`; `assigneeRoleId`; `assigneeBindingId`; compatibility `assigneeAgentId`; `expectsReview`; `parentTaskId`; `delegationChain`; `sourceRunId`; `priority`; and activity dedupe keys. Add projector handlers/view-model updates for `task.activity.added`, `task.delegation.created`, `task.delegation.completed`, `team.dispatch.started`, and `team.dispatch.completed`. Extend `RoomViewModel`, `TaskViewModel`, `RunViewModel`, and message/brief/card state as needed so SSE live and replay reconstruct Tasks tab, TaskStatusCard, and Run Detail collaboration state.
   **Must NOT do**: Do not keep old fallback status `todo` for V1.0 task.created payloads; do not handle detail-only Settings events; do not create duplicate tasks/cards/activities on SSE replay; do not require refresh.
@@ -1921,7 +1921,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `feat(web): project v10 task events` | Files: `apps/web/src/hooks/useProjector.ts`, `apps/web/src/types.ts`, projector tests.
 
-- [ ] 5.2 Update adapter-framework: NativeAgentAdapter real, Codex stub still 501 — refs: `adapter-framework/Post-MVP Adapter Stub（MODIFIED）`
+- [x] 5.2 Update adapter-framework: NativeAgentAdapter real, Codex stub still 501 — refs: `adapter-framework/Post-MVP Adapter Stub（MODIFIED）`
 
   **What to do**: Update adapter-framework code/docs/spec-facing surfaces so OpenCode and Native are real adapters, while Codex/LangGraph/A2A remain post-V1.0 stubs. Ensure API/UI/runtime errors say Codex is V1.x post V1.0 and Native does not return 501.
   **Must NOT do**: Do not implement Codex/LangGraph/A2A; do not remove stub behavior for unavailable adapters.
@@ -1961,7 +1961,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `chore(adapters): mark native adapter real` | Files: adapter registry/docs/tests/stub updates.
 
-- [ ] 5.3 Update `v1-roadmap`: remove Squad/Team placeholders — refs: `v1-roadmap/V1.0 Squad / Team 模式占位（REMOVED）`
+- [x] 5.3 Update `v1-roadmap`: remove Squad/Team placeholders — refs: `v1-roadmap/V1.0 Squad / Team 模式占位（REMOVED）`
 
   **What to do**: Apply roadmap/spec cleanup so V1.0 Squad/Team and OpenCode placeholders are removed/marked implemented exactly as the change spec says. Ensure board/timeline endpoints remain not found or V1.1+ as applicable.
   **Must NOT do**: Do not implement V1.1 task board Kanban/topology; do not reintroduce deployment placeholder as V1.0.
@@ -2001,7 +2001,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `docs(spec): close v10 roadmap placeholders` | Files: OpenSpec docs/spec route assertions if needed.
 
-- [ ] 6.1 Run full unit/type/lint validation — refs: `design/Goals G2`
+- [x] 6.1 Run full unit/type/lint validation — refs: `design/Goals G2`
 
   **What to do**: Run `pnpm.cmd test`, `pnpm.cmd typecheck`, and `pnpm.cmd lint` after all implementation waves. Fix failures only within the task/spec scope; if failure implies spec conflict or new architecture decision, stop and escalate per workflow manual.
   **Must NOT do**: Do not lower lint/test standards; do not skip failing tests; do not hide flaky failures.
@@ -2041,7 +2041,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: NO | Message: `test: final validation fixes only if needed` | Files: none unless fixes are required.
 
-- [ ] 6.2 Run `pnpm check:all` including `ai-sdk-provider:check` — refs: `event-system/events:check 与 visibility:check CI 校验`
+- [x] 6.2 Run `pnpm check:all` including `ai-sdk-provider:check` — refs: `event-system/events:check 与 visibility:check CI 校验`
 
   **What to do**: Run `pnpm.cmd check:all` and individual checks if needed. Confirm the check suite includes `ai-sdk-provider:check` and all five CI/check gates referenced by the spec.
   **Must NOT do**: Do not remove checks from `check:all`; do not mark success if `ai-sdk-provider:check` did not run.
@@ -2080,7 +2080,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: NO | Message: `chore: final check fixes only if needed` | Files: none unless fixes are required.
 
-- [ ] 6.3 Run OpenSpec strict validation — refs: `design/Goals G3`
+- [x] 6.3 Run OpenSpec strict validation — refs: `design/Goals G3`
 
   **What to do**: Run `openspec.cmd validate add-v10-orchestration --strict` from repo root and fix only spec/code consistency issues that are inside this change. If validation requires changing the accepted design, escalate to upper agent before editing specs.
   **Must NOT do**: Do not skip strict; do not patch specs to hide implementation gaps.
@@ -2117,7 +2117,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: NO | Message: `docs(spec): resolve strict validation only if needed` | Files: none unless strict fixes are needed.
 
-- [ ] 6.4 Prepare non-blocking browser QA handoff checklist — refs: `settings-ui/Settings Modal`, `squad-mode/Squad 模式调度`
+- [x] 6.4 Prepare non-blocking browser QA handoff checklist — refs: `settings-ui/Settings Modal`, `squad-mode/Squad 模式调度`
 
   **What to do**: Do not run Playwright. Prepare a non-blocking browser QA handoff checklist for later user testing of V1.0 Settings modal, Role generation, Squad Run, Team Task review, Tasks tab, TaskStatusCard, and Run Detail collaboration view. Include setup commands, seed/test data, expected UI states, failure cases, and exact observations the user can verify whenever convenient.
   **Must NOT do**: Do not run `pnpm.cmd test:e2e`; do not use Playwright/browser automation; do not wait for the user to run the checklist; do not block final implementation review on manual browser testing; do not hide refresh-only bugs in the checklist.
@@ -2156,7 +2156,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: NO | Message: `docs(qa): prepare v10 manual acceptance checklist` | Files: `.sisyphus/evidence/task-6.4-*.md` only unless fixes are required.
 
-- [ ] 6.5 Update OpenSpec `tasks.md` checkboxes — refs: `design/Goals G3`
+- [x] 6.5 Update OpenSpec `tasks.md` checkboxes — refs: `design/Goals G3`
 
   **What to do**: After successful implementation and validation evidence for every task, update `openspec/changes/add-v10-orchestration/tasks.md` checkboxes from `[ ]` to `[x]` for completed items. Include evidence references in PR/stage summary.
   **Must NOT do**: Do not check off tasks before corresponding evidence exists; do not mark `6.6` complete before V1.1 plan exists.
@@ -2195,7 +2195,7 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 
   **Commit**: YES | Message: `docs(spec): mark v10 tasks complete` | Files: `openspec/changes/add-v10-orchestration/tasks.md`.
 
-- [ ] 6.6 Prepare V1.1 plan for task-board Kanban + collaboration visualization — refs: `design/Roadmap Beyond MVP V1.1`
+- [x] 6.6 Prepare V1.1 plan for task-board Kanban + collaboration visualization — refs: `design/Roadmap Beyond MVP V1.1`
 
   **What to do**: Prepare a V1.1 planning artifact or issue draft for task-board Kanban and collaboration visualization (Timeline + Topology), using V1.0 outcomes/risks as input. Keep it separate from V1.0 implementation and clearly out of scope for this change.
   **Must NOT do**: Do not implement Kanban drag/drop, topology visualization, or V1.1 code; do not modify V1.0 behavior for speculative V1.1.
@@ -2238,16 +2238,16 @@ Wave 8: Final automated acceptance, non-blocking manual QA checklist, and OpenSp
 > 4 review agents run in PARALLEL. ALL must APPROVE. Present consolidated results to user and get explicit "okay" before completing.
 > **Do NOT auto-proceed after verification. Wait for user's explicit approval before marking work complete.**
 > **Never mark F1-F4 as checked before getting user's okay.** Rejection or user feedback -> fix -> re-run -> present again -> wait for okay.
-- [ ] F1. Plan Compliance Audit — oracle
+- [x] F1. Plan Compliance Audit — oracle
   - Evidence: `.sisyphus/evidence/final-plan-compliance.md`
   - Prompt: compare implementation branch against this plan and `openspec/changes/add-v10-orchestration/tasks.md`; verify every task/spec ref is satisfied and no non-goal scope was added.
-- [ ] F2. Code Quality Review — unspecified-high
+- [x] F2. Code Quality Review — unspecified-high
   - Evidence: `.sisyphus/evidence/final-code-quality.md`
   - Prompt: inspect diff for maintainability, duplicated paths, transaction boundaries, state machines, error handling, tests, and AI slop.
-- [ ] F3. Non-blocking Browser QA Handoff Audit — unspecified-high
+- [x] F3. Non-blocking Browser QA Handoff Audit — unspecified-high
   - Evidence: `.sisyphus/evidence/final-manual-qa.md`, `.sisyphus/evidence/task-6.4-user-manual-acceptance-checklist.md`
   - Prompt: do not use Playwright and do not wait for the user. Review the browser QA handoff checklist and automated frontend/backend evidence; verify the checklist is complete, non-blocking, and suitable for the user to run later for Settings modal, role/model/runtime config, Squad dispatch, Team review, Tasks tab, Task detail, and Run Detail Tools collaboration without relying on refresh. Mark F3 complete when the handoff quality is approved, not when the user manually tests it.
-- [ ] F4. Scope Fidelity Check — deep
+- [x] F4. Scope Fidelity Check — deep
   - Evidence: `.sisyphus/evidence/final-scope-fidelity.md`
   - Prompt: confirm no Deployment/Tauri/responsive/Docker/cloud/multi-user/V1.x features, no unregistered events, no Settings SSE consumption, no role-draft events, no string AI SDK model IDs.
 

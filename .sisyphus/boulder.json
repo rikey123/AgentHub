@@ -1,45 +1,25 @@
 {
-  "active_plan": "C:\\project\\AgentHub\\.sisyphus\\plans\\v05-chatroom-complete.md",
-  "started_at": "2026-05-24T10:07:41.400Z",
+  "active_plan": "C:\\project\\AgentHub\\.sisyphus\\plans\\add-v10-orchestration.md",
+  "started_at": "2026-05-28T16:33:43.973Z",
   "session_ids": [
-    "ses_1a6baca41ffepeBIWmVcU52ISH",
-    "ses_1a689a09effe5nRXvdlLj3MO84",
-    "ses_1a68967bbffe79vxE3GNdl1oIt",
-    "ses_1a6894253ffeQ2OvThvrj6x1A4",
-    "ses_1a6891dc4ffeXWHi4bGP4Jt4cc",
-    "ses_1a688f4caffegWumx2KL5ZF9d6",
-    "ses_1a688cd69ffepArti7pYoc4kIL",
-    "ses_1a688a65affexT7gGtyfsx3Irh",
-    "ses_1a2ee8108ffefCrSpjr6r205kB",
-    "ses_1a2ee7351ffeOX2AlCJ97L517c",
-    "ses_1a2ee61f5ffeV19L247WUe2tG2",
-    "ses_1a2d1c88dffeTu4sLJix84p2kB"
+    "ses_19138bdeeffevUKOWDVJ00BqA8",
+    "ses_18db66409ffeQwyzRS8KFcZl5s"
   ],
   "session_origins": {
-    "ses_1a6baca41ffepeBIWmVcU52ISH": "direct",
-    "ses_1a689a09effe5nRXvdlLj3MO84": "appended",
-    "ses_1a68967bbffe79vxE3GNdl1oIt": "appended",
-    "ses_1a6894253ffeQ2OvThvrj6x1A4": "appended",
-    "ses_1a6891dc4ffeXWHi4bGP4Jt4cc": "appended",
-    "ses_1a688f4caffegWumx2KL5ZF9d6": "appended",
-    "ses_1a688cd69ffepArti7pYoc4kIL": "appended",
-    "ses_1a688a65affexT7gGtyfsx3Irh": "appended",
-    "ses_1a2ee8108ffefCrSpjr6r205kB": "appended",
-    "ses_1a2ee7351ffeOX2AlCJ97L517c": "appended",
-    "ses_1a2ee61f5ffeV19L247WUe2tG2": "appended",
-    "ses_1a2d1c88dffeTu4sLJix84p2kB": "appended"
+    "ses_19138bdeeffevUKOWDVJ00BqA8": "direct",
+    "ses_18db66409ffeQwyzRS8KFcZl5s": "appended"
   },
-  "plan_name": "v05-chatroom-complete",
+  "plan_name": "add-v10-orchestration",
   "agent": "atlas",
   "task_sessions": {
     "final-wave:f1": {
       "task_key": "final-wave:f1",
       "task_label": "F1",
       "task_title": "Plan Compliance Audit — oracle",
-      "session_id": "ses_1a5564277ffeNc1LntukHWIUyq",
-      "agent": "oracle",
-      "category": "",
-      "updated_at": "2026-05-24T15:45:42.495Z"
+      "session_id": "ses_18dc79bbdffeByXwa43rythzVc",
+      "agent": "Sisyphus-Junior",
+      "category": "unspecified-high",
+      "updated_at": "2026-05-29T05:43:04.260Z"
     }
   }
 }

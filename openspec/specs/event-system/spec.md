@@ -79,8 +79,15 @@ The system SHALL classify every event as either `durable`（落 events 表，永
 | `tool.update.diverted` | run | ephemeral | detail |
 | `tool.output.delta` | run | ephemeral | detail |
 | `subagent.started` / `subagent.completed` | run | durable | detail |
+| `role.created` / `role.updated` / `role.deleted` | role | durable | detail |
+| `runtime.detected` / `runtime.updated` / `runtime.removed` | runtime | durable | detail |
+| `model_config.created` / `model_config.updated` / `model_config.deleted` | model | durable | detail |
+| `agent_binding.created` / `agent_binding.updated` / `agent_binding.removed` | binding | durable | detail |
 | `task.created` / `task.assigned` / `task.status.changed` | task | durable | both |
+| `task.activity.added` / `task.delegation.created` / `task.delegation.completed` | task | durable | both |
 | `task.status.changed.rejected` | task | ephemeral | detail |
+| `team.dispatch.started` / `team.dispatch.completed` | team | durable | both |
+| `permission.run_summary` | permission | durable | detail |
 | `context.item.created` / `.proposed` / `.confirmed` / `.update_requested` / `.conflict_created` / `.deprecated` / `.visibility.changed` | context | durable | detail |
 | `context.snapshot` | context | durable | detail |
 | `permission.requested` / `permission.resolved` | permission | durable | both |
