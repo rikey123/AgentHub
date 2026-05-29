@@ -32,3 +32,18 @@
 - Delegate rollback path manually deletes task events by room/type, which can erase unrelated durable replay history after a failed delegation; rely on transaction rollback instead.
 - Delegated completion event is published outside the task status transaction, and delegated status activities emit task.activity.added without task_activities inserts.
 - Timeout sweep returns leader wake intents but daemon timer ignores them, so stale task blocking does not actually WakeAgent.
+
+## Wave 6 Oracle Gate Re-Review 2 (2026-05-29)
+
+- Rejected after payload-fix review. Key blockers: run collaboration fields are lost because projector replaces `RunViewModel` on later lifecycle events that omit `taskId`/`parentRunId`; team dispatch projector/test reads `payload.runId` but producer emits `payload.leaderRunId` plus envelope `runId`; task.created tests still include fields not emitted by `TaskService.createInTransaction`; `pnpm.cmd typecheck` fails in reviewed orchestrator files.
+- GitNexus MCP was unavailable (`Not connected`), so review relied on direct file inspection, LSP diagnostics, and TypeScript typecheck.
+
+## F1 Plan Compliance Audit (2026-05-29)
+
+- REJECTED: `pnpm.cmd typecheck` fails despite `pnpm.cmd test`, `pnpm.cmd check:all`, `pnpm.cmd lint`, and OpenSpec strict passing.
+- Blocking areas: daemon/native-runtime type incompatibilities (`NativeManagedAdapter.disposeAllRuns`, missing `TaskService.read`, `DaemonApp.lifecycle`, AI SDK provider `.chatModel`, `createOpenAICompatible` missing `name`, permission resource/failure-class typing, partial EventBus test mocks).
+- Evidence written to `.sisyphus/evidence/final-plan-compliance.md`.
+
+## 2026-05-29 - Final plan compliance audit 2
+
+Verdict: REJECT. `pnpm.cmd test` failed in `packages/native-agent-runtime/test/provider-registry.test.ts` because `resolveProvider` calls `p.languageModel(...)` while the provider mocks/accepted task 2.1 contract expect `.chatModel(modelConfig.model)`. Also found missing `task-6.5-*` evidence even though task 6.5 is checked complete. Typecheck, lint, check:all, and OpenSpec strict passed; no blocking non-goal scope was found in registry/settings SSE/string AI SDK model checks.

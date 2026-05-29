@@ -378,3 +378,16 @@
 
 - Plan compliance must include `pnpm.cmd typecheck` because task 6.1 and the plan Definition of Done require it, even when a narrower verification prompt lists only test/check-all/lint.
 - `pnpm.cmd test`, `pnpm.cmd check:all`, and `pnpm.cmd lint` can all pass while strict TypeScript still catches Native Runtime and daemon contract mismatches.
+
+## F3 manual QA handoff audit — 2026-05-29
+
+- Final verdict written to `.sisyphus/evidence/final-manual-qa.md`: APPROVE.
+- Browser QA handoff can be approved when checklist quality is complete and explicitly non-blocking; user execution is not required for F3 completion.
+- Required handoff invariants: executable setup/steps, live-update-without-refresh checks, and coverage links for Settings, Squad, Team, and Tasks tab automated evidence.
+- Caveat pattern: older skipped Team evidence can be acceptable if later evidence clearly supersedes it with passing broader orchestrator/daemon/web coverage.
+
+## F2 Code Quality Review - 2026-05-29
+- Required review output written to `.sisyphus/evidence/final-code-quality.md` with VERDICT: REJECT because `pnpm.cmd test` fails.
+- Failure is in `packages/native-agent-runtime/test/provider-registry.test.ts`: provider factory mocks do not return objects with `languageModel()`, while `resolveProvider()` calls `p.languageModel(modelConfig.model)`.
+- `pnpm.cmd lint` passes with zero warnings.
+- Reviewed diff did not add new SQLite mutations; `permission.run_summary` is durable/detail but summarizes permission decisions and is not paired to a new DB mutation in this diff.

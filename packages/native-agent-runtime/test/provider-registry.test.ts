@@ -31,7 +31,7 @@ beforeEach(async () => {
   googleFactory.mockReset();
   openaiCompatibleFactory.mockReset();
 
-  const model = { chatModel: vi.fn((name: string) => ({ kind: "model", name })) };
+  const model = { languageModel: vi.fn((name: string) => ({ kind: "model", name })) };
   openaiFactory.mockReturnValue(model);
   anthropicFactory.mockReturnValue(model);
   googleFactory.mockReturnValue(model);
@@ -56,8 +56,8 @@ describe("resolveProvider", () => {
     if (provider === "openai") expect(openaiFactory).toHaveBeenCalledWith({ apiKey: "test-key", baseURL: "https://example.invalid/v1" });
     if (provider === "anthropic") expect(anthropicFactory).toHaveBeenCalledWith({ apiKey: "test-key", baseURL: "https://example.invalid/v1" });
     if (provider === "google") expect(googleFactory).toHaveBeenCalledWith({ apiKey: "test-key", baseURL: "https://example.invalid/v1" });
-    if (provider === "openai-compatible") expect(openaiCompatibleFactory).toHaveBeenCalledWith({ apiKey: "test-key", baseURL: "https://example.invalid/v1" });
-    if (provider === "ollama") expect(openaiCompatibleFactory).toHaveBeenCalledWith({ apiKey: "ollama", baseURL: "http://localhost:11434/v1" });
+    if (provider === "openai-compatible") expect(openaiCompatibleFactory).toHaveBeenCalledWith({ name: "native-agent-runtime", apiKey: "test-key", baseURL: "https://example.invalid/v1" });
+    if (provider === "ollama") expect(openaiCompatibleFactory).toHaveBeenCalledWith({ name: "ollama", apiKey: "ollama", baseURL: "http://localhost:11434/v1" });
   });
 
   it("throws a deterministic unsupported provider error", () => {
