@@ -27,11 +27,12 @@ export type MessageViewModel = {
 };
 
 export type BriefViewModel = {
-  readonly kind: "run_started" | "run_completed" | "run_failed" | "run_cancelled" | "phase_completed";
+  readonly kind: "run_started" | "run_completed" | "run_failed" | "run_cancelled" | "phase_completed" | "dispatch_started" | "dispatch_completed";
   readonly runId: string;
   readonly agentId: string;
   readonly agentName: string;
   readonly summary: string;
+  readonly dispatchId?: string | undefined;
   readonly artifactCount?: number | undefined;
   readonly cost?: { readonly tokens: number; readonly usd?: number | undefined } | undefined;
   readonly failureReason?: string | undefined;
@@ -68,11 +69,43 @@ export type ContextItemViewModel = {
   readonly runId?: string | undefined;
 };
 
+export type TaskActivityViewModel = {
+  readonly id: string;
+  readonly kind: string;
+  readonly byKind: string;
+  readonly by: string;
+  readonly payload?: unknown;
+  readonly createdAt?: number | undefined;
+};
+
+export type TaskDelegationViewModel = {
+  readonly id: string;
+  readonly status?: string | undefined;
+  readonly assigneeRoleId?: string | undefined;
+  readonly assigneeBindingId?: string | undefined;
+  readonly assigneeAgentId?: string | undefined;
+  readonly runId?: string | undefined;
+  readonly roleId?: string | undefined;
+  readonly completedAt?: number | undefined;
+  readonly createdAt?: number | undefined;
+  readonly payload?: unknown;
+};
+
 export type TaskViewModel = {
   readonly id: string;
   readonly title: string;
   readonly status: string;
+  readonly description?: string | undefined;
+  readonly priority?: string | undefined;
+  readonly assigneeRoleId?: string | undefined;
+  readonly assigneeBindingId?: string | undefined;
   readonly assigneeAgentId?: string | undefined;
+  readonly expectsReview?: boolean | undefined;
+  readonly parentTaskId?: string | undefined;
+  readonly delegationChain?: unknown[] | undefined;
+  readonly sourceRunId?: string | undefined;
+  readonly activities?: TaskActivityViewModel[] | undefined;
+  readonly delegations?: TaskDelegationViewModel[] | undefined;
 };
 
 export type RunViewModel = {
@@ -85,6 +118,12 @@ export type RunViewModel = {
   readonly cost?: { readonly inputTokens: number; readonly outputTokens: number; readonly cachedTokens: number; readonly costUsd: number; readonly modelId: string } | undefined;
   readonly failureClass?: string | undefined;
   readonly error?: string | undefined;
+  readonly permissionSummary?: readonly { readonly resource: { readonly type: string; readonly provider?: string | undefined }; readonly decision: string; readonly modelConfigId: string }[] | undefined;
+  readonly wakeReason?: string | undefined;
+  readonly parentRunId?: string | undefined;
+  readonly parentTaskId?: string | undefined;
+  readonly taskId?: string | undefined;
+  readonly dispatchId?: string | undefined;
 };
 
 export type MailboxFailureViewModel = {

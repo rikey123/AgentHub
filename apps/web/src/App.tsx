@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { AppShell } from "./components/shell/AppShell.tsx";
 import { TopBar } from "./components/shell/TopBar.tsx";
@@ -13,11 +13,18 @@ import { RunDetailDrawer } from "./components/run/RunDetailDrawer.tsx";
 import { CommandPalette, type PaletteCommand } from "./components/CommandPalette.tsx";
 import { KeymapModal } from "./components/KeymapModal.tsx";
 import { NewRoomDialog, type CreateRoomInput } from "./components/NewRoomDialog.tsx";
+import { SettingsModal } from "./components/settings/index.ts";
+import { getSettingsSearch, getSettingsStateFromSearch } from "./components/settings/settingsUrl.ts";
+import type { SettingsTabId } from "./components/settings/SettingsModal.tsx";
 import { useProjector } from "./hooks/useProjector.ts";
 import { useSdk, useCsrfFetch } from "./hooks/useSdk.ts";
 import { useTheme } from "./hooks/useTheme.ts";
 
 export default function App() {
+  const initialSettingsState = useMemo(() => {
+    if (typeof window === "undefined") return { isOpen: false, tab: "roles" as SettingsTabId };
+    return getSettingsStateFromSearch(window.location.search);
+  }, []);
   const [activeRoomId, setActiveRoomId] = useState<string | undefined>();
   const [activeRunId, setActiveRunId] = useState<string | undefined>();
   const [selectedMessageId, setSelectedMessageId] = useState<string | undefined>();
@@ -25,6 +32,8 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [keymapOpen, setKeymapOpen] = useState(false);
   const [newRoomOpen, setNewRoomOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(initialSettingsState.isOpen);
+  const [settingsTab, setSettingsTab] = useState<SettingsTabId>(initialSettingsState.tab);
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
   const [sidePanelTab, setSidePanelTab] = useState<"context" | "tasks" | "members" | "debug" | "cost">("context");
@@ -35,6 +44,15 @@ export default function App() {
   const sdk = useSdk();
   const csrfFetch = useCsrfFetch();
   const { theme, setTheme, toggleTheme, setDensity } = useTheme();
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const nextSearch = getSettingsSearch(window.location.search, settingsOpen, settingsTab);
+    if (nextSearch === window.location.search) return;
+
+    const nextUrl = `${window.location.pathname}${nextSearch}${window.location.hash}`;
+    window.history.replaceState(window.history.state, "", nextUrl);
+  }, [settingsOpen, settingsTab]);
 
   const rooms = useMemo(() => Array.from(projector.rooms.values()), [projector.rooms]);
   const activeRoom = activeRoomId ? projector.rooms.get(activeRoomId) : undefined;
@@ -62,6 +80,13 @@ export default function App() {
   }, [sdk]);
 
   const openNewRoom = useCallback(() => setNewRoomOpen(true), []);
+  const openSettings = useCallback(() => setSettingsOpen(true), []);
+  const handleSettingsOpenChange = useCallback((open: boolean) => {
+    setSettingsOpen(open);
+  }, []);
+  const handleSettingsTabChange = useCallback((tab: SettingsTabId) => {
+    setSettingsTab(tab);
+  }, []);
 
   const handleSendMessage = useCallback(async (input: { text: string; quotedMessageId?: string; attachmentIds: string[]; mentions: string[] }) => {
     if (!activeRoomId) return;
@@ -113,6 +138,15 @@ export default function App() {
     if (!window.confirm("Delete this message?")) return;
     await csrfFetch(`/messages/${encodeURIComponent(id)}`, { method: "DELETE" });
   }, [csrfFetch]);
+
+  const openTasksPanel = useCallback(() => {
+    setRightCollapsed(false);
+    setSidePanelTab("tasks");
+  }, []);
+
+  const handleOpenTask = useCallback(() => {
+    openTasksPanel();
+  }, [openTasksPanel]);
 
   const handleEditPending = useCallback((messageId: string) => {
     setEditingTurnId(messageId);
@@ -167,6 +201,7 @@ export default function App() {
   const commands = useMemo<PaletteCommand[]>(() => {
     const list: PaletteCommand[] = [
       { id: "new-room", label: "New room", group: "Rooms", perform: openNewRoom },
+      { id: "open-settings", label: "Open Settings", group: "Settings", keywords: ["roles", "runtimes", "models", "permissions", "workspace", "mcp"], perform: openSettings },
       { id: "toggle-left", label: leftCollapsed ? "Show rooms panel" : "Hide rooms panel", group: "View", perform: () => setLeftCollapsed((v) => !v) },
       { id: "toggle-right", label: rightCollapsed ? "Show workbench panel" : "Hide workbench panel", group: "View", perform: () => setRightCollapsed((v) => !v) },
       { id: "panel-context", label: "Workbench: Context", group: "View", perform: () => { setRightCollapsed(false); setSidePanelTab("context"); } },
@@ -191,7 +226,7 @@ export default function App() {
       });
     }
     return list;
-  }, [rooms, openNewRoom, leftCollapsed, rightCollapsed, setTheme, setDensity]);
+  }, [rooms, openNewRoom, openSettings, leftCollapsed, rightCollapsed, setTheme, setDensity]);
 
   const center = activeRoom ? (
     <div className="flex h-full flex-col">
@@ -204,6 +239,8 @@ export default function App() {
         onPin={(id) => void handlePin(id)}
         onRegenerate={(id) => void handleRegenerate(id)}
         onDelete={(id) => void handleDelete(id)}
+        onOpenTask={handleOpenTask}
+        onOpenTasks={openTasksPanel}
         onCancelPending={(id) => void handleCancelPending(id)}
         onEditPending={handleEditPending}
         csrfFetch={csrfFetch}
@@ -251,7 +288,7 @@ export default function App() {
             rightCollapsed={rightCollapsed}
           />
         }
-        rail={<FeatureRail active={rail} onSelect={setRail} />}
+        rail={<FeatureRail active={rail} onSelect={setRail} onOpenSettings={openSettings} />}
         rooms={
           <RoomList
             rooms={rooms}
@@ -261,18 +298,20 @@ export default function App() {
           />
         }
         center={center}
-        panel={activeRoom ? <SidePanel room={activeRoom} csrfFetch={csrfFetch} initialTab={sidePanelTab} /> : null}
+        panel={activeRoom ? <SidePanel key={`${activeRoom.id}:${sidePanelTab}`} room={activeRoom} csrfFetch={csrfFetch} initialTab={sidePanelTab} /> : null}
         roomsCollapsed={leftCollapsed}
         panelCollapsed={rightCollapsed || !activeRoom}
       />
       <CommandPalette isOpen={paletteOpen} onOpenChange={setPaletteOpen} commands={commands} />
       <KeymapModal isOpen={keymapOpen} onOpenChange={setKeymapOpen} />
       <NewRoomDialog isOpen={newRoomOpen} onOpenChange={setNewRoomOpen} onCreate={handleCreateRoom} />
+      <SettingsModal isOpen={settingsOpen} selectedTab={settingsTab} onTabChange={handleSettingsTabChange} onOpenChange={handleSettingsOpenChange} />
       <RunDetailDrawer
         isOpen={!!activeRunId}
         onOpenChange={(open) => { if (!open) setActiveRunId(undefined); }}
         room={activeRoom}
         runId={activeRunId}
+        onOpenRun={setActiveRunId}
         csrfFetch={csrfFetch}
       />
     </>

@@ -36,9 +36,15 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
     return failed("validation_failed", `unknown room mode '${mode}' (supported: solo, assisted, team, squad)`);
   }
   const workspaceId = stringField(command, "workspaceId") ?? "default-workspace";
-  const primaryAgentId = stringField(command, "primaryAgentId") ?? "mock-builder";
+  let primaryAgentId = stringField(command, "primaryAgentId") ?? stringField(command, "agentBindingId") ?? "mock-builder";
+  const leaderRoleId = stringField(command, "leaderRoleId");
+  const legacyAgentProfileId = stringField(command, "agentProfileId");
   const participants = Array.isArray(command.participants) ? command.participants : [];
-  if (mode === "solo" && participants.filter((item) => isObject(item) && item.type === "agent").length > 1) {
+  const isTeamMode = mode === "team" || mode === "squad";
+  if (isTeamMode && leaderRoleId === undefined) {
+    return failed("validation_failed", "squad_mode_requires_leader_role_id");
+  }
+  if (mode === "solo" && participants.filter((item) => isObject(item) && (item.type === "agent" || (typeof item.roleId === "string" && typeof item.runtimeId === "string"))).length > 1) {
     return failed("validation_failed", "Solo rooms cannot contain multiple agents");
   }
 
@@ -51,38 +57,99 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
     return { adapterId: row?.adapter_id ?? "mock", name: row?.name ?? agentId };
   };
 
+  const lookupBinding = (roleId: string, runtimeId: string, modelConfigId: string | null | undefined): { readonly bindingId: string; readonly adapterId: string; readonly name: string } | undefined => {
+    const row = options.database.sqlite
+      .prepare(
+        `SELECT
+          agent_bindings.id AS binding_id,
+          agent_bindings.role_id,
+          agent_bindings.runtime_id,
+          agent_bindings.model_config_id,
+          roles.name AS role_name,
+          runtimes.kind AS runtime_kind,
+          runtimes.name AS runtime_name
+         FROM agent_bindings
+         LEFT JOIN roles ON roles.id = agent_bindings.role_id
+         LEFT JOIN runtimes ON runtimes.id = agent_bindings.runtime_id
+         WHERE agent_bindings.role_id = ? AND agent_bindings.runtime_id = ? AND ${modelConfigId === undefined ? "agent_bindings.model_config_id IS NULL" : "agent_bindings.model_config_id = ?"}
+         LIMIT 1`
+      )
+      .get(...(modelConfigId === undefined ? [roleId, runtimeId] : [roleId, runtimeId, modelConfigId])) as
+      | { readonly binding_id?: string; readonly role_name?: string | null; readonly runtime_kind?: string | null; readonly runtime_name?: string | null }
+      | undefined;
+    if (row?.binding_id === undefined) return undefined;
+    return { bindingId: row.binding_id, adapterId: row.runtime_kind ?? "mock", name: row.role_name ?? row.runtime_name ?? row.binding_id };
+  };
+
+  type RoomParticipantRecord = {
+    readonly participantId: string;
+    readonly agentBindingId: string;
+    readonly adapterId: string;
+    readonly name: string;
+    readonly role: string;
+    readonly presence: string;
+  };
+
+  const resolvedParticipants: RoomParticipantRecord[] = [];
+  let primaryParticipant: RoomParticipantRecord | undefined;
+
   // In team/squad mode the primary agent is the leader; all other participants are teammates.
   // In assisted mode participants keep whatever role is specified (default: observer).
-  const isTeamMode = mode === "team" || mode === "squad";
+  for (const participant of participants) {
+    if (!isObject(participant)) continue;
+    if (participant.type === "agent" && typeof participant.agentId === "string" && participant.agentId !== primaryAgentId) {
+      const info = lookupAgent(participant.agentId);
+      const role = isTeamMode ? "teammate" : (typeof participant.role === "string" ? participant.role : "observer");
+      const presence = isTeamMode ? "active" : (participant.defaultPresence === "active" ? "active" : "observing");
+      resolvedParticipants.push({ participantId: participant.agentId, agentBindingId: typeof participant.agentBindingId === "string" ? participant.agentBindingId : participant.agentId, adapterId: info.adapterId, name: info.name, role, presence });
+      continue;
+    }
+    if (typeof participant.roleId === "string" && typeof participant.runtimeId === "string") {
+      const modelConfigId = stringField(participant as Record<string, unknown>, "modelConfigId");
+      const binding = lookupBinding(participant.roleId, participant.runtimeId, modelConfigId);
+      if (binding === undefined) return failed("not_found", "agent_binding_not_found");
+      const role = isTeamMode ? "teammate" : (typeof participant.role === "string" ? participant.role : "observer");
+      const presence = isTeamMode ? "active" : (participant.defaultPresence === "active" ? "active" : "observing");
+      const record: RoomParticipantRecord = { participantId: binding.bindingId, agentBindingId: binding.bindingId, adapterId: binding.adapterId, name: binding.name, role, presence };
+      resolvedParticipants.push(record);
+      if (isTeamMode && leaderRoleId !== undefined && participant.roleId === leaderRoleId) primaryParticipant = record;
+    }
+  }
+
+  if (primaryParticipant === undefined && isTeamMode && resolvedParticipants.length > 0) {
+    primaryParticipant = resolvedParticipants[0];
+  }
+  if (primaryParticipant !== undefined) {
+    primaryAgentId = primaryParticipant.participantId;
+  }
+  const leaderPayload = leaderRoleId !== undefined ? { leaderRoleId } : {};
 
   options.database.sqlite.transaction(() => {
     ensureWorkspace(options.database, workspaceId, now);
     options.database.sqlite
-      .prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES (?, ?, ?, ?, 'conversation', ?, NULL, ?, ?)")
-      .run(roomId, workspaceId, title, mode, primaryAgentId, now, now);
-    const primary = lookupAgent(primaryAgentId);
+      .prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, leader_role_id, archived_at, created_at, updated_at) VALUES (?, ?, ?, ?, 'conversation', ?, ?, NULL, ?, ?)")
+      .run(roomId, workspaceId, title, mode, primaryAgentId, leaderRoleId ?? null, now, now);
+    const primary = primaryParticipant ?? (() => {
+      const info = lookupAgent(primaryAgentId);
+      return { participantId: primaryAgentId, agentBindingId: stringField(command, "agentBindingId") ?? primaryAgentId, adapterId: info.adapterId, name: info.name, role: "primary", presence: "active" } satisfies RoomParticipantRecord;
+    })();
     options.database.sqlite
-      .prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, default_presence, joined_at) VALUES (?, ?, 'agent', 'primary', ?, NULL, 'active', ?)")
-      .run(roomId, primaryAgentId, primary.adapterId, now);
+      .prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES (?, ?, 'agent', 'primary', ?, NULL, ?, 'active', ?)")
+      .run(roomId, primary.participantId, primary.adapterId, primary.agentBindingId, now);
     options.database.sqlite
       .prepare("INSERT OR REPLACE INTO agent_presence (room_id, agent_id, state, reason, status_line, updated_at) VALUES (?, ?, 'active', NULL, NULL, ?)")
-      .run(roomId, primaryAgentId, now);
-    for (const participant of participants) {
-      if (isObject(participant) && participant.type === "agent" && typeof participant.agentId === "string" && participant.agentId !== primaryAgentId) {
-        const info = lookupAgent(participant.agentId);
-        // In team/squad mode all non-primary agents are teammates (active by default).
-        // In assisted mode use the specified role/presence or fall back to observer/observing.
-        const role = isTeamMode ? "teammate" : (typeof participant.role === "string" ? participant.role : "observer");
-        const presence = isTeamMode ? "active" : (participant.defaultPresence === "active" ? "active" : "observing");
+      .run(roomId, primary.participantId, now);
+    for (const participant of resolvedParticipants) {
+      if (participant.participantId !== primary.participantId) {
         options.database.sqlite
-          .prepare("INSERT OR IGNORE INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, default_presence, joined_at) VALUES (?, ?, 'agent', ?, ?, NULL, ?, ?)")
-          .run(roomId, participant.agentId, role, info.adapterId, presence, now);
+          .prepare("INSERT OR IGNORE INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES (?, ?, 'agent', ?, ?, NULL, ?, ?, ?)")
+          .run(roomId, participant.participantId, participant.role, participant.adapterId, participant.agentBindingId, participant.presence, now);
         options.database.sqlite
           .prepare("INSERT OR REPLACE INTO agent_presence (room_id, agent_id, state, reason, status_line, updated_at) VALUES (?, ?, ?, NULL, NULL, ?)")
-          .run(roomId, participant.agentId, presence, now);
+          .run(roomId, participant.participantId, participant.presence, now);
       }
     }
-    options.eventBus.publish(roomEvent("room.created", workspaceId, roomId, { roomId, title, mode, primaryAgentId }, now));
+    options.eventBus.publish(roomEvent("room.created", workspaceId, roomId, { roomId, title, mode, primaryAgentId, ...leaderPayload }, now));
     // Emit agent.joined + agent.state.changed for each participant so SSE consumers (and SSE
     // replay after a refresh) can rebuild the member roster without needing a separate API.
     // Without these events, refreshing the page lost all members until the daemon happened to
@@ -91,17 +158,10 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
       options.eventBus.publish({ id: randomUUID(), type: "agent.joined", schemaVersion: 1, workspaceId, roomId, agentId, payload: { agentId, agentName, role, adapterId }, createdAt: now });
       options.eventBus.publish({ id: randomUUID(), type: "agent.state.changed", schemaVersion: 1, workspaceId, roomId, agentId, payload: { agentId, state: presence }, createdAt: now });
     };
-    publishParticipantEvents(primaryAgentId, primary.name, primary.adapterId, "primary", "active");
-    for (const participant of participants) {
-      if (isObject(participant) && participant.type === "agent" && typeof participant.agentId === "string" && participant.agentId !== primaryAgentId) {
-        const info = lookupAgent(participant.agentId);
-        publishParticipantEvents(
-          participant.agentId,
-          info.name,
-          info.adapterId,
-          typeof participant.role === "string" ? participant.role : "observer",
-          participant.defaultPresence === "active" ? "active" : "observing"
-        );
+    publishParticipantEvents(primary.participantId, primary.name, primary.adapterId, "primary", "active");
+    for (const participant of resolvedParticipants) {
+      if (participant.participantId !== primary.participantId) {
+        publishParticipantEvents(participant.participantId, participant.name, participant.adapterId, participant.role, participant.presence);
       }
     }
   })();
@@ -109,7 +169,7 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
   const emittedEvents = latestEvents(options.database, roomId);
   void Promise.resolve().then(() => options.prewarmRoomAgents?.(roomId)).catch(() => undefined);
   void meta;
-  return { ok: true, data: { roomId }, emittedEvents };
+  return { ok: true, data: { roomId, agentBindingId: primaryAgentId, ...(leaderRoleId !== undefined ? { leaderRoleId } : {}), ...(legacyAgentProfileId !== undefined ? { agentProfileId: legacyAgentProfileId } : {}) }, emittedEvents };
 }
 
 function setRoomArchived(options: DaemonCommandHandlersOptions, command: Command, archived: boolean): CommandResult {
@@ -417,12 +477,12 @@ function actorId(meta: CommandMeta): string {
   return meta.actor.type === "system" ? "system" : meta.actor.id;
 }
 
-function stringField(command: Command, key: string): string | undefined {
+function stringField(command: Record<string, unknown>, key: string): string | undefined {
   const value = command[key];
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-function stringArrayField(command: Command, ...keys: readonly string[]): string[] {
+function stringArrayField(command: Record<string, unknown>, ...keys: readonly string[]): string[] {
   for (const key of keys) {
     const value = command[key];
     if (!Array.isArray(value)) continue;

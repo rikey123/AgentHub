@@ -5,6 +5,7 @@ export type RailItem = "chat" | "runs" | "tasks" | "context" | "artifacts" | "se
 interface FeatureRailProps {
   active: RailItem;
   onSelect: (item: RailItem) => void;
+  onOpenSettings?: () => void;
 }
 
 const items: Array<{ key: RailItem; label: string; glyph: string }> = [
@@ -16,7 +17,7 @@ const items: Array<{ key: RailItem; label: string; glyph: string }> = [
   { key: "settings", label: "Settings", glyph: "SE" }
 ];
 
-export function FeatureRail({ active, onSelect }: FeatureRailProps) {
+export function FeatureRail({ active, onSelect, onOpenSettings }: FeatureRailProps) {
   return (
     <nav
       aria-label="Workbench navigation"
@@ -28,6 +29,7 @@ export function FeatureRail({ active, onSelect }: FeatureRailProps) {
 
       <div className="flex flex-1 flex-col items-center gap-1">
         {items.map((item) => {
+          const isSettings = item.key === "settings";
           const isActive = item.key === active;
           return (
             <Tooltip key={item.key}>
@@ -35,8 +37,14 @@ export function FeatureRail({ active, onSelect }: FeatureRailProps) {
                 <button
                   type="button"
                   aria-label={item.label}
-                  aria-current={isActive ? "page" : undefined}
-                  onClick={() => onSelect(item.key)}
+                  aria-current={isActive && !isSettings ? "page" : undefined}
+                  onClick={() => {
+                    if (isSettings) {
+                      onOpenSettings?.();
+                      return;
+                    }
+                    onSelect(item.key);
+                  }}
                   className={[
                     "relative flex h-10 w-10 items-center justify-center rounded-2xl text-[11px] font-bold tracking-tight transition-all",
                     isActive

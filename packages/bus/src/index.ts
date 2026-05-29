@@ -131,6 +131,8 @@ export type CommandErrorCode =
   | "conflict"
   | "permission_denied"
   | "duplicate"
+  | "delegation_too_deep"
+  | "delegation_duplicate"
   | "not_implemented"
   | "internal_error"
   | "transaction_rollback"

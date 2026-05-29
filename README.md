@@ -17,6 +17,6 @@ The daemon defaults to `http://127.0.0.1:6677`. Browser clients first call `POST
 
 - Local-only daemon, SQLite, EventBus/CommandBus, Mock and Claude adapter surfaces.
 - Solo and Assisted rooms, Permission Engine, Context Ledger, ArtifactFS run-level diffs, Debug/observability basics.
-- V1 capabilities are stubs only: they return deterministic `501`, `404`, `adapter_not_found`, or `tool_not_found` responses.
+- V1 capabilities are stubs only for unavailable adapters; NativeAgentAdapter is already a real V1.0 implementation, while unsupported adapters still return deterministic `501`, `404`, `adapter_not_found`, or `tool_not_found` responses.
 
 AgentHub intentionally does not introduce SaaS, cloud sync, multi-user auth, Postgres, Redis, WebSocket Hub, native mobile, or marketplace behavior.

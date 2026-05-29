@@ -23,6 +23,7 @@ export type RunFailureClass =
   | "retryable_visible"
   | "fresh_session_required"
   | "permission_denied"
+  | "permission_expired"
   | "user_cancelled"
   | "configuration"
   | "fatal";
@@ -31,6 +32,8 @@ export type WakeReason =
   | "primary_turn"
   | "user_mention"
   | "delegated_task"
+  | "task_review"
+  | "task_blocked"
   | "rule_review"
   | "knock_approved"
   | "group_review"
@@ -105,6 +108,9 @@ export type RunRow = {
 };
 
 export type RunLifecycleSideEffects = {
+  readonly onRunning?: (runId: string) => void;
+  readonly onCompleted?: (runId: string) => void;
+  readonly onFailed?: (runId: string, failureClass: RunFailureClass) => void;
   readonly onTerminal?: (runId: string) => void;
   readonly finalizeNextTurns?: (tx: SqliteTx, runId: string, failureClass: RunFailureClass, now: number) => void;
   readonly onTargetUnavailable?: (tx: SqliteTx, runId: string) => void;
@@ -211,7 +217,7 @@ export class RunLifecycleService {
       this.requireStatus(run, ["claimed"], "markStarting");
       const now = this.now();
       this.updateStatus(db, runId, "starting", { pid_at_start: pidAtStart, started_at: now });
-      this.publishRunEvent(db, "agent.run.started", runId, run.workspace_id, run.room_id, run.agent_id, { runId, pidAtStart });
+      this.publishRunEvent(db, "agent.run.started", runId, run.workspace_id, run.room_id, run.agent_id, { runId, pidAtStart, ...(run.task_id !== null ? { taskId: run.task_id } : {}), ...(run.parent_run_id !== null ? { parentRunId: run.parent_run_id } : {}) });
     });
   }
 
@@ -224,6 +230,7 @@ export class RunLifecycleService {
         this.publishRunEvent(db, "agent.run.resumed", runId, run.workspace_id, run.room_id, run.agent_id, { runId, adapterSessionId });
       }
     });
+    this.sideEffects.onRunning?.(runId);
   }
 
   markWaitingPermission(tx: SqliteTx | null, runId: string, permissionId: string): void {
@@ -260,6 +267,7 @@ export class RunLifecycleService {
       this.publishRunEvent(db, "agent.run.completed", runId, run.workspace_id, run.room_id, run.agent_id, { runId, cost });
       this.publishBriefEvent(db, runId, run.workspace_id, run.room_id, run.agent_id, briefText);
     });
+    this.sideEffects.onCompleted?.(runId);
     this.sideEffects.onTerminal?.(runId);
   }
 
@@ -281,6 +289,7 @@ export class RunLifecycleService {
       this.publishRunEvent(db, "agent.run.failed", runId, run.workspace_id, run.room_id, run.agent_id, { runId, reason, failureClass, error });
       this.publishBriefEvent(db, runId, run.workspace_id, run.room_id, run.agent_id, briefText);
     });
+    this.sideEffects.onFailed?.(runId, failureClass);
     this.sideEffects.onTerminal?.(runId);
   }
 
@@ -401,6 +410,7 @@ function isFailureClass(value: unknown): value is RunFailureClass {
     value === "retryable_visible" ||
     value === "fresh_session_required" ||
     value === "permission_denied" ||
+    value === "permission_expired" ||
     value === "user_cancelled" ||
     value === "configuration" ||
     value === "fatal"

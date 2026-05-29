@@ -7,6 +7,11 @@ export type EventCategory =
   | "agent"
   | "run"
   | "task"
+  | "role"
+  | "runtime"
+  | "model"
+  | "binding"
+  | "team"
   | "context"
   | "permission"
   | "intervention"
@@ -109,6 +114,24 @@ export const EVENT_REGISTRY = [
   { type: "task.assigned", category: "task", durability: "durable", visibility: "both", schemaVersion: 1 },
   { type: "task.status.changed", category: "task", durability: "durable", visibility: "both", schemaVersion: 1 },
   { type: "task.status.changed.rejected", category: "task", durability: "ephemeral", visibility: "detail", schemaVersion: 1 },
+  { type: "role.created", category: "role", durability: "durable", visibility: "detail", schemaVersion: 1 },
+  { type: "role.updated", category: "role", durability: "durable", visibility: "detail", schemaVersion: 1 },
+  { type: "role.deleted", category: "role", durability: "durable", visibility: "detail", schemaVersion: 1 },
+  { type: "runtime.detected", category: "runtime", durability: "durable", visibility: "detail", schemaVersion: 1 },
+  { type: "runtime.updated", category: "runtime", durability: "durable", visibility: "detail", schemaVersion: 1 },
+  { type: "runtime.removed", category: "runtime", durability: "durable", visibility: "detail", schemaVersion: 1 },
+  { type: "model_config.created", category: "model", durability: "durable", visibility: "detail", schemaVersion: 1 },
+  { type: "model_config.updated", category: "model", durability: "durable", visibility: "detail", schemaVersion: 1 },
+  { type: "model_config.deleted", category: "model", durability: "durable", visibility: "detail", schemaVersion: 1 },
+  { type: "agent_binding.created", category: "binding", durability: "durable", visibility: "detail", schemaVersion: 1 },
+  { type: "agent_binding.updated", category: "binding", durability: "durable", visibility: "detail", schemaVersion: 1 },
+  { type: "agent_binding.removed", category: "binding", durability: "durable", visibility: "detail", schemaVersion: 1 },
+  { type: "task.activity.added", category: "task", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "task.delegation.created", category: "task", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "task.delegation.completed", category: "task", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "team.dispatch.started", category: "team", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "team.dispatch.completed", category: "team", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "permission.run_summary", category: "permission", durability: "durable", visibility: "detail", schemaVersion: 1 },
   { type: "context.item.created", category: "context", durability: "durable", visibility: "detail", schemaVersion: 1 },
   { type: "context.item.proposed", category: "context", durability: "durable", visibility: "detail", schemaVersion: 1 },
   { type: "context.item.confirmed", category: "context", durability: "durable", visibility: "detail", schemaVersion: 1 },

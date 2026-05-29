@@ -25,6 +25,7 @@ export type BriefResolver = (input: {
 export type AdapterEvent =
   | { readonly type: "session.opened"; readonly sessionId: string; readonly workDir?: string; readonly providerConversationId?: string }
   | { readonly type: "provider.conversation.updated"; readonly providerConversationId: string }
+  | { readonly type: "message.part.delta"; readonly messageId: string; readonly delta: string }
   | { readonly type: "tool.call.requested"; readonly toolCallId: string; readonly name: string; readonly input: unknown }
   | { readonly type: "tool.call.completed"; readonly toolCallId: string; readonly output: unknown; readonly ok: boolean }
   | { readonly type: "subagent.started"; readonly subRunId: string; readonly profileRef: string }
@@ -84,6 +85,11 @@ export class AdapterBridge {
     }
     if (event.type === "provider.conversation.updated") {
       this.input.lifecycle.updateSessionState(null, this.input.runId, { providerConversationId: event.providerConversationId });
+      return;
+    }
+    if (event.type === "message.part.delta") {
+      this.publishAdapterDomainEvent(event);
+      this.onMessageDelta();
       return;
     }
     if (event.type === "session.ended") {

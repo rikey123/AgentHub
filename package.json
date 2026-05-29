@@ -11,6 +11,7 @@
   },
   "scripts": {
     "build": "turbo run build",
+    "ai-sdk-provider:check": "node scripts/checks/ai-sdk-provider-check.mjs",
     "check:all": "node scripts/checks/check-all.mjs",
     "check:bun-api": "node scripts/checks/bun-api-check.mjs",
     "check:deps": "node scripts/checks/deps-check.mjs",
@@ -38,7 +39,8 @@
     "turbo": "^2.5.4",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.48.0",
-    "vitest": "^4.0.14"
+    "vitest": "^4.0.14",
+    "zod": "^3.24.4"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

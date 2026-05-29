@@ -3,6 +3,7 @@ import path from "node:path";
 import { repoRoot } from "./lib.mjs";
 
 const checks = [
+  ["ai-sdk-provider:check", "ai-sdk-provider-check.mjs"],
   ["events:check", "events-check.mjs"],
   ["visibility:check", "visibility-check.mjs"],
   ["subscriptions:check", "subscriptions-check.mjs"],
@@ -24,5 +25,5 @@ if (failed) {
   process.stderr.write("\ncheck:all failed\n");
   process.exitCode = 1;
 } else {
-  process.stdout.write("\ncheck:all passed (5 custom checks)\n");
+  process.stdout.write("\ncheck:all passed (6 custom checks)\n");
 }

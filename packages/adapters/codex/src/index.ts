@@ -4,7 +4,7 @@ import { Effect, Stream } from "effect";
 
 export const codexManifest: AgentAdapterManifest = {
   id: "codex",
-  name: "Codex Adapter Stub",
+  name: "Codex Adapter",
   runtimeKind: "acp",
   provider: "codex",
   capabilities: { canStreamTokens: false, canEmitToolEvents: false, canEmitPermissionEvents: false, canEmitSubagentEvents: false, canInjectAtStart: true, canInjectNextTurn: true, canInjectRuntime: false, canCancel: false, canReadContextSnapshot: false, canRestoreSession: false, supportsMcp: false, supportsHooks: false, supportsWorkspaceIsolation: false },
@@ -15,7 +15,7 @@ export const codexManifest: AgentAdapterManifest = {
 
 export class CodexAdapterStub {
   readonly id = "codex";
-  readonly name = "Codex Adapter Stub";
+  readonly name = "Codex Adapter";
   readonly kind = "acp" as const;
   readonly manifest = codexManifest;
   detect(): Effect.Effect<DetectedRuntime[], AdapterError> { return Effect.succeed([]); }

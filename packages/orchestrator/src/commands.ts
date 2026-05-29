@@ -13,6 +13,7 @@ export type WakeAgentCommand = Command & {
   readonly agentId: string;
   readonly workspaceId: string;
   readonly reason: WakeReason;
+  readonly taskId?: string;
   readonly triggerEventId?: string;
   readonly promptDelta?: AgentPromptDelta;
   readonly targetFiles?: readonly string[];
@@ -104,6 +105,7 @@ function handleWakeAgent(
         agentId: command.agentId,
         roomId: command.roomId,
         workspaceId: command.workspaceId,
+        ...(command.taskId !== undefined ? { taskId: command.taskId } : {}),
         wakeReason: command.reason,
         ...(command.workspaceMode !== undefined ? { workspaceMode: command.workspaceMode } : {}),
         ...(command.parentRunId !== undefined ? { parentRunId: command.parentRunId } : {}),
@@ -184,6 +186,8 @@ const zeroMailboxAllowed = new Set<WakeReason>([
   "agent_crashed",
   "group_review",
   "knock_approved",
+  "task_review",
+  "task_blocked",
   "consume_pending_turn",
   "delegated_task",
   "mailbox_message"  // agent-to-agent messages via room.send_message MCP tool
