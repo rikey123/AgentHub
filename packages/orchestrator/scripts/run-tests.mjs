@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(packageRoot, "..", "..");
 const vitestBin = resolve(repoRoot, "node_modules", ".bin", process.platform === "win32" ? "vitest.cmd" : "vitest");
-const vitestArgs = ["run", "packages/orchestrator/test/orchestrator.test.ts", "packages/orchestrator/test/run-prompt-source.test.ts"];
+const vitestArgs = ["run", "packages/orchestrator/test/orchestrator.test.ts", "packages/orchestrator/test/run-prompt-source.test.ts", "packages/orchestrator/test/room-mcp-file-shell.test.ts"];
 const command = process.platform === "win32" ? "cmd.exe" : vitestBin;
 const args = process.platform === "win32" ? ["/c", vitestBin, ...vitestArgs] : vitestArgs;
 
