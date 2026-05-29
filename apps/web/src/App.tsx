@@ -139,6 +139,15 @@ export default function App() {
     await csrfFetch(`/messages/${encodeURIComponent(id)}`, { method: "DELETE" });
   }, [csrfFetch]);
 
+  const openTasksPanel = useCallback(() => {
+    setRightCollapsed(false);
+    setSidePanelTab("tasks");
+  }, []);
+
+  const handleOpenTask = useCallback((_taskId: string) => {
+    openTasksPanel();
+  }, [openTasksPanel]);
+
   const handleEditPending = useCallback((messageId: string) => {
     setEditingTurnId(messageId);
     if (!activeRoomId) return;
@@ -230,6 +239,8 @@ export default function App() {
         onPin={(id) => void handlePin(id)}
         onRegenerate={(id) => void handleRegenerate(id)}
         onDelete={(id) => void handleDelete(id)}
+        onOpenTask={handleOpenTask}
+        onOpenTasks={openTasksPanel}
         onCancelPending={(id) => void handleCancelPending(id)}
         onEditPending={handleEditPending}
         csrfFetch={csrfFetch}
@@ -287,7 +298,7 @@ export default function App() {
           />
         }
         center={center}
-        panel={activeRoom ? <SidePanel room={activeRoom} csrfFetch={csrfFetch} initialTab={sidePanelTab} /> : null}
+        panel={activeRoom ? <SidePanel key={`${activeRoom.id}:${sidePanelTab}`} room={activeRoom} csrfFetch={csrfFetch} initialTab={sidePanelTab} /> : null}
         roomsCollapsed={leftCollapsed}
         panelCollapsed={rightCollapsed || !activeRoom}
       />
@@ -300,6 +311,7 @@ export default function App() {
         onOpenChange={(open) => { if (!open) setActiveRunId(undefined); }}
         room={activeRoom}
         runId={activeRunId}
+        onOpenRun={setActiveRunId}
         csrfFetch={csrfFetch}
       />
     </>

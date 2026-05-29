@@ -4,6 +4,7 @@ import { ScrollShadow, Skeleton } from "@heroui/react";
 import type { RoomViewModel } from "../../types.ts";
 import { MessageItem } from "./MessageItem.tsx";
 import { BriefItem } from "./BriefItem.tsx";
+import { TaskStatusCard, type TaskStatusCardModel } from "./TaskStatusCard.tsx";
 import { TypingIndicator } from "./TypingIndicator.tsx";
 import { ConnectionBanner } from "./ConnectionBanner.tsx";
 import { RunBriefToasts } from "./RunBriefToasts.tsx";
@@ -18,6 +19,8 @@ interface ChatStreamProps {
   onPin: (id: string) => void;
   onRegenerate: (id: string) => void;
   onDelete: (id: string) => void;
+  onOpenTask: (taskId: string) => void;
+  onOpenTasks: () => void;
   onCancelPending: (pendingTurnId: string) => void;
   onEditPending: (id: string) => void;
   csrfFetch: typeof fetch;
@@ -27,18 +30,69 @@ interface ChatStreamProps {
 
 type FeedItem =
   | { kind: "message"; id: string; data: ChatStreamProps["room"]["messages"][number] }
-  | { kind: "brief"; id: string; data: ChatStreamProps["room"]["briefs"][number] };
+  | { kind: "brief"; id: string; data: ChatStreamProps["room"]["briefs"][number] }
+  | { kind: "task_status"; id: string; data: TaskStatusCardModel };
+
+export function buildChatFeedItems(room: RoomViewModel): FeedItem[] {
+  return [
+    ...room.messages.map((m) => ({ kind: "message" as const, id: m.id, data: m })),
+    ...room.briefs.map((b, i) => {
+      const taskStatus = taskStatusCardFromBrief(b, room);
+      if (taskStatus) return { kind: "task_status" as const, id: taskStatus.id, data: taskStatus };
+      return { kind: "brief" as const, id: `${b.runId}-${i}`, data: b };
+    }),
+    ...taskStatusCardsFromDelegations(room).map((card) => ({ kind: "task_status" as const, id: card.id, data: card }))
+  ];
+}
+
+function taskStatusCardsFromDelegations(room: RoomViewModel): TaskStatusCardModel[] {
+  return room.tasks.flatMap((task) => {
+    const delegations = task.delegations ?? [];
+    return delegations.map((delegation) => {
+      const payload = objectPayload(delegation.payload);
+      const assigneeRole = stringValue(payload.assigneeRoleName) ?? stringValue(payload.roleName) ?? delegation.assigneeRoleId ?? task.assigneeRoleId ?? "Assignee";
+      const leaderName = stringValue(payload.leaderName) ?? stringValue(payload.dispatcherName) ?? "Leader";
+      const taskTitle = stringValue(payload.taskTitle) ?? task.title;
+      return {
+        id: `task-delegation-${delegation.id}`,
+        summary: stringValue(payload.summary) ?? `${leaderName} dispatched '${taskTitle}' to ${assigneeRole}`,
+        taskId: task.id,
+        taskTitle,
+        assigneeRole,
+        status: delegation.status ?? task.status,
+        actionTarget: "task" as const
+      };
+    });
+  });
+}
+
+function taskStatusCardFromBrief(brief: RoomViewModel["briefs"][number], room: RoomViewModel): TaskStatusCardModel | undefined {
+  if (brief.kind !== "dispatch_started") return undefined;
+  const reviewCount = room.tasks.filter((task) => task.status === "review").length;
+  const summary = reviewCount > 0 ? `${reviewCount} tasks ready for review` : (brief.summary || "Tasks ready for review");
+  return {
+    id: `task-review-${brief.dispatchId ?? brief.runId}`,
+    summary,
+    assigneeRole: "Team",
+    status: "review",
+    actionTarget: "tasks_tab"
+  };
+}
+
+function objectPayload(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
 
 export function ChatStream(props: ChatStreamProps) {
   const { room } = props;
 
   const items = useMemo<FeedItem[]>(() => {
-    const merged: FeedItem[] = [
-      ...room.messages.map((m) => ({ kind: "message" as const, id: m.id, data: m })),
-      ...room.briefs.map((b, i) => ({ kind: "brief" as const, id: `${b.runId}-${i}`, data: b }))
-    ];
-    return merged;
-  }, [room.messages, room.briefs]);
+    return buildChatFeedItems(room);
+  }, [room.messages, room.briefs, room.tasks]);
 
   const parentRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
@@ -158,8 +212,10 @@ export function ChatStream(props: ChatStreamProps) {
                         onEditPending={() => props.onEditPending(item.id)}
                         csrfFetch={props.csrfFetch}
                       />
-                    ) : (
+                    ) : item.kind === "brief" ? (
                       <BriefItem brief={item.data} onOpenRun={props.onOpenRun} />
+                    ) : (
+                      <TaskStatusCard card={item.data} onOpenTask={props.onOpenTask} onOpenTasks={props.onOpenTasks} />
                     )}
                   </div>
                 );

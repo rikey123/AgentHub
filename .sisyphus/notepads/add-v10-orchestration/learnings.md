@@ -198,6 +198,7 @@
 
 - AgentHub web currently has no jsdom/Testing Library dependency; settings UI tests should keep component-contract coverage dependency-free unless the test stack is added deliberately.
 - HeroUI `Modal.Backdrop` renders no useful server string output, so SSR string assertions are not a reliable way to prove modal contents.
+
 - Settings modal bootstrap is REST-only: `GET /roles`, `/runtimes`, `/model-configs`, and `/agent-bindings` run in parallel with one AbortController per open cycle; closing aborts and clears local state.
 - `FeatureRail` Settings should act as an entry point, not a persistent rail tab: call the settings opener and leave the active workbench rail unchanged.
 - Repo-wide/web build typecheck is currently blocked by native-runtime/daemon TS issues outside settings UI; targeted web settings tests pass.
@@ -287,3 +288,24 @@
 - Task completion events that reflect state changes belong inside the same SQLite transaction as the mutation.
 - If delegated status transitions do not create `task_activities` rows, they should not emit `task.activity.added`.
 - Timeout sweeps need to actively dispatch `WakeAgent`; returning wake metadata alone is not enough to resume the leader.
+
+## [2026-05-29T10:16:00Z] Task 4.9 Tasks tab V1.0
+- `TasksPanel` can stay purely projector-driven: derive V1.0 lanes, selected detail, parent/children, and activity timeline from `room.tasks` passed by `SidePanel`; no extra REST or SQLite read is needed.
+- The current web test convention is still dependency-free Vitest contract tests; colocated `TasksPanel.test.tsx` exports and exercises pure helpers rather than adding jsdom/Testing Library mid-wave.
+- HeroUI slide-over pattern matches `RunDetailDrawer`: `Drawer.Backdrop` → `Drawer.Content` → `Drawer.Dialog`; cards should use `Card.Content`, not `Card.Body`.
+- Build/typecheck remain affected by unrelated pre-existing Wave 5 TypeScript debt, but `pnpm.cmd test -- apps/web` passes and LSP diagnostics are clean for the changed TasksPanel files.
+- GitNexus MCP was unavailable (`Not connected`) during the required impact check, so task evidence records the outage and the edit scope stayed limited to the panel/test/evidence/notepad files.
+
+## [2026-05-29T10:14:00Z] Task 4.10 Run Detail task tree
+- Run Detail Tools tab can derive teammate collaboration from existing `room.tasks` delegations plus optional run task-context fields, so `useProjector.ts` did not need to change for this UI task.
+- Sibling run navigation should stay owned by `App`'s `activeRunId`; `RunDetailDrawer` receives an `onOpenRun` callback and passes it to `ToolsTab` instead of trying to mutate props/local drawer state.
+- The repo has no existing task-detail drawer, so the task link opens a small RunDetail-owned HeroUI drawer with task status, assignee, parent task, and source run only.
+- `pnpm.cmd test -- apps/web` is the reliable required verification for web component contracts; `@agenthub/web` build remains blocked by existing test typing and backend workspace errors outside this task.
+- GitNexus MCP was unavailable (`Not connected`) for required impact checks; evidence records the outage and the source scope was kept to Run Detail/Tools tab/types/test files.
+
+## [2026-05-29T10:16:00Z] Task 4.11 TaskStatusCard timeline
+- Main chat timeline composition lives in `apps/web/src/components/chat/ChatStream.tsx`; it can derive non-message feed items from `RoomViewModel` without modifying `useProjector.ts`.
+- `task.delegation.created` is visible in web state as `room.tasks[].delegations`, so dispatch cards can be synthesized from task projector state while raw `task.activities` stay out of the main timeline.
+- `team.dispatch.started` already arrives as a `dispatch_started` brief; rendering that brief as a `TaskStatusCard` keeps review readiness main-visible and avoids adding another projector branch.
+- The side panel tabs are internally uncontrolled; remounting `SidePanel` with a key containing `sidePanelTab` lets card actions force the Tasks tab open from `App`.
+- Current web/package build is blocked by pre-existing TypeScript errors in `useProjector.test.ts` and backend workspace packages, but `pnpm.cmd test -- apps/web` passes and modified files have zero LSP diagnostics.
