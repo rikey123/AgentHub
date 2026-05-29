@@ -78,6 +78,41 @@ export const roomMcpTools: readonly McpToolDefinition[] = [
     }
   },
   {
+    name: "file.read",
+    description: "Read the contents of a file in the workspace",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Relative path to the file within the workspace" }
+      },
+      required: ["path"]
+    }
+  },
+  {
+    name: "file.write",
+    description: "Write content to a file in the workspace (requires permission approval)",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Relative path to the file within the workspace" },
+        content: { type: "string", description: "Content to write to the file" }
+      },
+      required: ["path", "content"]
+    }
+  },
+  {
+    name: "shell",
+    description: "Execute a shell command in the workspace (requires permission approval)",
+    inputSchema: {
+      type: "object",
+      properties: {
+        command: { type: "string", description: "Shell command to execute" },
+        cwd: { type: "string", description: "Working directory for the command (optional)" }
+      },
+      required: ["command"]
+    }
+  },
+  {
     name: "room.spawn_agent",
     description: "Spawn a new agent in the room.",
     inputSchema: {

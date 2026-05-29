@@ -114,7 +114,7 @@ export class NativeAgentAdapter {
     try {
       modelConfig = this.options.getModelConfigForRun?.(run) ?? this.options.modelConfig;
       apiKey = this.options.getApiKeyForRun !== undefined ? await this.options.getApiKeyForRun(run) : this.options.apiKey;
-      const permission = this.checkModelPermission(run, modelConfig);
+      const permission = await this.checkModelPermission(run, modelConfig);
       if (permission.decision !== "allowed") {
         this.failWithPermissionDenied(run, permission.decision);
         return;
@@ -189,7 +189,7 @@ export class NativeAgentAdapter {
     this.permissionCache.clear();
   }
 
-  private checkModelPermission(run: RunRow, modelConfig: ModelConfigRow): { readonly decision: "allowed" | "denied" | "expired" } {
+  private async checkModelPermission(run: RunRow, modelConfig: ModelConfigRow): Promise<{ readonly decision: "allowed" | "denied" | "expired" }> {
     const cacheKey = `${run.id}:${modelConfig.id}`;
     const cached = this.permissionCache.get(cacheKey);
     if (cached) {
@@ -207,7 +207,21 @@ export class NativeAgentAdapter {
       resource
     }) ?? { status: "allow", reason: "default_allow" };
 
-    const decision = decided.status === "allow" ? "allowed" : decided.status === "deny" ? "denied" : "expired";
+    let decision: "allowed" | "denied" | "expired";
+    if (decided.status === "allow") {
+      decision = "allowed";
+    } else if (decided.status === "deny") {
+      decision = "denied";
+    } else if (decided.status === "ask") {
+      this.options.lifecycle.markWaitingPermission(null, run.id, decided.requestId);
+      const resolution = await decided.promise;
+      decision = resolution.decision === "allowed" ? "allowed" : resolution.decision === "denied" ? "denied" : "expired";
+      if (decision === "allowed") {
+        this.options.lifecycle.markRunning(null, run.id, `native-${run.id}`);
+      }
+    } else {
+      decision = "expired";
+    }
     const summary: PermissionDecisionSummary = { resource, decision, modelConfigId: modelConfig.id };
     this.permissionCache.set(cacheKey, { decision, summary });
     const active = this.activeRuns.get(run.id);

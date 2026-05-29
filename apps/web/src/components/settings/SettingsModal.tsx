@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Card, Chip, Modal, ScrollShadow, Skeleton, Tabs } from "@heroui/react";
+import { Button, Card, Chip, Input, Label, Modal, ScrollShadow, Skeleton, Tabs, TextArea, TextField } from "@heroui/react";
 import { ModelsTab, type ModelConfig } from "./ModelsTab.tsx";
 import { RolesTab, type RoleConfig } from "./RolesTab.tsx";
 import { RuntimesTab, type RuntimeConfig } from "./RuntimesTab.tsx";
+import { formatBytes } from "../../lib/format.ts";
 
 export type SettingsTabId = "roles" | "runtimes" | "models" | "permissions" | "workspace" | "mcp";
 
@@ -173,6 +174,7 @@ export function SettingsModal({ isOpen, selectedTab, onTabChange, onOpenChange, 
                       onRolesChange={(roles) => setData((current) => ({ ...current, roles }))}
                       onRuntimesChange={(runtimes) => setData((current) => ({ ...current, runtimes }))}
                       onModelConfigsChange={(configs) => setData((current) => ({ ...current, modelConfigs: configs }))}
+                      onPermissionProfilesChange={(permissionProfiles) => setData((current) => ({ ...current, permissionProfiles }))}
                     />
                   </Tabs.Panel>
                 ))}
@@ -194,7 +196,8 @@ function SettingsPanel({
   fetchImpl,
   onRolesChange,
   onRuntimesChange,
-  onModelConfigsChange
+  onModelConfigsChange,
+  onPermissionProfilesChange
 }: {
   tab: (typeof SETTINGS_TABS)[number];
   loading: boolean;
@@ -205,6 +208,7 @@ function SettingsPanel({
   onRolesChange: (roles: RoleConfig[]) => void;
   onRuntimesChange: (runtimes: RuntimeConfig[]) => void;
   onModelConfigsChange: (configs: ModelConfig[]) => void;
+  onPermissionProfilesChange: (permissionProfiles: unknown) => void;
 }) {
   if (tab.id === "roles" && !loading && !error && data !== undefined) {
     return <RolesTab roles={data} modelConfigs={allData.modelConfigs} fetchImpl={fetchImpl} onRolesChange={onRolesChange} />;
@@ -219,7 +223,7 @@ function SettingsPanel({
   }
 
   if (tab.id === "permissions" && !loading && !error && data !== undefined) {
-    return <PermissionsSettingsTab permissionProfiles={data} />;
+    return <PermissionsSettingsTab permissionProfiles={data} fetchImpl={fetchImpl} onPermissionProfilesChange={onPermissionProfilesChange} />;
   }
 
   if (tab.id === "workspace" && !loading && !error && allData.workspace !== undefined) {
@@ -273,12 +277,64 @@ function PlaceholderState({ tab, data }: { tab: (typeof SETTINGS_TABS)[number]; 
   );
 }
 
-function PermissionsSettingsTab({ permissionProfiles }: { permissionProfiles: unknown }) {
+function PermissionsSettingsTab({ permissionProfiles, fetchImpl, onPermissionProfilesChange }: { permissionProfiles: unknown; fetchImpl: typeof fetch; onPermissionProfilesChange: (permissionProfiles: unknown) => void }) {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [formError, setFormError] = useState<string | undefined>(undefined);
   const profiles = normalizePermissionProfiles(permissionProfiles);
-  if (profiles.length === 0) return <PlaceholderState tab={{ id: "permissions", label: "Permissions" }} data={permissionProfiles} />;
+
+  const createProfile = async () => {
+    if (name.trim().length === 0) return;
+    setCreating(true);
+    setFormError(undefined);
+    try {
+      const response = await fetchImpl("/permissions/profiles", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { accept: "application/json", "content-type": "application/json" },
+        body: JSON.stringify({ name: name.trim(), description: description.trim() })
+      });
+      if (!response.ok) throw new Error(`Create profile failed: ${response.status}`);
+      const created = await response.json() as { readonly profile?: unknown; readonly profiles?: unknown[] };
+      if (created.profile !== undefined) {
+        onPermissionProfilesChange({ profiles: [...profiles, created.profile] });
+      } else {
+        onPermissionProfilesChange({ profiles: Array.isArray(created.profiles) ? created.profiles : profiles });
+      }
+      setName("");
+      setDescription("");
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setCreating(false);
+    }
+  };
 
   return (
     <section className="grid gap-3 p-5" data-testid="settings-panel-permissions">
+      <Card variant="transparent" className="border border-border">
+        <Card.Header>
+          <Card.Title className="text-sm">Create profile</Card.Title>
+          <Card.Description className="text-xs">Create a custom permission profile for agents.</Card.Description>
+        </Card.Header>
+        <Card.Content className="grid gap-3">
+          <TextField value={name} onChange={setName}>
+            <Label className="text-sm font-semibold">Name</Label>
+            <Input placeholder="e.g. Builder Strict Clone" data-testid="permission-profile-name" />
+          </TextField>
+          <TextField value={description} onChange={setDescription}>
+            <Label className="text-sm font-semibold">Description</Label>
+            <TextArea className="min-h-24" placeholder="Explain when to use this profile" data-testid="permission-profile-description" />
+          </TextField>
+          {formError ? <p className="text-xs text-danger" role="alert">{formError}</p> : null}
+          <div>
+            <Button size="sm" variant="primary" isPending={creating} isDisabled={name.trim().length === 0} onPress={() => void createProfile()}>
+              Create Profile
+            </Button>
+          </div>
+        </Card.Content>
+      </Card>
       {profiles.map((profile) => (
         <Card key={profile.id} variant="transparent" className="border border-border">
           <Card.Header>
@@ -302,6 +358,10 @@ function WorkspaceTab({ workspace }: { workspace: unknown }) {
   const rootPath = normalizeWorkspaceRootPath(workspace);
   const workspaceName = typeof workspace === "object" && workspace !== null && typeof (workspace as { readonly name?: unknown }).name === "string" ? (workspace as { readonly name: string }).name : undefined;
   const workspaceId = typeof workspace === "object" && workspace !== null && typeof (workspace as { readonly id?: unknown }).id === "string" ? (workspace as { readonly id: string }).id : undefined;
+  const worktreeMode = readWorkspaceString(workspace, ["worktree_mode", "worktreeMode", "workspace_mode", "workspaceMode"]);
+  const artifactStorage = readWorkspaceString(workspace, ["artifact_storage", "artifactStorage", "artifact_storage_mode", "artifactStorageMode"]) ?? "Artifact storage is managed by the daemon";
+  const attachmentLimit = readWorkspaceNumber(workspace, ["attachment_max_bytes", "attachmentMaxBytes", "attachment_limit_bytes", "attachmentLimitBytes"]);
+  const gcPolicy = readWorkspaceString(workspace, ["gc_policy", "gcPolicy", "attachment_gc_policy", "attachmentGcPolicy"]) ?? "Garbage collection is daemon-managed";
 
   return (
     <section className="grid gap-4 p-5" data-testid="settings-panel-workspace">
@@ -313,6 +373,10 @@ function WorkspaceTab({ workspace }: { workspace: unknown }) {
         <Card.Content className="grid gap-2 text-sm">
           <div><span className="text-muted">Name:</span> {workspaceName ?? workspaceId ?? "Workspace"}</div>
           <div className="ah-mono rounded-xl border border-border bg-surface px-3 py-2 text-xs">{rootPath}</div>
+          <div><span className="text-muted">Worktree mode:</span> {worktreeMode ?? "Not reported"}</div>
+          <div><span className="text-muted">Artifacts:</span> {artifactStorage}</div>
+          <div><span className="text-muted">Attachment limit:</span> {attachmentLimit !== undefined ? formatBytes(attachmentLimit) : "Not reported"}</div>
+          <div><span className="text-muted">GC:</span> {gcPolicy}</div>
         </Card.Content>
       </Card>
     </section>
@@ -363,6 +427,28 @@ function normalizeWorkspaceRootPath(workspace: unknown): string {
   if (typeof record.root_path === "string") return record.root_path;
   if (typeof record.rootPath === "string") return record.rootPath;
   return ".";
+}
+
+function readWorkspaceString(workspace: unknown, keys: readonly string[]): string | undefined {
+  if (!workspace || typeof workspace !== "object") return undefined;
+  const record = workspace as Record<string, unknown>;
+  for (const key of keys) {
+    if (typeof record[key] === "string") return record[key] as string;
+  }
+  return undefined;
+}
+
+function readWorkspaceNumber(workspace: unknown, keys: readonly string[]): number | undefined {
+  if (!workspace || typeof workspace !== "object") return undefined;
+  const record = workspace as Record<string, unknown>;
+  for (const key of keys) {
+    if (typeof record[key] === "number" && Number.isFinite(record[key])) return record[key] as number;
+    if (typeof record[key] === "string" && record[key].trim().length > 0) {
+      const parsed = Number(record[key]);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return undefined;
 }
 
 function extractWorkspaceId(agentBindings: unknown): string | undefined {

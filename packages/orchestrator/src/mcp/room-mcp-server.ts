@@ -1,15 +1,21 @@
 import { randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import * as net from "node:net";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 import type { CommandBus, CommandResult, EventBus } from "@agenthub/bus";
 import type { AgentHubDatabase } from "@agenthub/db";
+import type { PermissionEngine, PermissionResource } from "../../../permissions/src/index.ts";
 
 import { nameToSlug } from "../mention-parser.ts";
 import { MailboxService } from "../mailbox-service.ts";
 import { TaskService, normalizeStatus, normalizeTaskPriority } from "../task-service.ts";
 import { writeTcpMessage, createTcpMessageReader } from "./tcp-helpers.ts";
+
+const execFileAsync = promisify(execFile);
 
 export type RoomMcpToolName = "room.create_task" | "room.update_task" | "room.list_tasks" | "room.read_mailbox" | "room.send_message" | "room.list_members" | "room.spawn_agent" | "room.delegate" | string;
 
@@ -49,7 +55,7 @@ export class RoomMcpServer {
   private readonly authToken = randomUUID();
   private readonly sessionRegistrations = new Map<string, RoomMcpSessionRegistration>();
 
-  constructor(private readonly options: { readonly commandBus: CommandBus; readonly taskService: TaskService; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly now?: () => number }) {}
+  constructor(private readonly options: { readonly commandBus: CommandBus; readonly taskService: TaskService; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly permissionEngine?: PermissionEngine; readonly artifactFs?: { readonly writeTextFile: (input: { readonly runId: string; readonly path: string; readonly content: string }) => void }; readonly now?: () => number }) {}
 
   /**
    * Start the TCP server. Must be called once before getStdioConfig().
@@ -185,6 +191,9 @@ export class RoomMcpServer {
   async callTool(name: RoomMcpToolName, input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext = {}): Promise<RoomMcpToolResult> {
     const registrationFailure = this.validateRegistration(session, context);
     if (registrationFailure !== undefined) return registrationFailure;
+    if (name === "file.read") return this.handleFileRead(input, session);
+    if (name === "file.write") return await this.handleFileWrite(input, session, context);
+    if (name === "shell") return await this.handleShell(input, session, context);
     if (name === "room.create_task") return this.createTask(input, session, context);
     if (name === "room.update_task") return this.updateTask(input, session, context);
     if (name === "room.list_tasks") return { ok: true, data: { tasks: this.options.taskService.list({ roomId: session.roomId }) } };
@@ -194,6 +203,70 @@ export class RoomMcpServer {
     if (name === "room.delegate") return this.handleDelegate(input, session, context);
     if (name === "room.spawn_agent") return this.handleSpawnAgent(input, session, context);
     return toolNotFound(name);
+  }
+
+  private handleFileRead(input: unknown, session: RoomMcpSessionContext): RoomMcpToolResult {
+    const path = isRecord(input) && typeof input.path === "string" ? input.path : undefined;
+    if (!path) return failure("validation_failed", "path is required");
+    const workspaceRoot = this.workspaceRootFor(session.roomId);
+    if (workspaceRoot === undefined) return failure("not_found", `Workspace for room '${session.roomId}' not found`);
+    try {
+      const content = readFileSync(join(workspaceRoot, path), "utf8");
+      return { ok: true, data: { path, content } };
+    } catch (error) {
+      return failure("file_not_found", error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private async handleFileWrite(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): Promise<RoomMcpToolResult> {
+    if (!isRecord(input) || typeof input.path !== "string" || typeof input.content !== "string") return failure("validation_failed", "path and content are required");
+    const permission = this.checkPermission(session, context, { type: "file", path: input.path, operation: "write" });
+    if (!permission.ok) return permission;
+    const workspaceRoot = this.workspaceRootFor(session.roomId);
+    if (workspaceRoot === undefined) return failure("not_found", `Workspace for room '${session.roomId}' not found`);
+    const target = join(workspaceRoot, input.path);
+    mkdirSync(dirname(target), { recursive: true });
+    if (this.options.artifactFs !== undefined) {
+      this.options.artifactFs.writeTextFile({ runId: this.requireRunId(session, context), path: input.path, content: input.content });
+    } else {
+      writeFileSync(target, input.content, "utf8");
+    }
+    return { ok: true, data: { path: input.path, written: true } };
+  }
+
+  private async handleShell(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): Promise<RoomMcpToolResult> {
+    if (!isRecord(input) || typeof input.command !== "string" || input.command.length === 0) return failure("validation_failed", "command is required");
+    const permission = this.checkPermission(session, context, { type: "shell", command: input.command });
+    if (!permission.ok) return permission;
+    const workspaceRoot = this.workspaceRootFor(session.roomId);
+    if (workspaceRoot === undefined) return failure("not_found", `Workspace for room '${session.roomId}' not found`);
+    const cwd = typeof input.cwd === "string" && input.cwd.length > 0 ? join(workspaceRoot, input.cwd) : workspaceRoot;
+    try {
+      const result = await execFileAsync(process.platform === "win32" ? "cmd.exe" : "/bin/sh", process.platform === "win32" ? ["/c", input.command] : ["-lc", input.command], { cwd, timeout: 60_000, windowsHide: true });
+      return { ok: true, data: { stdout: result.stdout, stderr: result.stderr, code: 0 } };
+    } catch (error) {
+      return failure("shell_failed", error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private checkPermission(session: RoomMcpSessionContext, context: RoomMcpCallContext, resource: PermissionResource): RoomMcpToolResult | { readonly ok: true } {
+    const permissionEngine = this.options.permissionEngine;
+    if (!permissionEngine) return { ok: true };
+    const runId = this.requireRunId(session, context);
+    const result = permissionEngine.check({ workspaceId: this.workspaceIdForRoom(session.roomId) ?? "default-workspace", roomId: session.roomId, agentId: session.agentId, runId, ...(context.registration?.adapterSessionId !== undefined ? { adapterSessionId: context.registration.adapterSessionId } : {}), resource });
+    if (result.status === "allow") return { ok: true };
+    if (result.status === "ask") return failure("permission_pending", `Permission request '${result.requestId}' is pending`);
+    return failure("permission_denied", result.reason);
+  }
+
+  private workspaceRootFor(roomId: string): string | undefined {
+    const row = this.options.database.sqlite.prepare("SELECT w.root_path AS root_path FROM rooms r JOIN workspaces w ON w.id = r.workspace_id WHERE r.id = ? AND r.archived_at IS NULL").get(roomId) as { readonly root_path: string | null } | undefined;
+    return row?.root_path ?? undefined;
+  }
+
+  private workspaceIdForRoom(roomId: string): string | undefined {
+    const row = this.options.database.sqlite.prepare("SELECT workspace_id FROM rooms WHERE id = ? AND archived_at IS NULL").get(roomId) as { readonly workspace_id: string } | undefined;
+    return row?.workspace_id;
   }
 
   // ---------------------------------------------------------------------------
