@@ -13,6 +13,7 @@ export type WakeAgentCommand = Command & {
   readonly agentId: string;
   readonly workspaceId: string;
   readonly reason: WakeReason;
+  readonly taskId?: string;
   readonly triggerEventId?: string;
   readonly promptDelta?: AgentPromptDelta;
   readonly targetFiles?: readonly string[];
@@ -104,6 +105,7 @@ function handleWakeAgent(
         agentId: command.agentId,
         roomId: command.roomId,
         workspaceId: command.workspaceId,
+        ...(command.taskId !== undefined ? { taskId: command.taskId } : {}),
         wakeReason: command.reason,
         ...(command.workspaceMode !== undefined ? { workspaceMode: command.workspaceMode } : {}),
         ...(command.parentRunId !== undefined ? { parentRunId: command.parentRunId } : {}),

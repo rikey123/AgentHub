@@ -11,7 +11,7 @@ import { MailboxService } from "../mailbox-service.ts";
 import { TaskService, normalizeStatus, normalizeTaskPriority } from "../task-service.ts";
 import { writeTcpMessage, createTcpMessageReader } from "./tcp-helpers.ts";
 
-export type RoomMcpToolName = "room.create_task" | "room.update_task" | "room.list_tasks" | "room.read_mailbox" | "room.send_message" | "room.list_members" | "room.spawn_agent" | string;
+export type RoomMcpToolName = "room.create_task" | "room.update_task" | "room.list_tasks" | "room.read_mailbox" | "room.send_message" | "room.list_members" | "room.spawn_agent" | "room.delegate" | string;
 
 export type RoomMcpSessionContext = {
   readonly roomId: string;
@@ -191,6 +191,7 @@ export class RoomMcpServer {
     if (name === "room.read_mailbox") return this.handleReadMailbox(input, session, context);
     if (name === "room.send_message") return this.handleSendMessage(input, session, context);
     if (name === "room.list_members") return this.handleListMembers(session);
+    if (name === "room.delegate") return this.handleDelegate(input, session, context);
     if (name === "room.spawn_agent") return this.handleSpawnAgent(input, session, context);
     return toolNotFound(name);
   }
@@ -360,6 +361,89 @@ export class RoomMcpServer {
   // ---------------------------------------------------------------------------
   // Task tools
   // ---------------------------------------------------------------------------
+
+  private handleDelegate(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): RoomMcpToolResult {
+    if (!isRecord(input)) return failure("validation_failed", "input must be an object");
+    const toRoleId = typeof input.toRoleId === "string" && input.toRoleId.trim().length > 0 ? input.toRoleId.trim() : undefined;
+    const title = typeof input.title === "string" && input.title.trim().length > 0 ? input.title.trim() : undefined;
+    if (!toRoleId) return failure("validation_failed", "toRoleId is required");
+    if (!title) return failure("validation_failed", "title is required");
+
+    const description = typeof input.description === "string" && input.description.trim().length > 0 ? input.description.trim() : undefined;
+    const expectsReview = typeof input.expectsReview === "boolean" ? input.expectsReview : false;
+    const runId = this.requireRunId(session, context);
+
+    const room = this.options.database.sqlite
+      .prepare(
+        `SELECT rooms.workspace_id, rooms.leader_role_id, ab.role_id AS caller_role_id
+         FROM rooms
+         INNER JOIN room_participants rp ON rp.room_id = rooms.id AND rp.participant_id = ? AND rp.participant_type = 'agent'
+         LEFT JOIN agent_bindings ab ON ab.id = rp.agent_binding_id
+         WHERE rooms.id = ? AND rooms.archived_at IS NULL`
+      )
+      .get(session.agentId, session.roomId) as { readonly workspace_id: string; readonly leader_role_id: string | null; readonly caller_role_id: string | null } | undefined;
+    if (!room) return failure("not_found", `Room '${session.roomId}' not found`);
+    if (room.leader_role_id === null || room.caller_role_id !== room.leader_role_id) return failure("delegate_requires_leader_role", "delegate_requires_leader_role");
+
+    const now = this.options.now?.() ?? Date.now();
+    let delegateResult: { readonly taskId: string; readonly runId: string } | undefined;
+    let createdTaskId: string | undefined;
+    try {
+      this.options.database.sqlite.transaction(() => {
+        const taskResult = this.options.taskService.createInTransaction({
+          // The delegate flow owns the outer transaction, so call the task service's
+          // no-transaction path here to keep task creation + WakeAgent atomic.
+          roomId: session.roomId,
+          title,
+          ...(description !== undefined ? { description } : {}),
+          assigneeRoleId: toRoleId,
+          expectsReview,
+          sourceRunId: runId,
+          createdBy: session.agentId
+        });
+        if (!taskResult.ok) throw new DelegateAbort(taskResult);
+        createdTaskId = taskResult.data.taskId;
+
+        const dispatched = this.dispatchInternal(
+          {
+            type: "WakeAgent",
+            roomId: session.roomId,
+            agentId: taskResult.data.task.assigneeAgentId ?? session.agentId,
+            workspaceId: room.workspace_id,
+            reason: "delegated_task",
+            taskId: taskResult.data.taskId,
+            promptDelta: { kind: "delta_only", instructions: description !== undefined ? `${title}\n\n${description}` : title },
+            idempotencyKey: `delegate:${runId}:${taskResult.data.taskId}:${randomUUID()}`
+          },
+          session,
+          context
+        );
+        if (isPromiseLike(dispatched)) throw new DelegateAbort(failure("internal_error", "WakeAgent dispatch returned an async result"));
+        if (!dispatched.ok) throw new DelegateAbort(dispatched);
+
+        this.options.eventBus.publish({
+          id: randomUUID(),
+          type: "task.delegation.created",
+          schemaVersion: 1,
+          workspaceId: room.workspace_id,
+          roomId: session.roomId,
+          taskId: taskResult.data.taskId,
+          payload: { taskId: taskResult.data.taskId, byRoleId: room.leader_role_id, atRunId: runId, expectsReview },
+          createdAt: now
+        });
+
+        delegateResult = { taskId: taskResult.data.taskId, runId: (dispatched.data as { readonly runId: string }).runId };
+      })();
+    } catch (error) {
+      if (error instanceof DelegateAbort) {
+        this.options.database.sqlite.prepare("DELETE FROM events WHERE room_id = ? AND type IN ('task.created', 'task.assigned', 'task.delegation.created')").run(session.roomId);
+        return error.result;
+      }
+      throw error;
+    }
+
+    return { ok: true, data: delegateResult as { readonly taskId: string; readonly runId: string } };
+  }
 
   private async createTask(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): Promise<RoomMcpToolResult> {
     if (!isRecord(input) || typeof input.title !== "string" || input.title.length === 0) return failure("validation_failed", "title is required");
@@ -561,6 +645,16 @@ export class RoomMcpServer {
     })();
     return mailboxMessageId;
   }
+}
+
+class DelegateAbort extends Error {
+  constructor(readonly result: RoomMcpToolResult) {
+    super("room.delegate aborted");
+  }
+}
+
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+  return typeof value === "object" && value !== null && typeof (value as { then?: unknown }).then === "function";
 }
 
 function commandResult(result: CommandResult): RoomMcpToolResult {

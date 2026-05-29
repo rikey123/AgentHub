@@ -199,6 +199,12 @@
 
 - `GET /model-configs` currently returns snake_case rows (`base_url`, `api_key_fingerprint`), while create/update requests expect camelCase payload fields (`baseUrl`, `apiKey`); UI helpers should normalize responses defensively but write daemon-native camelCase.
 
+## [2026-05-29T08:04:48Z] Task 4.1 room.delegate
+
+- `room.delegate` now uses the transaction-free `TaskService.createInTransaction()` path inside one outer SQLite transaction so the task insert, WakeAgent dispatch, and `task.delegation.created` publish stay coupled.
+- Delegate failure cleanup must include all delegate-owned task events (`task.created`, `task.assigned`, `task.delegation.created`) when the wake step aborts.
+- `WakeAgent` had to carry `taskId` so the delegated run can bind back to the task row.
+
 ## [2026-05-29T07:14:13Z] Task 4.8 room leader validation
 - `POST /rooms` now requires `leaderRoleId` for `team` and `squad` modes; the daemon returns `400` with `validation_failed` / `squad_mode_requires_leader_role_id` when it is missing.
 - V1.0 room participants can be passed as `{ roleId, runtimeId, modelConfigId? }` and are resolved to `agent_binding_id` before insert; legacy `agentProfileId` compatibility remains unchanged.

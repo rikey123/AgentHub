@@ -105,6 +105,10 @@ export class TaskService {
   constructor(private readonly options: { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly now?: () => number }) {}
 
   create(input: CreateTaskInput): CommandResult<{ readonly task: TaskView; readonly taskId: string }> {
+    return this.options.database.sqlite.transaction(() => this.createInTransaction(input))();
+  }
+
+  createInTransaction(input: CreateTaskInput): CommandResult<{ readonly task: TaskView; readonly taskId: string }> {
     if (input.title.trim().length === 0) return failed("validation_failed", "title is required");
     const room = this.room(input.roomId);
     if (!room) return failed("not_found", `Room '${input.roomId}' not found`);
@@ -123,42 +127,40 @@ export class TaskService {
     const dependencies = JSON.stringify(input.dependencies ?? []);
     const delegationChain = input.delegationChain !== undefined ? JSON.stringify(input.delegationChain) : null;
     const expectsReview = input.expectsReview ?? false;
-    this.options.database.sqlite.transaction(() => {
-      this.options.database.sqlite
-        .prepare(
-          `INSERT INTO tasks (
-            id, workspace_id, room_id, parent_task_id, delegation_chain, title, description, status, assignee_agent_id,
-            assignee_role_id, assignee_binding_id, source_run_id, source_message_id, dependencies, priority, expects_review,
-            due_at, created_by, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .run(
-          taskId,
-          room.workspace_id,
-          input.roomId,
-          input.parentTaskId ?? null,
-          delegationChain,
-          input.title,
-          input.description ?? null,
-          "pending",
-          assigneeAgentId,
-          input.assigneeRoleId ?? null,
-          assigneeBinding?.id ?? input.assigneeBindingId ?? null,
-          input.sourceRunId ?? null,
-          input.sourceMessageId ?? null,
-          dependencies,
-          input.priority ?? null,
-          expectsReview ? 1 : 0,
-          input.dueAt ?? null,
-          input.createdBy,
-          now,
-          now
-        );
-      this.options.eventBus.publish(taskEvent("task.created", room.workspace_id, input.roomId, taskId, { taskId, roomId: input.roomId, title: input.title, parentTaskId: input.parentTaskId, assigneeRoleId: input.assigneeRoleId, assigneeBindingId: assigneeBinding?.id ?? input.assigneeBindingId, assigneeAgentId, expectsReview, sourceRunId: input.sourceRunId, createdBy: input.createdBy }, now));
-      if (assigneeAgentId !== null) {
-        this.options.eventBus.publish(taskEvent("task.assigned", room.workspace_id, input.roomId, taskId, { taskId, prevAssignee: null, newAssignee: assigneeAgentId }, now));
-      }
-    })();
+    this.options.database.sqlite
+      .prepare(
+        `INSERT INTO tasks (
+          id, workspace_id, room_id, parent_task_id, delegation_chain, title, description, status, assignee_agent_id,
+          assignee_role_id, assignee_binding_id, source_run_id, source_message_id, dependencies, priority, expects_review,
+          due_at, created_by, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        taskId,
+        room.workspace_id,
+        input.roomId,
+        input.parentTaskId ?? null,
+        delegationChain,
+        input.title,
+        input.description ?? null,
+        "pending",
+        assigneeAgentId,
+        input.assigneeRoleId ?? null,
+        assigneeBinding?.id ?? input.assigneeBindingId ?? null,
+        input.sourceRunId ?? null,
+        input.sourceMessageId ?? null,
+        dependencies,
+        input.priority ?? null,
+        expectsReview ? 1 : 0,
+        input.dueAt ?? null,
+        input.createdBy,
+        now,
+        now
+      );
+    this.options.eventBus.publish(taskEvent("task.created", room.workspace_id, input.roomId, taskId, { taskId, roomId: input.roomId, title: input.title, parentTaskId: input.parentTaskId, assigneeRoleId: input.assigneeRoleId, assigneeBindingId: assigneeBinding?.id ?? input.assigneeBindingId, assigneeAgentId, expectsReview, sourceRunId: input.sourceRunId, createdBy: input.createdBy }, now));
+    if (assigneeAgentId !== null) {
+      this.options.eventBus.publish(taskEvent("task.assigned", room.workspace_id, input.roomId, taskId, { taskId, prevAssignee: null, newAssignee: assigneeAgentId }, now));
+    }
     const task = this.task(taskId);
     if (!task) return failed("internal_error", `Task '${taskId}' was not persisted`);
     return { ok: true, data: { task: taskView(task), taskId }, emittedEvents: latestTaskEvents(this.options.database, taskId) };
