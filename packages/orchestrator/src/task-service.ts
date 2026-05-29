@@ -205,12 +205,7 @@ export class TaskService {
     const existing = this.task(taskId);
     if (!existing) return failed("not_found", `Task '${taskId}' not found`);
     if (existing.status !== "in_progress" && existing.status !== "review") return this.rejectTransition(existing, "completed", reason);
-    const result = this.updateStatus({ taskId, status: "completed", reason });
-    if (result.ok) {
-      const completedTask = this.task(taskId);
-      if (completedTask) this.options.onTaskCompleted?.(completedTask);
-    }
-    return result;
+    return this.updateStatus({ taskId, status: "completed", reason });
   }
 
   review(taskId: string): CommandResult<{ readonly task: TaskView; readonly taskId: string }> {

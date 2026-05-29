@@ -120,7 +120,12 @@ export class PendingTurnService {
 
   private finishConsume(row: PendingTurnRow, wake: CommandResult): CommandResult {
     if (!wake.ok) {
-      this.options.database.sqlite.prepare("UPDATE pending_turns SET status = 'queued', scheduled_at = NULL WHERE id = ? AND status = 'scheduled'").run(row.id);
+      const now = this.now();
+      const room = this.room(row.room_id);
+      this.options.database.sqlite.transaction(() => {
+        this.options.database.sqlite.prepare("UPDATE pending_turns SET status = 'queued', scheduled_at = NULL WHERE id = ? AND status = 'scheduled'").run(row.id);
+        this.options.eventBus.publish(pendingTurnEvent("pending_turn.cancelled", { ...row, status: "queued" }, room?.workspace_id ?? "default-workspace", { pendingTurnId: row.id, messageId: row.user_message_id, reason: "wake_failed" }, now));
+      })();
       return wake;
     }
     const now = this.now();
