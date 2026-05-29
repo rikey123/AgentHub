@@ -351,3 +351,18 @@
 - For unused destructured values, the smallest lint-safe fix was to rename the binding to a throwaway and explicitly `void` it when the pattern had to stay intact.
 - Replacing `any` with `unknown` worked cleanly in the native agent runtime tests; a tiny local cast to `Record<string, unknown>` kept the helper type-safe without changing behavior.
 - Removing dead imports/parameters was enough for the web and orchestrator files; the existing call sites tolerated the simpler signatures.
+
+## [2026-05-29] Task 6.6 V1.1 planning artifact
+- Created .sisyphus/evidence/task-6.6-v11-plan.md as a standalone planning document; no V1.1 code was added to the V1.0 codebase.
+- V1.1 features (Kanban, Timeline, Topology) all depend on a frozen V1.0 event/projector contract; they must not be scaffolded until V1.0 ships.
+- Key V1.0 prerequisites for V1.1: TaskViewModel with assigneeRoleId/delegationChain/expectsReview/dueAt, task.delegation.created/completed with delegationId, team.dispatch.started/completed with dispatchId, and task.updated with visibility main.
+- Kanban drag-and-drop writes back through room.update_task; optimistic UI vs. wait-for-event is an open design question for V1.1.
+- Topology graph edges are built from replayed delegation events, so the projector replay model must be stable before V1.1 graph work begins.
+- Estimated effort: M (2-3 weeks) assuming V1.0 prerequisites are fully shipped and stable.
+
+## [2026-05-29] Task 6.4 — Browser QA handoff checklist
+- Created two evidence files: 	ask-6.4-user-manual-acceptance-checklist.md (full surface) and 	ask-6.4-squad-team-manual-checklist.md (squad/team focused).
+- The full checklist covers Settings modal (Roles/Runtimes/Models tabs, deep link, URL cleanup), Role Generation (dialog, polling, draft preview, save, cancel), Squad Run (delegate, Tasks tab live update, TaskStatusCard, teammate completion), Team Review (multi-delegate, partial completion gate, review card, approval), Tasks Tab (lane grouping, detail slide-over, activity timeline, live update), and Run Detail collaboration (parent link, siblings, task tree, navigation).
+- The squad/team checklist adds explicit three-way parallel dispatch (A.7), partial-completion leader-does-not-wake (B.3), and rejection/re-delegation path (B.7) as distinct steps.
+- Both checklists include a live-update invariant table mapping each SSE event type to the expected UI reaction, with a three-step debug guide (transaction publish, registry visibility, projector handler) for when refresh is required.
+- Task 6.4 completion requires only checklist creation; user execution is a non-blocking QA handoff.
