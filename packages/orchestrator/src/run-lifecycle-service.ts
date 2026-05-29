@@ -32,6 +32,7 @@ export type WakeReason =
   | "user_mention"
   | "delegated_task"
   | "task_review"
+  | "task_blocked"
   | "rule_review"
   | "knock_approved"
   | "group_review"

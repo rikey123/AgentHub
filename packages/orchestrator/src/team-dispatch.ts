@@ -15,43 +15,41 @@ type TeamDispatchRuntime = {
 
 export async function handleTeamDispatchReviewTerminal(runtime: TeamDispatchRuntime, runId: string): Promise<void> {
   const run = runtime.database.sqlite.prepare("SELECT id, workspace_id, room_id, agent_id, task_id, status FROM runs WHERE id = ?").get(runId) as { readonly id: string; readonly workspace_id: string; readonly room_id: string; readonly agent_id: string; readonly task_id: string | null; readonly status: string } | undefined;
-  if (run === undefined || run.status !== "completed" || run.task_id === null) return;
+  if (run === undefined || run.task_id === null) return;
 
   const task = runtime.database.sqlite.prepare("SELECT * FROM tasks WHERE id = ?").get(run.task_id) as TaskRow | undefined;
   if (task === undefined || task.expects_review === 0) return;
-  if (task.status !== "pending" && task.status !== "in_progress") return;
-
-  const updated = runtime.taskService.review(task.id);
-  if (!updated.ok) return;
 
   const scope = taskDispatchScope(task);
   if (scope === undefined) return;
 
-  const taskIds = teamDispatchTaskIds(runtime.database, task.room_id, scope);
-  if (taskIds.length === 0) return;
-
-  const pendingCount = teamDispatchPendingCount(runtime.database, task.room_id, scope);
-  if (pendingCount > 0) return;
+  const siblingState = teamDispatchSiblingState(runtime.database, task.room_id, scope);
+  if (siblingState.taskIds.length === 0) return;
 
   const alreadyStarted = teamDispatchEventCount(runtime.database, task.room_id, "team.dispatch.started", scope) > 0;
   if (alreadyStarted) return;
 
+  if (siblingState.pendingCount > 0) return;
+
   const room = runtime.database.sqlite.prepare("SELECT workspace_id, primary_agent_id FROM rooms WHERE id = ?").get(task.room_id) as { readonly workspace_id: string; readonly primary_agent_id: string | null } | undefined;
   if (room === undefined || room.primary_agent_id === null) return;
 
-  const prompt = `All delegated tasks are ready for review: ${taskIds.join(", ")}`;
+  const wakeReason = siblingState.blockedCount > 0 ? "task_blocked" : "task_review";
+  const prompt = wakeReason === "task_blocked"
+    ? `A delegated task is blocked: ${siblingState.taskIds.join(", ")}`
+    : `All delegated tasks are ready for review: ${siblingState.taskIds.join(", ")}`;
   const wakeResult = await Promise.resolve(runtime.commandBus.dispatch(
     {
       type: "WakeAgent",
       roomId: task.room_id,
       agentId: room.primary_agent_id,
       workspaceId: room.workspace_id,
-      reason: "task_review",
+      reason: wakeReason,
       taskId: task.id,
       promptDelta: { kind: "delta_only", instructions: prompt },
-      idempotencyKey: `team-dispatch:${scope.kind}:${scope.value}:review`
+      idempotencyKey: `team-dispatch:${scope.kind}:${scope.value}:${wakeReason}`
     },
-    { actor: { type: "system" }, traceId: `team-dispatch:${runId}:${task.id}`, idempotencyKey: `team-dispatch:${scope.kind}:${scope.value}:review`, origin: "internal" }
+    { actor: { type: "system" }, traceId: `team-dispatch:${runId}:${task.id}`, idempotencyKey: `team-dispatch:${scope.kind}:${scope.value}:${wakeReason}`, origin: "internal" }
   ));
   if (!wakeResult.ok) return;
 
@@ -67,7 +65,7 @@ export async function handleTeamDispatchReviewTerminal(runtime: TeamDispatchRunt
     runId: leaderRunId,
     agentId: room.primary_agent_id,
     taskId: task.id,
-    payload: { leaderRunId, targetTaskIds: taskIds, sourceRunId: scope.value },
+    payload: { leaderRunId, targetTaskIds: siblingState.taskIds, sourceRunId: scope.value },
     createdAt: runtime.now?.() ?? Date.now()
   });
 }
@@ -113,11 +111,18 @@ function teamDispatchTaskIds(database: AgentHubDatabase, roomId: string, scope: 
   return rows.map((row) => row.id);
 }
 
-function teamDispatchPendingCount(database: AgentHubDatabase, roomId: string, scope: TeamDispatchScope): number {
+function teamDispatchSiblingState(database: AgentHubDatabase, roomId: string, scope: TeamDispatchScope): { readonly taskIds: readonly string[]; readonly pendingCount: number; readonly blockedCount: number } {
   const sql = scope.kind === "parent_task_id"
-    ? "SELECT COUNT(*) AS count FROM tasks WHERE room_id = ? AND parent_task_id = ? AND expects_review = 1 AND status NOT IN ('review', 'completed', 'cancelled')"
-    : "SELECT COUNT(*) AS count FROM tasks WHERE room_id = ? AND source_run_id = ? AND parent_task_id IS NULL AND expects_review = 1 AND status NOT IN ('review', 'completed', 'cancelled')";
-  return (database.sqlite.prepare(sql).get(roomId, scope.value) as { readonly count: number }).count;
+    ? "SELECT id, status FROM tasks WHERE room_id = ? AND parent_task_id = ? AND expects_review = 1 ORDER BY created_at ASC, id ASC"
+    : "SELECT id, status FROM tasks WHERE room_id = ? AND source_run_id = ? AND parent_task_id IS NULL AND expects_review = 1 ORDER BY created_at ASC, id ASC";
+  const rows = database.sqlite.prepare(sql).all(roomId, scope.value) as Array<{ readonly id: string; readonly status: string }>;
+  let pendingCount = 0;
+  let blockedCount = 0;
+  for (const row of rows) {
+    if (row.status === "blocked") blockedCount += 1;
+    if (row.status === "pending" || row.status === "in_progress") pendingCount += 1;
+  }
+  return { taskIds: rows.map((row) => row.id), pendingCount, blockedCount };
 }
 
 function teamDispatchAllCompleted(database: AgentHubDatabase, roomId: string, scope: TeamDispatchScope): boolean {

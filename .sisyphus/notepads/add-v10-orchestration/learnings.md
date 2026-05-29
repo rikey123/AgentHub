@@ -69,6 +69,13 @@
 - The daemon’s role-generation job response shape is `draftJson`; the web modal should not expect `draft`, `roleDraft`, or `result`.
 - Failed role-generation cleanup is easiest to regression-test when the cleanup logic is factored into a helper that can be called directly.
 
+## [2026-05-29T09:26:45Z] Task 4.4 sibling completion gate
+- Tightened `packages/orchestrator/src/team-dispatch.ts` so the terminal hook waits when any sibling is still `pending`/`in_progress`, wakes the leader only once when the group is ready, and uses `task_blocked` when any sibling is blocked.
+- Kept idempotency on the `team.dispatch.started` / `team.dispatch.completed` event checks so duplicate terminal notifications do not double-wake the leader.
+- Updated the team-mode regression tests to assert the leader wake count by reason, not by counting the normal delegated-task wake calls from `room.delegate`.
+- Verified with `pnpm.cmd test -- packages/orchestrator` after the fix; all orchestrator tests pass.
+- Captured task evidence in `.sisyphus/evidence/task-4.4-sibling-partial-no-wake.md` and `.sisyphus/evidence/task-4.4-sibling-idempotent.md`.
+
 ## [2026-05-29T02:32:02Z] Task 1.1
 - Implemented REST role CRUD directly in `packages/daemon/src/index.ts` with same-transaction durable publishes for `role.created`, `role.updated`, and `role.deleted`.
 - Added a response normalizer so role API replies decode stored JSON strings for `capabilities` and `tags` before returning them to clients.

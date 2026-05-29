@@ -201,6 +201,12 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
       onRunCompleted: (runId: string) => {
         const run = database.sqlite.prepare("SELECT task_id, workspace_id, room_id, wake_reason FROM runs WHERE id = ?").get(runId) as { readonly task_id: string | null; readonly workspace_id: string; readonly room_id: string; readonly wake_reason: string | null } | undefined;
         if (!run?.task_id || run.wake_reason !== "delegated_task") return;
+        const task = taskService.read(run.task_id);
+        if (task.expectsReview) {
+          const reviewResult = taskService.review(run.task_id);
+          if (!reviewResult.ok) return;
+          return;
+        }
         const taskResult = taskService.completeDelegatedRun(run.task_id, runId);
         if (!taskResult.ok) return;
         appendTaskMailboxWake(run.workspace_id, run.room_id, run.task_id, runId, "task_completed");
@@ -210,6 +216,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
         if (!run?.task_id || run.wake_reason !== "delegated_task") return;
         const taskResult = taskService.blockDelegatedRun(run.task_id, runId);
         if (!taskResult.ok) return;
+        if (taskResult.data.task.expectsReview) return;
         appendTaskMailboxWake(run.workspace_id, run.room_id, run.task_id, runId, "task_blocked");
       }
     };
