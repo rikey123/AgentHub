@@ -26,3 +26,9 @@
 - Verification commands passed: `pnpm.cmd test -- packages/daemon apps/web` and `pnpm.cmd check:all`.
 - Key blocker: daemon returns completed role generation drafts as `draftJson`, but `RoleGeneratorModal.normalizeRoleGenerationJob` only reads `draft`, `roleDraft`, or `result`, so the real UI treats completed jobs as failure.
 - Secondary blocker: role generation failure path updates `role_drafts.status='failed'` and leaves the row, while the spec scenario expects failed jobs to be cleaned without generation events.
+
+## 2026-05-29T09:38:31.6874542+08:00 Wave 5 oracle review
+- REJECTED: required check:all fails because events:check treats MCP tool literal room.delegate as an event and reports it missing from the canonical registry.
+- Delegate rollback path manually deletes task events by room/type, which can erase unrelated durable replay history after a failed delegation; rely on transaction rollback instead.
+- Delegated completion event is published outside the task status transaction, and delegated status activities emit task.activity.added without task_activities inserts.
+- Timeout sweep returns leader wake intents but daemon timer ignores them, so stale task blocking does not actually WakeAgent.
