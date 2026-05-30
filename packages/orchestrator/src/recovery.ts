@@ -1,6 +1,8 @@
 import type { AgentHubDatabase } from "@agenthub/db";
+import type { EventBus } from "@agenthub/bus";
 
 import { RunLifecycleService, type RunRow } from "./run-lifecycle-service.ts";
+import { TaskService, type TaskStatus } from "./task-service.ts";
 
 export type CrashRecoveryMode = "resumable" | "restartable" | "fail_run";
 
@@ -10,6 +12,23 @@ export type ReclaimAdapter = {
 };
 
 export type ReclaimAdapterResolver = (run: RunRow) => ReclaimAdapter | undefined;
+
+export type TerminalDelegatedTaskRunReconciliation = {
+  readonly checkedRunIds: readonly string[];
+  readonly reviewDispatchRunIds: readonly string[];
+  readonly reviewedTaskIds: readonly string[];
+  readonly completedTaskIds: readonly string[];
+  readonly blockedTaskIds: readonly string[];
+};
+
+type TerminalDelegatedTaskRunRow = {
+  readonly run_id: string;
+  readonly run_status: "completed" | "failed";
+  readonly task_id: string;
+  readonly task_status: TaskStatus;
+  readonly expects_review: number;
+  readonly room_mode: string;
+};
 
 export class StartupRecovery {
   constructor(
@@ -40,6 +59,71 @@ export class StartupRecovery {
       }
     }
   }
+}
+
+export function reconcileTerminalDelegatedTaskRuns(input: { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly taskService: TaskService; readonly now?: () => number }): TerminalDelegatedTaskRunReconciliation {
+  const rows = input.database.sqlite
+    .prepare(
+      `SELECT r.id AS run_id,
+              r.status AS run_status,
+              r.task_id AS task_id,
+              t.status AS task_status,
+              t.expects_review AS expects_review,
+              rooms.mode AS room_mode
+       FROM runs r
+       INNER JOIN tasks t ON t.id = r.task_id
+       INNER JOIN rooms ON rooms.id = t.room_id
+       WHERE r.wake_reason = 'delegated_task'
+         AND r.status IN ('completed', 'failed')
+         AND t.status IN ('pending', 'in_progress')
+       ORDER BY COALESCE(r.ended_at, r.updated_at), r.id`
+    )
+    .all() as TerminalDelegatedTaskRunRow[];
+
+  const checkedRunIds: string[] = [];
+  const reviewDispatchRunIds: string[] = [];
+  const reviewedTaskIds: string[] = [];
+  const completedTaskIds: string[] = [];
+  const blockedTaskIds: string[] = [];
+  const now = input.now?.() ?? Date.now();
+
+  for (const row of rows) {
+    checkedRunIds.push(row.run_id);
+    const requiresReview = row.room_mode === "team" || row.expects_review !== 0;
+    if (row.room_mode === "team" && row.expects_review === 0) {
+      input.database.sqlite.prepare("UPDATE tasks SET expects_review = 1, updated_at = ? WHERE id = ? AND expects_review = 0").run(now, row.task_id);
+    }
+
+    if (row.task_status === "pending") {
+      input.taskService.startDelegatedRun(row.task_id, row.run_id);
+    }
+
+    if (row.run_status === "completed") {
+      if (requiresReview) {
+        const review = input.taskService.review(row.task_id);
+        if (review.ok) {
+          pushUnique(reviewedTaskIds, row.task_id);
+          pushUnique(reviewDispatchRunIds, row.run_id);
+        }
+        continue;
+      }
+      const completed = input.taskService.completeDelegatedRun(row.task_id, row.run_id);
+      if (completed.ok) pushUnique(completedTaskIds, row.task_id);
+      continue;
+    }
+
+    const blocked = input.taskService.blockDelegatedRun(row.task_id, row.run_id);
+    if (blocked.ok) {
+      pushUnique(blockedTaskIds, row.task_id);
+      if (requiresReview) pushUnique(reviewDispatchRunIds, row.run_id);
+    }
+  }
+
+  return { checkedRunIds, reviewDispatchRunIds, reviewedTaskIds, completedTaskIds, blockedTaskIds };
+}
+
+function pushUnique(target: string[], value: string): void {
+  if (!target.includes(value)) target.push(value);
 }
 
 export class ReclaimStaleClaimedRun {

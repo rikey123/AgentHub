@@ -333,6 +333,43 @@ describe("daemon M1.4 composition", () => {
     await seededDaemon.close();
   });
 
+  it("reconciles terminal delegated task statuses on startup", async () => {
+    await daemon.close();
+    currentDaemon = undefined;
+    const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-task-reconcile-"));
+    const databasePath = join(dir, "agenthub.sqlite");
+    const seeded = createDatabase({ path: databasePath, applyMigrations: true });
+    try {
+      seeded.sqlite.transaction(() => {
+        seeded.sqlite.prepare("INSERT INTO workspaces (id, name, root_path, created_at, updated_at) VALUES ('ws_reconcile', 'Workspace', '.', 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO roles (id, workspace_id, name, prompt, capabilities, is_builtin, created_at, updated_at) VALUES ('role_leader_reconcile', 'ws_reconcile', 'Leader', '', '[]', 0, 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO roles (id, workspace_id, name, prompt, capabilities, is_builtin, created_at, updated_at) VALUES ('role_builder_reconcile', 'ws_reconcile', 'Builder', '', '[]', 0, 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES ('agent_leader_reconcile', 'ws_reconcile', 'Leader', 'mock', NULL, '', '{}', NULL, 0, NULL, 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES ('agent_builder_reconcile', 'ws_reconcile', 'Builder', 'mock', NULL, '', '{}', NULL, 0, NULL, 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES ('binding_leader_reconcile', 'ws_reconcile', 'role_leader_reconcile', 'runtime_1', NULL, NULL, 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES ('binding_builder_reconcile', 'ws_reconcile', 'role_builder_reconcile', 'runtime_1', NULL, NULL, 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, leader_role_id, archived_at, created_at, updated_at) VALUES ('room_reconcile_startup', 'ws_reconcile', 'Team', 'team', 'conversation', 'agent_leader_reconcile', 'role_leader_reconcile', NULL, 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES ('room_reconcile_startup', 'agent_leader_reconcile', 'agent', 'primary', 'mock', NULL, 'binding_leader_reconcile', 'active', 1)").run();
+        seeded.sqlite.prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES ('room_reconcile_startup', 'agent_builder_reconcile', 'agent', 'teammate', 'mock', NULL, 'binding_builder_reconcile', 'active', 1)").run();
+        seeded.sqlite.prepare("INSERT INTO tasks (id, workspace_id, room_id, parent_task_id, delegation_chain, title, description, status, assignee_agent_id, assignee_role_id, assignee_binding_id, source_run_id, source_message_id, dependencies, priority, expects_review, due_at, created_by, created_at, updated_at) VALUES ('task_reconcile_a', 'ws_reconcile', 'room_reconcile_startup', NULL, NULL, 'A', NULL, 'pending', 'agent_builder_reconcile', 'role_builder_reconcile', 'binding_builder_reconcile', 'run_source_reconcile', NULL, '[]', NULL, 0, NULL, 'agent_leader_reconcile', 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO tasks (id, workspace_id, room_id, parent_task_id, delegation_chain, title, description, status, assignee_agent_id, assignee_role_id, assignee_binding_id, source_run_id, source_message_id, dependencies, priority, expects_review, due_at, created_by, created_at, updated_at) VALUES ('task_reconcile_b', 'ws_reconcile', 'room_reconcile_startup', NULL, NULL, 'B', NULL, 'pending', 'agent_builder_reconcile', 'role_builder_reconcile', 'binding_builder_reconcile', 'run_source_reconcile', NULL, '[]', NULL, 0, NULL, 'agent_leader_reconcile', 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO runs (id, workspace_id, task_id, room_id, agent_id, adapter_id, adapter_session_id, provider_conversation_id, parent_run_id, status, wake_reason, waiting_reason, workspace_path, work_dir, workspace_mode, context_version, target_files, mailbox_claim_count, pid_at_start, claimed_at, started_at, ended_at, input_tokens, output_tokens, cached_tokens, cost_usd, model_id, failure_class, error, created_at, updated_at) VALUES ('run_reconcile_a', 'ws_reconcile', 'task_reconcile_a', 'room_reconcile_startup', 'agent_builder_reconcile', 'mock', NULL, NULL, NULL, 'completed', 'delegated_task', NULL, NULL, NULL, NULL, NULL, '[]', 0, NULL, NULL, 2, 3, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1, 3)").run();
+        seeded.sqlite.prepare("INSERT INTO runs (id, workspace_id, task_id, room_id, agent_id, adapter_id, adapter_session_id, provider_conversation_id, parent_run_id, status, wake_reason, waiting_reason, workspace_path, work_dir, workspace_mode, context_version, target_files, mailbox_claim_count, pid_at_start, claimed_at, started_at, ended_at, input_tokens, output_tokens, cached_tokens, cost_usd, model_id, failure_class, error, created_at, updated_at) VALUES ('run_reconcile_b', 'ws_reconcile', 'task_reconcile_b', 'room_reconcile_startup', 'agent_builder_reconcile', 'mock', NULL, NULL, NULL, 'completed', 'delegated_task', NULL, NULL, NULL, NULL, NULL, '[]', 0, NULL, NULL, 2, 4, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1, 4)").run();
+      })();
+    } finally {
+      seeded.sqlite.close();
+    }
+
+    const seededDaemon = createDaemon({ databasePath, port: 0, modelTestFetch: modelTestFetchMock, now: () => 500 });
+    await seededDaemon.start();
+
+    expect(seededDaemon.database.sqlite.prepare("SELECT status, expects_review FROM tasks WHERE id = 'task_reconcile_a'").get()).toMatchObject({ status: "review", expects_review: 1 });
+    expect(seededDaemon.database.sqlite.prepare("SELECT status, expects_review FROM tasks WHERE id = 'task_reconcile_b'").get()).toMatchObject({ status: "review", expects_review: 1 });
+    expect(seededDaemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'team.dispatch.started' AND json_extract(payload, '$.sourceRunId') = 'run_source_reconcile'").get()).toMatchObject({ count: 1 });
+
+    await seededDaemon.close();
+  });
+
   it("runs hourly role draft GC and stops on cleanup", async () => {
     const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-role-drafts-gc-"));
     const databasePath = join(dir, "agenthub.sqlite");

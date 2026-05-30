@@ -7,12 +7,13 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import type { CommandBus, CommandResult, EventBus } from "@agenthub/bus";
+import type { CommandErrorCode } from "@agenthub/bus";
 import type { AgentHubDatabase } from "@agenthub/db";
 import type { PermissionEngine, PermissionResource } from "../../../permissions/src/index.ts";
 
 import { nameToSlug } from "../mention-parser.ts";
 import { MailboxService } from "../mailbox-service.ts";
-import { TaskService, normalizeStatus, normalizeTaskPriority } from "../task-service.ts";
+import { TaskService, normalizeStatus, normalizeTaskPriority, type TaskRow } from "../task-service.ts";
 import { writeTcpMessage, createTcpMessageReader } from "./tcp-helpers.ts";
 
 const execFileAsync = promisify(execFile);
@@ -354,9 +355,11 @@ export class RoomMcpServer {
   private handleListMembers(session: RoomMcpSessionContext): RoomMcpToolResult {
     const rows = this.options.database.sqlite
       .prepare(
-        `SELECT rp.participant_id AS agentId, rp.role, ap.name, ap.adapter_id AS adapterId,
+        `SELECT rp.participant_id AS agentId, rp.role, rp.agent_binding_id AS bindingId, ab.role_id AS roleId, COALESCE(ap.name, r.name) AS name, ap.adapter_id AS adapterId,
                 COALESCE(ap2.state, 'offline') AS presence
          FROM room_participants rp
+         LEFT JOIN agent_bindings ab ON ab.id = rp.agent_binding_id
+         LEFT JOIN roles r ON r.id = ab.role_id
          LEFT JOIN agent_profiles ap ON ap.id = rp.participant_id
          LEFT JOIN agent_presence ap2 ON ap2.room_id = rp.room_id AND ap2.agent_id = rp.participant_id
          WHERE rp.room_id = ? AND rp.participant_type = 'agent'
@@ -365,6 +368,8 @@ export class RoomMcpServer {
       .all(session.roomId) as {
         readonly agentId: string;
         readonly role: string;
+        readonly bindingId: string | null;
+        readonly roleId: string | null;
         readonly name: string | null;
         readonly adapterId: string | null;
         readonly presence: string;
@@ -375,6 +380,8 @@ export class RoomMcpServer {
       name: row.name ?? row.agentId,
       slug: row.name ? nameToSlug(row.name) : row.agentId,
       role: row.role,
+      ...(row.roleId !== null ? { roleId: row.roleId } : {}),
+      ...(row.bindingId !== null ? { bindingId: row.bindingId } : {}),
       adapterId: row.adapterId ?? "unknown",
       presence: row.presence,
       isSelf: row.agentId === session.agentId,
@@ -496,10 +503,11 @@ export class RoomMcpServer {
 
   private handleDelegate(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): RoomMcpToolResult {
     if (!isRecord(input)) return failure("validation_failed", "input must be an object");
+    const taskId = typeof input.taskId === "string" && input.taskId.trim().length > 0 ? input.taskId.trim() : undefined;
     const toRoleId = typeof input.toRoleId === "string" && input.toRoleId.trim().length > 0 ? input.toRoleId.trim() : undefined;
     const title = typeof input.title === "string" && input.title.trim().length > 0 ? input.title.trim() : undefined;
-    if (!toRoleId) return failure("validation_failed", "toRoleId is required");
-    if (!title) return failure("validation_failed", "title is required");
+    if (taskId === undefined && !toRoleId) return failure("validation_failed", "toRoleId is required");
+    if (taskId === undefined && !title) return failure("validation_failed", "title is required");
 
     const description = typeof input.description === "string" && input.description.trim().length > 0 ? input.description.trim() : undefined;
     const parentTaskId = typeof input.parentTaskId === "string" && input.parentTaskId.trim().length > 0 ? input.parentTaskId.trim() : undefined;
@@ -519,26 +527,27 @@ export class RoomMcpServer {
     if (room.leader_role_id === null || room.caller_role_id !== room.leader_role_id) return failure("delegate_requires_leader_role", "delegate_requires_leader_role");
 
     const now = this.options.now?.() ?? Date.now();
-    const effectiveExpectsReview = expectsReview ?? (room.mode === "team");
+    const effectiveExpectsReview = room.mode === "team" ? true : expectsReview ?? false;
     let delegateResult: { readonly taskId: string; readonly runId: string } | undefined;
     try {
       this.options.database.sqlite.transaction(() => {
-        const taskResult = this.options.taskService.createInTransaction({
-          // The delegate flow owns the outer transaction, so call the task service's
-          // no-transaction path here to keep task creation + WakeAgent atomic.
-          roomId: session.roomId,
-          title,
-          ...(parentTaskId !== undefined ? { parentTaskId } : {}),
-          ...(description !== undefined ? { description } : {}),
-          assigneeRoleId: toRoleId,
-          expectsReview: effectiveExpectsReview,
-          sourceRunId: runId,
-          createdBy: session.agentId
-        });
-        if (!taskResult.ok) {
-          if (taskResult.error.code === "delegation_too_deep" || taskResult.error.code === "delegation_duplicate") throw new DelegateAbort(taskResult);
-          throw new DelegateAbort(taskResult);
-        }
+        const taskResult = taskId !== undefined
+          ? this.existingTaskForDelegate(taskId, session.roomId, effectiveExpectsReview, runId)
+          : this.options.taskService.createInTransaction({
+              // The delegate flow owns the outer transaction, so call the task service's
+              // no-transaction path here to keep task creation + WakeAgent atomic.
+              roomId: session.roomId,
+              title: title as string,
+              ...(parentTaskId !== undefined ? { parentTaskId } : {}),
+              ...(description !== undefined ? { description } : {}),
+              assigneeRoleId: toRoleId as string,
+              expectsReview: effectiveExpectsReview,
+              sourceRunId: runId,
+              createdBy: session.agentId
+            });
+        if (!taskResult.ok) throw new DelegateAbort(taskResult);
+        const delegatedTitle = taskResult.data.task.title;
+        const delegatedDescription = taskResult.data.task.description;
         const dispatched = this.dispatchInternal(
           {
             type: "WakeAgent",
@@ -547,7 +556,7 @@ export class RoomMcpServer {
             workspaceId: room.workspace_id,
             reason: "delegated_task",
             taskId: taskResult.data.taskId,
-            promptDelta: { kind: "delta_only", instructions: description !== undefined ? `${title}\n\n${description}` : title },
+            promptDelta: { kind: "delta_only", instructions: delegatedDescription !== undefined ? `${delegatedTitle}\n\n${delegatedDescription}` : delegatedTitle },
             idempotencyKey: `delegate:${runId}:${taskResult.data.taskId}:${randomUUID()}`
           },
           session,
@@ -575,6 +584,33 @@ export class RoomMcpServer {
     }
 
     return { ok: true, data: delegateResult as { readonly taskId: string; readonly runId: string } };
+  }
+
+  private existingTaskForDelegate(
+    taskId: string,
+    roomId: string,
+    expectsReview: boolean,
+    sourceRunId: string
+  ): CommandResult<{ readonly task: import("../task-service.ts").TaskView; readonly taskId: string }> {
+    const existing = this.options.database.sqlite.prepare("SELECT * FROM tasks WHERE id = ? AND room_id = ?").get(taskId, roomId) as TaskRow | undefined;
+    if (existing === undefined) return commandFailure("not_found", `Task '${taskId}' not found`);
+    if (existing.status !== "pending") return commandFailure("conflict", "only pending tasks can be delegated");
+    if (existing.assignee_agent_id === null) return commandFailure("validation_failed", "task has no assignee");
+    const assignee = this.options.database.sqlite
+      .prepare(
+        `SELECT rp.agent_binding_id AS bindingId, ab.role_id AS roleId
+         FROM room_participants rp
+         LEFT JOIN agent_bindings ab ON ab.id = rp.agent_binding_id
+         WHERE rp.room_id = ? AND rp.participant_id = ? AND rp.participant_type = 'agent'
+         LIMIT 1`
+      )
+      .get(roomId, existing.assignee_agent_id) as { readonly bindingId: string | null; readonly roleId: string | null } | undefined;
+    this.options.database.sqlite
+      .prepare("UPDATE tasks SET expects_review = ?, source_run_id = ?, assignee_role_id = COALESCE(assignee_role_id, ?), assignee_binding_id = COALESCE(assignee_binding_id, ?), updated_at = ? WHERE id = ?")
+      .run(expectsReview ? 1 : 0, sourceRunId, assignee?.roleId ?? null, assignee?.bindingId ?? null, this.options.now?.() ?? Date.now(), taskId);
+    const task = this.options.taskService.list({ roomId }).find((item) => item.id === taskId);
+    if (task === undefined) return commandFailure("internal_error", `Task '${taskId}' was not persisted`);
+    return { ok: true, data: { task, taskId }, emittedEvents: [] };
   }
 
   private async createTask(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): Promise<RoomMcpToolResult> {
@@ -782,7 +818,7 @@ export class RoomMcpServer {
 }
 
 class DelegateAbort extends Error {
-  constructor(readonly result: RoomMcpToolResult) {
+  constructor(readonly result: RoomMcpToolResult | CommandResult) {
     super("room.delegate aborted");
   }
 }
@@ -802,6 +838,10 @@ function toolNotFound(name: string): RoomMcpToolResult {
 
 function failure(code: string, message: string): RoomMcpToolResult {
   return { ok: false, error: { code, message } };
+}
+
+function commandFailure<T>(code: CommandErrorCode, message: string, details?: unknown): CommandResult<T> {
+  return { ok: false, error: { code, message, ...(details !== undefined ? { details } : {}) } };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -18,6 +18,13 @@ test-results/
 *.db
 *.db-shm
 *.db-wal
+*.db-journal
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite-journal
+*.sqlite3-shm
+*.sqlite3-wal
+*.sqlite3-journal
 *.log
 logs/
 tmp/
@@ -27,17 +34,48 @@ temp
 # Secrets and local machine config
 .env
 .env.*
+.env.local
+.env.*.local
+.envrc
+*.local.env
+*.env.local
 !.env.example
+!.env.sample
+!.env.template
+*.secret
+*.secrets
+*.token
+*.credentials
+credentials/
+secrets/
+*.crt
+*.cert
+*.cer
+*.p12
+*.pfx
 *.pem
 *.key
 id_rsa
 id_ed25519
+.aws/
+.gcp/
+.ssh/
+.netrc
+.npmrc.local
+.local.env
+.local.json
+.local.yaml
+.local.yml
+.local.toml
 
 # OS / editor noise
 .DS_Store
 Thumbs.db
 *.swp
 *.swo
+.idea/
+.vscode/
+.direnv/
 
 # Tool-local private settings
 .claude/settings.local.json

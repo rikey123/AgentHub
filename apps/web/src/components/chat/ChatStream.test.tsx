@@ -1,10 +1,9 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { RoomViewModel } from "../../types.ts";
 import { buildChatFeedItems } from "./ChatStream.tsx";
-import { TaskStatusCard, type TaskStatusCardModel } from "./TaskStatusCard.tsx";
 
-describe("TaskStatusCard timeline integration", () => {
-  it("creates a dispatch card from projector task delegation state", () => {
+describe("ChatStream task notification feed", () => {
+  it("keeps delegated task updates out of the main chat feed", () => {
     const room = roomFixture({
       tasks: [
         {
@@ -28,20 +27,10 @@ describe("TaskStatusCard timeline integration", () => {
       ]
     });
 
-    const cards = buildChatFeedItems(room).filter((item) => item.kind === "task_status");
-
-    expect(cards).toHaveLength(1);
-    expect(cards[0]?.data).toMatchObject({
-      summary: "Lead dispatched 'Stabilize worker retries' to Builder",
-      taskId: "task-1",
-      taskTitle: "Stabilize worker retries",
-      assigneeRole: "Builder",
-      status: "created",
-      actionTarget: "task"
-    });
+    expect(buildChatFeedItems(room)).toEqual([]);
   });
 
-  it("creates a review-ready card from dispatch started brief and links to Tasks tab", () => {
+  it("keeps team dispatch briefs out of the main chat feed", () => {
     const room = roomFixture({
       briefs: [
         {
@@ -51,6 +40,14 @@ describe("TaskStatusCard timeline integration", () => {
           agentId: "agent-lead",
           agentName: "Lead",
           summary: "Dispatch started"
+        },
+        {
+          kind: "dispatch_completed",
+          runId: "run-review",
+          dispatchId: "dispatch-1",
+          agentId: "agent-lead",
+          agentName: "Lead",
+          summary: "Dispatch completed"
         }
       ],
       tasks: [
@@ -60,22 +57,25 @@ describe("TaskStatusCard timeline integration", () => {
       ]
     });
 
-    const card = buildChatFeedItems(room).find((item) => item.kind === "task_status")?.data;
-    expect(card).toMatchObject({
-      summary: "2 tasks ready for review",
-      assigneeRole: "Team",
-      status: "review",
-      actionTarget: "tasks_tab"
+    expect(buildChatFeedItems(room)).toEqual([]);
+  });
+
+  it("keeps ordinary run briefs in the main chat feed", () => {
+    const room = roomFixture({
+      briefs: [
+        {
+          kind: "run_completed",
+          runId: "run-1",
+          agentId: "agent-builder",
+          agentName: "Builder",
+          summary: "Finished the reply"
+        }
+      ]
     });
 
-    const onOpenTasks = vi.fn();
-    const tree = TaskStatusCard({ card: card as TaskStatusCardModel, onOpenTasks });
-    const action = findElementByProp(tree, "data-testid", "task-status-card-action");
-
-    expect(action).toBeDefined();
-    expect(typeof action?.props.onPress).toBe("function");
-    (action?.props.onPress as (() => void) | undefined)?.();
-    expect(onOpenTasks).toHaveBeenCalledTimes(1);
+    expect(buildChatFeedItems(room)).toMatchObject([
+      { kind: "brief", id: "run-1-0" }
+    ]);
   });
 
   it("does not turn task activity rows into main timeline feed items", () => {
@@ -116,18 +116,4 @@ function roomFixture(patch: Partial<RoomViewModel>): RoomViewModel {
     unreadCount: 0,
     ...patch
   };
-}
-
-function findElementByProp(element: unknown, prop: string, value: unknown): { props: Record<string, unknown> } | undefined {
-  if (!element || typeof element !== "object" || !("props" in element)) return undefined;
-  const props = (element as { props: Record<string, unknown> }).props;
-  if (props[prop] === value) return { props };
-
-  const children = props.children;
-  const childList = Array.isArray(children) ? children : [children];
-  for (const child of childList) {
-    const found = findElementByProp(child, prop, value);
-    if (found) return found;
-  }
-  return undefined;
 }

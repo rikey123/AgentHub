@@ -128,6 +128,23 @@ describe("NativeAgentAdapter integration", () => {
     });
   });
 
+  test("opens the native session so lifecycle running side effects fire before completion", async () => {
+    const calls: string[] = [];
+    lifecycle = new RunLifecycleService(currentDatabase(), currentBus(), {
+      now: () => now,
+      sideEffects: {
+        onRunning: (runId) => calls.push(`running:${runId}`),
+        onCompleted: (runId) => calls.push(`completed:${runId}`)
+      }
+    });
+    const run = createStartingRun("run_native_side_effects");
+    streamTextMock.mockReturnValue({ fullStream: asyncGenerator([{ type: "text-delta", text: "done" }]), usage: Promise.resolve({ inputTokens: 1, outputTokens: 1 }) });
+
+    await new NativeAgentAdapter({ database: currentDatabase(), eventBus: currentBus() as unknown as import("../../bus/src/index.ts").EventBus, lifecycle: currentLifecycle(), permissions: currentPermissions(), modelConfig: openAiModelConfig(), now: () => now }).runManaged(run);
+
+    expect(calls).toEqual([`running:${run.id}`, `completed:${run.id}`]);
+  });
+
   test("denies model.api_call permission before creating the stream", async () => {
     seedPermissionRule("rule_deny_anthropic", "model.api_call.anthropic", "anthropic", "deny");
     const run = createStartingRun("run_native_permission_deny");

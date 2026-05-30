@@ -10,7 +10,7 @@ import { ContextLedger, createContextCommandHandlers, HeuristicBriefGenerator } 
 import { createDatabase, type AgentHubDatabase } from "@agenthub/db";
 import { MockAdapterManager } from "@agenthub/adapter-mock";
 import { createInterventionCommandHandlers, InterventionEngine } from "@agenthub/interventions";
-import { ActiveWakesRegistry, checkTaskTimeouts, createCancelRunHandler, createCompleteTaskHandler, createConsumePendingTurnHandler, createCreateTaskHandler, createUpdateTaskHandler, createWakeAgentHandler, handleTeamDispatchReviewTerminal, MailboxService, maybePublishTeamDispatchCompleted, PendingTurnService, ReclaimStaleClaimedRun, RoomMcpServer, RunLifecycleService, RunQueue, StartupRecovery, TaskService, type BriefResolver } from "@agenthub/orchestrator";
+import { ActiveWakesRegistry, checkTaskTimeouts, createCancelRunHandler, createCompleteTaskHandler, createConsumePendingTurnHandler, createCreateTaskHandler, createUpdateTaskHandler, createWakeAgentHandler, handleTeamDispatchReviewTerminal, MailboxService, maybePublishTeamDispatchCompleted, PendingTurnService, ReclaimStaleClaimedRun, reconcileTerminalDelegatedTaskRuns, RoomMcpServer, RunLifecycleService, RunQueue, StartupRecovery, TaskService, type BriefResolver } from "@agenthub/orchestrator";
 import { createPermissionCommandHandlers, PermissionEngine, seedBuiltInPermissionProfiles } from "@agenthub/permissions";
 import type { EventEnvelope } from "@agenthub/protocol/events";
 import { attachmentMaxBytes, authenticateBrowserRequest, createKeychain, createKeychainAccount, issueBrowserSession, redactAndTruncate, storeAttachment, type BrowserAuthResult, type KeychainBridge } from "@agenthub/security";
@@ -335,6 +335,10 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     // Start the TCP server so agents can reach room.* MCP tools via the stdio bridge.
     await roomMcpServer.startTcp();
     roomMcpServerRef.current = roomMcpServer;
+    const delegatedTaskReconciliation = reconcileTerminalDelegatedTaskRuns({ database, eventBus, taskService, ...(options.now !== undefined ? { now: options.now } : {}) });
+    for (const runId of delegatedTaskReconciliation.reviewDispatchRunIds) {
+      await handleTeamDispatchReviewTerminal({ database, eventBus, commandBus, taskService, ...(options.now !== undefined ? { now: options.now } : {}) }, runId);
+    }
     const runTaskTimeoutSweep = () => {
       const wakes = checkTaskTimeouts(database, eventBus, options.now?.() ?? Date.now());
       for (const wake of wakes) {
