@@ -1,7 +1,13 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { ROOM_MODE_OPTIONS, RoleBindingRow, RoleSelect, buildCreateRoomInput } from "./NewRoomDialog.tsx";
+import {
+  ROOM_MODE_OPTIONS,
+  RoleBindingRow,
+  RoleSelect,
+  buildCreateRoomInput,
+  ensureAgentBindingsForParticipants
+} from "./NewRoomDialog.tsx";
 
 describe("NewRoomDialog create-room contract", () => {
   it("offers all V1.0 room modes", () => {
@@ -137,5 +143,54 @@ describe("NewRoomDialog create-room contract", () => {
         }
       ]
     })).toThrow("Leader role must be included as a participant.");
+  });
+
+  it("creates missing agent bindings before submitting a V1 team room", async () => {
+    const requests: Array<{ path: string; body: unknown }> = [];
+    const fetchImpl = (async (input, init) => {
+      requests.push({ path: String(input), body: JSON.parse(String(init?.body ?? "{}")) });
+      const request = requests[requests.length - 1]!;
+      const body = request.body as { readonly roleId?: string };
+      return new Response(JSON.stringify({
+        agentBinding: {
+          id: body.roleId === "role_lead" ? "binding_created_lead" : "binding_created_reviewer",
+          roleId: body.roleId,
+          runtimeId: (body as { readonly runtimeId?: string }).runtimeId,
+          modelConfigId: (body as { readonly modelConfigId?: string }).modelConfigId ?? null
+        }
+      }), { status: 201, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+
+    const result = await ensureAgentBindingsForParticipants({
+      fetchImpl,
+      existingBindings: [],
+      participants: [
+        {
+          roleId: "role_lead",
+          runtimeId: "native-default",
+          runtimeKind: "native",
+          modelConfigId: "mc_gpt4o",
+          defaultPresence: "active"
+        },
+        {
+          roleId: "role_reviewer",
+          runtimeId: "custom-acp-1",
+          runtimeKind: "custom-acp",
+          defaultPresence: "active"
+        }
+      ]
+    });
+
+    expect(result.bindingIds).toEqual(["binding_created_lead", "binding_created_reviewer"]);
+    expect(requests).toEqual([
+      {
+        path: "/agent-bindings",
+        body: { roleId: "role_lead", runtimeId: "native-default", modelConfigId: "mc_gpt4o" }
+      },
+      {
+        path: "/agent-bindings",
+        body: { roleId: "role_reviewer", runtimeId: "custom-acp-1" }
+      }
+    ]);
   });
 });

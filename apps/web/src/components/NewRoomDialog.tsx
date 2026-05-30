@@ -15,7 +15,7 @@ import {
   TextField
 } from "@heroui/react";
 import { useAgents, type AgentSummary } from "../hooks/useAgents.ts";
-import { useRoomCreationOptions } from "../hooks/useRoomCreationOptions.ts";
+import { useRoomCreationOptions, type AgentBindingSummary } from "../hooks/useRoomCreationOptions.ts";
 import { initials } from "../lib/format.ts";
 
 export type RoomMode = "solo" | "assisted" | "squad" | "team";
@@ -112,6 +112,7 @@ interface NewRoomDialogProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   onCreate: (input: CreateRoomInput) => Promise<void> | void;
+  csrfFetch?: typeof fetch | undefined;
 }
 
 const providerColor: Record<string, "default" | "accent" | "success" | "warning" | "danger"> = {
@@ -397,7 +398,104 @@ function patchParticipantRuntime(
   return { ...participant, ...patch, runtimeId, modelConfigId };
 }
 
-export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogProps) {
+export async function ensureAgentBindingsForParticipants(options: {
+  readonly fetchImpl: typeof fetch;
+  readonly existingBindings: readonly AgentBindingSummary[];
+  readonly participants: readonly BuildV1ParticipantInput[];
+}): Promise<{ readonly bindingIds: string[]; readonly ensuredBindings: AgentBindingSummary[]; readonly createdBindings: AgentBindingSummary[] }> {
+  const known = new Map<string, AgentBindingSummary>();
+  for (const binding of options.existingBindings) {
+    known.set(agentBindingKey(binding.roleId, binding.runtimeId, binding.modelConfigId), binding);
+  }
+
+  const bindingIds: string[] = [];
+  const ensuredBindings: AgentBindingSummary[] = [];
+  const createdBindings: AgentBindingSummary[] = [];
+  for (const participant of options.participants) {
+    const modelConfigId = normalizedModelConfigId(participant.modelConfigId);
+    const key = agentBindingKey(participant.roleId, participant.runtimeId, modelConfigId);
+    const existing = known.get(key);
+    if (existing) {
+      bindingIds.push(existing.id);
+      ensuredBindings.push(existing);
+      continue;
+    }
+
+    const body: { roleId: string; runtimeId: string; modelConfigId?: string } = {
+      roleId: participant.roleId,
+      runtimeId: participant.runtimeId
+    };
+    if (modelConfigId !== null) body.modelConfigId = modelConfigId;
+    const response = await options.fetchImpl("/agent-bindings", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    const payload = await readJson(response);
+    if (!response.ok) {
+      throw new Error(`Create agent binding failed for ${participant.roleId}/${participant.runtimeId}: ${errorMessage(payload, response.status)}`);
+    }
+    const created = normalizeCreatedAgentBinding(payload, participant);
+    known.set(key, created);
+    bindingIds.push(created.id);
+    ensuredBindings.push(created);
+    createdBindings.push(created);
+  }
+  return { bindingIds, ensuredBindings, createdBindings };
+}
+
+function agentBindingKey(roleId: string, runtimeId: string, modelConfigId: string | null | undefined): string {
+  return `${roleId}\u0000${runtimeId}\u0000${modelConfigId ?? ""}`;
+}
+
+function normalizedModelConfigId(value: string | null | undefined): string | null {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+async function readJson(response: Response): Promise<unknown> {
+  try {
+    return await response.json() as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeCreatedAgentBinding(payload: unknown, participant: BuildV1ParticipantInput): AgentBindingSummary {
+  const record = payload && typeof payload === "object" && "agentBinding" in payload
+    ? (payload as { readonly agentBinding?: unknown }).agentBinding
+    : payload;
+  if (!record || typeof record !== "object") {
+    throw new Error("Create agent binding returned an invalid response.");
+  }
+  const row = record as Record<string, unknown>;
+  const id = stringValue(row.id);
+  if (!id) throw new Error("Create agent binding returned no id.");
+  return {
+    id,
+    roleId: stringValue(row.roleId ?? row.role_id) ?? participant.roleId,
+    runtimeId: stringValue(row.runtimeId ?? row.runtime_id) ?? participant.runtimeId,
+    modelConfigId: normalizedModelConfigId(stringValue(row.modelConfigId ?? row.model_config_id) ?? participant.modelConfigId)
+  };
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function errorMessage(payload: unknown, status: number): string {
+  if (payload && typeof payload === "object") {
+    const record = payload as Record<string, unknown>;
+    const message = stringValue(record.message);
+    const error = stringValue(record.error);
+    if (message && error) return `${error}: ${message}`;
+    if (message) return message;
+    if (error) return error;
+  }
+  return `HTTP ${status}`;
+}
+
+export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetch }: NewRoomDialogProps) {
   const { agents, loading, error: agentsError } = useAgents();
   const {
     roles,
@@ -407,6 +505,7 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
     loading: optionsLoading,
     error: optionsError
   } = useRoomCreationOptions();
+  const [createdAgentBindings, setCreatedAgentBindings] = useState<AgentBindingSummary[]>([]);
   const [title, setTitle] = useState("");
   const [mode, setMode] = useState<RoomMode>("assisted");
   const [primaryId, setPrimaryId] = useState<string | undefined>(undefined);
@@ -426,6 +525,7 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
       setLeaderRoleId("");
       setLeaderBinding(undefined);
       setV1Participants([]);
+      setCreatedAgentBindings([]);
     }
   }, [isOpen]);
 
@@ -540,13 +640,25 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
       });
       const currentLeaderRoleId = leaderBinding?.roleId ?? leaderRoleId;
       const leaderParticipant = leaderBinding ?? allV1Participants.find((participant) => participant.roleId === currentLeaderRoleId);
-      const leaderBindingId = leaderParticipant
-        ? agentBindings.find((binding) =>
-            binding.roleId === currentLeaderRoleId
-            && binding.runtimeId === leaderParticipant.runtimeId
-            && binding.modelConfigId === (leaderParticipant.modelConfigId || null)
-          )?.id
-        : undefined;
+      let leaderBindingId: string | undefined;
+      if (teamMode) {
+        const ensured = await ensureAgentBindingsForParticipants({
+          fetchImpl: csrfFetch,
+          existingBindings: [...agentBindings, ...createdAgentBindings],
+          participants: v1ParticipantInput
+        });
+        if (ensured.createdBindings.length > 0) {
+          setCreatedAgentBindings((current) => mergeAgentBindings(current, ensured.createdBindings));
+        }
+        if (leaderParticipant) {
+          const leaderIndex = v1ParticipantInput.findIndex((participant) =>
+            participant.roleId === currentLeaderRoleId
+            && participant.runtimeId === leaderParticipant.runtimeId
+            && normalizedModelConfigId(participant.modelConfigId) === normalizedModelConfigId(leaderParticipant.modelConfigId)
+          );
+          leaderBindingId = ensured.bindingIds[leaderIndex >= 0 ? leaderIndex : 0];
+        }
+      }
       const primaryAgentId = teamMode ? (leaderBindingId ?? "") : (primaryId ?? "");
       const createInput = {
         title,
@@ -811,6 +923,13 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
       </Modal.Container>
     </Modal.Backdrop>
   );
+}
+
+function mergeAgentBindings(current: readonly AgentBindingSummary[], next: readonly AgentBindingSummary[]): AgentBindingSummary[] {
+  const bindings = new Map<string, AgentBindingSummary>();
+  for (const binding of current) bindings.set(agentBindingKey(binding.roleId, binding.runtimeId, binding.modelConfigId), binding);
+  for (const binding of next) bindings.set(agentBindingKey(binding.roleId, binding.runtimeId, binding.modelConfigId), binding);
+  return Array.from(bindings.values());
 }
 
 function RoomModeOption({ value, title, description }: { value: RoomMode; title: string; description: string }) {

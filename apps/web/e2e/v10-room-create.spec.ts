@@ -74,6 +74,51 @@ test.describe("V1.0 room creation", () => {
       { participant_id: "binding_e2e_reviewer", role: "teammate", agent_binding_id: "binding_e2e_reviewer" }
     ]);
   });
+
+  test("creates a missing leader binding before creating a team room", async ({ page }) => {
+    daemon.database.sqlite.prepare("DELETE FROM agent_bindings WHERE id = ?").run("binding_e2e_leader");
+    const bindingRequests: unknown[] = [];
+    const roomRequests: unknown[] = [];
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (url.pathname === "/agent-bindings" && request.method() === "POST") {
+        bindingRequests.push(request.postDataJSON() as unknown);
+      }
+      if (url.pathname === "/rooms" && request.method() === "POST") {
+        roomRequests.push(request.postDataJSON() as unknown);
+      }
+    });
+
+    await page.goto(testUrl);
+    await page.locator('[data-testid="room-list-create-room"]').click();
+    await page.getByLabel("Title").fill("Auto Binding Room");
+    await page.getByText("Team", { exact: true }).click();
+    await chooseHeroSelect(page, "new-room-leader-role", "Leader E2E");
+    await chooseHeroSelect(page, "new-room-leader-runtime", "AgentHub Native");
+    await chooseHeroSelect(page, "new-room-leader-model", "Local E2E Model");
+    await page.getByRole("button", { name: "Create room" }).click();
+
+    await expect(page.getByRole("textbox", { name: "Message" })).toBeEnabled();
+    await expect(page.getByRole("heading", { name: "Auto Binding Room" })).toBeVisible();
+
+    const createdBinding = daemon.database.sqlite
+      .prepare("SELECT id FROM agent_bindings WHERE role_id = ? AND runtime_id = ? AND model_config_id = ? ORDER BY created_at DESC LIMIT 1")
+      .get("role_e2e_leader", "native-default", "mc_e2e_native") as { readonly id: string } | undefined;
+    expect(createdBinding?.id).toBeTruthy();
+    expect(bindingRequests).toEqual([
+      { roleId: "role_e2e_leader", runtimeId: "native-default", modelConfigId: "mc_e2e_native" }
+    ]);
+    expect(roomRequests).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        mode: "team",
+        primaryAgentId: createdBinding?.id,
+        leaderRoleId: "role_e2e_leader",
+        participants: [
+          { roleId: "role_e2e_leader", runtimeId: "native-default", modelConfigId: "mc_e2e_native", defaultPresence: "active" }
+        ]
+      })
+    ]));
+  });
 });
 
 async function chooseHeroSelect(page: import("@playwright/test").Page, testId: string, optionName: string): Promise<void> {
