@@ -70,10 +70,30 @@ export const roomMcpTools: readonly McpToolDefinition[] = [
   },
   {
     name: "room.list_members",
-    description: "List the room members.",
+    description: "List the room members, including roleId values that can be used as room.delegate toRoleId targets.",
     inputSchema: {
       type: "object",
       properties: {},
+      additionalProperties: true
+    }
+  },
+  {
+    name: "room.delegate",
+    description: "Leader-only: delegate work to a teammate role. Creates and wakes a Task atomically, or dispatches an existing pending backlog task when taskId is provided.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        taskId: { type: "string", description: "Existing pending task to dispatch from the backlog." },
+        toRoleId: { type: "string", description: "Target teammate role id from room.list_members." },
+        title: { type: "string", description: "Task title when creating a new delegated task." },
+        description: { type: "string" },
+        parentTaskId: { type: "string" },
+        expectsReview: { type: "boolean" }
+      },
+      anyOf: [
+        { required: ["taskId"] },
+        { required: ["toRoleId", "title"] }
+      ],
       additionalProperties: true
     }
   },

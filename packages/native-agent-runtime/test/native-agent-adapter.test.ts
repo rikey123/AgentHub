@@ -20,6 +20,7 @@ vi.mock("../src/mcp-tool-converter.ts", () => ({
 }));
 
 let NativeAgentAdapter: typeof import("../src/native-agent-adapter.ts").NativeAgentAdapter;
+type AgentPromptDelta = import("../../orchestrator/src/index.ts").AgentPromptDelta;
 
 beforeEach(async () => {
   streamTextMock.mockReset();
@@ -65,6 +66,56 @@ describe("NativeAgentAdapter", () => {
     expect(publish).toHaveBeenCalledWith(expect.objectContaining({ type: "permission.run_summary" }));
     expect(publish).toHaveBeenCalledWith(expect.objectContaining({ type: "permission.run_summary", payload: expect.objectContaining({ decisions: [expect.objectContaining({ modelConfigId: "mc-1" })] }) }));
     expect(lifecycle.complete).toHaveBeenCalledWith(null, "run-1", { inputTokens: 120, outputTokens: 45, cachedTokens: 12, costUsd: 0.001035, modelId: "gpt-4o" }, undefined);
+  });
+
+  it("uses the orchestrator team prompt and queued run input in team rooms", async () => {
+    const publish = vi.fn();
+    const lifecycle = createLifecycle();
+    const database = createTeamDatabaseStub();
+    permissionCheckMock.mockReturnValue({ status: "allow", reason: "default_allow" });
+    streamTextMock.mockReturnValue({
+      fullStream: asyncGenerator([]),
+      usage: Promise.resolve({ inputTokens: 0, outputTokens: 0 })
+    });
+    const adapter = new NativeAgentAdapter({
+      database,
+      eventBus: { publish } as unknown as import("../../bus/src/index.ts").EventBus,
+      lifecycle: lifecycle as never,
+      permissions: { check: permissionCheckMock } as never,
+      modelConfig: { id: "mc-1", provider: "openai", model: "gpt-4o", base_url: null, api_key_ref: null },
+      apiKey: "test-key"
+    });
+
+    await adapter.runManaged(runRow({ agent_id: "agent-leader" }));
+
+    const call = streamTextMock.mock.calls[0]?.[0] as { readonly system?: string; readonly messages?: readonly { readonly content: string }[] } | undefined;
+    expect(call?.system).toContain("room.delegate");
+    expect(call?.messages?.[0]?.content).toContain("backlog");
+  });
+
+  it("uses delegated task instructions as the user input for delegated runs", async () => {
+    const publish = vi.fn();
+    const lifecycle = createLifecycle();
+    const database = createTeamDatabaseStub();
+    permissionCheckMock.mockReturnValue({ status: "allow", reason: "default_allow" });
+    streamTextMock.mockReturnValue({
+      fullStream: asyncGenerator([]),
+      usage: Promise.resolve({ inputTokens: 0, outputTokens: 0 })
+    });
+    const adapter = new NativeAgentAdapter({
+      database,
+      eventBus: { publish } as unknown as import("../../bus/src/index.ts").EventBus,
+      lifecycle: lifecycle as never,
+      permissions: { check: permissionCheckMock } as never,
+      modelConfig: { id: "mc-1", provider: "openai", model: "gpt-4o", base_url: null, api_key_ref: null },
+      apiKey: "test-key"
+    });
+
+    await adapter.runManaged(runRow({ id: "run-delegated", wake_reason: "delegated_task", task_id: "task-1", agent_id: "agent-builder" }));
+
+    const call = streamTextMock.mock.calls[0]?.[0] as { readonly system?: string; readonly messages?: readonly { readonly content: string }[] } | undefined;
+    expect(call?.system).toContain("room.update_task");
+    expect(call?.messages?.[0]?.content).toBe("Implement login\n\nAdd the login flow");
   });
 
   it("denies before stream creation for model api calls", async () => {
@@ -178,14 +229,87 @@ function createLifecycle() {
 }
 
 function createDatabaseStub() {
+  const sqlite = {
+    prepare: vi.fn((sql: string) => ({
+      get: vi.fn(() => {
+        if (sql.includes("SELECT COALESCE(MAX(seq)")) return { seq: 1 };
+        return undefined;
+      }),
+      all: vi.fn(() => []),
+      run: vi.fn(() => ({ changes: 0 }))
+    })),
+    transaction: vi.fn((fn: () => unknown) => () => fn())
+  };
   return {
-    sqlite: {
-      prepare: vi.fn(() => ({ get: vi.fn(() => ({ seq: 1 })), run: vi.fn() }))
-    }
+    sqlite
   } as never;
 }
 
-function runRow(): import("../../orchestrator/src/index.ts").RunRow {
+function createTeamDatabaseStub() {
+  const messages = new Map<string, string>([
+    ["user-message-1", "dispatch the backlog now"]
+  ]);
+  const queuedPayloadByRun = new Map<string, { readonly promptDelta?: AgentPromptDelta; readonly messageId?: string }>([
+    ["run-1", { promptDelta: { kind: "delta_only", instructions: "dispatch the backlog now" }, messageId: "user-message-1" }],
+    ["run-delegated", { promptDelta: { kind: "delta_only", instructions: "Implement login\n\nAdd the login flow" } }]
+  ]);
+  const task = {
+    title: "Implement login",
+    description: "Add the login flow"
+  };
+  const participants = [
+    { agentId: "agent-leader", role: "primary", name: "Project Manager", adapterId: "native", presence: "active" },
+    { agentId: "agent-builder", role: "teammate", name: "Builder", adapterId: "native", presence: "active" }
+  ];
+
+  const sqlite = {
+    prepare: vi.fn((sql: string) => ({
+        get: vi.fn((...args: unknown[]) => {
+          if (sql.includes("SELECT COALESCE(MAX(seq)")) return { seq: 1 };
+          if (sql.includes("SELECT mode, primary_agent_id FROM rooms")) return { mode: "squad", primary_agent_id: "agent-leader" };
+          if (sql.includes("SELECT role_prompt, name FROM agent_profiles")) {
+            const agentId = args[0];
+            return { role_prompt: "", name: agentId === "agent-builder" ? "Builder" : "Project Manager" };
+          }
+          if (sql.includes("SELECT id FROM messages WHERE run_id")) return undefined;
+          if (sql.includes("SELECT payload FROM events WHERE run_id")) {
+            return { payload: JSON.stringify(queuedPayloadByRun.get(String(args[0])) ?? {}) };
+          }
+          if (sql.includes("SELECT payload FROM message_parts")) {
+            const messageId = args[0];
+            const text = messages.get(String(messageId));
+            return text !== undefined ? { payload: JSON.stringify({ text }) } : undefined;
+          }
+          if (sql.includes("SELECT title, description FROM tasks")) return task;
+          return undefined;
+        }),
+        all: vi.fn((...args: unknown[]) => {
+          if (sql.includes("FROM room_participants rp")) {
+            return participants.map((participant) => ({
+              agentId: participant.agentId,
+              role: participant.role,
+              name: participant.name,
+              adapterId: participant.adapterId,
+              presence: participant.presence
+            }));
+          }
+          if (sql.includes("SELECT payload FROM message_parts")) {
+            const messageId = args[0];
+            const text = messages.get(String(messageId));
+            return text !== undefined ? [{ payload: JSON.stringify({ text }) }] : [];
+          }
+          return [];
+        }),
+        run: vi.fn(() => ({ changes: 0 }))
+      })),
+    transaction: vi.fn((fn: () => unknown) => () => fn())
+  };
+  return {
+    sqlite
+  } as never;
+}
+
+function runRow(overrides: Partial<import("../../orchestrator/src/index.ts").RunRow> = {}): import("../../orchestrator/src/index.ts").RunRow {
   return {
     id: "run-1",
     workspace_id: "workspace-1",
@@ -217,7 +341,8 @@ function runRow(): import("../../orchestrator/src/index.ts").RunRow {
     failure_class: null,
     error: null,
     created_at: 1,
-    updated_at: 1
+    updated_at: 1,
+    ...overrides
   };
 }
 

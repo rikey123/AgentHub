@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { stepCountIs, streamText, type LanguageModel, type ToolSet } from "ai";
 import type { EventBus, PublishInput } from "../../bus/src/index.ts";
 import type { AgentHubDatabase } from "../../db/src/index.ts";
-import { AdapterBridge, type AdapterArtifactFSBoundary, type RunLifecycleService, type RunRow } from "../../orchestrator/src/index.ts";
+import { AdapterBridge, buildFirstWakePrompt, buildRunPrompt, type AdapterArtifactFSBoundary, type RunLifecycleService, type RunRow } from "../../orchestrator/src/index.ts";
 import type { AgentAdapterManifest } from "../../protocol/src/index.ts";
 import type { PermissionEngine, PermissionResource } from "../../permissions/src/index.ts";
 
@@ -146,13 +146,12 @@ export class NativeAgentAdapter {
         ...(this.options.tools ?? {}),
         ...mcpToolSet
       } satisfies ToolSet;
-      const userText = this.loadLatestUserText(run.room_id);
-      const rolePrompt = this.loadRolePrompt(run.room_id, run.agent_id);
+      const prompt = this.loadRunPrompt(run);
       const messageId = `msg_${run.id}`;
       const result = streamText({
         model: providerModel,
-        ...(rolePrompt !== undefined ? { system: rolePrompt } : {}),
-        messages: [{ role: "user" as const, content: userText ?? `Run ${run.id}` }],
+        ...(prompt.system !== undefined ? { system: prompt.system } : {}),
+        messages: [{ role: "user" as const, content: prompt.input }],
         abortSignal: controller.signal,
         tools,
         stopWhen: stepCountIs(5)
@@ -308,40 +307,13 @@ export class NativeAgentAdapter {
     } satisfies PublishInput);
   }
 
-  private loadLatestUserText(roomId: string | null): string | undefined {
-    if (roomId === null) return undefined;
-    const row = this.options.database.sqlite
-      .prepare(
-        `SELECT mp.payload AS payload
-         FROM messages m
-         JOIN message_parts mp ON mp.message_id = m.id
-         WHERE m.room_id = ? AND m.role = 'user' AND m.status = 'completed'
-         ORDER BY m.created_at DESC, mp.seq ASC
-         LIMIT 1`
-      )
-      .get(roomId) as { readonly payload: string } | undefined;
-    if (row === undefined) return undefined;
-    try {
-      const parsed = JSON.parse(row.payload) as { readonly text?: unknown };
-      return typeof parsed.text === "string" && parsed.text.length > 0 ? parsed.text : undefined;
-    } catch {
-      return undefined;
-    }
-  }
-
-  private loadRolePrompt(roomId: string | null, agentId: string | null): string | undefined {
-    if (roomId === null || agentId === null) return undefined;
-    const row = this.options.database.sqlite
-      .prepare(
-        `SELECT r.prompt AS prompt
-         FROM room_participants rp
-         JOIN agent_bindings ab ON ab.id = rp.agent_binding_id
-         JOIN roles r ON r.id = ab.role_id
-         WHERE rp.room_id = ? AND rp.participant_id = ? AND rp.participant_type = 'agent'
-         LIMIT 1`
-      )
-      .get(roomId, agentId) as { readonly prompt: string } | undefined;
-    return row?.prompt;
+  private loadRunPrompt(run: RunRow): { readonly system?: string; readonly input: string } {
+    const system = buildFirstWakePrompt(run.id, run.agent_id, run.room_id, this.options.database);
+    const rendered = buildRunPrompt(run, this.options.database, { now: this.now });
+    const input = system !== undefined && rendered.startsWith(`${system}\n\n---\n\n`)
+      ? rendered.slice(system.length + "\n\n---\n\n".length)
+      : rendered;
+    return { ...(system !== undefined ? { system } : {}), input };
   }
 }
 

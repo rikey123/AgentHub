@@ -9,10 +9,12 @@ vi.mock("../../orchestrator/src/index.ts", () => ({
 }));
 
 let convertMcpToolsToAiSdkTools: typeof import("../src/mcp-tool-converter.ts").convertMcpToolsToAiSdkTools;
+let roomMcpTools: typeof import("../src/room-mcp-tools.ts").roomMcpTools;
 
 beforeEach(async () => {
   bridgeHandle.mockReset();
   ({ convertMcpToolsToAiSdkTools } = await import("../src/mcp-tool-converter.ts"));
+  ({ roomMcpTools } = await import("../src/room-mcp-tools.ts"));
 });
 
 describe("convertMcpToolsToAiSdkTools", () => {
@@ -42,5 +44,22 @@ describe("convertMcpToolsToAiSdkTools", () => {
 
     expect(bridgeHandle).toHaveBeenCalledWith(expect.objectContaining({ type: "tool.call.completed", ok: false, output: { code: "validation_failed", message: "title is required" } }));
     expect(bridgeHandle).toHaveBeenCalledTimes(2);
+  });
+
+  it("exposes room.delegate to native agents as a provider-safe tool", () => {
+    const toolSet = convertMcpToolsToAiSdkTools(
+      roomMcpTools,
+      async () => ({ ok: true, data: {} }),
+      new (class { handle = bridgeHandle; })() as never
+    );
+
+    expect(toolSet.room_delegate).toBeDefined();
+    expect(toolSet.room_delegate?.description).toContain("delegate");
+    expect(toolSet.room_delegate?.inputSchema).toHaveProperty("jsonSchema", expect.objectContaining({
+      anyOf: expect.arrayContaining([
+        expect.objectContaining({ required: expect.arrayContaining(["taskId"]) }),
+        expect.objectContaining({ required: expect.arrayContaining(["toRoleId", "title"]) })
+      ])
+    }));
   });
 });

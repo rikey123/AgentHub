@@ -484,6 +484,40 @@ describe("TaskService and RoomMcpServer", () => {
     });
   });
 
+  test("room.delegate can dispatch an existing pending backlog task", async () => {
+    seedDelegatedRoom("room_delegate_existing", "agent_leader", "role_leader", "role_builder", "binding_leader", "binding_builder", "agent_builder");
+    createRun("run_delegate_existing", { roomId: "room_delegate_existing", agentId: "agent_leader" });
+    const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const created = service.create({ roomId: "room_delegate_existing", title: "Backlog implementation", description: "Build the queued item", assigneeRoleId: "role_builder", createdBy: "agent_leader" });
+    if (!created.ok) throw new Error("expected backlog task");
+    const commandBus = commandBusWithHandlers();
+    const mcp = new RoomMcpServer({ commandBus, taskService: service, database: currentDatabase(), eventBus: currentBus(), now: () => now });
+
+    const result = await mcp.callTool("room.delegate", { taskId: created.data.taskId }, { roomId: "room_delegate_existing", runId: "run_delegate_existing", agentId: "agent_leader" });
+
+    expect(result).toMatchObject({ ok: true });
+    if (!result.ok || !isRecord(result.data) || typeof result.data.runId !== "string") throw new Error("expected delegate success");
+    expect(result.data).toMatchObject({ taskId: created.data.taskId });
+    expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM tasks WHERE room_id = 'room_delegate_existing'").get()).toMatchObject({ count: 1 });
+    expect(currentDatabase().sqlite.prepare("SELECT task_id, agent_id, wake_reason FROM runs WHERE id = ?").get(result.data.runId)).toMatchObject({ task_id: created.data.taskId, agent_id: "agent_builder", wake_reason: "delegated_task" });
+    expect(currentDatabase().sqlite.prepare("SELECT type FROM events WHERE type = 'task.delegation.created' AND task_id = ?").get(created.data.taskId)).toBeDefined();
+  });
+
+  test("room.delegate backfills role and binding when dispatching legacy backlog tasks", async () => {
+    seedDelegatedRoom("room_delegate_legacy", "agent_leader", "role_leader", "role_builder", "binding_leader", "binding_builder", "agent_builder");
+    createRun("run_delegate_legacy", { roomId: "room_delegate_legacy", agentId: "agent_leader" });
+    const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const created = service.create({ roomId: "room_delegate_legacy", title: "Legacy backlog", description: "Created with the V0.5 assignee field", assigneeAgentId: "agent_builder", createdBy: "agent_leader" });
+    if (!created.ok) throw new Error("expected legacy backlog task");
+    expect(currentDatabase().sqlite.prepare("SELECT assignee_role_id, assignee_binding_id FROM tasks WHERE id = ?").get(created.data.taskId)).toMatchObject({ assignee_role_id: null, assignee_binding_id: null });
+    const mcp = new RoomMcpServer({ commandBus: commandBusWithHandlers(), taskService: service, database: currentDatabase(), eventBus: currentBus(), now: () => now });
+
+    const result = await mcp.callTool("room.delegate", { taskId: created.data.taskId }, { roomId: "room_delegate_legacy", runId: "run_delegate_legacy", agentId: "agent_leader" });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(currentDatabase().sqlite.prepare("SELECT assignee_role_id, assignee_binding_id FROM tasks WHERE id = ?").get(created.data.taskId)).toMatchObject({ assignee_role_id: "role_builder", assignee_binding_id: "binding_builder" });
+  });
+
   test("squad mode queues three teammate delegates without active wake conflicts", async () => {
     seedSquadRoomWithTeammates("room_squad_parallel", [
       { roleId: "role_builder_a", bindingId: "binding_builder_a", agentId: "agent_builder_a" },
@@ -604,6 +638,20 @@ describe("TaskService and RoomMcpServer", () => {
     expect(result).toMatchObject({ ok: false, error: { code: "delegate_requires_leader_role", message: "delegate_requires_leader_role" } });
     expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM tasks WHERE room_id = 'room_delegate_denied'").get()).toMatchObject({ count: 0 });
     expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE room_id = 'room_delegate_denied' AND type LIKE 'task.%'").get()).toMatchObject({ count: 0 });
+  });
+
+  test("room.list_members returns role ids for delegate targets", async () => {
+    seedDelegatedRoom("room_list_member_roles", "agent_leader", "role_leader", "role_builder", "binding_leader", "binding_builder", "agent_builder");
+    const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const mcp = new RoomMcpServer({ commandBus: commandBusWithHandlers(), taskService: service, database: currentDatabase(), eventBus: currentBus(), now: () => now });
+
+    const result = await mcp.callTool("room.list_members", {}, { roomId: "room_list_member_roles", runId: "run_members", agentId: "agent_leader" });
+
+    expect(result).toMatchObject({ ok: true });
+    if (!result.ok || !isRecord(result.data) || !Array.isArray(result.data.members)) throw new Error("expected member list");
+    expect(result.data.members).toEqual(expect.arrayContaining([
+      expect.objectContaining({ agentId: "agent_builder", roleId: "role_builder", bindingId: "binding_builder" })
+    ]));
   });
 
   test("room.delegate rolls back task and events when WakeAgent enqueue fails", async () => {
