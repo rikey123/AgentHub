@@ -111,6 +111,8 @@ export class NativeAgentAdapter {
       ...(this.options.artifactFs !== undefined ? { artifactFs: this.options.artifactFs } : {})
     });
     this.activeRuns.set(run.id, { controller, bridge, run, permissionSummary: [] });
+    const sessionId = `native-${run.id}`;
+    bridge.handle({ type: "session.opened", sessionId });
     let modelConfig = this.options.modelConfig;
     let apiKey = this.options.apiKey;
 
@@ -172,12 +174,12 @@ export class NativeAgentAdapter {
 
       this.completeAssistantText(run, messageId);
       const usage = await usagePromise;
-      bridge.handle({ type: "session.ended", sessionId: `native-${run.id}`, reason: "completed", cost: costFromUsage(usage, modelConfig.model) });
+      bridge.handle({ type: "session.ended", sessionId, reason: "completed", cost: costFromUsage(usage, modelConfig.model) });
     } catch (error) {
       if (isAbortError(error)) {
         this.completeAssistantText(run, `msg_${run.id}`);
         this.options.lifecycle.markCancelling(null, run.id);
-        bridge.handle({ type: "session.ended", sessionId: `native-${run.id}`, reason: "cancelled", cost: zeroCost(modelConfig.model) });
+        bridge.handle({ type: "session.ended", sessionId, reason: "cancelled", cost: zeroCost(modelConfig.model) });
         return;
       }
       this.completeAssistantText(run, `msg_${run.id}`);

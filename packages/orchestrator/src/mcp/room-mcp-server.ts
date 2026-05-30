@@ -527,7 +527,7 @@ export class RoomMcpServer {
     if (room.leader_role_id === null || room.caller_role_id !== room.leader_role_id) return failure("delegate_requires_leader_role", "delegate_requires_leader_role");
 
     const now = this.options.now?.() ?? Date.now();
-    const effectiveExpectsReview = expectsReview ?? (room.mode === "team");
+    const effectiveExpectsReview = room.mode === "team" ? true : expectsReview ?? false;
     let delegateResult: { readonly taskId: string; readonly runId: string } | undefined;
     try {
       this.options.database.sqlite.transaction(() => {

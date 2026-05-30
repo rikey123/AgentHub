@@ -21,6 +21,7 @@ import {
   TaskService,
   handleTeamDispatchReviewTerminal,
   maybePublishTeamDispatchCompleted,
+  reconcileTerminalDelegatedTaskRuns,
   StartupRecovery,
   createCancelRunHandler,
   createCompleteTaskHandler,
@@ -581,6 +582,23 @@ describe("TaskService and RoomMcpServer", () => {
     expect(leaderWakes[0]).toMatchObject({ taskId: created2.data.taskId });
   });
 
+  test("team mode forces delegated tasks into review even if the model asks to skip review", async () => {
+    seedDelegatedRoom("room_team_force_review", "agent_leader", "role_leader", "role_builder", "binding_leader", "binding_builder", "agent_builder");
+    currentDatabase().sqlite.prepare("UPDATE rooms SET mode = 'team' WHERE id = 'room_team_force_review'").run();
+    const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const commandBus = commandBusWithHandlers();
+    const mcp = new RoomMcpServer({ commandBus, taskService: service, database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const leaderSession = { roomId: "room_team_force_review", runId: "run_team_force_review", agentId: "agent_leader" };
+
+    const created = await mcp.callTool("room.delegate", { toRoleId: "role_builder", title: "Must review", expectsReview: false }, leaderSession);
+
+    expect(created).toMatchObject({ ok: true });
+    if (!created.ok || !isRecord(created.data) || typeof created.data.taskId !== "string") throw new Error("expected delegated task");
+    expect(currentDatabase().sqlite.prepare("SELECT expects_review FROM tasks WHERE id = ?").get(created.data.taskId)).toMatchObject({ expects_review: 1 });
+    const event = currentDatabase().sqlite.prepare("SELECT payload FROM events WHERE type = 'task.delegation.created' AND task_id = ? ORDER BY seq DESC LIMIT 1").get(created.data.taskId) as { readonly payload: string };
+    expect(JSON.parse(event.payload)).toMatchObject({ expectsReview: true });
+  });
+
   test("leader approval of review task emits team.dispatch.completed after all siblings complete", async () => {
     seedDelegatedRoom("room_team_approve", "agent_leader", "role_leader", "role_builder", "binding_leader", "binding_builder", "agent_builder");
     const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now, onTaskCompleted: (task) => maybePublishTeamDispatchCompleted({ database: currentDatabase(), eventBus: currentBus(), now: () => now }, task) });
@@ -684,6 +702,18 @@ describe("TaskService and RoomMcpServer", () => {
     expect(currentDatabase().sqlite.prepare("SELECT status, expects_review FROM tasks WHERE id = 'task_delegate_terminal'").get()).toMatchObject({ status: "completed", expects_review: 0 });
     expect(currentDatabase().sqlite.prepare("SELECT type FROM events WHERE type = 'task.delegation.completed' AND task_id = 'task_delegate_terminal' ORDER BY seq DESC LIMIT 1").get()).toBeDefined();
     expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM mailbox_messages WHERE room_id = 'room_delegate_terminal' AND to_agent_id = 'agent_leader_term'").get()).toMatchObject({ count: 0 });
+  });
+
+  test("delegated run start advances review tasks to in_progress", () => {
+    seedDelegatedRoom("room_delegate_review_start", "agent_leader_start", "role_leader_start", "role_builder_start", "binding_leader_start", "binding_builder_start", "agent_builder_start");
+    const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const created = service.create({ roomId: "room_delegate_review_start", title: "Review start", assigneeRoleId: "role_builder_start", expectsReview: true, sourceRunId: "run_leader_start", createdBy: "agent_leader_start" });
+    if (!created.ok) throw new Error("expected review task");
+
+    expect(service.startDelegatedRun(created.data.taskId, "run_review_start")).toMatchObject({ ok: true });
+
+    expect(currentDatabase().sqlite.prepare("SELECT status, expects_review FROM tasks WHERE id = ?").get(created.data.taskId)).toMatchObject({ status: "in_progress", expects_review: 1 });
+    expect(currentDatabase().sqlite.prepare("SELECT type FROM events WHERE type = 'task.status.changed' AND task_id = ? AND json_extract(payload, '$.nextStatus') = 'in_progress'").get(created.data.taskId)).toBeDefined();
   });
 
   test("delegated run failure blocks squad task and emits blocked wake mail", () => {
@@ -1135,6 +1165,41 @@ describe("startup recovery and reclaim", () => {
     expect(statusOf("run_fail_attach")).toBe("failed");
     expect(currentLifecycle().read("run_fail_attach").failure_class).toBe("fresh_session_required");
   });
+
+  test("reconciles completed team delegated runs stuck before review", async () => {
+    seedDelegatedRoom("room_reconcile_team", "agent_leader_reconcile", "role_leader_reconcile", "role_builder_reconcile", "binding_leader_reconcile", "binding_builder_reconcile", "agent_builder_reconcile");
+    currentDatabase().sqlite.prepare("UPDATE rooms SET mode = 'team' WHERE id = 'room_reconcile_team'").run();
+    const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const taskA = service.create({ roomId: "room_reconcile_team", title: "Recovered A", assigneeRoleId: "role_builder_reconcile", expectsReview: false, sourceRunId: "run_source_reconcile", createdBy: "agent_leader_reconcile" });
+    const taskB = service.create({ roomId: "room_reconcile_team", title: "Recovered B", assigneeRoleId: "role_builder_reconcile", expectsReview: false, sourceRunId: "run_source_reconcile", createdBy: "agent_leader_reconcile" });
+    if (!taskA.ok || !taskB.ok) throw new Error("expected tasks");
+    insertTerminalRunInRoom("room_reconcile_team", "agent_builder_reconcile", taskA.data.taskId, "run_reconcile_a", "completed");
+    insertTerminalRunInRoom("room_reconcile_team", "agent_builder_reconcile", taskB.data.taskId, "run_reconcile_b", "completed");
+
+    const result = reconcileTerminalDelegatedTaskRuns({ database: currentDatabase(), eventBus: currentBus(), taskService: service, now: () => now });
+
+    expect(result.reviewDispatchRunIds).toEqual(["run_reconcile_a", "run_reconcile_b"]);
+    expect(currentDatabase().sqlite.prepare("SELECT status, expects_review FROM tasks WHERE id = ?").get(taskA.data.taskId)).toMatchObject({ status: "review", expects_review: 1 });
+    expect(currentDatabase().sqlite.prepare("SELECT status, expects_review FROM tasks WHERE id = ?").get(taskB.data.taskId)).toMatchObject({ status: "review", expects_review: 1 });
+    const commandBus = { dispatch: (command: { readonly reason: string; readonly taskId: string }) => ({ ok: true, data: { runId: `leader-${command.taskId}` }, emittedEvents: [] }) } as unknown as CommandBus;
+    await handleTeamDispatchReviewTerminal({ database: currentDatabase(), eventBus: currentBus(), commandBus, taskService: service, now: () => now }, "run_reconcile_b");
+    expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'team.dispatch.started' AND json_extract(payload, '$.sourceRunId') = 'run_source_reconcile'").get()).toMatchObject({ count: 1 });
+  });
+
+  test("reconciles completed squad delegated runs stuck in progress", () => {
+    seedDelegatedRoom("room_reconcile_squad", "agent_leader_squad", "role_leader_squad", "role_builder_squad", "binding_leader_squad", "binding_builder_squad", "agent_builder_squad");
+    const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const task = service.create({ roomId: "room_reconcile_squad", title: "Recovered squad", assigneeRoleId: "role_builder_squad", expectsReview: false, sourceRunId: "run_source_squad", createdBy: "agent_leader_squad" });
+    if (!task.ok) throw new Error("expected squad task");
+    currentDatabase().sqlite.prepare("UPDATE tasks SET status = 'in_progress' WHERE id = ?").run(task.data.taskId);
+    insertTerminalRunInRoom("room_reconcile_squad", "agent_builder_squad", task.data.taskId, "run_reconcile_squad", "completed");
+
+    const result = reconcileTerminalDelegatedTaskRuns({ database: currentDatabase(), eventBus: currentBus(), taskService: service, now: () => now });
+
+    expect(result.completedTaskIds).toEqual([task.data.taskId]);
+    expect(currentDatabase().sqlite.prepare("SELECT status, expects_review FROM tasks WHERE id = ?").get(task.data.taskId)).toMatchObject({ status: "completed", expects_review: 0 });
+    expect(currentDatabase().sqlite.prepare("SELECT type FROM events WHERE type = 'task.delegation.completed' AND task_id = ?").get(task.data.taskId)).toBeDefined();
+  });
 });
 
 function currentDatabase(): AgentHubDatabase {
@@ -1240,6 +1305,12 @@ function insertTerminalRun(taskId: string, runId: string, status: "completed" | 
   currentDatabase().sqlite.prepare(
     "INSERT INTO runs (id, workspace_id, task_id, room_id, agent_id, adapter_id, adapter_session_id, provider_conversation_id, parent_run_id, status, wake_reason, waiting_reason, workspace_path, work_dir, workspace_mode, context_version, target_files, mailbox_claim_count, pid_at_start, claimed_at, started_at, ended_at, input_tokens, output_tokens, cached_tokens, cost_usd, model_id, failure_class, error, created_at, updated_at) VALUES (?, 'ws_1', ?, 'room_1', 'agent_1', NULL, NULL, NULL, NULL, ?, 'delegated_task', NULL, NULL, NULL, NULL, NULL, '[]', 0, NULL, NULL, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)"
   ).run(runId, taskId, status, now, now, now, now);
+}
+
+function insertTerminalRunInRoom(roomId: string, agentId: string, taskId: string, runId: string, status: "completed" | "failed"): void {
+  currentDatabase().sqlite.prepare(
+    "INSERT INTO runs (id, workspace_id, task_id, room_id, agent_id, adapter_id, adapter_session_id, provider_conversation_id, parent_run_id, status, wake_reason, waiting_reason, workspace_path, work_dir, workspace_mode, context_version, target_files, mailbox_claim_count, pid_at_start, claimed_at, started_at, ended_at, input_tokens, output_tokens, cached_tokens, cost_usd, model_id, failure_class, error, created_at, updated_at) VALUES (?, 'ws_1', ?, ?, ?, NULL, NULL, NULL, NULL, ?, 'delegated_task', NULL, NULL, NULL, NULL, NULL, '[]', 0, NULL, NULL, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)"
+  ).run(runId, taskId, roomId, agentId, status, now, now, now, now);
 }
 
 function seedMailbox(id: string, roomId: string, agentId: string): void {

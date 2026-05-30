@@ -223,14 +223,18 @@ export class TaskService {
     const existing = this.task(taskId);
     if (!existing) return failed("not_found", `Task '${taskId}' not found`);
     if (existing.expects_review !== 0) return failed("conflict", `Task '${taskId}' is not a squad task`);
-    if (existing.status !== "in_progress" && existing.status !== "completed") return this.rejectTransition(existing, "completed", "delegated_run_completed");
+    if (existing.status !== "pending" && existing.status !== "in_progress" && existing.status !== "completed") return this.rejectTransition(existing, "completed", "delegated_run_completed");
     if (existing.status === "completed") return { ok: true, data: { task: taskView(existing), taskId }, emittedEvents: latestTaskEvents(this.options.database, taskId) };
 
     const now = this.options.now?.() ?? Date.now();
     this.options.database.sqlite.transaction(() => {
+      if (existing.status === "pending") {
+        this.options.database.sqlite.prepare("UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?").run("in_progress", now, taskId);
+        this.options.eventBus.publish(taskEvent("task.status.changed", existing.workspace_id, existing.room_id ?? "", taskId, { taskId, prevStatus: "pending", nextStatus: "in_progress", reason: "delegated_run_started", byRunId }, now));
+      }
       this.options.database.sqlite.prepare("UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?").run("completed", now, taskId);
-      this.options.eventBus.publish(taskEvent("task.status.changed", existing.workspace_id, existing.room_id ?? "", taskId, { taskId, prevStatus: existing.status, nextStatus: "completed", reason: "delegated_run_completed" }, now));
-    this.options.eventBus.publish(taskEvent("task.delegation.completed", existing.workspace_id, existing.room_id ?? "", taskId, { taskId, delegationId: taskId, byTeammateRunId: byRunId }, now));
+      this.options.eventBus.publish(taskEvent("task.status.changed", existing.workspace_id, existing.room_id ?? "", taskId, { taskId, prevStatus: existing.status === "pending" ? "in_progress" : existing.status, nextStatus: "completed", reason: "delegated_run_completed" }, now));
+      this.options.eventBus.publish(taskEvent("task.delegation.completed", existing.workspace_id, existing.room_id ?? "", taskId, { taskId, delegationId: taskId, byTeammateRunId: byRunId }, now));
     })();
 
     const task = this.task(taskId);
@@ -342,7 +346,7 @@ export class TaskService {
   ): CommandResult<{ readonly task: TaskView; readonly taskId: string }> {
     const existing = this.task(taskId);
     if (!existing) return failed("not_found", `Task '${taskId}' not found`);
-    if (existing.expects_review !== 0) return failed("conflict", `Task '${taskId}' is not a squad task`);
+    if (nextStatus === "completed" && existing.expects_review !== 0) return failed("conflict", `Task '${taskId}' is not a squad task`);
     const allowedFrom: readonly TaskStatus[] = nextStatus === "in_progress" ? ["pending"] : ["pending", "in_progress"];
     if (!allowedFrom.includes(existing.status)) return failed("conflict", "invalid_task_transition", { from: existing.status, to: nextStatus });
     if (existing.status === nextStatus) return { ok: true, data: { task: taskView(existing), taskId }, emittedEvents: latestTaskEvents(this.options.database, taskId) };
