@@ -5,10 +5,12 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const streamTextMock = vi.hoisted(() => vi.fn());
+const stepCountIsMock = vi.hoisted(() => vi.fn((count: number) => ({ type: "step-count-is", count })));
 const resolveProviderMock = vi.hoisted(() => vi.fn());
 
 vi.mock("ai", () => ({
   streamText: streamTextMock,
+  stepCountIs: stepCountIsMock,
   jsonSchema: (schema: unknown) => ({ jsonSchema: schema })
 }));
 vi.mock("../src/provider-registry.ts", () => ({ resolveProvider: resolveProviderMock }));
@@ -37,6 +39,7 @@ beforeEach(() => {
   currentPermissions().seedBuiltInProfiles();
   seedSoloRoom();
   streamTextMock.mockReset();
+  stepCountIsMock.mockClear();
   resolveProviderMock.mockReset();
   resolveProviderMock.mockReturnValue({ providerModel: true });
 });
@@ -66,7 +69,7 @@ describe("NativeAgentAdapter integration", () => {
     streamTextMock.mockImplementation(({ tools: aiTools }: { readonly tools: Record<string, { readonly execute: (input: unknown) => Promise<unknown> }> }) => ({
       fullStream: asyncGenerator([
         { type: "text-delta", text: "Hello " },
-        { type: "execute-tool", execute: () => aiTools["file.write"]!.execute({ path: "src/foo.ts", content: "hello" }) },
+        { type: "execute-tool", execute: () => aiTools.file_write!.execute({ path: "src/foo.ts", content: "hello" }) },
         { type: "text-delta", text: "world" }
       ]),
       usage: Promise.resolve({ inputTokens: 120, outputTokens: 45, inputTokenDetails: { cacheReadTokens: 12 } })
@@ -85,18 +88,25 @@ describe("NativeAgentAdapter integration", () => {
     }).runManaged(run);
     currentBus().flushDeltas();
 
-    expect(streamTextMock).toHaveBeenCalledWith(expect.objectContaining({ model: { providerModel: true }, abortSignal: expect.any(AbortSignal), tools: expect.objectContaining({ "file.write": expect.any(Object) }) }));
+    expect(stepCountIsMock).toHaveBeenCalledWith(5);
+    expect(streamTextMock).toHaveBeenCalledWith(expect.objectContaining({ model: { providerModel: true }, abortSignal: expect.any(AbortSignal), tools: expect.objectContaining({ file_write: expect.any(Object) }), stopWhen: { type: "step-count-is", count: 5 } }));
     expect(eventTypesForRun(run.id)).toEqual([
       "agent.run.queued",
       "agent.run.started",
       "permission.resolved",
+      "message.created",
       "tool.call.requested",
       "tool.call.completed",
+      "message.completed",
       "agent.run.completed",
       "message.brief.published",
       "permission.run_summary"
     ]);
-    expect(delivered).toEqual(["permission.resolved", "tool.call.requested", "tool.call.completed", "agent.run.completed", "message.brief.published", "permission.run_summary", "message.part.delta"]);
+    expect(delivered).toEqual(["permission.resolved", "message.created", "tool.call.requested", "tool.call.completed", "message.completed", "agent.run.completed", "message.brief.published", "permission.run_summary", "message.part.delta"]);
+    expect(assistantMessage(run.id)).toMatchObject({ role: "assistant", status: "completed", sender_id: "agent_1" });
+    expect(assistantMessageText(run.id)).toBe("Hello world");
+    expect(eventPayload("message.created", run.id)).toMatchObject({ messageId: `msg_${run.id}`, role: "assistant", senderId: "agent_1", runId: run.id });
+    expect(eventPayload("message.completed", run.id)).toMatchObject({ messageId: `msg_${run.id}`, text: "Hello world" });
     expect(eventPayload("tool.call.requested", run.id)).toMatchObject({ name: "file.write", input: { path: "src/foo.ts" } });
     expect(eventPayload("tool.call.completed", run.id)).toMatchObject({ ok: true, output: { written: true } });
     expect(eventPayload("agent.run.completed", run.id)).toMatchObject({ cost: { inputTokens: 120, outputTokens: 45, cachedTokens: 12, costUsd: 0.001035, modelId: "gpt-4o" } });
@@ -197,6 +207,18 @@ async function* asyncGenerator(parts: readonly unknown[], signal?: AbortSignal):
 }
 
 function eventTypesForRun(runId: string): string[] { return currentDatabase().sqlite.prepare("SELECT type FROM events WHERE run_id = ? ORDER BY seq ASC").all(runId).map((row) => (row as { type: string }).type); }
+function assistantMessage(runId: string) {
+  return currentDatabase().sqlite.prepare("SELECT id, role, sender_id, run_id, status FROM messages WHERE run_id = ? AND role = 'assistant'").get(runId);
+}
+function assistantMessageText(runId: string): string {
+  const message = assistantMessage(runId) as { readonly id: string } | undefined;
+  expect(message).toBeDefined();
+  const rows = currentDatabase().sqlite.prepare("SELECT payload FROM message_parts WHERE message_id = ? ORDER BY seq ASC").all(message!.id) as { readonly payload: string }[];
+  return rows.map((row) => {
+    const parsed = JSON.parse(row.payload) as { readonly text?: unknown };
+    return typeof parsed.text === "string" ? parsed.text : "";
+  }).join("");
+}
 function eventPayload(type: string, runId: string): Record<string, unknown> {
   const row = currentDatabase().sqlite.prepare("SELECT payload FROM events WHERE type = ? AND run_id = ? ORDER BY seq DESC LIMIT 1").get(type, runId) as { payload: string } | undefined;
   expect(row).toBeDefined();

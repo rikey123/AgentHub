@@ -23,8 +23,9 @@ describe("convertMcpToolsToAiSdkTools", () => {
       new (class { handle = bridgeHandle; })() as never
     );
 
-    expect(toolSet["room.list_tasks"]!.inputSchema).toHaveProperty("jsonSchema");
-    await toolSet["room.list_tasks"]!.execute?.({}, {} as never);
+    expect(toolSet["room_list_tasks"]!.inputSchema).toHaveProperty("jsonSchema");
+    expect(toolSet["room.list_tasks"]).toBeUndefined();
+    await toolSet["room_list_tasks"]!.execute?.({}, {} as never);
 
     expect(bridgeHandle).toHaveBeenCalledWith(expect.objectContaining({ type: "tool.call.requested", name: "room.list_tasks" }));
     expect(bridgeHandle).toHaveBeenCalledWith(expect.objectContaining({ type: "tool.call.completed", ok: true, output: { tasks: [] } }));
@@ -37,7 +38,7 @@ describe("convertMcpToolsToAiSdkTools", () => {
       new (class { handle = bridgeHandle; })() as never
     );
 
-    await expect(toolSet["room.create_task"]!.execute?.({ title: "" }, {} as never)).resolves.toEqual({ code: "validation_failed", message: "title is required" });
+    await expect(toolSet["room_create_task"]!.execute?.({ title: "" }, {} as never)).resolves.toEqual({ code: "validation_failed", message: "title is required" });
 
     expect(bridgeHandle).toHaveBeenCalledWith(expect.objectContaining({ type: "tool.call.completed", ok: false, output: { code: "validation_failed", message: "title is required" } }));
     expect(bridgeHandle).toHaveBeenCalledTimes(2);

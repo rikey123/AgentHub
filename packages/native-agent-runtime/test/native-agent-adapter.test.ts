@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const streamTextMock = vi.hoisted(() => vi.fn());
+const stepCountIsMock = vi.hoisted(() => vi.fn((count: number) => ({ type: "step-count-is", count })));
 const resolveProviderMock = vi.hoisted(() => vi.fn());
 const convertMcpToolsToAiSdkToolsMock = vi.hoisted(() => vi.fn());
 const permissionCheckMock = vi.hoisted(() => vi.fn());
 
 vi.mock("ai", () => ({
-  streamText: streamTextMock
+  streamText: streamTextMock,
+  stepCountIs: stepCountIsMock
 }));
 
 vi.mock("../src/provider-registry.ts", () => ({
@@ -21,6 +23,7 @@ let NativeAgentAdapter: typeof import("../src/native-agent-adapter.ts").NativeAg
 
 beforeEach(async () => {
   streamTextMock.mockReset();
+  stepCountIsMock.mockClear();
   resolveProviderMock.mockReset();
   convertMcpToolsToAiSdkToolsMock.mockReset();
   permissionCheckMock.mockReset();
@@ -56,7 +59,8 @@ describe("NativeAgentAdapter", () => {
     expect(permissionCheckMock).toHaveBeenCalledTimes(1);
     expect(resolveProviderMock).toHaveBeenCalledWith({ id: "mc-1", provider: "openai", model: "gpt-4o", base_url: null, api_key_ref: null }, "test-key");
     expect(convertMcpToolsToAiSdkToolsMock).toHaveBeenCalled();
-    expect(streamTextMock).toHaveBeenCalledWith(expect.objectContaining({ model: { id: "resolved-model" }, abortSignal: expect.any(AbortSignal), tools: {} }));
+    expect(stepCountIsMock).toHaveBeenCalledWith(5);
+    expect(streamTextMock).toHaveBeenCalledWith(expect.objectContaining({ model: { id: "resolved-model" }, abortSignal: expect.any(AbortSignal), tools: {}, stopWhen: { type: "step-count-is", count: 5 } }));
     expect(publish).toHaveBeenCalledWith(expect.objectContaining({ type: "message.part.delta" }));
     expect(publish).toHaveBeenCalledWith(expect.objectContaining({ type: "permission.run_summary" }));
     expect(publish).toHaveBeenCalledWith(expect.objectContaining({ type: "permission.run_summary", payload: expect.objectContaining({ decisions: [expect.objectContaining({ modelConfigId: "mc-1" })] }) }));
@@ -176,7 +180,7 @@ function createLifecycle() {
 function createDatabaseStub() {
   return {
     sqlite: {
-      prepare: vi.fn(() => ({ get: vi.fn(() => ({ seq: 1 })) }))
+      prepare: vi.fn(() => ({ get: vi.fn(() => ({ seq: 1 })), run: vi.fn() }))
     }
   } as never;
 }

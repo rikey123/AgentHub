@@ -1,5 +1,7 @@
-import { streamText, type LanguageModel, type ToolSet } from "ai";
-import type { EventBus } from "../../bus/src/index.ts";
+import { randomUUID } from "node:crypto";
+
+import { stepCountIs, streamText, type LanguageModel, type ToolSet } from "ai";
+import type { EventBus, PublishInput } from "../../bus/src/index.ts";
 import type { AgentHubDatabase } from "../../db/src/index.ts";
 import { AdapterBridge, type AdapterArtifactFSBoundary, type RunLifecycleService, type RunRow } from "../../orchestrator/src/index.ts";
 import type { AgentAdapterManifest } from "../../protocol/src/index.ts";
@@ -85,6 +87,7 @@ export class NativeAgentAdapter {
   private readonly now: () => number;
   private readonly activeRuns = new Map<string, ActiveRunState>();
   private readonly permissionCache = new Map<string, { readonly decision: "allowed" | "denied" | "expired"; readonly summary: PermissionDecisionSummary }>();
+  private readonly assistantTextByRun = new Map<string, string>();
 
   constructor(private readonly options: NativeAgentAdapterOptions) {
     this.now = options.now ?? Date.now;
@@ -145,30 +148,35 @@ export class NativeAgentAdapter {
       } satisfies ToolSet;
       const userText = this.loadLatestUserText(run.room_id);
       const rolePrompt = this.loadRolePrompt(run.room_id, run.agent_id);
+      const messageId = `msg_${run.id}`;
       const result = streamText({
         model: providerModel,
         ...(rolePrompt !== undefined ? { system: rolePrompt } : {}),
         messages: [{ role: "user" as const, content: userText ?? `Run ${run.id}` }],
         abortSignal: controller.signal,
-        tools
+        tools,
+        stopWhen: stepCountIs(5)
       });
 
       for await (const chunk of result.fullStream) {
         if (chunk.type === "text-delta") {
           const delta = chunk.text;
           if (delta.length === 0) continue;
-          bridge.handle({ type: "message.part.delta", messageId: `msg_${run.id}`, delta });
+          this.appendAssistantText(run, messageId, delta, bridge);
         }
       }
 
+      this.completeAssistantText(run, messageId);
       const usage = await result.usage;
       bridge.handle({ type: "session.ended", sessionId: `native-${run.id}`, reason: "completed", cost: costFromUsage(usage, modelConfig.model) });
     } catch (error) {
       if (isAbortError(error)) {
+        this.completeAssistantText(run, `msg_${run.id}`);
         this.options.lifecycle.markCancelling(null, run.id);
         bridge.handle({ type: "session.ended", sessionId: `native-${run.id}`, reason: "cancelled", cost: zeroCost(modelConfig.model) });
         return;
       }
+      this.completeAssistantText(run, `msg_${run.id}`);
       this.options.lifecycle.fail(null, run.id, "native_agent_runtime_error", classifyFailureClass(error), error instanceof Error ? error.message : String(error));
     } finally {
       this.publishPermissionSummary(run.id);
@@ -247,6 +255,57 @@ export class NativeAgentAdapter {
       payload: { runId, decisions: active.permissionSummary },
       createdAt: this.now()
     });
+  }
+
+  private appendAssistantText(run: RunRow, messageId: string, delta: string, bridge: AdapterBridge): void {
+    const existing = this.assistantTextByRun.get(run.id);
+    if (existing === undefined) {
+      this.persistAssistantMessageStart(run, messageId);
+      this.assistantTextByRun.set(run.id, delta);
+    } else {
+      this.assistantTextByRun.set(run.id, existing + delta);
+    }
+    this.publishRunEvent(run, "message.part.delta", { messageId, text: delta });
+    bridge.onMessageDelta();
+  }
+
+  private completeAssistantText(run: RunRow, messageId: string): void {
+    const text = this.assistantTextByRun.get(run.id);
+    if (text === undefined) return;
+    this.assistantTextByRun.delete(run.id);
+    this.persistAssistantMessageEnd(run, messageId, text);
+  }
+
+  private persistAssistantMessageStart(run: RunRow, messageId: string): void {
+    const now = this.now();
+    this.options.database.sqlite.prepare(
+      `INSERT OR IGNORE INTO messages (id, workspace_id, room_id, sender_type, sender_id, run_id, role, status, quoted_message_id, turn_dispatch_mode, pending_turn_id, created_at, updated_at, deleted_at)
+       VALUES (?, ?, ?, 'agent', ?, ?, 'assistant', 'streaming', NULL, 'immediate', NULL, ?, ?, NULL)`
+    ).run(messageId, run.workspace_id, run.room_id, run.agent_id, run.id, now, now);
+    this.publishRunEvent(run, "message.created", { messageId, role: "assistant", senderId: run.agent_id, runId: run.id });
+  }
+
+  private persistAssistantMessageEnd(run: RunRow, messageId: string, text: string): void {
+    const now = this.now();
+    const nextSeq = ((this.options.database.sqlite.prepare("SELECT COALESCE(MAX(seq), 0) + 1 AS seq FROM message_parts WHERE message_id = ?").get(messageId) as { readonly seq: number }).seq);
+    this.options.database.sqlite.prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, ?, 'text', ?, ?)").run(messageId, nextSeq, JSON.stringify({ text }), now);
+    this.options.database.sqlite.prepare("UPDATE messages SET status = 'completed', updated_at = ? WHERE id = ?").run(now, messageId);
+    this.publishRunEvent(run, "message.completed", { messageId, text });
+  }
+
+  private publishRunEvent(run: RunRow, type: PublishInput["type"], payload: Record<string, unknown>): void {
+    this.options.eventBus.publish({
+      id: randomUUID(),
+      type,
+      schemaVersion: 1,
+      workspaceId: run.workspace_id,
+      roomId: run.room_id,
+      ...(run.task_id !== null ? { taskId: run.task_id } : {}),
+      runId: run.id,
+      agentId: run.agent_id,
+      payload,
+      createdAt: this.now()
+    } satisfies PublishInput);
   }
 
   private loadLatestUserText(roomId: string | null): string | undefined {
