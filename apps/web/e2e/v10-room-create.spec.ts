@@ -43,14 +43,13 @@ test.describe("V1.0 room creation", () => {
     await page.getByText("Team", { exact: true }).click();
     await expect(page.locator('[data-testid="new-room-leader-role"]')).toBeVisible();
     await chooseHeroSelect(page, "new-room-leader-role", "Leader E2E");
-    await chooseHeroSelect(page, "new-room-participant-role-0", "Leader E2E");
-    await chooseHeroSelect(page, "new-room-participant-runtime-0", "AgentHub Native");
-    await chooseHeroSelect(page, "new-room-participant-model-0", "Local E2E Model");
-    await page.getByRole("button", { name: "Add participant" }).click();
-    await expect(page.locator('[data-testid="new-room-participant-role-1"]')).toBeVisible();
+    await chooseHeroSelect(page, "new-room-leader-runtime", "AgentHub Native");
+    await chooseHeroSelect(page, "new-room-leader-model", "Local E2E Model");
+    await page.getByRole("button", { name: "Add teammate" }).click();
+    await expect(page.locator('[data-testid="new-room-participant-0-role"]')).toBeVisible();
     await expect(page.getByRole("button", { name: "Create room" })).toBeVisible();
-    await chooseHeroSelect(page, "new-room-participant-role-1", "Reviewer E2E");
-    await chooseHeroSelect(page, "new-room-participant-runtime-1", "Claude E2E ACP");
+    await chooseHeroSelect(page, "new-room-participant-0-role", "Reviewer E2E");
+    await chooseHeroSelect(page, "new-room-participant-0-runtime", "Claude E2E ACP");
     await page.getByRole("button", { name: "Create room" }).click();
 
     await expect(page.getByRole("textbox", { name: "Message" })).toBeEnabled();

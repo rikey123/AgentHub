@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Avatar,
   Button,
@@ -290,6 +290,83 @@ export function RoleSelect({
   );
 }
 
+export function RoleBindingRow({
+  title,
+  roleId,
+  runtimeId,
+  modelConfigId,
+  presence,
+  roles,
+  runtimes,
+  modelConfigs,
+  onChange,
+  testIdPrefix,
+  action
+}: {
+  title?: string;
+  roleId: string;
+  runtimeId: string;
+  modelConfigId: string;
+  presence: RoomPresence;
+  roles: readonly { id: string; name: string; description?: string; prompt?: string; capabilities: string[]; is_builtin?: boolean }[];
+  runtimes: readonly { id: string; name: string; kind: string; detectedVersion?: string | null; version?: string | null }[];
+  modelConfigs: readonly { id: string; name: string; provider: string; model: string }[];
+  onChange: (patch: Partial<V1ParticipantDraft>) => void;
+  testIdPrefix: string;
+  action?: ReactNode;
+}) {
+  const runtime = runtimes.find((candidate) => candidate.id === runtimeId);
+  const needsModel = runtime?.kind === "native";
+  return (
+    <div className="grid gap-3 rounded-xl border border-border bg-surface p-3">
+      {title ? (
+        <div className="flex items-center justify-between gap-3">
+          <h4 className="text-sm font-semibold">{title}</h4>
+          {runtime ? <Chip size="sm" variant="soft" color={runtime.kind === "native" ? "success" : "default"}>{runtime.kind}</Chip> : null}
+        </div>
+      ) : null}
+      <div className="grid gap-3 lg:grid-cols-[minmax(180px,1fr)_minmax(190px,1fr)_minmax(190px,1fr)_minmax(170px,0.8fr)_auto]">
+        <RoleSelect
+          label="Role"
+          value={roleId}
+          roles={roles}
+          onChange={(value) => onChange({ roleId: value })}
+          testId={`${testIdPrefix}-role`}
+        />
+        <StyledSelect
+          label="Runtime"
+          value={runtimeId}
+          options={runtimeOptions(runtimes)}
+          placeholder="Choose runtime"
+          onChange={(value) => onChange({ runtimeId: value })}
+          testId={`${testIdPrefix}-runtime`}
+          isDisabled={runtimes.length === 0}
+        />
+        <StyledSelect
+          label="Model"
+          value={modelConfigId}
+          options={modelOptions(modelConfigs, needsModel ? "Choose model" : "No model override")}
+          placeholder={needsModel ? "Choose model" : "No model override"}
+          onChange={(value) => onChange({ modelConfigId: value })}
+          testId={`${testIdPrefix}-model`}
+          isDisabled={!needsModel && modelConfigs.length === 0}
+        />
+        <StyledSelect
+          label="Presence"
+          value={presence}
+          options={presenceOptions}
+          placeholder="Choose presence"
+          onChange={(value) => onChange({ defaultPresence: value as RoomPresence })}
+          testId={`${testIdPrefix}-presence`}
+        />
+        <div className="flex items-end justify-end gap-2">
+          {action}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 type V1ParticipantDraft = {
   id: string;
   roleId: string;
@@ -308,6 +385,18 @@ function newParticipantDraft(roleId: string, runtimeId: string, modelConfigId = 
   };
 }
 
+function patchParticipantRuntime(
+  participant: V1ParticipantDraft,
+  patch: Partial<V1ParticipantDraft>,
+  runtimes: readonly { id: string; kind: string }[],
+  modelConfigs: readonly { id: string }[]
+): V1ParticipantDraft {
+  const runtimeId = patch.runtimeId ?? participant.runtimeId;
+  const runtime = runtimes.find((candidate) => candidate.id === runtimeId);
+  const modelConfigId = patch.modelConfigId ?? (runtime?.kind === "native" ? (participant.modelConfigId || modelConfigs[0]?.id || "") : "");
+  return { ...participant, ...patch, runtimeId, modelConfigId };
+}
+
 export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogProps) {
   const { agents, loading, error: agentsError } = useAgents();
   const {
@@ -322,6 +411,7 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
   const [mode, setMode] = useState<RoomMode>("assisted");
   const [primaryId, setPrimaryId] = useState<string | undefined>(undefined);
   const [leaderRoleId, setLeaderRoleId] = useState<string>("");
+  const [leaderBinding, setLeaderBinding] = useState<V1ParticipantDraft | undefined>(undefined);
   const [v1Participants, setV1Participants] = useState<V1ParticipantDraft[]>([]);
   const [extraIds, setExtraIds] = useState<Set<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);
@@ -334,6 +424,7 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
       setExtraIds(new Set());
       setMode("assisted");
       setLeaderRoleId("");
+      setLeaderBinding(undefined);
       setV1Participants([]);
     }
   }, [isOpen]);
@@ -352,12 +443,14 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
   }, [leaderRoleId, roles]);
 
   useEffect(() => {
-    if (v1Participants.length > 0 || roles.length === 0 || runtimes.length === 0) return;
-    const role = roles.find((candidate) => candidate.id === leaderRoleId) ?? roles[0];
+    if (leaderBinding || roles.length === 0 || runtimes.length === 0) return;
+    const role = roles.find((candidate) => candidate.id === leaderRoleId) ?? roles.find((candidate) => candidate.capabilities.includes("task.delegate")) ?? roles[0];
     const runtime = runtimes.find((candidate) => candidate.kind === "native") ?? runtimes[0];
     const modelConfigId = runtime?.kind === "native" ? modelConfigs[0]?.id ?? "" : "";
-    setV1Participants([newParticipantDraft(role?.id ?? "", runtime?.id ?? "", modelConfigId)]);
-  }, [leaderRoleId, modelConfigs, roles, runtimes, v1Participants.length]);
+    const next = newParticipantDraft(role?.id ?? "", runtime?.id ?? "", modelConfigId);
+    setLeaderBinding(next);
+    setLeaderRoleId(next.roleId);
+  }, [leaderBinding, leaderRoleId, modelConfigs, roles, runtimes]);
 
   const sortedAgents = useMemo(
     () => agents.slice().sort((a, b) => {
@@ -370,7 +463,7 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
 
   const primaryAgent = sortedAgents.find((agent) => agent.id === primaryId);
   const selectedExtras = sortedAgents.filter((agent) => extraIds.has(agent.id) && agent.id !== primaryId);
-  const selectedLeader = roles.find((role) => role.id === leaderRoleId);
+  const selectedLeader = roles.find((role) => role.id === (leaderBinding?.roleId ?? leaderRoleId));
   const teamMode = mode === "squad" || mode === "team";
 
   const toggleExtra = (id: string) => {
@@ -384,15 +477,28 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
   const updateV1Participant = (id: string, patch: Partial<V1ParticipantDraft>) => {
     setV1Participants((current) => current.map((participant) => {
       if (participant.id !== id) return participant;
-      const runtimeId = patch.runtimeId ?? participant.runtimeId;
-      const runtime = runtimes.find((candidate) => candidate.id === runtimeId);
-      const modelConfigId = patch.modelConfigId ?? (runtime?.kind === "native" ? (participant.modelConfigId || modelConfigs[0]?.id || "") : "");
-      return { ...participant, ...patch, runtimeId, modelConfigId };
+      return patchParticipantRuntime(participant, patch, runtimes, modelConfigs);
     }));
   };
 
+  const updateLeaderBinding = (patch: Partial<V1ParticipantDraft>) => {
+    let nextRoleId: string | undefined;
+    setLeaderBinding((current) => {
+      const fallbackRole = roles.find((candidate) => candidate.id === leaderRoleId) ?? roles[0];
+      const fallbackRuntime = runtimes.find((candidate) => candidate.kind === "native") ?? runtimes[0];
+      const base = current ?? newParticipantDraft(fallbackRole?.id ?? "", fallbackRuntime?.id ?? "", fallbackRuntime?.kind === "native" ? modelConfigs[0]?.id ?? "" : "");
+      const next = patchParticipantRuntime(base, patch, runtimes, modelConfigs);
+      nextRoleId = next.roleId;
+      return next;
+    });
+    if (nextRoleId) setLeaderRoleId(nextRoleId);
+  };
+
   const addV1Participant = () => {
-    const role = roles.find((candidate) => candidate.id === leaderRoleId) ?? roles[0];
+    const currentLeaderRoleId = leaderBinding?.roleId ?? leaderRoleId;
+    const role = roles.find((candidate) => candidate.id !== currentLeaderRoleId && candidate.capabilities.includes("code.review"))
+      ?? roles.find((candidate) => candidate.id !== currentLeaderRoleId)
+      ?? roles[0];
     const runtime = runtimes.find((candidate) => candidate.kind === "native") ?? runtimes[0];
     const modelConfigId = runtime?.kind === "native" ? modelConfigs[0]?.id ?? "" : "";
     setV1Participants((current) => [
@@ -420,7 +526,8 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
           const defaultPresence: RoomPresence = agent?.defaultPresence === "active" ? "active" : "observing";
           return { type: "agent" as const, agentId: id, role: roleForAgent(agent), defaultPresence };
         });
-      const v1ParticipantInput = v1Participants.map((participant) => {
+      const allV1Participants = leaderBinding ? [leaderBinding, ...v1Participants] : v1Participants;
+      const v1ParticipantInput = allV1Participants.map((participant) => {
         const runtime = runtimes.find((candidate) => candidate.id === participant.runtimeId);
         const next: BuildV1ParticipantInput = {
           roleId: participant.roleId,
@@ -431,10 +538,11 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
         if (participant.modelConfigId) next.modelConfigId = participant.modelConfigId;
         return next;
       });
-      const leaderParticipant = v1Participants.find((participant) => participant.roleId === leaderRoleId);
+      const currentLeaderRoleId = leaderBinding?.roleId ?? leaderRoleId;
+      const leaderParticipant = leaderBinding ?? allV1Participants.find((participant) => participant.roleId === currentLeaderRoleId);
       const leaderBindingId = leaderParticipant
         ? agentBindings.find((binding) =>
-            binding.roleId === leaderRoleId
+            binding.roleId === currentLeaderRoleId
             && binding.runtimeId === leaderParticipant.runtimeId
             && binding.modelConfigId === (leaderParticipant.modelConfigId || null)
           )?.id
@@ -447,7 +555,7 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
         legacyAgentParticipants,
         v1Participants: v1ParticipantInput
       };
-      await onCreate(buildCreateRoomInput(leaderRoleId ? { ...createInput, leaderRoleId } : createInput));
+      await onCreate(buildCreateRoomInput(currentLeaderRoleId ? { ...createInput, leaderRoleId: currentLeaderRoleId } : createInput));
       onOpenChange(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -566,7 +674,7 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
                     <div className="mb-3 flex items-start justify-between gap-3">
                       <div>
                         <h3 className="text-sm font-semibold">Role team</h3>
-                        <p className="text-xs text-muted">Choose a leader role and bind each participant to a role, runtime, and model when required.</p>
+                        <p className="text-xs text-muted">Bind the leader to a role, runtime, and model, then add teammates when needed.</p>
                       </div>
                       <Chip size="sm" variant="soft" color={selectedLeader ? "accent" : "default"}>
                         {selectedLeader?.name ?? "No leader"}
@@ -576,69 +684,56 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
                     {optionsError ? <p className="mb-2 text-xs text-danger">{optionsError}</p> : null}
                     {optionsLoading ? <p className="mb-2 text-xs text-muted">Loading roles, runtimes, and models...</p> : null}
 
-                    <RoleSelect
-                      label="Leader Role"
-                      value={leaderRoleId}
-                      roles={roles}
-                      onChange={setLeaderRoleId}
-                      testId="new-room-leader-role"
-                    />
+                    {leaderBinding ? (
+                      <RoleBindingRow
+                        title="Leader binding"
+                        roleId={leaderBinding.roleId}
+                        runtimeId={leaderBinding.runtimeId}
+                        modelConfigId={leaderBinding.modelConfigId}
+                        presence={leaderBinding.defaultPresence}
+                        roles={roles}
+                        runtimes={runtimes}
+                        modelConfigs={modelConfigs}
+                        onChange={updateLeaderBinding}
+                        testIdPrefix="new-room-leader"
+                      />
+                    ) : (
+                      <div className="rounded-xl border border-dashed border-border bg-surface p-3 text-sm text-muted">
+                        Loading leader binding options...
+                      </div>
+                    )}
 
                     <div className="mt-4 grid gap-3">
                       <div className="flex items-center justify-between gap-3">
-                        <h4 className="text-sm font-semibold">Participants</h4>
+                        <h4 className="text-sm font-semibold">Teammates</h4>
                         <Button size="sm" variant="secondary" onPress={addV1Participant} isDisabled={roles.length === 0 || runtimes.length === 0}>
-                          Add participant
+                          Add teammate
                         </Button>
                       </div>
 
                       {v1Participants.length === 0 ? (
                         <div className="rounded-xl border border-dashed border-border bg-surface p-3 text-sm text-muted">
-                          Add at least one participant for squad or team rooms.
+                          Add teammate roles here. The leader binding above is always included.
                         </div>
                       ) : v1Participants.map((participant, index) => {
-                        const runtime = runtimes.find((candidate) => candidate.id === participant.runtimeId);
-                        const needsModel = runtime?.kind === "native";
                         return (
-                          <div key={participant.id} className="grid gap-3 rounded-xl border border-border bg-surface p-3 lg:grid-cols-[minmax(180px,1fr)_minmax(190px,1fr)_minmax(190px,1fr)_minmax(170px,0.8fr)_auto]">
-                            <RoleSelect
-                              label="Role"
-                              value={participant.roleId}
-                              roles={roles}
-                              onChange={(value) => updateV1Participant(participant.id, { roleId: value })}
-                              testId={`new-room-participant-role-${index}`}
-                            />
-                            <StyledSelect
-                              label="Runtime"
-                              value={participant.runtimeId}
-                              options={runtimeOptions(runtimes)}
-                              placeholder="Choose runtime"
-                              onChange={(value) => updateV1Participant(participant.id, { runtimeId: value })}
-                              testId={`new-room-participant-runtime-${index}`}
-                              isDisabled={runtimes.length === 0}
-                            />
-                            <StyledSelect
-                              label="Model"
-                              value={participant.modelConfigId}
-                              options={modelOptions(modelConfigs, needsModel ? "Choose model" : "No model override")}
-                              placeholder={needsModel ? "Choose model" : "No model override"}
-                              onChange={(value) => updateV1Participant(participant.id, { modelConfigId: value })}
-                              testId={`new-room-participant-model-${index}`}
-                              isDisabled={!needsModel && modelConfigs.length === 0}
-                            />
-                            <StyledSelect
-                              label="Presence"
-                              value={participant.defaultPresence}
-                              options={presenceOptions}
-                              placeholder="Choose presence"
-                              onChange={(value) => updateV1Participant(participant.id, { defaultPresence: value as RoomPresence })}
-                            />
-                            <div className="flex items-end justify-end gap-2">
+                          <RoleBindingRow
+                            key={participant.id}
+                            roleId={participant.roleId}
+                            runtimeId={participant.runtimeId}
+                            modelConfigId={participant.modelConfigId}
+                            presence={participant.defaultPresence}
+                            roles={roles}
+                            runtimes={runtimes}
+                            modelConfigs={modelConfigs}
+                            onChange={(patch) => updateV1Participant(participant.id, patch)}
+                            testIdPrefix={`new-room-participant-${index}`}
+                            action={
                               <Button size="sm" variant="tertiary" onPress={() => removeV1Participant(participant.id)} isDisabled={v1Participants.length === 1}>
                                 Remove
                               </Button>
-                            </div>
-                          </div>
+                            }
+                          />
                         );
                       })}
                     </div>
@@ -699,14 +794,14 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
               {mode === "solo"
                 ? "Solo rooms start with the primary agent only."
                 : teamMode
-                  ? `${v1Participants.length} role participant${v1Participants.length === 1 ? "" : "s"} will join this room.`
+                  ? `Leader plus ${v1Participants.length} teammate${v1Participants.length === 1 ? "" : "s"} will join this room.`
                   : `${selectedExtras.length + 1} agent${selectedExtras.length === 0 ? "" : "s"} will join this room.`}
             </div>
             <Button slot="close" variant="tertiary">Cancel</Button>
             <Button
               variant="primary"
               isPending={submitting}
-              isDisabled={submitting || (!teamMode && !primaryId) || (teamMode && (!leaderRoleId || v1Participants.length === 0))}
+              isDisabled={submitting || (!teamMode && !primaryId) || (teamMode && !leaderBinding)}
               onPress={() => void handleSubmit()}
             >
               Create room

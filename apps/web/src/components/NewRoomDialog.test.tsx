@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { ROOM_MODE_OPTIONS, RoleSelect, buildCreateRoomInput } from "./NewRoomDialog.tsx";
+import { ROOM_MODE_OPTIONS, RoleBindingRow, RoleSelect, buildCreateRoomInput } from "./NewRoomDialog.tsx";
 
 describe("NewRoomDialog create-room contract", () => {
   it("offers all V1.0 room modes", () => {
@@ -28,6 +28,34 @@ describe("NewRoomDialog create-room contract", () => {
     expect(html).toContain("Leader Role");
     expect(html).toContain("select__trigger");
     expect(html).toContain("hidden-select-container");
+  });
+
+  it("renders a leader binding row with explicit role, runtime, and model selectors", () => {
+    const html = renderToStaticMarkup(createElement(RoleBindingRow, {
+      title: "Leader binding",
+      roleId: "role_lead",
+      runtimeId: "native-default",
+      modelConfigId: "mc_gpt4o",
+      presence: "active",
+      roles: [
+        { id: "role_lead", name: "Lead", description: "Coordinates work", prompt: "", capabilities: ["task.delegate"], is_builtin: true }
+      ],
+      runtimes: [
+        { id: "native-default", name: "AgentHub Native", kind: "native", detectedVersion: "native", version: null }
+      ],
+      modelConfigs: [
+        { id: "mc_gpt4o", name: "GPT-4o", provider: "openai", model: "gpt-4o" }
+      ],
+      onChange: () => undefined,
+      testIdPrefix: "new-room-leader"
+    }));
+
+    expect(html).toContain("Leader binding");
+    expect(html).toContain("new-room-leader-role");
+    expect(html).toContain("new-room-leader-runtime");
+    expect(html).toContain("new-room-leader-model");
+    expect(html).toContain("AgentHub Native");
+    expect(html).toContain("GPT-4o");
   });
 
   it("builds a team payload with a leader role and role/runtime/model participants", () => {
