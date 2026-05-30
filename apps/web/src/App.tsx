@@ -20,6 +20,22 @@ import { useProjector } from "./hooks/useProjector.ts";
 import { useSdk, useCsrfFetch } from "./hooks/useSdk.ts";
 import { useTheme } from "./hooks/useTheme.ts";
 
+type ChatRoomLayoutProps = {
+  readonly chat: React.ReactNode;
+  readonly pendingTurns: React.ReactNode;
+  readonly input: React.ReactNode;
+};
+
+export function ChatRoomLayout({ chat, pendingTurns, input }: ChatRoomLayoutProps) {
+  return (
+    <div className="flex h-full min-h-0 flex-col overflow-hidden" data-testid="chat-room-layout">
+      <div className="min-h-0 flex-1 overflow-hidden" data-testid="chat-scroll-region">{chat}</div>
+      <div className="shrink-0" data-testid="chat-pending-region">{pendingTurns}</div>
+      <div className="shrink-0" data-testid="chat-input-region">{input}</div>
+    </div>
+  );
+}
+
 export default function App() {
   const initialSettingsState = useMemo(() => {
     if (typeof window === "undefined") return { isOpen: false, tab: "roles" as SettingsTabId };
@@ -230,43 +246,49 @@ export default function App() {
   }, [rooms, openNewRoom, openSettings, leftCollapsed, rightCollapsed, setTheme, setDensity]);
 
   const center = activeRoom ? (
-    <div className="flex h-full flex-col">
-      <ChatStream
-        room={activeRoom}
-        selectedMessageId={selectedMessageId}
-        onSelectMessage={setSelectedMessageId}
-        onOpenRun={(runId) => setActiveRunId(runId)}
-        onQuote={handleQuoteMessage}
-        onPin={(id) => void handlePin(id)}
-        onRegenerate={(id) => void handleRegenerate(id)}
-        onDelete={(id) => void handleDelete(id)}
-        onOpenTask={handleOpenTask}
-        onOpenTasks={openTasksPanel}
-        onCancelPending={(id) => void handleCancelPending(id)}
-        onEditPending={handleEditPending}
-        csrfFetch={csrfFetch}
-        connectionStatus={projector.connectionStatus}
-        connectionError={projector.connectionError}
-      />
-      <PendingTurnList
-        turns={activeRoom.pendingTurns}
-        onCancel={(id) => void handleCancelPending(id)}
-        onEdit={handleEditPending}
-      />
-      <InputBox
-        roomId={activeRoom.id}
-        participants={activeRoom.participants}
-        connectionStatus={projector.connectionStatus}
-        pendingCount={activeRoom.pendingTurns.length}
-        latestPendingMessageId={activeRoom.pendingTurns.length > 0 ? activeRoom.pendingTurns[activeRoom.pendingTurns.length - 1]!.id : undefined}
-        editingTurnId={editingTurnId}
-        onCancelEdit={() => setEditingTurnId(undefined)}
-        onRequestEdit={handleEditPending}
-        csrfFetch={csrfFetch}
-        onSend={handleSendMessage}
-        onEditSend={handleEditSend}
-      />
-    </div>
+    <ChatRoomLayout
+      chat={
+        <ChatStream
+          room={activeRoom}
+          selectedMessageId={selectedMessageId}
+          onSelectMessage={setSelectedMessageId}
+          onOpenRun={(runId) => setActiveRunId(runId)}
+          onQuote={handleQuoteMessage}
+          onPin={(id) => void handlePin(id)}
+          onRegenerate={(id) => void handleRegenerate(id)}
+          onDelete={(id) => void handleDelete(id)}
+          onOpenTask={handleOpenTask}
+          onOpenTasks={openTasksPanel}
+          onCancelPending={(id) => void handleCancelPending(id)}
+          onEditPending={handleEditPending}
+          csrfFetch={csrfFetch}
+          connectionStatus={projector.connectionStatus}
+          connectionError={projector.connectionError}
+        />
+      }
+      pendingTurns={
+        <PendingTurnList
+          turns={activeRoom.pendingTurns}
+          onCancel={(id) => void handleCancelPending(id)}
+          onEdit={handleEditPending}
+        />
+      }
+      input={
+        <InputBox
+          roomId={activeRoom.id}
+          participants={activeRoom.participants}
+          connectionStatus={projector.connectionStatus}
+          pendingCount={activeRoom.pendingTurns.length}
+          latestPendingMessageId={activeRoom.pendingTurns.length > 0 ? activeRoom.pendingTurns[activeRoom.pendingTurns.length - 1]!.id : undefined}
+          editingTurnId={editingTurnId}
+          onCancelEdit={() => setEditingTurnId(undefined)}
+          onRequestEdit={handleEditPending}
+          csrfFetch={csrfFetch}
+          onSend={handleSendMessage}
+          onEditSend={handleEditSend}
+        />
+      }
+    />
   ) : (
     <HomeView rooms={rooms} onOpenRoom={setActiveRoomId} onCreate={openNewRoom} />
   );

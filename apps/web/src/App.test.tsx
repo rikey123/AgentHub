@@ -50,7 +50,7 @@ vi.mock("./components/CommandPalette.tsx", () => ({ CommandPalette: () => null }
 vi.mock("./components/KeymapModal.tsx", () => ({ KeymapModal: () => null }));
 vi.mock("./components/NewRoomDialog.tsx", () => ({ NewRoomDialog: () => null }));
 
-import App from "./App.tsx";
+import App, { ChatRoomLayout } from "./App.tsx";
 
 describe("App integration wiring", () => {
   it("passes csrfFetch into SettingsModal so settings writes use browser CSRF", () => {
@@ -61,5 +61,22 @@ describe("App integration wiring", () => {
     expect(props).toEqual(expect.objectContaining({
       fetchImpl: mocks.csrfFetch
     }));
+  });
+
+  it("keeps chat messages scrollable without pushing the composer out of view", () => {
+    const html = renderToStaticMarkup(
+      createElement(ChatRoomLayout, {
+        chat: createElement("div", null, "messages"),
+        pendingTurns: createElement("div", null, "pending"),
+        input: createElement("div", null, "composer")
+      })
+    );
+
+    expect(html).toContain('data-testid="chat-room-layout"');
+    expect(html).toContain("flex h-full min-h-0 flex-col overflow-hidden");
+    expect(html).toContain('data-testid="chat-scroll-region"');
+    expect(html).toContain("min-h-0 flex-1 overflow-hidden");
+    expect(html).toContain('data-testid="chat-input-region"');
+    expect(html).toContain("shrink-0");
   });
 });

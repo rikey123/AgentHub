@@ -145,7 +145,7 @@ export function ChatStream(props: ChatStreamProps) {
     (props.connectionStatus === "connected" || props.connectionStatus === "disconnected" || props.connectionStatus === "offline" || props.connectionStatus === "reconnecting");
 
   return (
-    <div className="relative flex h-full flex-col bg-[radial-gradient(circle_at_top_left,color-mix(in_oklab,var(--accent)_9%,transparent),transparent_34%),linear-gradient(180deg,var(--background),var(--background-secondary))]">
+    <div className="relative flex h-full min-h-0 flex-col bg-[radial-gradient(circle_at_top_left,color-mix(in_oklab,var(--accent)_9%,transparent),transparent_34%),linear-gradient(180deg,var(--background),var(--background-secondary))]">
       <RunBriefToasts roomId={room.id} briefs={room.briefs} onOpenRun={props.onOpenRun} />
       {props.connectionStatus !== "connected" ? (
         <div className="px-3 pt-2">
@@ -170,7 +170,7 @@ export function ChatStream(props: ChatStreamProps) {
           ))}
         </div>
       ) : null}
-      <ScrollShadow className="flex-1 overflow-hidden" orientation="vertical">
+      <ScrollShadow className="min-h-0 flex-1 overflow-hidden" orientation="vertical">
         <div ref={parentRef} className="h-full overflow-auto" tabIndex={0}>
           {showFirstConnectSkeleton ? (
             <div className="mx-auto flex max-w-[920px] flex-col gap-3 p-4" aria-label="Loading messages">
