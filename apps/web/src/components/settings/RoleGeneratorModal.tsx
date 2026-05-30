@@ -366,7 +366,7 @@ export function normalizeRoleGenerationJob(fallbackJobId: string, payload: unkno
     promptFragment: stringField(isRecord(row) ? row.promptFragment ?? row.prompt_fragment ?? row.partialPrompt : undefined) ?? "",
     tokenCount: numberField(isRecord(row) ? row.tokenCount ?? row.token_count ?? row.tokens : undefined) ?? 0
   };
-  const error = stringField(isRecord(row) ? row.error : undefined);
+  const error = stringField(isRecord(row) ? row.error ?? row.failureReason ?? row.failure_reason : undefined);
   if (error) job.error = error;
   if (draftJson) job.draftJson = draftJson;
   return job;

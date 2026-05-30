@@ -74,6 +74,66 @@ describe("generateRoleDraftWithModelConfig", () => {
     })).rejects.toThrow("json_parse_failure");
   });
 
+  it("repairs fenced JSON drafts and permissionProfileId aliases from OpenAI-compatible models", async () => {
+    generateObjectMock.mockImplementation(async (options: { readonly experimental_repairText?: (input: { readonly text: string; readonly error: Error }) => Promise<string | null> }) => {
+      const repaired = await options.experimental_repairText?.({
+        text: [
+          "好的，下面是角色草稿：",
+          "```json",
+          JSON.stringify({
+            name: "Brainstorm Facilitator",
+            description: "Facilitates divergent thinking sessions",
+            prompt: "Help the user explore ideas broadly before narrowing options.",
+            capabilities: ["chat"],
+            permissionProfileId: "perm-readonly"
+          }),
+          "```"
+        ].join("\n"),
+        error: new Error("JSON parse failure")
+      });
+      return { object: JSON.parse(repaired ?? "null") };
+    });
+
+    const draft = await generateRoleDraftWithModelConfig({
+      modelConfig: { id: "mc-1", provider: "openai-compatible", model: "role-model", base_url: "https://models.example/v1", api_key_ref: "secret-ref" },
+      apiKey: "secret-value",
+      request: { description: "帮我生成一个擅长头脑风暴的角色", targetWork: null, preferredTone: null, capabilities: [] }
+    });
+
+    expect(draft).toEqual({
+      name: "Brainstorm Facilitator",
+      description: "Facilitates divergent thinking sessions",
+      prompt: "Help the user explore ideas broadly before narrowing options.",
+      capabilities: ["chat"],
+      suggestedPermissionProfileId: "perm-readonly"
+    });
+  });
+
+  it("normalizes title and systemPrompt objects returned by schema-limited providers", async () => {
+    generateObjectMock.mockResolvedValue({
+      object: {
+        title: "Brainstorm Facilitator",
+        description: "Facilitates divergent thinking sessions",
+        systemPrompt: "Help the user explore ideas broadly before narrowing options.",
+        suggestedPermissionProfileId: null
+      }
+    });
+
+    const draft = await generateRoleDraftWithModelConfig({
+      modelConfig: { id: "mc-1", provider: "openai-compatible", model: "role-model", base_url: "https://models.example/v1", api_key_ref: "secret-ref" },
+      apiKey: "secret-value",
+      request: { description: "帮我生成一个擅长头脑风暴的角色", targetWork: null, preferredTone: null, capabilities: [] }
+    });
+
+    expect(draft).toEqual({
+      name: "Brainstorm Facilitator",
+      description: "Facilitates divergent thinking sessions",
+      prompt: "Help the user explore ideas broadly before narrowing options.",
+      capabilities: ["chat"],
+      suggestedPermissionProfileId: null
+    });
+  });
+
   it("throws json_parse_failure when suggestedPermissionProfileId is missing", async () => {
     generateObjectMock.mockResolvedValue({
       object: {

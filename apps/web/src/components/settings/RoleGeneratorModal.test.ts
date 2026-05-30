@@ -120,6 +120,13 @@ describe("RoleGeneratorModal REST integration contract", () => {
       tokenCount: 0,
       error: "invalid_api_key"
     });
+    expect(normalizeRoleGenerationJob("job_parse", { status: "failed", failureReason: "json_parse_failure" })).toEqual({
+      jobId: "job_parse",
+      status: "failed",
+      promptFragment: "",
+      tokenCount: 0,
+      error: "json_parse_failure"
+    });
     expect(normalizeRoleGenerationJob("job_missing", { status: "expired" })).toMatchObject({ status: "expired" });
   });
 });
