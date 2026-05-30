@@ -13,8 +13,8 @@
     "orientationAngle": 0,
     "orientationType": "landscape-primary"
   },
-  "timestamp": "2026-05-29T08:13:09.928Z",
-  "url": "http://127.0.0.1:19920/",
+  "timestamp": "2026-05-30T07:17:06.621Z",
+  "url": "http://127.0.0.1:26840/",
   "toolOptions": {
     "rules": {
       "aria-required-parent": {
@@ -891,9 +891,9 @@
             }
           ],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Toggle rooms panel\" id=\"react-aria3681853477-_r_1_\">☰</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Toggle rooms panel\" id=\"react-aria7981614630-_r_1_\">☰</button>",
           "target": [
-            "#react-aria3681853477-_r_1_"
+            "#react-aria7981614630-_r_1_"
           ]
         },
         {
@@ -990,9 +990,9 @@
             }
           ],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Open command palette\" id=\"react-aria3681853477-_r_4_\"><span class=\"hidden sm:inline\">Command</span><kbd class=\"kbd ml-2\">⌘K</kbd></button>",
+          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Open command palette\" id=\"react-aria7981614630-_r_4_\"><span class=\"hidden sm:inline\">Command</span><kbd class=\"kbd ml-2\">⌘K</kbd></button>",
           "target": [
-            "#react-aria3681853477-_r_4_"
+            "#react-aria7981614630-_r_4_"
           ]
         },
         {
@@ -1023,9 +1023,9 @@
             }
           ],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Show keymap\" id=\"react-aria3681853477-_r_7_\">?</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Show keymap\" id=\"react-aria7981614630-_r_7_\">?</button>",
           "target": [
-            "#react-aria3681853477-_r_7_"
+            "#react-aria7981614630-_r_7_"
           ]
         },
         {
@@ -1056,9 +1056,9 @@
             }
           ],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Theme: auto\" id=\"react-aria3681853477-_r_a_\">🌓</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Theme: auto\" id=\"react-aria7981614630-_r_a_\">🌓</button>",
           "target": [
-            "#react-aria3681853477-_r_a_"
+            "#react-aria7981614630-_r_a_"
           ]
         },
         {
@@ -1089,9 +1089,9 @@
             }
           ],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Toggle workbench panel\" id=\"react-aria3681853477-_r_d_\">⊟</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Toggle workbench panel\" id=\"react-aria7981614630-_r_d_\">⊟</button>",
           "target": [
-            "#react-aria3681853477-_r_d_"
+            "#react-aria7981614630-_r_d_"
           ]
         },
         {
@@ -1419,9 +1419,9 @@
             }
           ],
           "impact": null,
-          "html": "<button data-slot=\"button\" data-testid=\"room-list-create-room\" class=\"button button--sm button--primary rounded-full px-4\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"New Room\" id=\"react-aria3681853477-_r_l_\">New</button>",
+          "html": "<button data-slot=\"button\" data-testid=\"room-list-create-room\" class=\"button button--sm button--primary rounded-full px-4\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"New Room\" id=\"react-aria7981614630-_r_l_\">New</button>",
           "target": [
-            "#react-aria3681853477-_r_l_"
+            "#react-aria7981614630-_r_l_"
           ]
         },
         {
@@ -1452,9 +1452,9 @@
             }
           ],
           "impact": null,
-          "html": "<input aria-label=\"Search rooms\" placeholder=\"Search room or mode\" tabindex=\"0\" id=\"react-aria3681853477-_r_n_\" class=\"search-field__input\" data-slot=\"search-field-input\" data-rac=\"\" type=\"search\" value=\"\" title=\"\">",
+          "html": "<input aria-label=\"Search rooms\" placeholder=\"Search room or mode\" tabindex=\"0\" id=\"react-aria7981614630-_r_n_\" class=\"search-field__input\" data-slot=\"search-field-input\" data-rac=\"\" type=\"search\" value=\"\" title=\"\">",
           "target": [
-            "#react-aria3681853477-_r_n_"
+            "#react-aria7981614630-_r_n_"
           ]
         },
         {
@@ -1518,7 +1518,7 @@
             }
           ],
           "impact": null,
-          "html": "<li role=\"option\" aria-selected=\"true\" data-testid=\"room-list-item-c95a1...\" tabindex=\"0\" class=\"group relative curso...\" aria-current=\"true\">",
+          "html": "<li role=\"option\" aria-selected=\"true\" data-testid=\"room-list-item-114bf...\" tabindex=\"0\" class=\"group relative curso...\" aria-current=\"true\">",
           "target": [
             "li"
           ]
@@ -1551,9 +1551,9 @@
             }
           ],
           "impact": null,
-          "html": "<button data-slot=\"dropdown-trigger\" data-testid=\"message-menu-fad30fe...\" class=\"dropdown__trigger in...\" data-rac=\"\" type=\"button\" tabindex=\"0\" aria-haspopup=\"true\" aria-expanded=\"false\" id=\"react-aria3681853477...\" data-react-aria-pres...=\"true\" aria-label=\"Message actions\">",
+          "html": "<button data-slot=\"dropdown-trigger\" data-testid=\"message-menu-f3c8c94...\" class=\"dropdown__trigger in...\" data-rac=\"\" type=\"button\" tabindex=\"0\" aria-haspopup=\"true\" aria-expanded=\"false\" id=\"react-aria7981614630...\" data-react-aria-pres...=\"true\" aria-label=\"Message actions\">",
           "target": [
-            "#react-aria3681853477-_r_1c_"
+            "#react-aria7981614630-_r_1c_"
           ]
         },
         {
@@ -1584,9 +1584,9 @@
             }
           ],
           "impact": null,
-          "html": "<button data-slot=\"dropdown-trigger\" data-testid=\"message-menu-3c13e4c...\" class=\"dropdown__trigger in...\" data-rac=\"\" type=\"button\" tabindex=\"0\" aria-haspopup=\"true\" aria-expanded=\"false\" id=\"react-aria3681853477...\" data-react-aria-pres...=\"true\" aria-label=\"Message actions\">",
+          "html": "<button data-slot=\"dropdown-trigger\" data-testid=\"message-menu-c39f647...\" class=\"dropdown__trigger in...\" data-rac=\"\" type=\"button\" tabindex=\"0\" aria-haspopup=\"true\" aria-expanded=\"false\" id=\"react-aria7981614630...\" data-react-aria-pres...=\"true\" aria-label=\"Message actions\">",
           "target": [
-            "#react-aria3681853477-_r_1g_"
+            "#react-aria7981614630-_r_1g_"
           ]
         },
         {
@@ -1683,9 +1683,9 @@
             }
           ],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Attach files\" id=\"react-aria3681853477-_r_12_\">Attach</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Attach files\" id=\"react-aria7981614630-_r_12_\">Attach</button>",
           "target": [
-            "#react-aria3681853477-_r_12_"
+            "#react-aria7981614630-_r_12_"
           ]
         },
         {
@@ -1716,9 +1716,9 @@
             }
           ],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Mention agent\" id=\"react-aria3681853477-_r_14_\">@ Agent</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Mention agent\" id=\"react-aria7981614630-_r_14_\">@ Agent</button>",
           "target": [
-            "#react-aria3681853477-_r_14_"
+            "#react-aria7981614630-_r_14_"
           ]
         },
         {
@@ -1782,9 +1782,9 @@
             }
           ],
           "impact": null,
-          "html": "<div data-slot=\"tabs-list\" class=\"tabs__list\" data-rac=\"\" data-collection=\"react-aria3681853477-_r_18_\" id=\"react-aria3681853477-_r_19_\" aria-label=\"Workbench panels\" role=\"tablist\" aria-orientation=\"horizontal\" data-orientation=\"horizontal\">",
+          "html": "<div data-slot=\"tabs-list\" class=\"tabs__list\" data-rac=\"\" data-collection=\"react-aria7981614630-_r_18_\" id=\"react-aria7981614630-_r_19_\" aria-label=\"Workbench panels\" role=\"tablist\" aria-orientation=\"horizontal\" data-orientation=\"horizontal\">",
           "target": [
-            "#react-aria3681853477-_r_19_"
+            "#react-aria7981614630-_r_19_"
           ]
         },
         {
@@ -1815,9 +1815,9 @@
             }
           ],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-conte...\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"0\" data-collection=\"react-aria3681853477...\" data-key=\"context\" data-react-aria-pres...=\"true\" id=\"react-aria3681853477...\" aria-selected=\"true\" aria-controls=\"react-aria3681853477...\" ...>",
+          "html": "<div data-testid=\"side-panel-tab-conte...\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"0\" data-collection=\"react-aria7981614630...\" data-key=\"context\" data-react-aria-pres...=\"true\" id=\"react-aria7981614630...\" aria-selected=\"true\" aria-controls=\"react-aria7981614630...\" ...>",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-context"
+            "#react-aria7981614630-_r_19_-tab-context"
           ]
         },
         {
@@ -1848,9 +1848,9 @@
             }
           ],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-tasks\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"tasks\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-tasks\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-tasks\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"tasks\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-tasks\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-tasks"
+            "#react-aria7981614630-_r_19_-tab-tasks"
           ]
         },
         {
@@ -1881,9 +1881,9 @@
             }
           ],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-members\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"members\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-members\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-members\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"members\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-members\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-members"
+            "#react-aria7981614630-_r_19_-tab-members"
           ]
         },
         {
@@ -1914,9 +1914,9 @@
             }
           ],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-debug\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"debug\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-debug\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-debug\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"debug\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-debug\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-debug"
+            "#react-aria7981614630-_r_19_-tab-debug"
           ]
         },
         {
@@ -1947,9 +1947,9 @@
             }
           ],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-cost\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"cost\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-cost\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-cost\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"cost\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-cost\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-cost"
+            "#react-aria7981614630-_r_19_-tab-cost"
           ]
         },
         {
@@ -1980,9 +1980,9 @@
             }
           ],
           "impact": null,
-          "html": "<div data-slot=\"tabs-panel\" id=\"react-aria3681853477-_r_19_-tabpanel-context\" aria-labelledby=\"react-aria3681853477-_r_19_-tab-context\" tabindex=\"0\" role=\"tabpanel\" class=\"tabs__panel\" data-rac=\"\"><div class=\"p-6 text-center text-sm text-muted\">No context items yet.</div></div>",
+          "html": "<div data-slot=\"tabs-panel\" id=\"react-aria7981614630-_r_19_-tabpanel-context\" aria-labelledby=\"react-aria7981614630-_r_19_-tab-context\" tabindex=\"0\" role=\"tabpanel\" class=\"tabs__panel\" data-rac=\"\"><div class=\"p-6 text-center text-sm text-muted\">No context items yet.</div></div>",
           "target": [
-            "#react-aria3681853477-_r_19_-tabpanel-context"
+            "#react-aria7981614630-_r_19_-tabpanel-context"
           ]
         }
       ]
@@ -2155,7 +2155,7 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<li role=\"option\" aria-selected=\"true\" data-testid=\"room-list-item-c95a1...\" tabindex=\"0\" class=\"group relative curso...\" aria-current=\"true\">",
+          "html": "<li role=\"option\" aria-selected=\"true\" data-testid=\"room-list-item-114bf...\" tabindex=\"0\" class=\"group relative curso...\" aria-current=\"true\">",
           "target": [
             "li"
           ]
@@ -2173,7 +2173,7 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div role=\"button\" tabindex=\"0\" class=\"group mx-auto my-1.5 w-full max-w-[920px] px-4 py-1 transition-colors \" data-message-id=\"fad30fed-3fe5-46b3-bcaa-31167d29fdd2\" data-testid=\"message-bubble-user\">",
+          "html": "<div role=\"button\" tabindex=\"0\" class=\"group mx-auto my-1.5 w-full max-w-[920px] px-4 py-1 transition-colors \" data-message-id=\"f3c8c94c-04e6-4172-a627-9dc6b6e7777d\" data-testid=\"message-bubble-user\">",
           "target": [
             "div[data-testid=\"message-bubble-user\"]"
           ]
@@ -2191,7 +2191,7 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div role=\"button\" tabindex=\"0\" class=\"group mx-auto my-1.5 w-full max-w-[920px] px-4 py-1 transition-colors \" data-message-id=\"3c13e4c4-59cf-4e0a-a689-12ef1fa3aa0d\" data-testid=\"message-bubble-agent\">",
+          "html": "<div role=\"button\" tabindex=\"0\" class=\"group mx-auto my-1.5 w-full max-w-[920px] px-4 py-1 transition-colors \" data-message-id=\"c39f647d-a73f-4883-acc4-20fc8e5a5f83\" data-testid=\"message-bubble-agent\">",
           "target": [
             "div[data-testid=\"message-bubble-agent\"]"
           ]
@@ -2227,9 +2227,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div data-slot=\"tabs-list\" class=\"tabs__list\" data-rac=\"\" data-collection=\"react-aria3681853477-_r_18_\" id=\"react-aria3681853477-_r_19_\" aria-label=\"Workbench panels\" role=\"tablist\" aria-orientation=\"horizontal\" data-orientation=\"horizontal\">",
+          "html": "<div data-slot=\"tabs-list\" class=\"tabs__list\" data-rac=\"\" data-collection=\"react-aria7981614630-_r_18_\" id=\"react-aria7981614630-_r_19_\" aria-label=\"Workbench panels\" role=\"tablist\" aria-orientation=\"horizontal\" data-orientation=\"horizontal\">",
           "target": [
-            "#react-aria3681853477-_r_19_"
+            "#react-aria7981614630-_r_19_"
           ]
         },
         {
@@ -2245,9 +2245,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-conte...\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"0\" data-collection=\"react-aria3681853477...\" data-key=\"context\" data-react-aria-pres...=\"true\" id=\"react-aria3681853477...\" aria-selected=\"true\" aria-controls=\"react-aria3681853477...\" ...>",
+          "html": "<div data-testid=\"side-panel-tab-conte...\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"0\" data-collection=\"react-aria7981614630...\" data-key=\"context\" data-react-aria-pres...=\"true\" id=\"react-aria7981614630...\" aria-selected=\"true\" aria-controls=\"react-aria7981614630...\" ...>",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-context"
+            "#react-aria7981614630-_r_19_-tab-context"
           ]
         },
         {
@@ -2263,9 +2263,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-tasks\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"tasks\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-tasks\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-tasks\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"tasks\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-tasks\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-tasks"
+            "#react-aria7981614630-_r_19_-tab-tasks"
           ]
         },
         {
@@ -2281,9 +2281,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-members\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"members\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-members\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-members\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"members\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-members\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-members"
+            "#react-aria7981614630-_r_19_-tab-members"
           ]
         },
         {
@@ -2299,9 +2299,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-debug\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"debug\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-debug\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-debug\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"debug\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-debug\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-debug"
+            "#react-aria7981614630-_r_19_-tab-debug"
           ]
         },
         {
@@ -2317,9 +2317,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-cost\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"cost\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-cost\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-cost\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"cost\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-cost\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-cost"
+            "#react-aria7981614630-_r_19_-tab-cost"
           ]
         },
         {
@@ -2335,9 +2335,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div data-slot=\"tabs-panel\" id=\"react-aria3681853477-_r_19_-tabpanel-context\" aria-labelledby=\"react-aria3681853477-_r_19_-tab-context\" tabindex=\"0\" role=\"tabpanel\" class=\"tabs__panel\" data-rac=\"\"><div class=\"p-6 text-center text-sm text-muted\">No context items yet.</div></div>",
+          "html": "<div data-slot=\"tabs-panel\" id=\"react-aria7981614630-_r_19_-tabpanel-context\" aria-labelledby=\"react-aria7981614630-_r_19_-tab-context\" tabindex=\"0\" role=\"tabpanel\" class=\"tabs__panel\" data-rac=\"\"><div class=\"p-6 text-center text-sm text-muted\">No context items yet.</div></div>",
           "target": [
-            "#react-aria3681853477-_r_19_-tabpanel-context"
+            "#react-aria7981614630-_r_19_-tabpanel-context"
           ]
         }
       ]
@@ -2482,7 +2482,7 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div role=\"button\" tabindex=\"0\" class=\"group mx-auto my-1.5 w-full max-w-[920px] px-4 py-1 transition-colors \" data-message-id=\"fad30fed-3fe5-46b3-bcaa-31167d29fdd2\" data-testid=\"message-bubble-user\">",
+          "html": "<div role=\"button\" tabindex=\"0\" class=\"group mx-auto my-1.5 w-full max-w-[920px] px-4 py-1 transition-colors \" data-message-id=\"f3c8c94c-04e6-4172-a627-9dc6b6e7777d\" data-testid=\"message-bubble-user\">",
           "target": [
             "div[data-testid=\"message-bubble-user\"]"
           ]
@@ -2500,7 +2500,7 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div role=\"button\" tabindex=\"0\" class=\"group mx-auto my-1.5 w-full max-w-[920px] px-4 py-1 transition-colors \" data-message-id=\"3c13e4c4-59cf-4e0a-a689-12ef1fa3aa0d\" data-testid=\"message-bubble-agent\">",
+          "html": "<div role=\"button\" tabindex=\"0\" class=\"group mx-auto my-1.5 w-full max-w-[920px] px-4 py-1 transition-colors \" data-message-id=\"c39f647d-a73f-4883-acc4-20fc8e5a5f83\" data-testid=\"message-bubble-agent\">",
           "target": [
             "div[data-testid=\"message-bubble-agent\"]"
           ]
@@ -2554,9 +2554,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Toggle rooms panel\" id=\"react-aria3681853477-_r_1_\">☰</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Toggle rooms panel\" id=\"react-aria7981614630-_r_1_\">☰</button>",
           "target": [
-            "#react-aria3681853477-_r_1_"
+            "#react-aria7981614630-_r_1_"
           ]
         },
         {
@@ -2608,9 +2608,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Open command palette\" id=\"react-aria3681853477-_r_4_\"><span class=\"hidden sm:inline\">Command</span><kbd class=\"kbd ml-2\">⌘K</kbd></button>",
+          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Open command palette\" id=\"react-aria7981614630-_r_4_\"><span class=\"hidden sm:inline\">Command</span><kbd class=\"kbd ml-2\">⌘K</kbd></button>",
           "target": [
-            "#react-aria3681853477-_r_4_"
+            "#react-aria7981614630-_r_4_"
           ]
         },
         {
@@ -2626,9 +2626,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Show keymap\" id=\"react-aria3681853477-_r_7_\">?</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Show keymap\" id=\"react-aria7981614630-_r_7_\">?</button>",
           "target": [
-            "#react-aria3681853477-_r_7_"
+            "#react-aria7981614630-_r_7_"
           ]
         },
         {
@@ -2644,9 +2644,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Theme: auto\" id=\"react-aria3681853477-_r_a_\">🌓</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Theme: auto\" id=\"react-aria7981614630-_r_a_\">🌓</button>",
           "target": [
-            "#react-aria3681853477-_r_a_"
+            "#react-aria7981614630-_r_a_"
           ]
         },
         {
@@ -2662,9 +2662,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Toggle workbench panel\" id=\"react-aria3681853477-_r_d_\">⊟</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Toggle workbench panel\" id=\"react-aria7981614630-_r_d_\">⊟</button>",
           "target": [
-            "#react-aria3681853477-_r_d_"
+            "#react-aria7981614630-_r_d_"
           ]
         },
         {
@@ -2842,9 +2842,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" data-testid=\"room-list-create-room\" class=\"button button--sm button--primary rounded-full px-4\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"New Room\" id=\"react-aria3681853477-_r_l_\">New</button>",
+          "html": "<button data-slot=\"button\" data-testid=\"room-list-create-room\" class=\"button button--sm button--primary rounded-full px-4\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"New Room\" id=\"react-aria7981614630-_r_l_\">New</button>",
           "target": [
-            "#react-aria3681853477-_r_l_"
+            "#react-aria7981614630-_r_l_"
           ]
         },
         {
@@ -2860,9 +2860,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<input aria-label=\"Search rooms\" placeholder=\"Search room or mode\" tabindex=\"0\" id=\"react-aria3681853477-_r_n_\" class=\"search-field__input\" data-slot=\"search-field-input\" data-rac=\"\" type=\"search\" value=\"\" title=\"\">",
+          "html": "<input aria-label=\"Search rooms\" placeholder=\"Search room or mode\" tabindex=\"0\" id=\"react-aria7981614630-_r_n_\" class=\"search-field__input\" data-slot=\"search-field-input\" data-rac=\"\" type=\"search\" value=\"\" title=\"\">",
           "target": [
-            "#react-aria3681853477-_r_n_"
+            "#react-aria7981614630-_r_n_"
           ]
         },
         {
@@ -2896,7 +2896,7 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<li role=\"option\" aria-selected=\"true\" data-testid=\"room-list-item-c95a1...\" tabindex=\"0\" class=\"group relative curso...\" aria-current=\"true\">",
+          "html": "<li role=\"option\" aria-selected=\"true\" data-testid=\"room-list-item-114bf...\" tabindex=\"0\" class=\"group relative curso...\" aria-current=\"true\">",
           "target": [
             "li"
           ]
@@ -2914,9 +2914,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"dropdown-trigger\" data-testid=\"message-menu-fad30fe...\" class=\"dropdown__trigger in...\" data-rac=\"\" type=\"button\" tabindex=\"0\" aria-haspopup=\"true\" aria-expanded=\"false\" id=\"react-aria3681853477...\" data-react-aria-pres...=\"true\" aria-label=\"Message actions\">",
+          "html": "<button data-slot=\"dropdown-trigger\" data-testid=\"message-menu-f3c8c94...\" class=\"dropdown__trigger in...\" data-rac=\"\" type=\"button\" tabindex=\"0\" aria-haspopup=\"true\" aria-expanded=\"false\" id=\"react-aria7981614630...\" data-react-aria-pres...=\"true\" aria-label=\"Message actions\">",
           "target": [
-            "#react-aria3681853477-_r_1c_"
+            "#react-aria7981614630-_r_1c_"
           ]
         },
         {
@@ -2932,9 +2932,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"dropdown-trigger\" data-testid=\"message-menu-3c13e4c...\" class=\"dropdown__trigger in...\" data-rac=\"\" type=\"button\" tabindex=\"0\" aria-haspopup=\"true\" aria-expanded=\"false\" id=\"react-aria3681853477...\" data-react-aria-pres...=\"true\" aria-label=\"Message actions\">",
+          "html": "<button data-slot=\"dropdown-trigger\" data-testid=\"message-menu-c39f647...\" class=\"dropdown__trigger in...\" data-rac=\"\" type=\"button\" tabindex=\"0\" aria-haspopup=\"true\" aria-expanded=\"false\" id=\"react-aria7981614630...\" data-react-aria-pres...=\"true\" aria-label=\"Message actions\">",
           "target": [
-            "#react-aria3681853477-_r_1g_"
+            "#react-aria7981614630-_r_1g_"
           ]
         },
         {
@@ -2986,9 +2986,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Attach files\" id=\"react-aria3681853477-_r_12_\">Attach</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Attach files\" id=\"react-aria7981614630-_r_12_\">Attach</button>",
           "target": [
-            "#react-aria3681853477-_r_12_"
+            "#react-aria7981614630-_r_12_"
           ]
         },
         {
@@ -3004,9 +3004,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Mention agent\" id=\"react-aria3681853477-_r_14_\">@ Agent</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Mention agent\" id=\"react-aria7981614630-_r_14_\">@ Agent</button>",
           "target": [
-            "#react-aria3681853477-_r_14_"
+            "#react-aria7981614630-_r_14_"
           ]
         },
         {
@@ -3040,9 +3040,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<div data-slot=\"tabs-list\" class=\"tabs__list\" data-rac=\"\" data-collection=\"react-aria3681853477-_r_18_\" id=\"react-aria3681853477-_r_19_\" aria-label=\"Workbench panels\" role=\"tablist\" aria-orientation=\"horizontal\" data-orientation=\"horizontal\">",
+          "html": "<div data-slot=\"tabs-list\" class=\"tabs__list\" data-rac=\"\" data-collection=\"react-aria7981614630-_r_18_\" id=\"react-aria7981614630-_r_19_\" aria-label=\"Workbench panels\" role=\"tablist\" aria-orientation=\"horizontal\" data-orientation=\"horizontal\">",
           "target": [
-            "#react-aria3681853477-_r_19_"
+            "#react-aria7981614630-_r_19_"
           ]
         },
         {
@@ -3058,9 +3058,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-conte...\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"0\" data-collection=\"react-aria3681853477...\" data-key=\"context\" data-react-aria-pres...=\"true\" id=\"react-aria3681853477...\" aria-selected=\"true\" aria-controls=\"react-aria3681853477...\" ...>",
+          "html": "<div data-testid=\"side-panel-tab-conte...\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"0\" data-collection=\"react-aria7981614630...\" data-key=\"context\" data-react-aria-pres...=\"true\" id=\"react-aria7981614630...\" aria-selected=\"true\" aria-controls=\"react-aria7981614630...\" ...>",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-context"
+            "#react-aria7981614630-_r_19_-tab-context"
           ]
         },
         {
@@ -3076,9 +3076,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-tasks\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"tasks\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-tasks\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-tasks\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"tasks\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-tasks\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-tasks"
+            "#react-aria7981614630-_r_19_-tab-tasks"
           ]
         },
         {
@@ -3094,9 +3094,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-members\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"members\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-members\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-members\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"members\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-members\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-members"
+            "#react-aria7981614630-_r_19_-tab-members"
           ]
         },
         {
@@ -3112,9 +3112,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-debug\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"debug\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-debug\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-debug\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"debug\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-debug\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-debug"
+            "#react-aria7981614630-_r_19_-tab-debug"
           ]
         },
         {
@@ -3130,9 +3130,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-cost\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"cost\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-cost\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-cost\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"cost\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-cost\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-cost"
+            "#react-aria7981614630-_r_19_-tab-cost"
           ]
         },
         {
@@ -3148,9 +3148,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<div data-slot=\"tabs-panel\" id=\"react-aria3681853477-_r_19_-tabpanel-context\" aria-labelledby=\"react-aria3681853477-_r_19_-tab-context\" tabindex=\"0\" role=\"tabpanel\" class=\"tabs__panel\" data-rac=\"\"><div class=\"p-6 text-center text-sm text-muted\">No context items yet.</div></div>",
+          "html": "<div data-slot=\"tabs-panel\" id=\"react-aria7981614630-_r_19_-tabpanel-context\" aria-labelledby=\"react-aria7981614630-_r_19_-tab-context\" tabindex=\"0\" role=\"tabpanel\" class=\"tabs__panel\" data-rac=\"\"><div class=\"p-6 text-center text-sm text-muted\">No context items yet.</div></div>",
           "target": [
-            "#react-aria3681853477-_r_19_-tabpanel-context"
+            "#react-aria7981614630-_r_19_-tabpanel-context"
           ]
         }
       ]
@@ -3328,7 +3328,7 @@
             }
           ],
           "impact": null,
-          "html": "<li role=\"option\" aria-selected=\"true\" data-testid=\"room-list-item-c95a1...\" tabindex=\"0\" class=\"group relative curso...\" aria-current=\"true\">",
+          "html": "<li role=\"option\" aria-selected=\"true\" data-testid=\"room-list-item-114bf...\" tabindex=\"0\" class=\"group relative curso...\" aria-current=\"true\">",
           "target": [
             "li"
           ]
@@ -3346,7 +3346,7 @@
             }
           ],
           "impact": null,
-          "html": "<div role=\"button\" tabindex=\"0\" class=\"group mx-auto my-1.5 w-full max-w-[920px] px-4 py-1 transition-colors \" data-message-id=\"fad30fed-3fe5-46b3-bcaa-31167d29fdd2\" data-testid=\"message-bubble-user\">",
+          "html": "<div role=\"button\" tabindex=\"0\" class=\"group mx-auto my-1.5 w-full max-w-[920px] px-4 py-1 transition-colors \" data-message-id=\"f3c8c94c-04e6-4172-a627-9dc6b6e7777d\" data-testid=\"message-bubble-user\">",
           "target": [
             "div[data-testid=\"message-bubble-user\"]"
           ]
@@ -3364,7 +3364,7 @@
             }
           ],
           "impact": null,
-          "html": "<div role=\"button\" tabindex=\"0\" class=\"group mx-auto my-1.5 w-full max-w-[920px] px-4 py-1 transition-colors \" data-message-id=\"3c13e4c4-59cf-4e0a-a689-12ef1fa3aa0d\" data-testid=\"message-bubble-agent\">",
+          "html": "<div role=\"button\" tabindex=\"0\" class=\"group mx-auto my-1.5 w-full max-w-[920px] px-4 py-1 transition-colors \" data-message-id=\"c39f647d-a73f-4883-acc4-20fc8e5a5f83\" data-testid=\"message-bubble-agent\">",
           "target": [
             "div[data-testid=\"message-bubble-agent\"]"
           ]
@@ -3400,9 +3400,9 @@
             }
           ],
           "impact": null,
-          "html": "<div data-slot=\"tabs-list\" class=\"tabs__list\" data-rac=\"\" data-collection=\"react-aria3681853477-_r_18_\" id=\"react-aria3681853477-_r_19_\" aria-label=\"Workbench panels\" role=\"tablist\" aria-orientation=\"horizontal\" data-orientation=\"horizontal\">",
+          "html": "<div data-slot=\"tabs-list\" class=\"tabs__list\" data-rac=\"\" data-collection=\"react-aria7981614630-_r_18_\" id=\"react-aria7981614630-_r_19_\" aria-label=\"Workbench panels\" role=\"tablist\" aria-orientation=\"horizontal\" data-orientation=\"horizontal\">",
           "target": [
-            "#react-aria3681853477-_r_19_"
+            "#react-aria7981614630-_r_19_"
           ]
         },
         {
@@ -3418,9 +3418,9 @@
             }
           ],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-conte...\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"0\" data-collection=\"react-aria3681853477...\" data-key=\"context\" data-react-aria-pres...=\"true\" id=\"react-aria3681853477...\" aria-selected=\"true\" aria-controls=\"react-aria3681853477...\" ...>",
+          "html": "<div data-testid=\"side-panel-tab-conte...\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"0\" data-collection=\"react-aria7981614630...\" data-key=\"context\" data-react-aria-pres...=\"true\" id=\"react-aria7981614630...\" aria-selected=\"true\" aria-controls=\"react-aria7981614630...\" ...>",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-context"
+            "#react-aria7981614630-_r_19_-tab-context"
           ]
         },
         {
@@ -3436,9 +3436,9 @@
             }
           ],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-tasks\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"tasks\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-tasks\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-tasks\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"tasks\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-tasks\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-tasks"
+            "#react-aria7981614630-_r_19_-tab-tasks"
           ]
         },
         {
@@ -3454,9 +3454,9 @@
             }
           ],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-members\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"members\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-members\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-members\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"members\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-members\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-members"
+            "#react-aria7981614630-_r_19_-tab-members"
           ]
         },
         {
@@ -3472,9 +3472,9 @@
             }
           ],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-debug\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"debug\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-debug\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-debug\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"debug\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-debug\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-debug"
+            "#react-aria7981614630-_r_19_-tab-debug"
           ]
         },
         {
@@ -3490,9 +3490,9 @@
             }
           ],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-cost\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"cost\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-cost\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-cost\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"cost\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-cost\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-cost"
+            "#react-aria7981614630-_r_19_-tab-cost"
           ]
         },
         {
@@ -3508,9 +3508,9 @@
             }
           ],
           "impact": null,
-          "html": "<div data-slot=\"tabs-panel\" id=\"react-aria3681853477-_r_19_-tabpanel-context\" aria-labelledby=\"react-aria3681853477-_r_19_-tab-context\" tabindex=\"0\" role=\"tabpanel\" class=\"tabs__panel\" data-rac=\"\"><div class=\"p-6 text-center text-sm text-muted\">No context items yet.</div></div>",
+          "html": "<div data-slot=\"tabs-panel\" id=\"react-aria7981614630-_r_19_-tabpanel-context\" aria-labelledby=\"react-aria7981614630-_r_19_-tab-context\" tabindex=\"0\" role=\"tabpanel\" class=\"tabs__panel\" data-rac=\"\"><div class=\"p-6 text-center text-sm text-muted\">No context items yet.</div></div>",
           "target": [
-            "#react-aria3681853477-_r_19_-tabpanel-context"
+            "#react-aria7981614630-_r_19_-tabpanel-context"
           ]
         }
       ]
@@ -3824,7 +3824,7 @@
           "impact": null,
           "html": "<span aria-hidden=\"true\" class=\"tabs__separator\" data-slot=\"tabs-separator\"></span>",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-tasks > .tabs__separator[data-slot=\"tabs-separator\"][aria-hidden=\"true\"]"
+            "#react-aria7981614630-_r_19_-tab-tasks > .tabs__separator[data-slot=\"tabs-separator\"][aria-hidden=\"true\"]"
           ]
         },
         {
@@ -3856,7 +3856,7 @@
           "impact": null,
           "html": "<span aria-hidden=\"true\" class=\"tabs__separator\" data-slot=\"tabs-separator\"></span>",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-members > .tabs__separator[data-slot=\"tabs-separator\"][aria-hidden=\"true\"]"
+            "#react-aria7981614630-_r_19_-tab-members > .tabs__separator[data-slot=\"tabs-separator\"][aria-hidden=\"true\"]"
           ]
         },
         {
@@ -3888,7 +3888,7 @@
           "impact": null,
           "html": "<span aria-hidden=\"true\" class=\"tabs__separator\" data-slot=\"tabs-separator\"></span>",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-debug > .tabs__separator[data-slot=\"tabs-separator\"][aria-hidden=\"true\"]"
+            "#react-aria7981614630-_r_19_-tab-debug > .tabs__separator[data-slot=\"tabs-separator\"][aria-hidden=\"true\"]"
           ]
         },
         {
@@ -3920,7 +3920,7 @@
           "impact": null,
           "html": "<span aria-hidden=\"true\" class=\"tabs__separator\" data-slot=\"tabs-separator\"></span>",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-cost > .tabs__separator[data-slot=\"tabs-separator\"][aria-hidden=\"true\"]"
+            "#react-aria7981614630-_r_19_-tab-cost > .tabs__separator[data-slot=\"tabs-separator\"][aria-hidden=\"true\"]"
           ]
         }
       ]
@@ -4001,9 +4001,9 @@
             }
           ],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Toggle rooms panel\" id=\"react-aria3681853477-_r_1_\">☰</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Toggle rooms panel\" id=\"react-aria7981614630-_r_1_\">☰</button>",
           "target": [
-            "#react-aria3681853477-_r_1_"
+            "#react-aria7981614630-_r_1_"
           ]
         },
         {
@@ -4037,9 +4037,9 @@
             }
           ],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Open command palette\" id=\"react-aria3681853477-_r_4_\"><span class=\"hidden sm:inline\">Command</span><kbd class=\"kbd ml-2\">⌘K</kbd></button>",
+          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Open command palette\" id=\"react-aria7981614630-_r_4_\"><span class=\"hidden sm:inline\">Command</span><kbd class=\"kbd ml-2\">⌘K</kbd></button>",
           "target": [
-            "#react-aria3681853477-_r_4_"
+            "#react-aria7981614630-_r_4_"
           ]
         },
         {
@@ -4055,9 +4055,9 @@
             }
           ],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Show keymap\" id=\"react-aria3681853477-_r_7_\">?</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Show keymap\" id=\"react-aria7981614630-_r_7_\">?</button>",
           "target": [
-            "#react-aria3681853477-_r_7_"
+            "#react-aria7981614630-_r_7_"
           ]
         },
         {
@@ -4073,9 +4073,9 @@
             }
           ],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Theme: auto\" id=\"react-aria3681853477-_r_a_\">🌓</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Theme: auto\" id=\"react-aria7981614630-_r_a_\">🌓</button>",
           "target": [
-            "#react-aria3681853477-_r_a_"
+            "#react-aria7981614630-_r_a_"
           ]
         },
         {
@@ -4091,9 +4091,9 @@
             }
           ],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Toggle workbench panel\" id=\"react-aria3681853477-_r_d_\">⊟</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Toggle workbench panel\" id=\"react-aria7981614630-_r_d_\">⊟</button>",
           "target": [
-            "#react-aria3681853477-_r_d_"
+            "#react-aria7981614630-_r_d_"
           ]
         },
         {
@@ -4271,9 +4271,9 @@
             }
           ],
           "impact": null,
-          "html": "<button data-slot=\"button\" data-testid=\"room-list-create-room\" class=\"button button--sm button--primary rounded-full px-4\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"New Room\" id=\"react-aria3681853477-_r_l_\">New</button>",
+          "html": "<button data-slot=\"button\" data-testid=\"room-list-create-room\" class=\"button button--sm button--primary rounded-full px-4\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"New Room\" id=\"react-aria7981614630-_r_l_\">New</button>",
           "target": [
-            "#react-aria3681853477-_r_l_"
+            "#react-aria7981614630-_r_l_"
           ]
         },
         {
@@ -4289,9 +4289,9 @@
             }
           ],
           "impact": null,
-          "html": "<input aria-label=\"Search rooms\" placeholder=\"Search room or mode\" tabindex=\"0\" id=\"react-aria3681853477-_r_n_\" class=\"search-field__input\" data-slot=\"search-field-input\" data-rac=\"\" type=\"search\" value=\"\" title=\"\">",
+          "html": "<input aria-label=\"Search rooms\" placeholder=\"Search room or mode\" tabindex=\"0\" id=\"react-aria7981614630-_r_n_\" class=\"search-field__input\" data-slot=\"search-field-input\" data-rac=\"\" type=\"search\" value=\"\" title=\"\">",
           "target": [
-            "#react-aria3681853477-_r_n_"
+            "#react-aria7981614630-_r_n_"
           ]
         },
         {
@@ -4325,7 +4325,7 @@
             }
           ],
           "impact": null,
-          "html": "<li role=\"option\" aria-selected=\"true\" data-testid=\"room-list-item-c95a1...\" tabindex=\"0\" class=\"group relative curso...\" aria-current=\"true\">",
+          "html": "<li role=\"option\" aria-selected=\"true\" data-testid=\"room-list-item-114bf...\" tabindex=\"0\" class=\"group relative curso...\" aria-current=\"true\">",
           "target": [
             "li"
           ]
@@ -4343,9 +4343,9 @@
             }
           ],
           "impact": null,
-          "html": "<button data-slot=\"dropdown-trigger\" data-testid=\"message-menu-fad30fe...\" class=\"dropdown__trigger in...\" data-rac=\"\" type=\"button\" tabindex=\"0\" aria-haspopup=\"true\" aria-expanded=\"false\" id=\"react-aria3681853477...\" data-react-aria-pres...=\"true\" aria-label=\"Message actions\">",
+          "html": "<button data-slot=\"dropdown-trigger\" data-testid=\"message-menu-f3c8c94...\" class=\"dropdown__trigger in...\" data-rac=\"\" type=\"button\" tabindex=\"0\" aria-haspopup=\"true\" aria-expanded=\"false\" id=\"react-aria7981614630...\" data-react-aria-pres...=\"true\" aria-label=\"Message actions\">",
           "target": [
-            "#react-aria3681853477-_r_1c_"
+            "#react-aria7981614630-_r_1c_"
           ]
         },
         {
@@ -4361,9 +4361,9 @@
             }
           ],
           "impact": null,
-          "html": "<button data-slot=\"dropdown-trigger\" data-testid=\"message-menu-3c13e4c...\" class=\"dropdown__trigger in...\" data-rac=\"\" type=\"button\" tabindex=\"0\" aria-haspopup=\"true\" aria-expanded=\"false\" id=\"react-aria3681853477...\" data-react-aria-pres...=\"true\" aria-label=\"Message actions\">",
+          "html": "<button data-slot=\"dropdown-trigger\" data-testid=\"message-menu-c39f647...\" class=\"dropdown__trigger in...\" data-rac=\"\" type=\"button\" tabindex=\"0\" aria-haspopup=\"true\" aria-expanded=\"false\" id=\"react-aria7981614630...\" data-react-aria-pres...=\"true\" aria-label=\"Message actions\">",
           "target": [
-            "#react-aria3681853477-_r_1g_"
+            "#react-aria7981614630-_r_1g_"
           ]
         },
         {
@@ -4415,9 +4415,9 @@
             }
           ],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Attach files\" id=\"react-aria3681853477-_r_12_\">Attach</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Attach files\" id=\"react-aria7981614630-_r_12_\">Attach</button>",
           "target": [
-            "#react-aria3681853477-_r_12_"
+            "#react-aria7981614630-_r_12_"
           ]
         },
         {
@@ -4433,9 +4433,9 @@
             }
           ],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Mention agent\" id=\"react-aria3681853477-_r_14_\">@ Agent</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Mention agent\" id=\"react-aria7981614630-_r_14_\">@ Agent</button>",
           "target": [
-            "#react-aria3681853477-_r_14_"
+            "#react-aria7981614630-_r_14_"
           ]
         },
         {
@@ -4469,9 +4469,9 @@
             }
           ],
           "impact": null,
-          "html": "<div data-slot=\"tabs-list\" class=\"tabs__list\" data-rac=\"\" data-collection=\"react-aria3681853477-_r_18_\" id=\"react-aria3681853477-_r_19_\" aria-label=\"Workbench panels\" role=\"tablist\" aria-orientation=\"horizontal\" data-orientation=\"horizontal\">",
+          "html": "<div data-slot=\"tabs-list\" class=\"tabs__list\" data-rac=\"\" data-collection=\"react-aria7981614630-_r_18_\" id=\"react-aria7981614630-_r_19_\" aria-label=\"Workbench panels\" role=\"tablist\" aria-orientation=\"horizontal\" data-orientation=\"horizontal\">",
           "target": [
-            "#react-aria3681853477-_r_19_"
+            "#react-aria7981614630-_r_19_"
           ]
         },
         {
@@ -4487,9 +4487,9 @@
             }
           ],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-conte...\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"0\" data-collection=\"react-aria3681853477...\" data-key=\"context\" data-react-aria-pres...=\"true\" id=\"react-aria3681853477...\" aria-selected=\"true\" aria-controls=\"react-aria3681853477...\" ...>",
+          "html": "<div data-testid=\"side-panel-tab-conte...\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"0\" data-collection=\"react-aria7981614630...\" data-key=\"context\" data-react-aria-pres...=\"true\" id=\"react-aria7981614630...\" aria-selected=\"true\" aria-controls=\"react-aria7981614630...\" ...>",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-context"
+            "#react-aria7981614630-_r_19_-tab-context"
           ]
         },
         {
@@ -4505,9 +4505,9 @@
             }
           ],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-tasks\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"tasks\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-tasks\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-tasks\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"tasks\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-tasks\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-tasks"
+            "#react-aria7981614630-_r_19_-tab-tasks"
           ]
         },
         {
@@ -4523,9 +4523,9 @@
             }
           ],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-members\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"members\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-members\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-members\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"members\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-members\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-members"
+            "#react-aria7981614630-_r_19_-tab-members"
           ]
         },
         {
@@ -4541,9 +4541,9 @@
             }
           ],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-debug\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"debug\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-debug\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-debug\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"debug\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-debug\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-debug"
+            "#react-aria7981614630-_r_19_-tab-debug"
           ]
         },
         {
@@ -4559,9 +4559,9 @@
             }
           ],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-cost\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"cost\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-cost\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-cost\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"cost\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-cost\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-cost"
+            "#react-aria7981614630-_r_19_-tab-cost"
           ]
         },
         {
@@ -4577,9 +4577,9 @@
             }
           ],
           "impact": null,
-          "html": "<div data-slot=\"tabs-panel\" id=\"react-aria3681853477-_r_19_-tabpanel-context\" aria-labelledby=\"react-aria3681853477-_r_19_-tab-context\" tabindex=\"0\" role=\"tabpanel\" class=\"tabs__panel\" data-rac=\"\"><div class=\"p-6 text-center text-sm text-muted\">No context items yet.</div></div>",
+          "html": "<div data-slot=\"tabs-panel\" id=\"react-aria7981614630-_r_19_-tabpanel-context\" aria-labelledby=\"react-aria7981614630-_r_19_-tab-context\" tabindex=\"0\" role=\"tabpanel\" class=\"tabs__panel\" data-rac=\"\"><div class=\"p-6 text-center text-sm text-muted\">No context items yet.</div></div>",
           "target": [
-            "#react-aria3681853477-_r_19_-tabpanel-context"
+            "#react-aria7981614630-_r_19_-tabpanel-context"
           ]
         }
       ]
@@ -4757,7 +4757,7 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<li role=\"option\" aria-selected=\"true\" data-testid=\"room-list-item-c95a1...\" tabindex=\"0\" class=\"group relative curso...\" aria-current=\"true\">",
+          "html": "<li role=\"option\" aria-selected=\"true\" data-testid=\"room-list-item-114bf...\" tabindex=\"0\" class=\"group relative curso...\" aria-current=\"true\">",
           "target": [
             "li"
           ]
@@ -4775,7 +4775,7 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div role=\"button\" tabindex=\"0\" class=\"group mx-auto my-1.5 w-full max-w-[920px] px-4 py-1 transition-colors \" data-message-id=\"fad30fed-3fe5-46b3-bcaa-31167d29fdd2\" data-testid=\"message-bubble-user\">",
+          "html": "<div role=\"button\" tabindex=\"0\" class=\"group mx-auto my-1.5 w-full max-w-[920px] px-4 py-1 transition-colors \" data-message-id=\"f3c8c94c-04e6-4172-a627-9dc6b6e7777d\" data-testid=\"message-bubble-user\">",
           "target": [
             "div[data-testid=\"message-bubble-user\"]"
           ]
@@ -4793,7 +4793,7 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div role=\"button\" tabindex=\"0\" class=\"group mx-auto my-1.5 w-full max-w-[920px] px-4 py-1 transition-colors \" data-message-id=\"3c13e4c4-59cf-4e0a-a689-12ef1fa3aa0d\" data-testid=\"message-bubble-agent\">",
+          "html": "<div role=\"button\" tabindex=\"0\" class=\"group mx-auto my-1.5 w-full max-w-[920px] px-4 py-1 transition-colors \" data-message-id=\"c39f647d-a73f-4883-acc4-20fc8e5a5f83\" data-testid=\"message-bubble-agent\">",
           "target": [
             "div[data-testid=\"message-bubble-agent\"]"
           ]
@@ -4829,9 +4829,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div data-slot=\"tabs-list\" class=\"tabs__list\" data-rac=\"\" data-collection=\"react-aria3681853477-_r_18_\" id=\"react-aria3681853477-_r_19_\" aria-label=\"Workbench panels\" role=\"tablist\" aria-orientation=\"horizontal\" data-orientation=\"horizontal\">",
+          "html": "<div data-slot=\"tabs-list\" class=\"tabs__list\" data-rac=\"\" data-collection=\"react-aria7981614630-_r_18_\" id=\"react-aria7981614630-_r_19_\" aria-label=\"Workbench panels\" role=\"tablist\" aria-orientation=\"horizontal\" data-orientation=\"horizontal\">",
           "target": [
-            "#react-aria3681853477-_r_19_"
+            "#react-aria7981614630-_r_19_"
           ]
         },
         {
@@ -4847,9 +4847,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-conte...\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"0\" data-collection=\"react-aria3681853477...\" data-key=\"context\" data-react-aria-pres...=\"true\" id=\"react-aria3681853477...\" aria-selected=\"true\" aria-controls=\"react-aria3681853477...\" ...>",
+          "html": "<div data-testid=\"side-panel-tab-conte...\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"0\" data-collection=\"react-aria7981614630...\" data-key=\"context\" data-react-aria-pres...=\"true\" id=\"react-aria7981614630...\" aria-selected=\"true\" aria-controls=\"react-aria7981614630...\" ...>",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-context"
+            "#react-aria7981614630-_r_19_-tab-context"
           ]
         },
         {
@@ -4865,9 +4865,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-tasks\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"tasks\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-tasks\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-tasks\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"tasks\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-tasks\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-tasks"
+            "#react-aria7981614630-_r_19_-tab-tasks"
           ]
         },
         {
@@ -4883,9 +4883,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-members\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"members\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-members\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-members\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"members\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-members\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-members"
+            "#react-aria7981614630-_r_19_-tab-members"
           ]
         },
         {
@@ -4901,9 +4901,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-debug\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"debug\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-debug\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-debug\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"debug\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-debug\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-debug"
+            "#react-aria7981614630-_r_19_-tab-debug"
           ]
         },
         {
@@ -4919,9 +4919,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-cost\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"cost\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-cost\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-cost\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"cost\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-cost\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-cost"
+            "#react-aria7981614630-_r_19_-tab-cost"
           ]
         },
         {
@@ -4937,9 +4937,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div data-slot=\"tabs-panel\" id=\"react-aria3681853477-_r_19_-tabpanel-context\" aria-labelledby=\"react-aria3681853477-_r_19_-tab-context\" tabindex=\"0\" role=\"tabpanel\" class=\"tabs__panel\" data-rac=\"\"><div class=\"p-6 text-center text-sm text-muted\">No context items yet.</div></div>",
+          "html": "<div data-slot=\"tabs-panel\" id=\"react-aria7981614630-_r_19_-tabpanel-context\" aria-labelledby=\"react-aria7981614630-_r_19_-tab-context\" tabindex=\"0\" role=\"tabpanel\" class=\"tabs__panel\" data-rac=\"\"><div class=\"p-6 text-center text-sm text-muted\">No context items yet.</div></div>",
           "target": [
-            "#react-aria3681853477-_r_19_-tabpanel-context"
+            "#react-aria7981614630-_r_19_-tabpanel-context"
           ]
         }
       ]
@@ -4991,9 +4991,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div data-slot=\"tabs-list\" class=\"tabs__list\" data-rac=\"\" data-collection=\"react-aria3681853477-_r_18_\" id=\"react-aria3681853477-_r_19_\" aria-label=\"Workbench panels\" role=\"tablist\" aria-orientation=\"horizontal\" data-orientation=\"horizontal\">",
+          "html": "<div data-slot=\"tabs-list\" class=\"tabs__list\" data-rac=\"\" data-collection=\"react-aria7981614630-_r_18_\" id=\"react-aria7981614630-_r_19_\" aria-label=\"Workbench panels\" role=\"tablist\" aria-orientation=\"horizontal\" data-orientation=\"horizontal\">",
           "target": [
-            "#react-aria3681853477-_r_19_"
+            "#react-aria7981614630-_r_19_"
           ]
         }
       ]
@@ -5297,7 +5297,7 @@
             }
           ],
           "impact": null,
-          "html": "<li role=\"option\" aria-selected=\"true\" data-testid=\"room-list-item-c95a1...\" tabindex=\"0\" class=\"group relative curso...\" aria-current=\"true\">",
+          "html": "<li role=\"option\" aria-selected=\"true\" data-testid=\"room-list-item-114bf...\" tabindex=\"0\" class=\"group relative curso...\" aria-current=\"true\">",
           "target": [
             "li"
           ]
@@ -5329,7 +5329,7 @@
             }
           ],
           "impact": null,
-          "html": "<div role=\"button\" tabindex=\"0\" class=\"group mx-auto my-1.5 w-full max-w-[920px] px-4 py-1 transition-colors \" data-message-id=\"fad30fed-3fe5-46b3-bcaa-31167d29fdd2\" data-testid=\"message-bubble-user\">",
+          "html": "<div role=\"button\" tabindex=\"0\" class=\"group mx-auto my-1.5 w-full max-w-[920px] px-4 py-1 transition-colors \" data-message-id=\"f3c8c94c-04e6-4172-a627-9dc6b6e7777d\" data-testid=\"message-bubble-user\">",
           "target": [
             "div[data-testid=\"message-bubble-user\"]"
           ]
@@ -5361,7 +5361,7 @@
             }
           ],
           "impact": null,
-          "html": "<div role=\"button\" tabindex=\"0\" class=\"group mx-auto my-1.5 w-full max-w-[920px] px-4 py-1 transition-colors \" data-message-id=\"3c13e4c4-59cf-4e0a-a689-12ef1fa3aa0d\" data-testid=\"message-bubble-agent\">",
+          "html": "<div role=\"button\" tabindex=\"0\" class=\"group mx-auto my-1.5 w-full max-w-[920px] px-4 py-1 transition-colors \" data-message-id=\"c39f647d-a73f-4883-acc4-20fc8e5a5f83\" data-testid=\"message-bubble-agent\">",
           "target": [
             "div[data-testid=\"message-bubble-agent\"]"
           ]
@@ -5425,9 +5425,9 @@
             }
           ],
           "impact": null,
-          "html": "<div data-slot=\"tabs-list\" class=\"tabs__list\" data-rac=\"\" data-collection=\"react-aria3681853477-_r_18_\" id=\"react-aria3681853477-_r_19_\" aria-label=\"Workbench panels\" role=\"tablist\" aria-orientation=\"horizontal\" data-orientation=\"horizontal\">",
+          "html": "<div data-slot=\"tabs-list\" class=\"tabs__list\" data-rac=\"\" data-collection=\"react-aria7981614630-_r_18_\" id=\"react-aria7981614630-_r_19_\" aria-label=\"Workbench panels\" role=\"tablist\" aria-orientation=\"horizontal\" data-orientation=\"horizontal\">",
           "target": [
-            "#react-aria3681853477-_r_19_"
+            "#react-aria7981614630-_r_19_"
           ]
         },
         {
@@ -5457,9 +5457,9 @@
             }
           ],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-conte...\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"0\" data-collection=\"react-aria3681853477...\" data-key=\"context\" data-react-aria-pres...=\"true\" id=\"react-aria3681853477...\" aria-selected=\"true\" aria-controls=\"react-aria3681853477...\" ...>",
+          "html": "<div data-testid=\"side-panel-tab-conte...\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"0\" data-collection=\"react-aria7981614630...\" data-key=\"context\" data-react-aria-pres...=\"true\" id=\"react-aria7981614630...\" aria-selected=\"true\" aria-controls=\"react-aria7981614630...\" ...>",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-context"
+            "#react-aria7981614630-_r_19_-tab-context"
           ]
         },
         {
@@ -5489,9 +5489,9 @@
             }
           ],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-tasks\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"tasks\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-tasks\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-tasks\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"tasks\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-tasks\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-tasks"
+            "#react-aria7981614630-_r_19_-tab-tasks"
           ]
         },
         {
@@ -5521,9 +5521,9 @@
             }
           ],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-members\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"members\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-members\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-members\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"members\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-members\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-members"
+            "#react-aria7981614630-_r_19_-tab-members"
           ]
         },
         {
@@ -5553,9 +5553,9 @@
             }
           ],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-debug\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"debug\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-debug\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-debug\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"debug\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-debug\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-debug"
+            "#react-aria7981614630-_r_19_-tab-debug"
           ]
         },
         {
@@ -5585,9 +5585,9 @@
             }
           ],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-cost\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"cost\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-cost\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-cost\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"cost\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-cost\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-cost"
+            "#react-aria7981614630-_r_19_-tab-cost"
           ]
         },
         {
@@ -5617,9 +5617,9 @@
             }
           ],
           "impact": null,
-          "html": "<div data-slot=\"tabs-panel\" id=\"react-aria3681853477-_r_19_-tabpanel-context\" aria-labelledby=\"react-aria3681853477-_r_19_-tab-context\" tabindex=\"0\" role=\"tabpanel\" class=\"tabs__panel\" data-rac=\"\"><div class=\"p-6 text-center text-sm text-muted\">No context items yet.</div></div>",
+          "html": "<div data-slot=\"tabs-panel\" id=\"react-aria7981614630-_r_19_-tabpanel-context\" aria-labelledby=\"react-aria7981614630-_r_19_-tab-context\" tabindex=\"0\" role=\"tabpanel\" class=\"tabs__panel\" data-rac=\"\"><div class=\"p-6 text-center text-sm text-muted\">No context items yet.</div></div>",
           "target": [
-            "#react-aria3681853477-_r_19_-tabpanel-context"
+            "#react-aria7981614630-_r_19_-tabpanel-context"
           ]
         }
       ]
@@ -5664,7 +5664,7 @@
             }
           ],
           "impact": null,
-          "html": "<li role=\"option\" aria-selected=\"true\" data-testid=\"room-list-item-c95a1...\" tabindex=\"0\" class=\"group relative curso...\" aria-current=\"true\">",
+          "html": "<li role=\"option\" aria-selected=\"true\" data-testid=\"room-list-item-114bf...\" tabindex=\"0\" class=\"group relative curso...\" aria-current=\"true\">",
           "target": [
             "li"
           ]
@@ -5714,9 +5714,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Toggle rooms panel\" id=\"react-aria3681853477-_r_1_\">☰</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Toggle rooms panel\" id=\"react-aria7981614630-_r_1_\">☰</button>",
           "target": [
-            "#react-aria3681853477-_r_1_"
+            "#react-aria7981614630-_r_1_"
           ]
         },
         {
@@ -5810,9 +5810,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Open command palette\" id=\"react-aria3681853477-_r_4_\"><span class=\"hidden sm:inline\">Command</span><kbd class=\"kbd ml-2\">⌘K</kbd></button>",
+          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Open command palette\" id=\"react-aria7981614630-_r_4_\"><span class=\"hidden sm:inline\">Command</span><kbd class=\"kbd ml-2\">⌘K</kbd></button>",
           "target": [
-            "#react-aria3681853477-_r_4_"
+            "#react-aria7981614630-_r_4_"
           ]
         },
         {
@@ -5842,9 +5842,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Show keymap\" id=\"react-aria3681853477-_r_7_\">?</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Show keymap\" id=\"react-aria7981614630-_r_7_\">?</button>",
           "target": [
-            "#react-aria3681853477-_r_7_"
+            "#react-aria7981614630-_r_7_"
           ]
         },
         {
@@ -5874,9 +5874,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Theme: auto\" id=\"react-aria3681853477-_r_a_\">🌓</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Theme: auto\" id=\"react-aria7981614630-_r_a_\">🌓</button>",
           "target": [
-            "#react-aria3681853477-_r_a_"
+            "#react-aria7981614630-_r_a_"
           ]
         },
         {
@@ -5906,9 +5906,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Toggle workbench panel\" id=\"react-aria3681853477-_r_d_\">⊟</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Toggle workbench panel\" id=\"react-aria7981614630-_r_d_\">⊟</button>",
           "target": [
-            "#react-aria3681853477-_r_d_"
+            "#react-aria7981614630-_r_d_"
           ]
         },
         {
@@ -6226,9 +6226,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" data-testid=\"room-list-create-room\" class=\"button button--sm button--primary rounded-full px-4\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"New Room\" id=\"react-aria3681853477-_r_l_\">New</button>",
+          "html": "<button data-slot=\"button\" data-testid=\"room-list-create-room\" class=\"button button--sm button--primary rounded-full px-4\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"New Room\" id=\"react-aria7981614630-_r_l_\">New</button>",
           "target": [
-            "#react-aria3681853477-_r_l_"
+            "#react-aria7981614630-_r_l_"
           ]
         },
         {
@@ -6258,9 +6258,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<input aria-label=\"Search rooms\" placeholder=\"Search room or mode\" tabindex=\"0\" id=\"react-aria3681853477-_r_n_\" class=\"search-field__input\" data-slot=\"search-field-input\" data-rac=\"\" type=\"search\" value=\"\" title=\"\">",
+          "html": "<input aria-label=\"Search rooms\" placeholder=\"Search room or mode\" tabindex=\"0\" id=\"react-aria7981614630-_r_n_\" class=\"search-field__input\" data-slot=\"search-field-input\" data-rac=\"\" type=\"search\" value=\"\" title=\"\">",
           "target": [
-            "#react-aria3681853477-_r_n_"
+            "#react-aria7981614630-_r_n_"
           ]
         },
         {
@@ -6322,7 +6322,7 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<li role=\"option\" aria-selected=\"true\" data-testid=\"room-list-item-c95a1...\" tabindex=\"0\" class=\"group relative curso...\" aria-current=\"true\">",
+          "html": "<li role=\"option\" aria-selected=\"true\" data-testid=\"room-list-item-114bf...\" tabindex=\"0\" class=\"group relative curso...\" aria-current=\"true\">",
           "target": [
             "li"
           ]
@@ -6354,9 +6354,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"dropdown-trigger\" data-testid=\"message-menu-fad30fe...\" class=\"dropdown__trigger in...\" data-rac=\"\" type=\"button\" tabindex=\"0\" aria-haspopup=\"true\" aria-expanded=\"false\" id=\"react-aria3681853477...\" data-react-aria-pres...=\"true\" aria-label=\"Message actions\">",
+          "html": "<button data-slot=\"dropdown-trigger\" data-testid=\"message-menu-f3c8c94...\" class=\"dropdown__trigger in...\" data-rac=\"\" type=\"button\" tabindex=\"0\" aria-haspopup=\"true\" aria-expanded=\"false\" id=\"react-aria7981614630...\" data-react-aria-pres...=\"true\" aria-label=\"Message actions\">",
           "target": [
-            "#react-aria3681853477-_r_1c_"
+            "#react-aria7981614630-_r_1c_"
           ]
         },
         {
@@ -6386,9 +6386,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"dropdown-trigger\" data-testid=\"message-menu-3c13e4c...\" class=\"dropdown__trigger in...\" data-rac=\"\" type=\"button\" tabindex=\"0\" aria-haspopup=\"true\" aria-expanded=\"false\" id=\"react-aria3681853477...\" data-react-aria-pres...=\"true\" aria-label=\"Message actions\">",
+          "html": "<button data-slot=\"dropdown-trigger\" data-testid=\"message-menu-c39f647...\" class=\"dropdown__trigger in...\" data-rac=\"\" type=\"button\" tabindex=\"0\" aria-haspopup=\"true\" aria-expanded=\"false\" id=\"react-aria7981614630...\" data-react-aria-pres...=\"true\" aria-label=\"Message actions\">",
           "target": [
-            "#react-aria3681853477-_r_1g_"
+            "#react-aria7981614630-_r_1g_"
           ]
         },
         {
@@ -6482,9 +6482,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Attach files\" id=\"react-aria3681853477-_r_12_\">Attach</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Attach files\" id=\"react-aria7981614630-_r_12_\">Attach</button>",
           "target": [
-            "#react-aria3681853477-_r_12_"
+            "#react-aria7981614630-_r_12_"
           ]
         },
         {
@@ -6514,9 +6514,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Mention agent\" id=\"react-aria3681853477-_r_14_\">@ Agent</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Mention agent\" id=\"react-aria7981614630-_r_14_\">@ Agent</button>",
           "target": [
-            "#react-aria3681853477-_r_14_"
+            "#react-aria7981614630-_r_14_"
           ]
         },
         {
@@ -6578,9 +6578,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<div data-slot=\"tabs-list\" class=\"tabs__list\" data-rac=\"\" data-collection=\"react-aria3681853477-_r_18_\" id=\"react-aria3681853477-_r_19_\" aria-label=\"Workbench panels\" role=\"tablist\" aria-orientation=\"horizontal\" data-orientation=\"horizontal\">",
+          "html": "<div data-slot=\"tabs-list\" class=\"tabs__list\" data-rac=\"\" data-collection=\"react-aria7981614630-_r_18_\" id=\"react-aria7981614630-_r_19_\" aria-label=\"Workbench panels\" role=\"tablist\" aria-orientation=\"horizontal\" data-orientation=\"horizontal\">",
           "target": [
-            "#react-aria3681853477-_r_19_"
+            "#react-aria7981614630-_r_19_"
           ]
         },
         {
@@ -6610,9 +6610,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-conte...\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"0\" data-collection=\"react-aria3681853477...\" data-key=\"context\" data-react-aria-pres...=\"true\" id=\"react-aria3681853477...\" aria-selected=\"true\" aria-controls=\"react-aria3681853477...\" ...>",
+          "html": "<div data-testid=\"side-panel-tab-conte...\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"0\" data-collection=\"react-aria7981614630...\" data-key=\"context\" data-react-aria-pres...=\"true\" id=\"react-aria7981614630...\" aria-selected=\"true\" aria-controls=\"react-aria7981614630...\" ...>",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-context"
+            "#react-aria7981614630-_r_19_-tab-context"
           ]
         },
         {
@@ -6642,9 +6642,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-tasks\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"tasks\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-tasks\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-tasks\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"tasks\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-tasks\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-tasks"
+            "#react-aria7981614630-_r_19_-tab-tasks"
           ]
         },
         {
@@ -6674,9 +6674,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-members\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"members\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-members\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-members\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"members\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-members\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-members"
+            "#react-aria7981614630-_r_19_-tab-members"
           ]
         },
         {
@@ -6706,9 +6706,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-debug\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"debug\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-debug\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-debug\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"debug\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-debug\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-debug"
+            "#react-aria7981614630-_r_19_-tab-debug"
           ]
         },
         {
@@ -6738,9 +6738,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-cost\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"cost\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-cost\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-cost\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"cost\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-cost\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-cost"
+            "#react-aria7981614630-_r_19_-tab-cost"
           ]
         },
         {
@@ -6770,9 +6770,9 @@
           ],
           "none": [],
           "impact": null,
-          "html": "<div data-slot=\"tabs-panel\" id=\"react-aria3681853477-_r_19_-tabpanel-context\" aria-labelledby=\"react-aria3681853477-_r_19_-tab-context\" tabindex=\"0\" role=\"tabpanel\" class=\"tabs__panel\" data-rac=\"\"><div class=\"p-6 text-center text-sm text-muted\">No context items yet.</div></div>",
+          "html": "<div data-slot=\"tabs-panel\" id=\"react-aria7981614630-_r_19_-tabpanel-context\" aria-labelledby=\"react-aria7981614630-_r_19_-tab-context\" tabindex=\"0\" role=\"tabpanel\" class=\"tabs__panel\" data-rac=\"\"><div class=\"p-6 text-center text-sm text-muted\">No context items yet.</div></div>",
           "target": [
-            "#react-aria3681853477-_r_19_-tabpanel-context"
+            "#react-aria7981614630-_r_19_-tabpanel-context"
           ]
         }
       ]
@@ -6806,9 +6806,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Toggle rooms panel\" id=\"react-aria3681853477-_r_1_\">☰</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Toggle rooms panel\" id=\"react-aria7981614630-_r_1_\">☰</button>",
           "target": [
-            "#react-aria3681853477-_r_1_"
+            "#react-aria7981614630-_r_1_"
           ]
         },
         {
@@ -6860,9 +6860,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Open command palette\" id=\"react-aria3681853477-_r_4_\"><span class=\"hidden sm:inline\">Command</span><kbd class=\"kbd ml-2\">⌘K</kbd></button>",
+          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Open command palette\" id=\"react-aria7981614630-_r_4_\"><span class=\"hidden sm:inline\">Command</span><kbd class=\"kbd ml-2\">⌘K</kbd></button>",
           "target": [
-            "#react-aria3681853477-_r_4_"
+            "#react-aria7981614630-_r_4_"
           ]
         },
         {
@@ -6878,9 +6878,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Show keymap\" id=\"react-aria3681853477-_r_7_\">?</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Show keymap\" id=\"react-aria7981614630-_r_7_\">?</button>",
           "target": [
-            "#react-aria3681853477-_r_7_"
+            "#react-aria7981614630-_r_7_"
           ]
         },
         {
@@ -6896,9 +6896,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Theme: auto\" id=\"react-aria3681853477-_r_a_\">🌓</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Theme: auto\" id=\"react-aria7981614630-_r_a_\">🌓</button>",
           "target": [
-            "#react-aria3681853477-_r_a_"
+            "#react-aria7981614630-_r_a_"
           ]
         },
         {
@@ -6914,9 +6914,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Toggle workbench panel\" id=\"react-aria3681853477-_r_d_\">⊟</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Toggle workbench panel\" id=\"react-aria7981614630-_r_d_\">⊟</button>",
           "target": [
-            "#react-aria3681853477-_r_d_"
+            "#react-aria7981614630-_r_d_"
           ]
         },
         {
@@ -7094,9 +7094,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" data-testid=\"room-list-create-room\" class=\"button button--sm button--primary rounded-full px-4\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"New Room\" id=\"react-aria3681853477-_r_l_\">New</button>",
+          "html": "<button data-slot=\"button\" data-testid=\"room-list-create-room\" class=\"button button--sm button--primary rounded-full px-4\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"New Room\" id=\"react-aria7981614630-_r_l_\">New</button>",
           "target": [
-            "#react-aria3681853477-_r_l_"
+            "#react-aria7981614630-_r_l_"
           ]
         },
         {
@@ -7112,9 +7112,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<input aria-label=\"Search rooms\" placeholder=\"Search room or mode\" tabindex=\"0\" id=\"react-aria3681853477-_r_n_\" class=\"search-field__input\" data-slot=\"search-field-input\" data-rac=\"\" type=\"search\" value=\"\" title=\"\">",
+          "html": "<input aria-label=\"Search rooms\" placeholder=\"Search room or mode\" tabindex=\"0\" id=\"react-aria7981614630-_r_n_\" class=\"search-field__input\" data-slot=\"search-field-input\" data-rac=\"\" type=\"search\" value=\"\" title=\"\">",
           "target": [
-            "#react-aria3681853477-_r_n_"
+            "#react-aria7981614630-_r_n_"
           ]
         },
         {
@@ -7148,7 +7148,7 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<li role=\"option\" aria-selected=\"true\" data-testid=\"room-list-item-c95a1...\" tabindex=\"0\" class=\"group relative curso...\" aria-current=\"true\">",
+          "html": "<li role=\"option\" aria-selected=\"true\" data-testid=\"room-list-item-114bf...\" tabindex=\"0\" class=\"group relative curso...\" aria-current=\"true\">",
           "target": [
             "li"
           ]
@@ -7166,9 +7166,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"dropdown-trigger\" data-testid=\"message-menu-fad30fe...\" class=\"dropdown__trigger in...\" data-rac=\"\" type=\"button\" tabindex=\"0\" aria-haspopup=\"true\" aria-expanded=\"false\" id=\"react-aria3681853477...\" data-react-aria-pres...=\"true\" aria-label=\"Message actions\">",
+          "html": "<button data-slot=\"dropdown-trigger\" data-testid=\"message-menu-f3c8c94...\" class=\"dropdown__trigger in...\" data-rac=\"\" type=\"button\" tabindex=\"0\" aria-haspopup=\"true\" aria-expanded=\"false\" id=\"react-aria7981614630...\" data-react-aria-pres...=\"true\" aria-label=\"Message actions\">",
           "target": [
-            "#react-aria3681853477-_r_1c_"
+            "#react-aria7981614630-_r_1c_"
           ]
         },
         {
@@ -7184,9 +7184,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"dropdown-trigger\" data-testid=\"message-menu-3c13e4c...\" class=\"dropdown__trigger in...\" data-rac=\"\" type=\"button\" tabindex=\"0\" aria-haspopup=\"true\" aria-expanded=\"false\" id=\"react-aria3681853477...\" data-react-aria-pres...=\"true\" aria-label=\"Message actions\">",
+          "html": "<button data-slot=\"dropdown-trigger\" data-testid=\"message-menu-c39f647...\" class=\"dropdown__trigger in...\" data-rac=\"\" type=\"button\" tabindex=\"0\" aria-haspopup=\"true\" aria-expanded=\"false\" id=\"react-aria7981614630...\" data-react-aria-pres...=\"true\" aria-label=\"Message actions\">",
           "target": [
-            "#react-aria3681853477-_r_1g_"
+            "#react-aria7981614630-_r_1g_"
           ]
         },
         {
@@ -7238,9 +7238,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Attach files\" id=\"react-aria3681853477-_r_12_\">Attach</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Attach files\" id=\"react-aria7981614630-_r_12_\">Attach</button>",
           "target": [
-            "#react-aria3681853477-_r_12_"
+            "#react-aria7981614630-_r_12_"
           ]
         },
         {
@@ -7256,9 +7256,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Mention agent\" id=\"react-aria3681853477-_r_14_\">@ Agent</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Mention agent\" id=\"react-aria7981614630-_r_14_\">@ Agent</button>",
           "target": [
-            "#react-aria3681853477-_r_14_"
+            "#react-aria7981614630-_r_14_"
           ]
         },
         {
@@ -7292,9 +7292,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div data-slot=\"tabs-list\" class=\"tabs__list\" data-rac=\"\" data-collection=\"react-aria3681853477-_r_18_\" id=\"react-aria3681853477-_r_19_\" aria-label=\"Workbench panels\" role=\"tablist\" aria-orientation=\"horizontal\" data-orientation=\"horizontal\">",
+          "html": "<div data-slot=\"tabs-list\" class=\"tabs__list\" data-rac=\"\" data-collection=\"react-aria7981614630-_r_18_\" id=\"react-aria7981614630-_r_19_\" aria-label=\"Workbench panels\" role=\"tablist\" aria-orientation=\"horizontal\" data-orientation=\"horizontal\">",
           "target": [
-            "#react-aria3681853477-_r_19_"
+            "#react-aria7981614630-_r_19_"
           ]
         },
         {
@@ -7310,9 +7310,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-conte...\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"0\" data-collection=\"react-aria3681853477...\" data-key=\"context\" data-react-aria-pres...=\"true\" id=\"react-aria3681853477...\" aria-selected=\"true\" aria-controls=\"react-aria3681853477...\" ...>",
+          "html": "<div data-testid=\"side-panel-tab-conte...\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"0\" data-collection=\"react-aria7981614630...\" data-key=\"context\" data-react-aria-pres...=\"true\" id=\"react-aria7981614630...\" aria-selected=\"true\" aria-controls=\"react-aria7981614630...\" ...>",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-context"
+            "#react-aria7981614630-_r_19_-tab-context"
           ]
         },
         {
@@ -7328,9 +7328,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-tasks\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"tasks\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-tasks\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-tasks\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"tasks\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-tasks\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-tasks"
+            "#react-aria7981614630-_r_19_-tab-tasks"
           ]
         },
         {
@@ -7346,9 +7346,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-members\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"members\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-members\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-members\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"members\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-members\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-members"
+            "#react-aria7981614630-_r_19_-tab-members"
           ]
         },
         {
@@ -7364,9 +7364,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-debug\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"debug\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-debug\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-debug\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"debug\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-debug\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-debug"
+            "#react-aria7981614630-_r_19_-tab-debug"
           ]
         },
         {
@@ -7382,9 +7382,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-cost\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"cost\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-cost\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-cost\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"cost\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-cost\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-cost"
+            "#react-aria7981614630-_r_19_-tab-cost"
           ]
         },
         {
@@ -7400,9 +7400,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div data-slot=\"tabs-panel\" id=\"react-aria3681853477-_r_19_-tabpanel-context\" aria-labelledby=\"react-aria3681853477-_r_19_-tab-context\" tabindex=\"0\" role=\"tabpanel\" class=\"tabs__panel\" data-rac=\"\"><div class=\"p-6 text-center text-sm text-muted\">No context items yet.</div></div>",
+          "html": "<div data-slot=\"tabs-panel\" id=\"react-aria7981614630-_r_19_-tabpanel-context\" aria-labelledby=\"react-aria7981614630-_r_19_-tab-context\" tabindex=\"0\" role=\"tabpanel\" class=\"tabs__panel\" data-rac=\"\"><div class=\"p-6 text-center text-sm text-muted\">No context items yet.</div></div>",
           "target": [
-            "#react-aria3681853477-_r_19_-tabpanel-context"
+            "#react-aria7981614630-_r_19_-tabpanel-context"
           ]
         }
       ]
@@ -7721,9 +7721,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Toggle rooms panel\" id=\"react-aria3681853477-_r_1_\">☰</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Toggle rooms panel\" id=\"react-aria7981614630-_r_1_\">☰</button>",
           "target": [
-            "#react-aria3681853477-_r_1_"
+            "#react-aria7981614630-_r_1_"
           ]
         },
         {
@@ -7746,9 +7746,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Open command palette\" id=\"react-aria3681853477-_r_4_\"><span class=\"hidden sm:inline\">Command</span><kbd class=\"kbd ml-2\">⌘K</kbd></button>",
+          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Open command palette\" id=\"react-aria7981614630-_r_4_\"><span class=\"hidden sm:inline\">Command</span><kbd class=\"kbd ml-2\">⌘K</kbd></button>",
           "target": [
-            "#react-aria3681853477-_r_4_"
+            "#react-aria7981614630-_r_4_"
           ]
         },
         {
@@ -7771,9 +7771,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Show keymap\" id=\"react-aria3681853477-_r_7_\">?</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Show keymap\" id=\"react-aria7981614630-_r_7_\">?</button>",
           "target": [
-            "#react-aria3681853477-_r_7_"
+            "#react-aria7981614630-_r_7_"
           ]
         },
         {
@@ -7796,9 +7796,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Theme: auto\" id=\"react-aria3681853477-_r_a_\">🌓</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Theme: auto\" id=\"react-aria7981614630-_r_a_\">🌓</button>",
           "target": [
-            "#react-aria3681853477-_r_a_"
+            "#react-aria7981614630-_r_a_"
           ]
         },
         {
@@ -7821,9 +7821,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Toggle workbench panel\" id=\"react-aria3681853477-_r_d_\">⊟</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Toggle workbench panel\" id=\"react-aria7981614630-_r_d_\">⊟</button>",
           "target": [
-            "#react-aria3681853477-_r_d_"
+            "#react-aria7981614630-_r_d_"
           ]
         },
         {
@@ -7954,9 +7954,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" data-testid=\"room-list-create-room\" class=\"button button--sm button--primary rounded-full px-4\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"New Room\" id=\"react-aria3681853477-_r_l_\">New</button>",
+          "html": "<button data-slot=\"button\" data-testid=\"room-list-create-room\" class=\"button button--sm button--primary rounded-full px-4\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"New Room\" id=\"react-aria7981614630-_r_l_\">New</button>",
           "target": [
-            "#react-aria3681853477-_r_l_"
+            "#react-aria7981614630-_r_l_"
           ]
         },
         {
@@ -7979,9 +7979,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"dropdown-trigger\" data-testid=\"message-menu-fad30fe...\" class=\"dropdown__trigger in...\" data-rac=\"\" type=\"button\" tabindex=\"0\" aria-haspopup=\"true\" aria-expanded=\"false\" id=\"react-aria3681853477...\" data-react-aria-pres...=\"true\" aria-label=\"Message actions\">",
+          "html": "<button data-slot=\"dropdown-trigger\" data-testid=\"message-menu-f3c8c94...\" class=\"dropdown__trigger in...\" data-rac=\"\" type=\"button\" tabindex=\"0\" aria-haspopup=\"true\" aria-expanded=\"false\" id=\"react-aria7981614630...\" data-react-aria-pres...=\"true\" aria-label=\"Message actions\">",
           "target": [
-            "#react-aria3681853477-_r_1c_"
+            "#react-aria7981614630-_r_1c_"
           ]
         },
         {
@@ -8004,9 +8004,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"dropdown-trigger\" data-testid=\"message-menu-3c13e4c...\" class=\"dropdown__trigger in...\" data-rac=\"\" type=\"button\" tabindex=\"0\" aria-haspopup=\"true\" aria-expanded=\"false\" id=\"react-aria3681853477...\" data-react-aria-pres...=\"true\" aria-label=\"Message actions\">",
+          "html": "<button data-slot=\"dropdown-trigger\" data-testid=\"message-menu-c39f647...\" class=\"dropdown__trigger in...\" data-rac=\"\" type=\"button\" tabindex=\"0\" aria-haspopup=\"true\" aria-expanded=\"false\" id=\"react-aria7981614630...\" data-react-aria-pres...=\"true\" aria-label=\"Message actions\">",
           "target": [
-            "#react-aria3681853477-_r_1g_"
+            "#react-aria7981614630-_r_1g_"
           ]
         },
         {
@@ -8029,9 +8029,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Attach files\" id=\"react-aria3681853477-_r_12_\">Attach</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Attach files\" id=\"react-aria7981614630-_r_12_\">Attach</button>",
           "target": [
-            "#react-aria3681853477-_r_12_"
+            "#react-aria7981614630-_r_12_"
           ]
         },
         {
@@ -8054,9 +8054,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Mention agent\" id=\"react-aria3681853477-_r_14_\">@ Agent</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Mention agent\" id=\"react-aria7981614630-_r_14_\">@ Agent</button>",
           "target": [
-            "#react-aria3681853477-_r_14_"
+            "#react-aria7981614630-_r_14_"
           ]
         },
         {
@@ -8072,9 +8072,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" data-testid=\"message-send\" class=\"button button--md button--primary min-w-24 rounded-full\" data-rac=\"\" type=\"button\" disabled=\"\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_16_\" data-disabled=\"true\">Send</button>",
+          "html": "<button data-slot=\"button\" data-testid=\"message-send\" class=\"button button--md button--primary min-w-24 rounded-full\" data-rac=\"\" type=\"button\" disabled=\"\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_16_\" data-disabled=\"true\">Send</button>",
           "target": [
-            "#react-aria3681853477-_r_16_"
+            "#react-aria7981614630-_r_16_"
           ]
         }
       ]
@@ -8342,7 +8342,7 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div class=\"flex h-9 w-9 items-center justify-center rounded-full border border-border bg-overlay text-[10px] font-semibold text-muted shadow-sm\">v0.5</div>",
+          "html": "<div class=\"flex h-9 w-9 items-center justify-center rounded-full border border-border bg-overlay text-[10px] font-semibold text-muted shadow-sm\">v1.0</div>",
           "target": [
             ".h-9"
           ]
@@ -8367,9 +8367,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" data-testid=\"room-list-create-room\" class=\"button button--sm button--primary rounded-full px-4\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"New Room\" id=\"react-aria3681853477-_r_l_\">New</button>",
+          "html": "<button data-slot=\"button\" data-testid=\"room-list-create-room\" class=\"button button--sm button--primary rounded-full px-4\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"New Room\" id=\"react-aria7981614630-_r_l_\">New</button>",
           "target": [
-            "#react-aria3681853477-_r_l_"
+            "#react-aria7981614630-_r_l_"
           ]
         },
         {
@@ -8392,9 +8392,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<input aria-label=\"Search rooms\" placeholder=\"Search room or mode\" tabindex=\"0\" id=\"react-aria3681853477-_r_n_\" class=\"search-field__input\" data-slot=\"search-field-input\" data-rac=\"\" type=\"search\" value=\"\" title=\"\">",
+          "html": "<input aria-label=\"Search rooms\" placeholder=\"Search room or mode\" tabindex=\"0\" id=\"react-aria7981614630-_r_n_\" class=\"search-field__input\" data-slot=\"search-field-input\" data-rac=\"\" type=\"search\" value=\"\" title=\"\">",
           "target": [
-            "#react-aria3681853477-_r_n_"
+            "#react-aria7981614630-_r_n_"
           ]
         },
         {
@@ -8662,9 +8662,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Attach files\" id=\"react-aria3681853477-_r_12_\">Attach</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Attach files\" id=\"react-aria7981614630-_r_12_\">Attach</button>",
           "target": [
-            "#react-aria3681853477-_r_12_"
+            "#react-aria7981614630-_r_12_"
           ]
         },
         {
@@ -8687,9 +8687,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Mention agent\" id=\"react-aria3681853477-_r_14_\">@ Agent</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Mention agent\" id=\"react-aria7981614630-_r_14_\">@ Agent</button>",
           "target": [
-            "#react-aria3681853477-_r_14_"
+            "#react-aria7981614630-_r_14_"
           ]
         },
         {
@@ -8737,9 +8737,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-tasks\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"tasks\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-tasks\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-tasks\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"tasks\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-tasks\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-tasks"
+            "#react-aria7981614630-_r_19_-tab-tasks"
           ]
         },
         {
@@ -8764,7 +8764,7 @@
           "impact": null,
           "html": "<span class=\"chip__label\" data-slot=\"chip-label\">0</span>",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-tasks > .ml-2.chip--default.chip > .chip__label[data-slot=\"chip-label\"]"
+            "#react-aria7981614630-_r_19_-tab-tasks > .ml-2.chip--default.chip > .chip__label[data-slot=\"chip-label\"]"
           ]
         },
         {
@@ -8787,9 +8787,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-members\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"members\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-members\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-members\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"members\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-members\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-members"
+            "#react-aria7981614630-_r_19_-tab-members"
           ]
         },
         {
@@ -8814,7 +8814,7 @@
           "impact": null,
           "html": "<span class=\"chip__label\" data-slot=\"chip-label\">1</span>",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-members > .ml-2.chip--default.chip > .chip__label[data-slot=\"chip-label\"]"
+            "#react-aria7981614630-_r_19_-tab-members > .ml-2.chip--default.chip > .chip__label[data-slot=\"chip-label\"]"
           ]
         },
         {
@@ -8837,9 +8837,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-debug\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"debug\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-debug\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-debug\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"debug\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-debug\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-debug"
+            "#react-aria7981614630-_r_19_-tab-debug"
           ]
         },
         {
@@ -8928,7 +8928,7 @@
           "any": [
             {
               "id": "duplicate-id-aria",
-              "data": "react-aria3681853477-_r_19_-tab-context",
+              "data": "react-aria7981614630-_r_19_-tab-context",
               "relatedNodes": [],
               "impact": "critical",
               "message": "Document has no elements referenced with ARIA or labels that share the same id attribute"
@@ -8937,16 +8937,16 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-conte...\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"0\" data-collection=\"react-aria3681853477...\" data-key=\"context\" data-react-aria-pres...=\"true\" id=\"react-aria3681853477...\" aria-selected=\"true\" aria-controls=\"react-aria3681853477...\" ...>",
+          "html": "<div data-testid=\"side-panel-tab-conte...\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"0\" data-collection=\"react-aria7981614630...\" data-key=\"context\" data-react-aria-pres...=\"true\" id=\"react-aria7981614630...\" aria-selected=\"true\" aria-controls=\"react-aria7981614630...\" ...>",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-context"
+            "#react-aria7981614630-_r_19_-tab-context"
           ]
         },
         {
           "any": [
             {
               "id": "duplicate-id-aria",
-              "data": "react-aria3681853477-_r_19_-tabpanel-context",
+              "data": "react-aria7981614630-_r_19_-tabpanel-context",
               "relatedNodes": [],
               "impact": "critical",
               "message": "Document has no elements referenced with ARIA or labels that share the same id attribute"
@@ -8955,9 +8955,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div data-slot=\"tabs-panel\" id=\"react-aria3681853477-_r_19_-tabpanel-context\" aria-labelledby=\"react-aria3681853477-_r_19_-tab-context\" tabindex=\"0\" role=\"tabpanel\" class=\"tabs__panel\" data-rac=\"\"><div class=\"p-6 text-center text-sm text-muted\">No context items yet.</div></div>",
+          "html": "<div data-slot=\"tabs-panel\" id=\"react-aria7981614630-_r_19_-tabpanel-context\" aria-labelledby=\"react-aria7981614630-_r_19_-tab-context\" tabindex=\"0\" role=\"tabpanel\" class=\"tabs__panel\" data-rac=\"\"><div class=\"p-6 text-center text-sm text-muted\">No context items yet.</div></div>",
           "target": [
-            "#react-aria3681853477-_r_19_-tabpanel-context"
+            "#react-aria7981614630-_r_19_-tabpanel-context"
           ]
         }
       ]
@@ -9042,9 +9042,9 @@
             }
           ],
           "impact": null,
-          "html": "<input aria-label=\"Search rooms\" placeholder=\"Search room or mode\" tabindex=\"0\" id=\"react-aria3681853477-_r_n_\" class=\"search-field__input\" data-slot=\"search-field-input\" data-rac=\"\" type=\"search\" value=\"\" title=\"\">",
+          "html": "<input aria-label=\"Search rooms\" placeholder=\"Search room or mode\" tabindex=\"0\" id=\"react-aria7981614630-_r_n_\" class=\"search-field__input\" data-slot=\"search-field-input\" data-rac=\"\" type=\"search\" value=\"\" title=\"\">",
           "target": [
-            "#react-aria3681853477-_r_n_"
+            "#react-aria7981614630-_r_n_"
           ]
         },
         {
@@ -9251,9 +9251,9 @@
             }
           ],
           "impact": null,
-          "html": "<input aria-label=\"Search rooms\" placeholder=\"Search room or mode\" tabindex=\"0\" id=\"react-aria3681853477-_r_n_\" class=\"search-field__input\" data-slot=\"search-field-input\" data-rac=\"\" type=\"search\" value=\"\" title=\"\">",
+          "html": "<input aria-label=\"Search rooms\" placeholder=\"Search room or mode\" tabindex=\"0\" id=\"react-aria7981614630-_r_n_\" class=\"search-field__input\" data-slot=\"search-field-input\" data-rac=\"\" type=\"search\" value=\"\" title=\"\">",
           "target": [
-            "#react-aria3681853477-_r_n_"
+            "#react-aria7981614630-_r_n_"
           ]
         },
         {
@@ -9343,9 +9343,9 @@
             }
           ],
           "impact": null,
-          "html": "<input aria-label=\"Search rooms\" placeholder=\"Search room or mode\" tabindex=\"0\" id=\"react-aria3681853477-_r_n_\" class=\"search-field__input\" data-slot=\"search-field-input\" data-rac=\"\" type=\"search\" value=\"\" title=\"\">",
+          "html": "<input aria-label=\"Search rooms\" placeholder=\"Search room or mode\" tabindex=\"0\" id=\"react-aria7981614630-_r_n_\" class=\"search-field__input\" data-slot=\"search-field-input\" data-rac=\"\" type=\"search\" value=\"\" title=\"\">",
           "target": [
-            "#react-aria3681853477-_r_n_"
+            "#react-aria7981614630-_r_n_"
           ]
         },
         {
@@ -9892,9 +9892,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Toggle rooms panel\" id=\"react-aria3681853477-_r_1_\">☰</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Toggle rooms panel\" id=\"react-aria7981614630-_r_1_\">☰</button>",
           "target": [
-            "#react-aria3681853477-_r_1_"
+            "#react-aria7981614630-_r_1_"
           ]
         },
         {
@@ -9910,9 +9910,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Open command palette\" id=\"react-aria3681853477-_r_4_\"><span class=\"hidden sm:inline\">Command</span><kbd class=\"kbd ml-2\">⌘K</kbd></button>",
+          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Open command palette\" id=\"react-aria7981614630-_r_4_\"><span class=\"hidden sm:inline\">Command</span><kbd class=\"kbd ml-2\">⌘K</kbd></button>",
           "target": [
-            "#react-aria3681853477-_r_4_"
+            "#react-aria7981614630-_r_4_"
           ]
         },
         {
@@ -9928,9 +9928,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Show keymap\" id=\"react-aria3681853477-_r_7_\">?</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Show keymap\" id=\"react-aria7981614630-_r_7_\">?</button>",
           "target": [
-            "#react-aria3681853477-_r_7_"
+            "#react-aria7981614630-_r_7_"
           ]
         },
         {
@@ -9946,9 +9946,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Theme: auto\" id=\"react-aria3681853477-_r_a_\">🌓</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Theme: auto\" id=\"react-aria7981614630-_r_a_\">🌓</button>",
           "target": [
-            "#react-aria3681853477-_r_a_"
+            "#react-aria7981614630-_r_a_"
           ]
         },
         {
@@ -9964,9 +9964,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Toggle workbench panel\" id=\"react-aria3681853477-_r_d_\">⊟</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Toggle workbench panel\" id=\"react-aria7981614630-_r_d_\">⊟</button>",
           "target": [
-            "#react-aria3681853477-_r_d_"
+            "#react-aria7981614630-_r_d_"
           ]
         },
         {
@@ -10090,9 +10090,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" data-testid=\"room-list-create-room\" class=\"button button--sm button--primary rounded-full px-4\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"New Room\" id=\"react-aria3681853477-_r_l_\">New</button>",
+          "html": "<button data-slot=\"button\" data-testid=\"room-list-create-room\" class=\"button button--sm button--primary rounded-full px-4\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"New Room\" id=\"react-aria7981614630-_r_l_\">New</button>",
           "target": [
-            "#react-aria3681853477-_r_l_"
+            "#react-aria7981614630-_r_l_"
           ]
         },
         {
@@ -10108,9 +10108,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<input aria-label=\"Search rooms\" placeholder=\"Search room or mode\" tabindex=\"0\" id=\"react-aria3681853477-_r_n_\" class=\"search-field__input\" data-slot=\"search-field-input\" data-rac=\"\" type=\"search\" value=\"\" title=\"\">",
+          "html": "<input aria-label=\"Search rooms\" placeholder=\"Search room or mode\" tabindex=\"0\" id=\"react-aria7981614630-_r_n_\" class=\"search-field__input\" data-slot=\"search-field-input\" data-rac=\"\" type=\"search\" value=\"\" title=\"\">",
           "target": [
-            "#react-aria3681853477-_r_n_"
+            "#react-aria7981614630-_r_n_"
           ]
         },
         {
@@ -10126,7 +10126,7 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<li role=\"option\" aria-selected=\"true\" data-testid=\"room-list-item-c95a1...\" tabindex=\"0\" class=\"group relative curso...\" aria-current=\"true\">",
+          "html": "<li role=\"option\" aria-selected=\"true\" data-testid=\"room-list-item-114bf...\" tabindex=\"0\" class=\"group relative curso...\" aria-current=\"true\">",
           "target": [
             "li"
           ]
@@ -10162,7 +10162,7 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div role=\"button\" tabindex=\"0\" class=\"group mx-auto my-1.5 w-full max-w-[920px] px-4 py-1 transition-colors \" data-message-id=\"fad30fed-3fe5-46b3-bcaa-31167d29fdd2\" data-testid=\"message-bubble-user\">",
+          "html": "<div role=\"button\" tabindex=\"0\" class=\"group mx-auto my-1.5 w-full max-w-[920px] px-4 py-1 transition-colors \" data-message-id=\"f3c8c94c-04e6-4172-a627-9dc6b6e7777d\" data-testid=\"message-bubble-user\">",
           "target": [
             "div[data-testid=\"message-bubble-user\"]"
           ]
@@ -10180,9 +10180,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"dropdown-trigger\" data-testid=\"message-menu-fad30fe...\" class=\"dropdown__trigger in...\" data-rac=\"\" type=\"button\" tabindex=\"0\" aria-haspopup=\"true\" aria-expanded=\"false\" id=\"react-aria3681853477...\" data-react-aria-pres...=\"true\" aria-label=\"Message actions\">",
+          "html": "<button data-slot=\"dropdown-trigger\" data-testid=\"message-menu-f3c8c94...\" class=\"dropdown__trigger in...\" data-rac=\"\" type=\"button\" tabindex=\"0\" aria-haspopup=\"true\" aria-expanded=\"false\" id=\"react-aria7981614630...\" data-react-aria-pres...=\"true\" aria-label=\"Message actions\">",
           "target": [
-            "#react-aria3681853477-_r_1c_"
+            "#react-aria7981614630-_r_1c_"
           ]
         },
         {
@@ -10198,7 +10198,7 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div role=\"button\" tabindex=\"0\" class=\"group mx-auto my-1.5 w-full max-w-[920px] px-4 py-1 transition-colors \" data-message-id=\"3c13e4c4-59cf-4e0a-a689-12ef1fa3aa0d\" data-testid=\"message-bubble-agent\">",
+          "html": "<div role=\"button\" tabindex=\"0\" class=\"group mx-auto my-1.5 w-full max-w-[920px] px-4 py-1 transition-colors \" data-message-id=\"c39f647d-a73f-4883-acc4-20fc8e5a5f83\" data-testid=\"message-bubble-agent\">",
           "target": [
             "div[data-testid=\"message-bubble-agent\"]"
           ]
@@ -10216,9 +10216,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"dropdown-trigger\" data-testid=\"message-menu-3c13e4c...\" class=\"dropdown__trigger in...\" data-rac=\"\" type=\"button\" tabindex=\"0\" aria-haspopup=\"true\" aria-expanded=\"false\" id=\"react-aria3681853477...\" data-react-aria-pres...=\"true\" aria-label=\"Message actions\">",
+          "html": "<button data-slot=\"dropdown-trigger\" data-testid=\"message-menu-c39f647...\" class=\"dropdown__trigger in...\" data-rac=\"\" type=\"button\" tabindex=\"0\" aria-haspopup=\"true\" aria-expanded=\"false\" id=\"react-aria7981614630...\" data-react-aria-pres...=\"true\" aria-label=\"Message actions\">",
           "target": [
-            "#react-aria3681853477-_r_1g_"
+            "#react-aria7981614630-_r_1g_"
           ]
         },
         {
@@ -10252,9 +10252,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Attach files\" id=\"react-aria3681853477-_r_12_\">Attach</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Attach files\" id=\"react-aria7981614630-_r_12_\">Attach</button>",
           "target": [
-            "#react-aria3681853477-_r_12_"
+            "#react-aria7981614630-_r_12_"
           ]
         },
         {
@@ -10270,9 +10270,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Mention agent\" id=\"react-aria3681853477-_r_14_\">@ Agent</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Mention agent\" id=\"react-aria7981614630-_r_14_\">@ Agent</button>",
           "target": [
-            "#react-aria3681853477-_r_14_"
+            "#react-aria7981614630-_r_14_"
           ]
         },
         {
@@ -10288,9 +10288,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-conte...\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"0\" data-collection=\"react-aria3681853477...\" data-key=\"context\" data-react-aria-pres...=\"true\" id=\"react-aria3681853477...\" aria-selected=\"true\" aria-controls=\"react-aria3681853477...\" ...>",
+          "html": "<div data-testid=\"side-panel-tab-conte...\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"0\" data-collection=\"react-aria7981614630...\" data-key=\"context\" data-react-aria-pres...=\"true\" id=\"react-aria7981614630...\" aria-selected=\"true\" aria-controls=\"react-aria7981614630...\" ...>",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-context"
+            "#react-aria7981614630-_r_19_-tab-context"
           ]
         },
         {
@@ -10306,9 +10306,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-tasks\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"tasks\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-tasks\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-tasks\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"tasks\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-tasks\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-tasks"
+            "#react-aria7981614630-_r_19_-tab-tasks"
           ]
         },
         {
@@ -10324,9 +10324,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-members\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"members\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-members\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-members\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"members\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-members\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-members"
+            "#react-aria7981614630-_r_19_-tab-members"
           ]
         },
         {
@@ -10342,9 +10342,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-debug\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"debug\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-debug\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-debug\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"debug\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-debug\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-debug"
+            "#react-aria7981614630-_r_19_-tab-debug"
           ]
         },
         {
@@ -10360,9 +10360,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div data-testid=\"side-panel-tab-cost\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria3681853477-_r_18_\" data-key=\"cost\" data-react-aria-pressable=\"true\" id=\"react-aria3681853477-_r_19_-tab-cost\" aria-selected=\"false\" role=\"tab\">",
+          "html": "<div data-testid=\"side-panel-tab-cost\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"-1\" data-collection=\"react-aria7981614630-_r_18_\" data-key=\"cost\" data-react-aria-pressable=\"true\" id=\"react-aria7981614630-_r_19_-tab-cost\" aria-selected=\"false\" role=\"tab\">",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-cost"
+            "#react-aria7981614630-_r_19_-tab-cost"
           ]
         },
         {
@@ -10378,9 +10378,9 @@
           "all": [],
           "none": [],
           "impact": null,
-          "html": "<div data-slot=\"tabs-panel\" id=\"react-aria3681853477-_r_19_-tabpanel-context\" aria-labelledby=\"react-aria3681853477-_r_19_-tab-context\" tabindex=\"0\" role=\"tabpanel\" class=\"tabs__panel\" data-rac=\"\"><div class=\"p-6 text-center text-sm text-muted\">No context items yet.</div></div>",
+          "html": "<div data-slot=\"tabs-panel\" id=\"react-aria7981614630-_r_19_-tabpanel-context\" aria-labelledby=\"react-aria7981614630-_r_19_-tab-context\" tabindex=\"0\" role=\"tabpanel\" class=\"tabs__panel\" data-rac=\"\"><div class=\"p-6 text-center text-sm text-muted\">No context items yet.</div></div>",
           "target": [
-            "#react-aria3681853477-_r_19_-tabpanel-context"
+            "#react-aria7981614630-_r_19_-tabpanel-context"
           ]
         }
       ]
@@ -10465,9 +10465,9 @@
           "all": [],
           "none": [],
           "impact": "serious",
-          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Toggle rooms panel\" id=\"react-aria3681853477-_r_1_\">☰</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Toggle rooms panel\" id=\"react-aria7981614630-_r_1_\">☰</button>",
           "target": [
-            "#react-aria3681853477-_r_1_"
+            "#react-aria7981614630-_r_1_"
           ],
           "failureSummary": "Fix any of the following:\n  Element content contains only non-text characters"
         },
@@ -10507,9 +10507,9 @@
           "all": [],
           "none": [],
           "impact": "serious",
-          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Toggle workbench panel\" id=\"react-aria3681853477-_r_d_\">⊟</button>",
+          "html": "<button data-slot=\"button\" class=\"button button--icon-only button--sm button--ghost\" data-rac=\"\" type=\"button\" tabindex=\"0\" data-react-aria-pressable=\"true\" aria-label=\"Toggle workbench panel\" id=\"react-aria7981614630-_r_d_\">⊟</button>",
           "target": [
-            "#react-aria3681853477-_r_d_"
+            "#react-aria7981614630-_r_d_"
           ],
           "failureSummary": "Fix any of the following:\n  Element content contains only non-text characters"
         },
@@ -10940,7 +10940,7 @@
               },
               "relatedNodes": [
                 {
-                  "html": "<li role=\"option\" aria-selected=\"true\" data-testid=\"room-list-item-c95a1...\" tabindex=\"0\" class=\"group relative curso...\" aria-current=\"true\">",
+                  "html": "<li role=\"option\" aria-selected=\"true\" data-testid=\"room-list-item-114bf...\" tabindex=\"0\" class=\"group relative curso...\" aria-current=\"true\">",
                   "target": [
                     "li"
                   ]
@@ -10978,7 +10978,7 @@
               },
               "relatedNodes": [
                 {
-                  "html": "<li role=\"option\" aria-selected=\"true\" data-testid=\"room-list-item-c95a1...\" tabindex=\"0\" class=\"group relative curso...\" aria-current=\"true\">",
+                  "html": "<li role=\"option\" aria-selected=\"true\" data-testid=\"room-list-item-114bf...\" tabindex=\"0\" class=\"group relative curso...\" aria-current=\"true\">",
                   "target": [
                     "li"
                   ]
@@ -11016,7 +11016,7 @@
               },
               "relatedNodes": [
                 {
-                  "html": "<li role=\"option\" aria-selected=\"true\" data-testid=\"room-list-item-c95a1...\" tabindex=\"0\" class=\"group relative curso...\" aria-current=\"true\">",
+                  "html": "<li role=\"option\" aria-selected=\"true\" data-testid=\"room-list-item-114bf...\" tabindex=\"0\" class=\"group relative curso...\" aria-current=\"true\">",
                   "target": [
                     "li"
                   ]
@@ -11067,7 +11067,7 @@
           "all": [],
           "none": [],
           "impact": "serious",
-          "html": "<span class=\"shrink-0 text-muted\">04:13 PM</span>",
+          "html": "<span class=\"shrink-0 text-muted\">03:16 PM</span>",
           "target": [
             ".max-w-full.justify-end > .shrink-0.text-muted"
           ],
@@ -11131,7 +11131,7 @@
           "all": [],
           "none": [],
           "impact": "serious",
-          "html": "<span class=\"shrink-0 text-muted\">04:13 PM</span>",
+          "html": "<span class=\"shrink-0 text-muted\">03:16 PM</span>",
           "target": [
             ".max-w-full.justify-start > .shrink-0.text-muted"
           ],
@@ -11295,9 +11295,9 @@
           "all": [],
           "none": [],
           "impact": "serious",
-          "html": "<div data-testid=\"side-panel-tab-conte...\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"0\" data-collection=\"react-aria3681853477...\" data-key=\"context\" data-react-aria-pres...=\"true\" id=\"react-aria3681853477...\" aria-selected=\"true\" aria-controls=\"react-aria3681853477...\" ...>",
+          "html": "<div data-testid=\"side-panel-tab-conte...\" data-slot=\"tabs-tab\" class=\"tabs__tab\" data-rac=\"\" tabindex=\"0\" data-collection=\"react-aria7981614630...\" data-key=\"context\" data-react-aria-pres...=\"true\" id=\"react-aria7981614630...\" aria-selected=\"true\" aria-controls=\"react-aria7981614630...\" ...>",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-context"
+            "#react-aria7981614630-_r_19_-tab-context"
           ],
           "failureSummary": "Fix any of the following:\n  Element's background color could not be determined because it is overlapped by another element"
         },
@@ -11322,7 +11322,7 @@
           "impact": "serious",
           "html": "<span class=\"chip__label\" data-slot=\"chip-label\">0</span>",
           "target": [
-            "#react-aria3681853477-_r_19_-tab-context > .ml-2.chip--default.chip > .chip__label[data-slot=\"chip-label\"]"
+            "#react-aria7981614630-_r_19_-tab-context > .ml-2.chip--default.chip > .chip__label[data-slot=\"chip-label\"]"
           ],
           "failureSummary": "Fix any of the following:\n  Element content is too short to determine if it is actual text content"
         }
