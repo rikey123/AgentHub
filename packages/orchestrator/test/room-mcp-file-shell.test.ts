@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -39,6 +39,8 @@ vi.mock("node:fs", async () => {
       readFileSyncMock(...args);
       return actual.readFileSync(...args);
     },
+    // Explicitly preserve realpathSync with its .native sub-function so symlink escape tests work.
+    realpathSync: Object.assign(actual.realpathSync.bind(actual), { native: actual.realpathSync.native.bind(actual) }),
   };
 });
 
@@ -213,13 +215,50 @@ describe("RoomMcpServer file and shell safeguards", () => {
     expect(result).toMatchObject({ ok: false, error: { code: "permission_denied", message: "blocked" } });
     expect(execFileMock).not.toHaveBeenCalled();
   });
+
+  test("file.read routes through ArtifactFS for read-your-writes consistency", async () => {
+    seedRoom("room_1", "agent_1");
+    permissionEngine = createPermissionEngine({ file: () => ({ status: "allow" }) });
+    const shadowContent = "shadow-content";
+    artifactFs = {
+      readTextFile: ({ path }) => path === "shadow.txt" ? shadowContent : undefined,
+      writeTextFile: () => { /* no-op */ },
+    };
+    server = createServer();
+
+    const result = await currentServer().callTool("file.read", { path: "shadow.txt" }, session({ runId: "run_1" }), context());
+
+    expect(result).toEqual({ ok: true, data: { path: "shadow.txt", content: shadowContent } });
+    // readFileSyncMock should NOT have been called — content came from ArtifactFS.
+    expect(readFileSyncMock).not.toHaveBeenCalled();
+  });
+
+  test("permission check passes idempotency key from MCP request id", async () => {
+    seedRoom("room_1", "agent_1");
+    const checkCalls: Array<{ idempotencyKey: string | undefined }> = [];
+    permissionEngine = {
+      check(input: { idempotencyKey?: string }) {
+        checkCalls.push({ idempotencyKey: input.idempotencyKey });
+        return { status: "allow" as const };
+      }
+    } as unknown as typeof permissionEngine;
+    server = createServer();
+
+    // Seed a real file so readFileSync succeeds.
+    writeFileSync(join(tempDir!, "test.txt"), "hello", "utf8");
+    readFileSyncMock.mockReset(); // reset after the writeFileSync call above
+
+    await currentServer().callTool("file.read", { path: "test.txt" }, session(), { requestId: "mcp-req-123" });
+
+    expect(checkCalls[0]?.idempotencyKey).toBe("mcp:mcp-req-123:file");
+  });
 });
 
 let permissionEngine: {
   readonly check: (input: { readonly workspaceId: string; readonly roomId: string; readonly agentId: string; readonly runId: string; readonly resource: { readonly type: string; readonly path?: string; readonly operation?: string; readonly command?: string } }) => PermissionCheckResult;
 } | undefined;
 
-let artifactFs: { readonly writeTextFile: (input: { readonly runId: string; readonly path: string; readonly content: string }) => void } | undefined;
+let artifactFs: { readonly readTextFile?: (input: { readonly runId: string; readonly path: string }) => string | undefined; readonly writeTextFile: (input: { readonly runId: string; readonly path: string; readonly content: string }) => void } | undefined;
 
 function createServer(): RoomMcpServer {
   return new RoomMcpServer({

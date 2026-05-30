@@ -445,6 +445,16 @@ export class ArtifactFSRunRegistry {
     this.requireRun(input.runId).write(input.path, input.content);
   }
 
+  readTextFile(input: { readonly runId: string; readonly path: string }): string | undefined {
+    const fs = this.runs.get(input.runId);
+    if (!fs) return undefined;
+    try {
+      return fs.read(input.path);
+    } catch {
+      return undefined;
+    }
+  }
+
   deleteFile(input: { readonly runId: string; readonly path: string }): void {
     this.requireRun(input.runId).delete(input.path);
   }
