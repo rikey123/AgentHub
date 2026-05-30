@@ -215,6 +215,28 @@ describe("NativeAgentAdapter", () => {
 
     expect(lifecycle.complete).toHaveBeenCalledWith(null, "run-1", { inputTokens: 10, outputTokens: 20, cachedTokens: 3, costUsd: 0.00033, modelId: "gpt-4o" }, undefined);
   });
+
+  it("fails with the provider stream error instead of masking it as no output", async () => {
+    const lifecycle = createLifecycle();
+    streamTextMock.mockReturnValue({
+      fullStream: asyncGenerator([{ type: "error", error: new Error("openai_error") }]),
+      usage: Promise.reject(new Error("No output generated. Check the stream for errors."))
+    });
+
+    const adapter = new NativeAgentAdapter({
+      database: createDatabaseStub(),
+      eventBus: { publish: vi.fn() } as unknown as import("../../bus/src/index.ts").EventBus,
+      lifecycle: lifecycle as never,
+      permissions: { check: permissionCheckMock } as never,
+      modelConfig: { id: "mc-stream-error", provider: "openai-compatible", model: "gpt-5.4-mini", base_url: "https://models.example/v1", api_key_ref: null }
+    });
+
+    permissionCheckMock.mockReturnValue({ status: "allow", reason: "default_allow" });
+
+    await adapter.runManaged(runRow());
+
+    expect(lifecycle.fail).toHaveBeenCalledWith(null, "run-1", "native_agent_runtime_error", "retryable_visible", "openai_error");
+  });
 });
 
 function createLifecycle() {

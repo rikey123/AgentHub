@@ -156,8 +156,13 @@ export class NativeAgentAdapter {
         tools,
         stopWhen: stepCountIs(5)
       });
+      const usagePromise = result.usage;
+      void usagePromise.catch(() => undefined);
 
       for await (const chunk of result.fullStream) {
+        if (chunk.type === "error") {
+          throw normalizeStreamError(chunk.error);
+        }
         if (chunk.type === "text-delta") {
           const delta = chunk.text;
           if (delta.length === 0) continue;
@@ -166,7 +171,7 @@ export class NativeAgentAdapter {
       }
 
       this.completeAssistantText(run, messageId);
-      const usage = await result.usage;
+      const usage = await usagePromise;
       bridge.handle({ type: "session.ended", sessionId: `native-${run.id}`, reason: "completed", cost: costFromUsage(usage, modelConfig.model) });
     } catch (error) {
       if (isAbortError(error)) {
@@ -339,4 +344,10 @@ function classifyFailureClass(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   if (/api key|auth|credentials|unsupported-provider|not found/i.test(message)) return "configuration" as const;
   return "retryable_visible" as const;
+}
+
+function normalizeStreamError(error: unknown): Error {
+  if (error instanceof Error) return error;
+  if (typeof error === "string") return new Error(error);
+  return new Error(JSON.stringify(error));
 }

@@ -79,7 +79,7 @@ export const roomMcpTools: readonly McpToolDefinition[] = [
   },
   {
     name: "room.delegate",
-    description: "Leader-only: delegate work to a teammate role. Creates and wakes a Task atomically, or dispatches an existing pending backlog task when taskId is provided.",
+    description: "Leader-only: delegate work to a teammate role. To dispatch an existing pending backlog task, pass taskId. To create and wake a new task, pass toRoleId and title.",
     inputSchema: {
       type: "object",
       properties: {
@@ -90,10 +90,6 @@ export const roomMcpTools: readonly McpToolDefinition[] = [
         parentTaskId: { type: "string" },
         expectsReview: { type: "boolean" }
       },
-      anyOf: [
-        { required: ["taskId"] },
-        { required: ["toRoleId", "title"] }
-      ],
       additionalProperties: true
     }
   },

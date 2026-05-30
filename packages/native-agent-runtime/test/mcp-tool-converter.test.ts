@@ -56,10 +56,12 @@ describe("convertMcpToolsToAiSdkTools", () => {
     expect(toolSet.room_delegate).toBeDefined();
     expect(toolSet.room_delegate?.description).toContain("delegate");
     expect(toolSet.room_delegate?.inputSchema).toHaveProperty("jsonSchema", expect.objectContaining({
-      anyOf: expect.arrayContaining([
-        expect.objectContaining({ required: expect.arrayContaining(["taskId"]) }),
-        expect.objectContaining({ required: expect.arrayContaining(["toRoleId", "title"]) })
-      ])
+      properties: expect.objectContaining({
+        taskId: expect.any(Object),
+        toRoleId: expect.any(Object),
+        title: expect.any(Object)
+      })
     }));
+    expect(toolSet.room_delegate?.inputSchema).not.toHaveProperty("jsonSchema.anyOf");
   });
 });
