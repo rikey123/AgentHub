@@ -11,6 +11,16 @@ pnpm.cmd --filter @agenthub/daemon test
 pnpm.cmd --filter @agenthub/web dev
 ```
 
+### One-command launch
+
+From the repository root on Windows, you can start the daemon and web UI together with:
+
+```powershell
+.\agenthub.cmd web
+```
+
+This mirrors the reference-project pattern of a single launcher starting the backend and opening the browser for the web UI. If you only want the daemon, use `pnpm.cmd exec tsx apps/cli/src/index.ts start`.
+
 The daemon defaults to `http://127.0.0.1:6677`. Browser clients first call `POST /auth/session` to receive an HttpOnly `agenthub_session` cookie plus an in-memory CSRF token. CLI and SDK clients can use Bearer tokens for non-browser access.
 
 ## MVP scope
