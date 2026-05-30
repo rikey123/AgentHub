@@ -279,7 +279,13 @@ export class RoomMcpServer {
     if (resolvedCwd !== resolvedRoot && !resolvedCwd.startsWith(`${resolvedRoot}${sep}`)) {
       return failure("permission_denied", "cwd must be within workspace");
     }
-    const cwd = resolvedCwd;
+    // Resolve symlinks/junctions to catch cwd pointing outside workspace via a junction.
+    const realRoot = realpathOrResolvedTarget(resolvedRoot);
+    const realCwd = realpathOrResolvedTarget(resolvedCwd);
+    if (realCwd !== realRoot && !realCwd.startsWith(`${realRoot}${sep}`)) {
+      return failure("permission_denied", "cwd must be within workspace");
+    }
+    const cwd = realCwd;
     try {
       const result = await execFileAsync(process.platform === "win32" ? "cmd.exe" : "/bin/sh", process.platform === "win32" ? ["/c", input.command] : ["-lc", input.command], { cwd, timeout: 60_000, windowsHide: true });
       return { ok: true, data: { stdout: result.stdout, stderr: result.stderr, code: 0 } };

@@ -86,6 +86,25 @@ describe("RoomMcpServer symlink/junction escape safeguards", () => {
 
     expect(result).toMatchObject({ ok: false, error: { code: "permission_denied" } });
   });
+
+  it("shell blocks junction cwd pointing outside workspace", async () => {
+    // Create the junction directory (cwd must exist for shell to use it).
+    const junctionPath = join(tempDir!, "secrets");
+    try {
+      symlinkSync(externalDir!, junctionPath, "junction");
+    } catch {
+      return; // Skip if junction creation not available.
+    }
+
+    seedRoom("room_1", "agent_1");
+    // Permission engine allows the shell command — the cwd escape should still be blocked.
+    const server = createServer(createPermissionEngine({ shell: () => ({ status: "allow" }) }));
+
+    // Running shell with cwd pointing through the junction should be blocked.
+    const result = await server.callTool("shell", { command: "echo hi", cwd: "secrets" }, session(), context());
+
+    expect(result).toMatchObject({ ok: false, error: { code: "permission_denied", message: "cwd must be within workspace" } });
+  });
 });
 
 function currentDatabase(): AgentHubDatabase {
@@ -114,10 +133,12 @@ function context(): RoomMcpCallContext {
 
 function createPermissionEngine(handlers: {
   readonly file?: (resource: { readonly type: string; readonly path?: string; readonly operation?: string }) => PermissionCheckResult;
+  readonly shell?: (resource: { readonly type: string; readonly command?: string }) => PermissionCheckResult;
 }): { readonly check: (input: { readonly workspaceId: string; readonly roomId: string; readonly agentId: string; readonly runId: string; readonly resource: { readonly type: string; readonly path?: string; readonly operation?: string; readonly command?: string } }) => PermissionCheckResult } {
   return {
     check(input) {
       if (input.resource.type === "file") return handlers.file?.(input.resource) ?? { status: "allow" };
+      if (input.resource.type === "shell") return handlers.shell?.(input.resource) ?? { status: "allow" };
       return { status: "allow" };
     }
   };
