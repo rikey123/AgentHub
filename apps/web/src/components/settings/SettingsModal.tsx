@@ -7,6 +7,19 @@ import { formatBytes } from "../../lib/format.ts";
 
 export type SettingsTabId = "roles" | "runtimes" | "models" | "permissions" | "workspace" | "mcp";
 
+export const ROOM_MCP_TOOLS = [
+  "room.delegate",
+  "room.read_mailbox",
+  "room.create_task",
+  "room.update_task",
+  "room.list_tasks",
+  "room.send_message",
+  "room.list_members",
+  "room.spawn_agent",
+  "room.file",
+  "room.shell"
+] as const;
+
 export const SETTINGS_TABS: Array<{ id: SettingsTabId; label: string; endpoint?: SettingsEndpoint }> = [
   { id: "roles", label: "Roles", endpoint: "roles" },
   { id: "runtimes", label: "Runtimes", endpoint: "runtimes" },
@@ -16,7 +29,7 @@ export const SETTINGS_TABS: Array<{ id: SettingsTabId; label: string; endpoint?:
   { id: "mcp", label: "MCP" }
 ];
 
-type SettingsEndpoint = "roles" | "runtimes" | "modelConfigs" | "agentBindings" | "permissionProfiles";
+type SettingsEndpoint = "roles" | "runtimes" | "modelConfigs" | "agentBindings" | "permissionProfiles" | "permissionRules";
 
 type SettingsData = Record<SettingsEndpoint, unknown> & { workspace: unknown };
 
@@ -35,7 +48,8 @@ const endpointPaths: Record<SettingsEndpoint, string> = {
   runtimes: "/runtimes",
   modelConfigs: "/model-configs",
   agentBindings: "/agent-bindings",
-  permissionProfiles: "/permissions/profiles"
+  permissionProfiles: "/permissions/profiles",
+  permissionRules: "/permissions/rules"
 };
 
 const emptySettingsData = (): SettingsData => ({
@@ -44,6 +58,7 @@ const emptySettingsData = (): SettingsData => ({
   modelConfigs: undefined,
   agentBindings: undefined,
   permissionProfiles: undefined,
+  permissionRules: undefined,
   workspace: undefined
 });
 
@@ -137,7 +152,7 @@ export function SettingsModal({ isOpen, selectedTab, onTabChange, onOpenChange, 
                 </p>
               </div>
                 <Chip className="ml-auto" size="sm" variant="soft" color={status === "error" ? "danger" : loading ? "warning" : "success"}>
-                {loading ? "Loading" : status === "error" ? "REST error" : `${loadedCount}/6 loaded`}
+                {loading ? "Loading" : status === "error" ? "REST error" : `${loadedCount}/7 loaded`}
                 </Chip>
             </div>
           </Modal.Header>
@@ -175,6 +190,7 @@ export function SettingsModal({ isOpen, selectedTab, onTabChange, onOpenChange, 
                       onRuntimesChange={(runtimes) => setData((current) => ({ ...current, runtimes }))}
                       onModelConfigsChange={(configs) => setData((current) => ({ ...current, modelConfigs: configs }))}
                       onPermissionProfilesChange={(permissionProfiles) => setData((current) => ({ ...current, permissionProfiles }))}
+                      onPermissionRulesChange={(permissionRules) => setData((current) => ({ ...current, permissionRules }))}
                     />
                   </Tabs.Panel>
                 ))}
@@ -197,7 +213,8 @@ function SettingsPanel({
   onRolesChange,
   onRuntimesChange,
   onModelConfigsChange,
-  onPermissionProfilesChange
+  onPermissionProfilesChange,
+  onPermissionRulesChange
 }: {
   tab: (typeof SETTINGS_TABS)[number];
   loading: boolean;
@@ -209,6 +226,7 @@ function SettingsPanel({
   onRuntimesChange: (runtimes: RuntimeConfig[]) => void;
   onModelConfigsChange: (configs: ModelConfig[]) => void;
   onPermissionProfilesChange: (permissionProfiles: unknown) => void;
+  onPermissionRulesChange: (permissionRules: unknown) => void;
 }) {
   if (tab.id === "roles" && !loading && !error && data !== undefined) {
     return <RolesTab roles={data} modelConfigs={allData.modelConfigs} fetchImpl={fetchImpl} onRolesChange={onRolesChange} />;
@@ -223,7 +241,15 @@ function SettingsPanel({
   }
 
   if (tab.id === "permissions" && !loading && !error && data !== undefined) {
-    return <PermissionsSettingsTab permissionProfiles={data} fetchImpl={fetchImpl} onPermissionProfilesChange={onPermissionProfilesChange} />;
+    return (
+      <PermissionsSettingsTab
+        permissionProfiles={data}
+        permissionRules={allData.permissionRules}
+        fetchImpl={fetchImpl}
+        onPermissionProfilesChange={onPermissionProfilesChange}
+        onPermissionRulesChange={onPermissionRulesChange}
+      />
+    );
   }
 
   if (tab.id === "workspace" && !loading && !error && allData.workspace !== undefined) {
@@ -277,12 +303,27 @@ function PlaceholderState({ tab, data }: { tab: (typeof SETTINGS_TABS)[number]; 
   );
 }
 
-function PermissionsSettingsTab({ permissionProfiles, fetchImpl, onPermissionProfilesChange }: { permissionProfiles: unknown; fetchImpl: typeof fetch; onPermissionProfilesChange: (permissionProfiles: unknown) => void }) {
+export function PermissionsSettingsTab({
+  permissionProfiles,
+  permissionRules,
+  fetchImpl,
+  onPermissionProfilesChange,
+  onPermissionRulesChange
+}: {
+  permissionProfiles: unknown;
+  permissionRules: unknown;
+  fetchImpl: typeof fetch;
+  onPermissionProfilesChange: (permissionProfiles: unknown) => void;
+  onPermissionRulesChange: (permissionRules: unknown) => void;
+}) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [creating, setCreating] = useState(false);
+  const [deletingRuleId, setDeletingRuleId] = useState<string | undefined>();
   const [formError, setFormError] = useState<string | undefined>(undefined);
+  const [ruleError, setRuleError] = useState<string | undefined>(undefined);
   const profiles = normalizePermissionProfiles(permissionProfiles);
+  const rules = normalizePermissionRules(permissionRules);
 
   const createProfile = async () => {
     if (name.trim().length === 0) return;
@@ -293,14 +334,17 @@ function PermissionsSettingsTab({ permissionProfiles, fetchImpl, onPermissionPro
         method: "POST",
         credentials: "same-origin",
         headers: { accept: "application/json", "content-type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), description: description.trim() })
+        body: JSON.stringify({ name: name.trim(), payload: { description: description.trim() } })
       });
       if (!response.ok) throw new Error(`Create profile failed: ${response.status}`);
       const created = await response.json() as { readonly profile?: unknown; readonly profiles?: unknown[] };
       if (created.profile !== undefined) {
         onPermissionProfilesChange({ profiles: [...profiles, created.profile] });
+      } else if (Array.isArray(created.profiles)) {
+        onPermissionProfilesChange({ profiles: created.profiles });
       } else {
-        onPermissionProfilesChange({ profiles: Array.isArray(created.profiles) ? created.profiles : profiles });
+        const refreshed = await fetchJson(fetchImpl, "/permissions/profiles");
+        onPermissionProfilesChange(refreshed);
       }
       setName("");
       setDescription("");
@@ -308,6 +352,24 @@ function PermissionsSettingsTab({ permissionProfiles, fetchImpl, onPermissionPro
       setFormError(error instanceof Error ? error.message : String(error));
     } finally {
       setCreating(false);
+    }
+  };
+
+  const deleteRule = async (ruleId: string) => {
+    setDeletingRuleId(ruleId);
+    setRuleError(undefined);
+    try {
+      const response = await fetchImpl(`/permissions/rules/${encodeURIComponent(ruleId)}`, {
+        method: "DELETE",
+        credentials: "same-origin",
+        headers: { accept: "application/json" }
+      });
+      if (!response.ok) throw new Error(`Delete rule failed: ${response.status}`);
+      onPermissionRulesChange({ rules: rules.filter((rule) => rule.id !== ruleId) });
+    } catch (error) {
+      setRuleError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setDeletingRuleId(undefined);
     }
   };
 
@@ -335,6 +397,41 @@ function PermissionsSettingsTab({ permissionProfiles, fetchImpl, onPermissionPro
           </div>
         </Card.Content>
       </Card>
+      <Card variant="transparent" className="border border-border">
+        <Card.Header>
+          <div className="flex flex-wrap items-center gap-2">
+            <Card.Title className="text-sm">Permission rules</Card.Title>
+            <Chip size="sm" variant="soft" color="success">{rules.length} loaded</Chip>
+          </div>
+          <Card.Description className="text-xs">
+            Stored allow, deny, and ask decisions returned by GET /permissions/rules. Rule creation is not exposed by the V1.0 daemon API.
+          </Card.Description>
+        </Card.Header>
+        <Card.Content className="grid gap-2">
+          {ruleError ? <p className="text-xs text-danger" role="alert">{ruleError}</p> : null}
+          {rules.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border bg-surface px-3 py-3 text-sm text-muted">
+              No remembered permission rules are stored yet.
+            </div>
+          ) : rules.map((rule) => (
+            <div key={rule.id} className="grid gap-2 rounded-xl border border-border bg-surface px-3 py-3 sm:grid-cols-[1fr_auto] sm:items-center">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-semibold">{rule.resourceMatch}</span>
+                  <Chip size="sm" variant="soft" color={rule.action === "deny" ? "danger" : rule.action === "allow" ? "success" : "warning"}>{rule.action}</Chip>
+                  <Chip size="sm" variant="soft" color="default">{rule.resourceType}</Chip>
+                </div>
+                <div className="mt-1 text-xs text-muted">
+                  Workspace {rule.workspaceId ?? "all"}{rule.agentId ? ` · Agent ${rule.agentId}` : ""}{rule.profileId ? ` · Profile ${rule.profileId}` : ""}
+                </div>
+              </div>
+              <Button size="sm" variant="danger" isPending={deletingRuleId === rule.id} onPress={() => void deleteRule(rule.id)}>
+                Delete Rule
+              </Button>
+            </div>
+          ))}
+        </Card.Content>
+      </Card>
       {profiles.map((profile) => (
         <Card key={profile.id} variant="transparent" className="border border-border">
           <Card.Header>
@@ -354,49 +451,77 @@ function PermissionsSettingsTab({ permissionProfiles, fetchImpl, onPermissionPro
   );
 }
 
-function WorkspaceTab({ workspace }: { workspace: unknown }) {
+export function WorkspaceTab({ workspace }: { workspace: unknown }) {
   const rootPath = normalizeWorkspaceRootPath(workspace);
-  const workspaceName = typeof workspace === "object" && workspace !== null && typeof (workspace as { readonly name?: unknown }).name === "string" ? (workspace as { readonly name: string }).name : undefined;
-  const workspaceId = typeof workspace === "object" && workspace !== null && typeof (workspace as { readonly id?: unknown }).id === "string" ? (workspace as { readonly id: string }).id : undefined;
+  const workspaceRecord = unwrapWorkspace(workspace);
+  const workspaceName = typeof workspaceRecord.name === "string" ? workspaceRecord.name : undefined;
+  const workspaceId = typeof workspaceRecord.id === "string" ? workspaceRecord.id : undefined;
   const worktreeMode = readWorkspaceString(workspace, ["worktree_mode", "worktreeMode", "workspace_mode", "workspaceMode"]);
   const artifactStorage = readWorkspaceString(workspace, ["artifact_storage", "artifactStorage", "artifact_storage_mode", "artifactStorageMode"]) ?? "Artifact storage is managed by the daemon";
   const attachmentLimit = readWorkspaceNumber(workspace, ["attachment_max_bytes", "attachmentMaxBytes", "attachment_limit_bytes", "attachmentLimitBytes"]);
   const gcPolicy = readWorkspaceString(workspace, ["gc_policy", "gcPolicy", "attachment_gc_policy", "attachmentGcPolicy"]) ?? "Garbage collection is daemon-managed";
+  const updatedAt = readWorkspaceNumber(workspace, ["updated_at", "updatedAt"]);
 
   return (
     <section className="grid gap-4 p-5" data-testid="settings-panel-workspace">
       <Card variant="transparent" className="border border-border">
         <Card.Header>
-          <Card.Title className="text-sm">Workspace root</Card.Title>
-          <Card.Description className="text-xs">Local storage, artifacts, and attachment cleanup all resolve from this path.</Card.Description>
+          <div className="flex flex-wrap items-center gap-2">
+            <Card.Title className="text-sm">Workspace root</Card.Title>
+            <Chip size="sm" variant="soft" color="warning">Read-only</Chip>
+          </div>
+          <Card.Description className="text-xs">
+            Local storage, artifacts, and attachment cleanup all resolve from this path. No PATCH /workspaces endpoint is exposed in V1.0.
+          </Card.Description>
         </Card.Header>
         <Card.Content className="grid gap-2 text-sm">
           <div><span className="text-muted">Name:</span> {workspaceName ?? workspaceId ?? "Workspace"}</div>
+          <div><span className="text-muted">Configuration endpoint:</span> GET /workspaces/{workspaceId ?? "default-workspace"}</div>
           <div className="ah-mono rounded-xl border border-border bg-surface px-3 py-2 text-xs">{rootPath}</div>
           <div><span className="text-muted">Worktree mode:</span> {worktreeMode ?? "Not reported"}</div>
           <div><span className="text-muted">Artifacts:</span> {artifactStorage}</div>
           <div><span className="text-muted">Attachment limit:</span> {attachmentLimit !== undefined ? formatBytes(attachmentLimit) : "Not reported"}</div>
           <div><span className="text-muted">GC:</span> {gcPolicy}</div>
+          <div><span className="text-muted">Last updated:</span> {updatedAt !== undefined ? String(updatedAt) : "Not reported"}</div>
         </Card.Content>
       </Card>
     </section>
   );
 }
 
-function McpPlaceholder() {
+export function McpPlaceholder() {
   return (
     <section className="grid gap-4 p-5" data-testid="settings-panel-mcp">
       <Card variant="transparent" className="border border-border">
         <Card.Header>
-          <Card.Title className="text-sm">MCP / Tools</Card.Title>
-          <Card.Description className="text-xs">MCP server management coming in V1.1. This release keeps the surface read-only.</Card.Description>
+          <div className="flex flex-wrap items-center gap-2">
+            <Card.Title className="text-sm">MCP / Tools</Card.Title>
+            <Chip size="sm" variant="soft" color="warning">Read-only</Chip>
+          </div>
+          <Card.Description className="text-xs">MCP server management coming in V1.1. This release shows the enabled V1.0 room tools.</Card.Description>
         </Card.Header>
-        <Card.Content className="text-sm text-muted">
-          Existing room tools remain available, but external server management is not editable yet.
+        <Card.Content className="grid gap-3 text-sm text-muted">
+          <p>Existing room tools remain available, but external server management is not editable yet.</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {ROOM_MCP_TOOLS.map((tool) => (
+              <div key={tool} className="ah-mono rounded-xl border border-border bg-surface px-3 py-2 text-xs text-foreground">
+                {tool}
+              </div>
+            ))}
+          </div>
         </Card.Content>
       </Card>
     </section>
   );
+}
+
+async function fetchJson(fetchImpl: typeof fetch, path: string): Promise<unknown> {
+  const response = await fetchImpl(path, {
+    credentials: "same-origin",
+    headers: { accept: "application/json" }
+  });
+  if (!response.ok) throw new Error(`Fetch ${path} failed: ${response.status}`);
+  return response.json();
 }
 
 function normalizePermissionProfiles(value: unknown): Array<{
@@ -413,25 +538,56 @@ function normalizePermissionProfiles(value: unknown): Array<{
     const id = typeof record.id === "string" ? record.id : undefined;
     const name = typeof record.name === "string" ? record.name : undefined;
     if (!id || !name) return [];
+    const payload = profile && typeof profile === "object" && typeof record.payload === "object" && record.payload !== null ? record.payload as Record<string, unknown> : undefined;
     return [{
       id,
       name,
-      description: typeof record.description === "string" ? record.description : undefined
+      description: typeof record.description === "string" ? record.description : typeof payload?.description === "string" ? payload.description : undefined
+    }];
+  });
+}
+
+function normalizePermissionRules(value: unknown): Array<{
+  readonly id: string;
+  readonly workspaceId: string | undefined;
+  readonly agentId: string | undefined;
+  readonly profileId: string | undefined;
+  readonly resourceType: string;
+  readonly resourceMatch: string;
+  readonly action: "allow" | "deny" | "ask" | string;
+}> {
+  const rules = value && typeof value === "object" && Array.isArray((value as { readonly rules?: unknown }).rules)
+    ? (value as { readonly rules: unknown[] }).rules
+    : [];
+  return rules.flatMap((rule) => {
+    if (!rule || typeof rule !== "object") return [];
+    const record = rule as Record<string, unknown>;
+    const id = readStringFromRecord(record, ["id"]);
+    const resourceType = readStringFromRecord(record, ["resource_type", "resourceType"]) ?? "resource";
+    const resourceMatch = readStringFromRecord(record, ["resource_match", "resourceMatch"]) ?? "*";
+    const action = readStringFromRecord(record, ["action"]) ?? "ask";
+    if (!id) return [];
+    return [{
+      id,
+      workspaceId: readStringFromRecord(record, ["workspace_id", "workspaceId"]),
+      agentId: readStringFromRecord(record, ["agent_id", "agentId"]),
+      profileId: readStringFromRecord(record, ["profile_id", "profileId"]),
+      resourceType,
+      resourceMatch,
+      action
     }];
   });
 }
 
 function normalizeWorkspaceRootPath(workspace: unknown): string {
-  if (!workspace || typeof workspace !== "object") return ".";
-  const record = workspace as Record<string, unknown>;
+  const record = unwrapWorkspace(workspace);
   if (typeof record.root_path === "string") return record.root_path;
   if (typeof record.rootPath === "string") return record.rootPath;
   return ".";
 }
 
 function readWorkspaceString(workspace: unknown, keys: readonly string[]): string | undefined {
-  if (!workspace || typeof workspace !== "object") return undefined;
-  const record = workspace as Record<string, unknown>;
+  const record = unwrapWorkspace(workspace);
   for (const key of keys) {
     if (typeof record[key] === "string") return record[key] as string;
   }
@@ -439,14 +595,27 @@ function readWorkspaceString(workspace: unknown, keys: readonly string[]): strin
 }
 
 function readWorkspaceNumber(workspace: unknown, keys: readonly string[]): number | undefined {
-  if (!workspace || typeof workspace !== "object") return undefined;
-  const record = workspace as Record<string, unknown>;
+  const record = unwrapWorkspace(workspace);
   for (const key of keys) {
     if (typeof record[key] === "number" && Number.isFinite(record[key])) return record[key] as number;
     if (typeof record[key] === "string" && record[key].trim().length > 0) {
       const parsed = Number(record[key]);
       if (Number.isFinite(parsed)) return parsed;
     }
+  }
+  return undefined;
+}
+
+function unwrapWorkspace(workspace: unknown): Record<string, unknown> {
+  if (!workspace || typeof workspace !== "object") return {};
+  const record = workspace as Record<string, unknown>;
+  const nested = record.workspace;
+  return nested && typeof nested === "object" ? nested as Record<string, unknown> : record;
+}
+
+function readStringFromRecord(record: Record<string, unknown>, keys: readonly string[]): string | undefined {
+  for (const key of keys) {
+    if (typeof record[key] === "string" && record[key].length > 0) return record[key] as string;
   }
   return undefined;
 }

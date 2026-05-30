@@ -176,9 +176,7 @@ test.describe("main timeline and run detail projection", () => {
     await page.click('[data-testid="run-detail-tab-permissions"]');
     await page.click('[data-testid="run-detail-tab-artifacts"]');
     await page.click('[data-testid="run-detail-tab-raw"]');
-    await page.waitForSelector('[data-testid="raw-stream-content"]');
-    const rawText = await page.locator('[data-testid="raw-stream-content"]').textContent();
-    expect(rawText).toBe("Raw stream content requires admin scope or debug mode.");
+    await expect(page.locator('[data-testid="raw-stream-content"]')).toHaveText("Raw stream content requires admin scope or debug mode.");
     await page.click('[data-testid="run-detail-tab-cost"]');
 
     // Close run detail

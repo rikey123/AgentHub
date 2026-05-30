@@ -13,14 +13,90 @@ import {
   TextField
 } from "@heroui/react";
 import { useAgents, type AgentSummary } from "../hooks/useAgents.ts";
+import { useRoomCreationOptions } from "../hooks/useRoomCreationOptions.ts";
 import { initials } from "../lib/format.ts";
+
+export type RoomMode = "solo" | "assisted" | "squad" | "team";
+export type RoomParticipantRole = "observer" | "reviewer" | "specialist";
+export type RoomPresence = "observing" | "active";
+export type LegacyAgentParticipant = {
+  type: "agent";
+  agentId: string;
+  role: RoomParticipantRole;
+  defaultPresence: RoomPresence;
+};
+export type V1RoomParticipant = {
+  roleId: string;
+  runtimeId: string;
+  modelConfigId?: string;
+  role?: RoomParticipantRole;
+  defaultPresence?: RoomPresence;
+};
 
 export type CreateRoomInput = {
   title: string;
-  mode: "solo" | "assisted";
+  mode: RoomMode;
   primaryAgentId: string;
-  participants: Array<{ type: "agent"; agentId: string; role: "observer" | "reviewer" | "specialist"; defaultPresence: "observing" | "active" }>;
+  leaderRoleId?: string;
+  participants: Array<LegacyAgentParticipant | V1RoomParticipant>;
 };
+
+export const ROOM_MODE_OPTIONS: ReadonlyArray<{ value: RoomMode; title: string; description: string }> = [
+  { value: "solo", title: "Solo", description: "One primary agent only." },
+  { value: "assisted", title: "Assisted", description: "Primary agent plus optional collaborators." },
+  { value: "squad", title: "Squad", description: "Leader role coordinates a focused group." },
+  { value: "team", title: "Team", description: "Leader role routes work across active teammates." }
+];
+
+export type BuildV1ParticipantInput = V1RoomParticipant & {
+  runtimeKind: string;
+};
+
+export function buildCreateRoomInput(input: {
+  title: string;
+  mode: RoomMode;
+  primaryAgentId: string;
+  leaderRoleId?: string;
+  legacyAgentParticipants: LegacyAgentParticipant[];
+  v1Participants: BuildV1ParticipantInput[];
+}): CreateRoomInput {
+  const title = input.title.trim() || "New room";
+  if (input.mode === "solo") {
+    return { title, mode: "solo", primaryAgentId: input.primaryAgentId, participants: [] };
+  }
+  if (input.mode === "assisted") {
+    return { title, mode: "assisted", primaryAgentId: input.primaryAgentId, participants: input.legacyAgentParticipants };
+  }
+  if (!input.leaderRoleId) {
+    throw new Error("Pick a leader role.");
+  }
+  if (input.v1Participants.length === 0) {
+    throw new Error("Add at least one role participant.");
+  }
+  if (!input.v1Participants.some((participant) => participant.roleId === input.leaderRoleId)) {
+    throw new Error("Leader role must be included as a participant.");
+  }
+  const participants = input.v1Participants.map((participant) => {
+    if (participant.runtimeKind === "native" && !participant.modelConfigId) {
+      throw new Error("Native runtime participants require a model config.");
+    }
+    const next: V1RoomParticipant = {
+      roleId: participant.roleId,
+      runtimeId: participant.runtimeId
+    };
+    if (participant.modelConfigId) next.modelConfigId = participant.modelConfigId;
+    if (participant.role) next.role = participant.role;
+    if (participant.defaultPresence) next.defaultPresence = participant.defaultPresence;
+    return next;
+  });
+  return {
+    title,
+    mode: input.mode,
+    primaryAgentId: input.primaryAgentId,
+    leaderRoleId: input.leaderRoleId,
+    participants
+  };
+}
 
 interface NewRoomDialogProps {
   isOpen: boolean;
@@ -56,17 +132,45 @@ function capabilitySummary(agent: AgentSummary) {
   return labels.length > 0 ? labels.join(" / ") : agent.defaultPresence;
 }
 
-function roleForAgent(agent: AgentSummary | undefined): CreateRoomInput["participants"][number]["role"] {
+function roleForAgent(agent: AgentSummary | undefined): RoomParticipantRole {
   if (agent?.capabilities.includes("code.review")) return "reviewer";
   if (agent?.capabilities.includes("task.delegate")) return "specialist";
   return "observer";
 }
 
+type V1ParticipantDraft = {
+  id: string;
+  roleId: string;
+  runtimeId: string;
+  modelConfigId: string;
+  defaultPresence: RoomPresence;
+};
+
+function newParticipantDraft(roleId: string, runtimeId: string, modelConfigId = ""): V1ParticipantDraft {
+  return {
+    id: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `participant-${Date.now()}-${Math.random()}`,
+    roleId,
+    runtimeId,
+    modelConfigId,
+    defaultPresence: "active"
+  };
+}
+
 export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogProps) {
   const { agents, loading, error: agentsError } = useAgents();
+  const {
+    roles,
+    runtimes,
+    modelConfigs,
+    agentBindings,
+    loading: optionsLoading,
+    error: optionsError
+  } = useRoomCreationOptions();
   const [title, setTitle] = useState("");
-  const [mode, setMode] = useState<"solo" | "assisted">("assisted");
+  const [mode, setMode] = useState<RoomMode>("assisted");
   const [primaryId, setPrimaryId] = useState<string | undefined>(undefined);
+  const [leaderRoleId, setLeaderRoleId] = useState<string>("");
+  const [v1Participants, setV1Participants] = useState<V1ParticipantDraft[]>([]);
   const [extraIds, setExtraIds] = useState<Set<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
@@ -77,6 +181,8 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
       setError(undefined);
       setExtraIds(new Set());
       setMode("assisted");
+      setLeaderRoleId("");
+      setV1Participants([]);
     }
   }, [isOpen]);
 
@@ -86,6 +192,20 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
       setPrimaryId((builder ?? agents[0]!).id);
     }
   }, [agents, primaryId]);
+
+  useEffect(() => {
+    if (leaderRoleId || roles.length === 0) return;
+    const leader = roles.find((role) => role.capabilities.includes("task.delegate")) ?? roles[0];
+    setLeaderRoleId(leader?.id ?? "");
+  }, [leaderRoleId, roles]);
+
+  useEffect(() => {
+    if (v1Participants.length > 0 || roles.length === 0 || runtimes.length === 0) return;
+    const role = roles.find((candidate) => candidate.id === leaderRoleId) ?? roles[0];
+    const runtime = runtimes.find((candidate) => candidate.kind === "native") ?? runtimes[0];
+    const modelConfigId = runtime?.kind === "native" ? modelConfigs[0]?.id ?? "" : "";
+    setV1Participants([newParticipantDraft(role?.id ?? "", runtime?.id ?? "", modelConfigId)]);
+  }, [leaderRoleId, modelConfigs, roles, runtimes, v1Participants.length]);
 
   const sortedAgents = useMemo(
     () => agents.slice().sort((a, b) => {
@@ -98,6 +218,8 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
 
   const primaryAgent = sortedAgents.find((agent) => agent.id === primaryId);
   const selectedExtras = sortedAgents.filter((agent) => extraIds.has(agent.id) && agent.id !== primaryId);
+  const selectedLeader = roles.find((role) => role.id === leaderRoleId);
+  const teamMode = mode === "squad" || mode === "team";
 
   const toggleExtra = (id: string) => {
     setExtraIds((prev) => {
@@ -107,29 +229,73 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
     });
   };
 
+  const updateV1Participant = (id: string, patch: Partial<V1ParticipantDraft>) => {
+    setV1Participants((current) => current.map((participant) => {
+      if (participant.id !== id) return participant;
+      const runtimeId = patch.runtimeId ?? participant.runtimeId;
+      const runtime = runtimes.find((candidate) => candidate.id === runtimeId);
+      const modelConfigId = patch.modelConfigId ?? (runtime?.kind === "native" ? (participant.modelConfigId || modelConfigs[0]?.id || "") : "");
+      return { ...participant, ...patch, runtimeId, modelConfigId };
+    }));
+  };
+
+  const addV1Participant = () => {
+    const role = roles.find((candidate) => candidate.id === leaderRoleId) ?? roles[0];
+    const runtime = runtimes.find((candidate) => candidate.kind === "native") ?? runtimes[0];
+    const modelConfigId = runtime?.kind === "native" ? modelConfigs[0]?.id ?? "" : "";
+    setV1Participants((current) => [
+      ...current,
+      newParticipantDraft(role?.id ?? "", runtime?.id ?? "", modelConfigId)
+    ]);
+  };
+
+  const removeV1Participant = (id: string) => {
+    setV1Participants((current) => current.filter((participant) => participant.id !== id));
+  };
+
   const handleSubmit = async () => {
-    if (!primaryId) {
+    if (!primaryId && !teamMode) {
       setError("Pick a primary agent");
       return;
     }
     setSubmitting(true);
     setError(undefined);
     try {
-      const participants = Array.from(extraIds)
+      const legacyAgentParticipants = Array.from(extraIds)
         .filter((id) => id !== primaryId)
         .map((id) => {
           const agent = agents.find((x) => x.id === id);
-          const defaultPresence: "observing" | "active" = agent?.defaultPresence === "active" ? "active" : "observing";
+          const defaultPresence: RoomPresence = agent?.defaultPresence === "active" ? "active" : "observing";
           return { type: "agent" as const, agentId: id, role: roleForAgent(agent), defaultPresence };
         });
-      const finalMode = mode === "solo" ? "solo" : "assisted";
-      const finalParticipants = finalMode === "solo" ? [] : participants;
-      await onCreate({
-        title: title.trim() || "New room",
-        mode: finalMode,
-        primaryAgentId: primaryId,
-        participants: finalParticipants
+      const v1ParticipantInput = v1Participants.map((participant) => {
+        const runtime = runtimes.find((candidate) => candidate.id === participant.runtimeId);
+        const next: BuildV1ParticipantInput = {
+          roleId: participant.roleId,
+          runtimeId: participant.runtimeId,
+          runtimeKind: runtime?.kind ?? "",
+          defaultPresence: participant.defaultPresence
+        };
+        if (participant.modelConfigId) next.modelConfigId = participant.modelConfigId;
+        return next;
       });
+      const leaderParticipant = v1Participants.find((participant) => participant.roleId === leaderRoleId);
+      const leaderBindingId = leaderParticipant
+        ? agentBindings.find((binding) =>
+            binding.roleId === leaderRoleId
+            && binding.runtimeId === leaderParticipant.runtimeId
+            && binding.modelConfigId === (leaderParticipant.modelConfigId || null)
+          )?.id
+        : undefined;
+      const primaryAgentId = teamMode ? (leaderBindingId ?? "") : (primaryId ?? "");
+      const createInput = {
+        title,
+        mode,
+        primaryAgentId,
+        legacyAgentParticipants,
+        v1Participants: v1ParticipantInput
+      };
+      await onCreate(buildCreateRoomInput(leaderRoleId ? { ...createInput, leaderRoleId } : createInput));
       onOpenChange(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -171,27 +337,26 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
                       <h3 className="mb-2 text-sm font-semibold">Mode</h3>
                       <RadioGroup
                         value={mode}
-                        onChange={(v: unknown) => setMode(v as "solo" | "assisted")}
+                        onChange={(v: unknown) => setMode(v as RoomMode)}
                         aria-label="Room mode"
                       >
-                        <div className="grid gap-2 md:grid-cols-2">
-                          <RoomModeOption
-                            value="assisted"
-                            title="Assisted"
-                            description="Multiple agents collaborate; observers can knock."
-                          />
-                          <RoomModeOption
-                            value="solo"
-                            title="Solo"
-                            description="One primary agent only."
-                          />
+                        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+                          {ROOM_MODE_OPTIONS.map((option) => (
+                            <RoomModeOption
+                              key={option.value}
+                              value={option.value}
+                              title={option.title}
+                              description={option.description}
+                            />
+                          ))}
                         </div>
                       </RadioGroup>
                     </div>
                   </div>
                 </section>
 
-                <section className="rounded-2xl border border-border bg-overlay p-4 shadow-sm">
+                {!teamMode ? (
+                  <section className="rounded-2xl border border-border bg-overlay p-4 shadow-sm">
                   <div className="mb-3 flex items-start justify-between gap-3">
                     <div>
                       <h3 className="text-sm font-semibold">Primary agent</h3>
@@ -243,7 +408,111 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
                       );
                     })}
                   </div>
-                </section>
+                  </section>
+                ) : (
+                  <section className="rounded-2xl border border-border bg-overlay p-4 shadow-sm">
+                    <div className="mb-3 flex items-start justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-semibold">Role team</h3>
+                        <p className="text-xs text-muted">Choose a leader role and bind each participant to a role, runtime, and model when required.</p>
+                      </div>
+                      <Chip size="sm" variant="soft" color={selectedLeader ? "accent" : "default"}>
+                        {selectedLeader?.name ?? "No leader"}
+                      </Chip>
+                    </div>
+
+                    {optionsError ? <p className="mb-2 text-xs text-danger">{optionsError}</p> : null}
+                    {optionsLoading ? <p className="mb-2 text-xs text-muted">Loading roles, runtimes, and models...</p> : null}
+
+                    <label className="grid gap-1 text-sm font-semibold">
+                      Leader Role
+                      <select
+                        className="rounded-xl border border-field-border bg-field-background px-3 py-2 text-sm text-foreground"
+                        value={leaderRoleId}
+                        onChange={(event) => setLeaderRoleId(event.currentTarget.value)}
+                        data-testid="new-room-leader-role"
+                      >
+                        <option value="" disabled>Choose leader role</option>
+                        {roles.map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}
+                      </select>
+                    </label>
+
+                    <div className="mt-4 grid gap-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <h4 className="text-sm font-semibold">Participants</h4>
+                        <Button size="sm" variant="secondary" onPress={addV1Participant} isDisabled={roles.length === 0 || runtimes.length === 0}>
+                          Add participant
+                        </Button>
+                      </div>
+
+                      {v1Participants.length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-border bg-surface p-3 text-sm text-muted">
+                          Add at least one participant for squad or team rooms.
+                        </div>
+                      ) : v1Participants.map((participant, index) => {
+                        const runtime = runtimes.find((candidate) => candidate.id === participant.runtimeId);
+                        const needsModel = runtime?.kind === "native";
+                        return (
+                          <div key={participant.id} className="grid gap-3 rounded-xl border border-border bg-surface p-3 lg:grid-cols-[1fr_1fr_1fr_auto]">
+                            <label className="grid gap-1 text-xs font-semibold uppercase text-muted">
+                              Role
+                              <select
+                                className="rounded-xl border border-field-border bg-field-background px-3 py-2 text-sm normal-case text-foreground"
+                                value={participant.roleId}
+                                onChange={(event) => updateV1Participant(participant.id, { roleId: event.currentTarget.value })}
+                                data-testid={`new-room-participant-role-${index}`}
+                              >
+                                {roles.map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}
+                              </select>
+                            </label>
+                            <label className="grid gap-1 text-xs font-semibold uppercase text-muted">
+                              Runtime
+                              <select
+                                className="rounded-xl border border-field-border bg-field-background px-3 py-2 text-sm normal-case text-foreground"
+                                value={participant.runtimeId}
+                                onChange={(event) => updateV1Participant(participant.id, { runtimeId: event.currentTarget.value })}
+                                data-testid={`new-room-participant-runtime-${index}`}
+                              >
+                                {runtimes.map((runtimeOption) => (
+                                  <option key={runtimeOption.id} value={runtimeOption.id}>{runtimeOption.name} ({runtimeOption.kind})</option>
+                                ))}
+                              </select>
+                            </label>
+                            <label className="grid gap-1 text-xs font-semibold uppercase text-muted">
+                              Model
+                              <select
+                                className="rounded-xl border border-field-border bg-field-background px-3 py-2 text-sm normal-case text-foreground disabled:opacity-60"
+                                value={participant.modelConfigId}
+                                onChange={(event) => updateV1Participant(participant.id, { modelConfigId: event.currentTarget.value })}
+                                disabled={!needsModel && modelConfigs.length === 0}
+                                data-testid={`new-room-participant-model-${index}`}
+                              >
+                                <option value="">{needsModel ? "Choose model" : "No model override"}</option>
+                                {modelConfigs.map((config) => <option key={config.id} value={config.id}>{config.name} ({config.model})</option>)}
+                              </select>
+                            </label>
+                            <div className="flex items-end justify-between gap-2">
+                              <label className="grid flex-1 gap-1 text-xs font-semibold uppercase text-muted">
+                                Presence
+                                <select
+                                  className="rounded-xl border border-field-border bg-field-background px-3 py-2 text-sm normal-case text-foreground"
+                                  value={participant.defaultPresence}
+                                  onChange={(event) => updateV1Participant(participant.id, { defaultPresence: event.currentTarget.value as RoomPresence })}
+                                >
+                                  <option value="active">Active</option>
+                                  <option value="observing">Observing</option>
+                                </select>
+                              </label>
+                              <Button size="sm" variant="tertiary" onPress={() => removeV1Participant(participant.id)} isDisabled={v1Participants.length === 1}>
+                                Remove
+                              </Button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </section>
+                )}
 
                 {mode === "assisted" ? (
                   <section className="rounded-2xl border border-border bg-overlay p-4 shadow-sm">
@@ -298,13 +567,15 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
             <div className="mr-auto hidden text-xs text-muted sm:block">
               {mode === "solo"
                 ? "Solo rooms start with the primary agent only."
-                : `${selectedExtras.length + 1} agent${selectedExtras.length === 0 ? "" : "s"} will join this room.`}
+                : teamMode
+                  ? `${v1Participants.length} role participant${v1Participants.length === 1 ? "" : "s"} will join this room.`
+                  : `${selectedExtras.length + 1} agent${selectedExtras.length === 0 ? "" : "s"} will join this room.`}
             </div>
             <Button slot="close" variant="tertiary">Cancel</Button>
             <Button
               variant="primary"
               isPending={submitting}
-              isDisabled={!primaryId || submitting}
+              isDisabled={submitting || (!teamMode && !primaryId) || (teamMode && (!leaderRoleId || v1Participants.length === 0))}
               onPress={() => void handleSubmit()}
             >
               Create room
@@ -316,7 +587,7 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
   );
 }
 
-function RoomModeOption({ value, title, description }: { value: "solo" | "assisted"; title: string; description: string }) {
+function RoomModeOption({ value, title, description }: { value: RoomMode; title: string; description: string }) {
   return (
     <Radio value={value} className="rounded-xl border border-border bg-surface px-3 py-2 hover:bg-surface-secondary">
       <Radio.Control><Radio.Indicator /></Radio.Control>
