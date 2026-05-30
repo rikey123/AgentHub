@@ -682,262 +682,40 @@ tx {
 - **THEN** tx 内 UPDATE messages.brief_published_at 影响 0 行，不报错跳过
 - **AND** `message.brief.published` 仍发布（runId 字段标识来源）
 
-
 ### Requirement: RunQueue 是 bus 的一条命名队列
 
-The system SHALL implement a `RunQueue` as a first-class concept on top of the bus, not as ad-hoc Orchestrator code. RunQueue SHALL serialize Agent Runs by composite locks: `(roomId, agentId, [targetFiles])`. RunQueue Worker SHALL be the **sole owner** of `run_locks` table writes; AdapterManager and AdapterBridge MUST NOT touch locks. RunQueue Worker MUST NOT issue raw `UPDATE runs` SQL — all run state transitions go through `RunLifecycleService`（见上一 Requirement）.
+The system SHALL clarify the lock matrix semantics for multi-agent Squad/Team scenarios in V1.0.
 
-**Run 触发的完整链路**：
+**V1.0 多 Agent 并行场景的锁矩阵语义**：
 
-```text
-Orchestrator decision
-  → CommandBus.dispatch(WakeAgent, { origin: "internal" })
-        # WakeAgent 是模型调用唯一入口（详见 orchestrator/Observing 是被动状态 + WakeAgent）
-        # MVP 没有 StartRun Command；用户路径在 SendMessage 事务里依据 turn_dispatch_mode 决定是否 dispatch WakeAgent
-  → WakeAgent handler (orchestrator 模块内部)
-      # IMMEDIATE 事务（单事务原子）：
-      #   1) activeWakes guard — 已 active → append next_turn 而非新 run
-      #   2) 原子 claim mailbox（详见 orchestrator/Mailbox 原子认领）
-      #   3) RunLifecycleService.create(input)  — service 在同事务内 INSERT runs(status='queued', wake_reason, mailbox_claim_count) + INSERT events(agent.run.queued) + INSERT outbox
-      # WakeAgent handler 不另行 dispatch StartRun（MVP 不存在该 Command）
-  → RunQueue Worker (durable handler subscribed to agent.run.queued)
-  → Worker tries to acquire (agent / room / file) locks against `run_locks`
-      ├─ all locks acquired → INSERT run_locks (事务 1)
-      │                     → RunLifecycleService.markClaimed(null, runId)        # 事务 2：UPDATE runs.status='claimed' + claimed_at（无 durable event）
-      │                     → RunLifecycleService.markStarting(null, runId, pid)  # 事务 3：UPDATE runs.status='starting' + pid_at_start + INSERT events(agent.run.started) + outbox
-      │                     → AdapterManager.startRun(runId, profile, ...)
-      │                     → AdapterBridge subscribes to that adapter session's Stream<AdapterEvent>
-      │                     → On adapter session opened (**canonical 两步顺序，独立事务，让 Reclaim 可恢复 starting+sessionId 窗口**):
-      │                         tx1: RunLifecycleService.updateSessionState(null, runId, { adapterSessionId, workDir, providerConversationId? })
-      │                         tx2: RunLifecycleService.markRunning(null, runId, adapterSessionId)
-      │                         # 若 daemon 在 tx1 commit 后、tx2 之前崩溃 → status='starting' + adapter_session_id IS NOT NULL，
-      │                         # 落入 ReclaimStaleClaimedRun 扫描候选 3，按 crashRecovery=resumable + status='starting' attach 后走 markRunning
-      └─ blocked → RunLifecycleService.markWaiting(null, runId, reason)        # 事务：UPDATE runs.status='waiting'+waiting_reason + 仅在 (status, reason) 变化时 INSERT events(agent.run.waiting) + outbox
+- 不同 agent + 同 room：可并行（agent 锁不冲突）；
+- 同 file（不同 agent 都声明 targetFiles 含同文件）：后到者 markWaiting reason='locked_by_<other_run>'；
+- 任一 agent 不声明 targetFiles：取 workspace 整体写锁，其他 agent 写任何文件都阻塞；
+- Leader system prompt 应提示"派发 Task 时让 teammate 声明 targetFiles 减少锁竞争"——产品手册级建议，不是内核强制。
+
+**Squad/Team 场景示例**：
+
+```
+Squad Room: project-manager(leader) + builder(teammate1) + reviewer(teammate2)
+
+t=1  builder Run 1 启动，声明 targetFiles=["src/auth.ts"]
+     → 获得 file 锁 lock_key="src/auth.ts"
+t=2  reviewer Run 1 启动，声明 targetFiles=["src/auth.ts"]
+     → 申请同 file 锁 → markWaiting reason='locked_by_builder_run_1'
+t=3  builder Run 1 完成 → 释放 file 锁
+t=4  reviewer Run 1 被 RunQueue 重新调度 → 获得 file 锁 → 继续执行
 ```
 
-**终结链路**：
+#### Scenario: 不同 agent 同 room 可并行
 
-正常完成 / 失败：
+- **WHEN** Squad Room 中 builder Run 1 和 reviewer Run 1 同时启动，targetFiles 不重叠
+- **THEN** 两个 Run 并行执行（agent 锁不冲突）
 
-```text
-AdapterBridge sees adapter completion / error / session.ended
-  → RunLifecycleService.complete(null, runId, cost)         # 单事务：UPDATE runs.status='completed' + ended_at + cost + INSERT events(agent.run.completed) + outbox
-  → 或 .fail(null, runId, reason, failureClass)
-  → RunQueue Worker (subscribed to .completed/.failed/.cancelled)
-  → 释放 run_locks WHERE run_id = runId
-  → scheduleTick()                                    # 唤醒等待队列
-```
+#### Scenario: 同 file 锁串行
 
-用户取消（同步驱动 adapter，不依赖 event 回环）：
-
-```text
-HTTP POST /runs/:id/cancel
-  → CommandBus.dispatch(CancelRun)
-  → RunService.handleCancelRun()
-      → RunLifecycleService.markCancelling(null, runId)     # 事务 1：UPDATE runs.status='cancelling'（无 durable event）
-      → AdapterManager.cancelRun(runId)               # 同步驱动 adapter（同 Allowed sync queries 表）
-  ↓ adapter session 实际收尾后
-AdapterBridge sees adapter session.ended
-  → RunLifecycleService.cancelFinalized(null, runId)        # 事务 2：UPDATE runs.status='cancelled' + INSERT events(agent.run.cancelled) + outbox
-  → RunQueue Worker 释放锁、scheduleTick
-```
-
-> **为何 cancel 走同步路径而非订阅事件**：若 AdapterBridge 订阅 `agent.run.cancelled` 才去调 `adapter.cancelRun()`，等该事件出现时 cancel 早已"完成态"，反而触发死循环 / 二次取消。MVP 用 CancelRun handler 在 `markCancelling` 成功后直接调 `AdapterManager.cancelRun(runId)` —— 简单、可靠、无回环。
-
-**队列状态唯一来源**：
-
-- The authoritative queue state SHALL live in `runs.status IN ('queued', 'waiting', 'starting', 'running')` (and `runs.waiting_reason`).
-- `agent.run.queued` events are immutable facts — **the worker MUST NOT use any "notYetScheduled" event flag**; it MUST scan `runs` table for queued/waiting rows.
-- The worker uses the durable event purely as a **wake-up signal** (handler cursor advances on each `agent.run.queued`); the actual scheduling decision reads `runs`.
-
-**锁矩阵**：
-
-| 锁类型 | lock_type | 作用 | 持有者 |
-|---|---|---|---|
-| Agent 锁 | `agent` | 同一 Agent 不能并发跑两个 Run | runId |
-| Room 锁 | `room` | Solo / Assisted 模式下用户消息触发的 Run 串行 | runId |
-| 文件锁 | `file` | 多 Run 声明同一 targetFile 时串行 | runId per file |
-| Workspace 锁 | `workspace` | `targetFiles` 未知（如重型 coding agent 的 best-effort 退化）时申请整 workspace 写锁；与 file 锁互斥（详见下文 "workspace ↔ file 互斥规则"） | runId per workspace |
-
-**workspace ↔ file 互斥规则**（关键，避免简单 `(lock_type, lock_key)` 主键不足以阻止 workspace+file 并行写）：
-
-`run_locks` 表新增 `workspace_id` 字段（**`file` 与 `workspace` 类型**必填，`agent` / `room` 可空），并在锁申请阶段用以下两条规则做交叉互斥：
-
-```text
-申请 lock_type='file', lock_key='<path>', workspace_id='<W>' 前：
-  SELECT 1 FROM run_locks
-   WHERE lock_type='workspace' AND workspace_id='<W>' AND run_id != '<currentRunId>'
-   LIMIT 1
-  → 命中 → 阻塞（reason="workspace_lock_held_by:<runId>"）
-
-申请 lock_type='workspace', lock_key='<W>', workspace_id='<W>' 前：
-  SELECT 1 FROM run_locks
-   WHERE lock_type='file' AND workspace_id='<W>' AND run_id != '<currentRunId>'
-   LIMIT 1
-  → 命中 → 阻塞（reason="file_locks_held_in_workspace:<W>"）
-```
-
-两条规则在同一个事务内 + 锁表上的 `IMMEDIATE` 事务保证检查与写入原子。`agent` / `room` 锁不参与该互斥（它们是不同维度的串行约束）。
-
-**调度算法（伪码）**：
-
-```ts
-// On agent.run.queued event OR on lock release notification
-async function scheduleTick() {
-  // 队列状态来自 runs 表，不是 events 表
-  const candidates = await db.select(`
-    SELECT * FROM runs
-    WHERE status IN ('queued', 'waiting')
-    ORDER BY created_at ASC
-    LIMIT BATCH
-  `)
-
-  for (const run of candidates) {
-    const lockResult = tryAcquireAllLocks(run)   // 字典序：agent → room → files（targetFiles 未知时退化为 workspace 级写锁）
-    if (lockResult.ok) {
-      // 拿锁阶段（事务 1）：仅写锁表；runs 表不在此处更新
-      await db.transaction(async (tx) => {
-        await tx.insertMany('run_locks', lockResult.lockRows)
-      })
-      // claimed 阶段（事务 2）：UPDATE runs.status='claimed' + claimed_at（无 durable event）
-      //   markClaimed 接受 prevState ∈ { queued, waiting }，因此从 waiting 醒来的 run 也走同一路径
-      const claimed = await runLifecycleService.markClaimed(null, run.id)
-      if (!claimed.ok) {
-        await releaseLocks(run.id); continue
-      }
-      // starting 阶段（事务 3）：UPDATE runs.status='starting' + pid_at_start + INSERT events(agent.run.started) + outbox
-      const transitioned = await runLifecycleService.markStarting(null, run.id, process.pid)
-      if (transitioned.ok) {
-        await adapterManager.startRun(run)         // 启动 adapter session
-        // AdapterManager 创建 AdapterBridge，订阅 adapter Stream<AdapterEvent>，
-        // 后续 markRunning / complete / fail / cancelFinalized 都由 AdapterBridge 调 RunLifecycleService
-      } else {
-        await releaseLocks(run.id)                  // 回收刚拿到的锁
-      }
-    } else {
-      // 阻塞分支：调 RunLifecycleService.markWaiting，
-      // 由 service 内部判定 (status, reason) 是否变化、变化才发 agent.run.waiting
-      await runLifecycleService.markWaiting(null, run.id, lockResult.reason)
-    }
-  }
-}
-```
-
-```sql
--- runs 表的 status / waiting_reason 字段（与 agents capability 的 Run 模型对齐；该 capability MUST 接收此扩展）
-ALTER TABLE runs ADD COLUMN waiting_reason TEXT;       -- 例: 'agent_lock_held_by:run_42' / 'file_lock:auth.ts'
-
--- 锁表（lock_key 唯一即可保证同类型互斥；跨类型互斥靠申请阶段的 SELECT 检查 + IMMEDIATE 事务）
-CREATE TABLE run_locks (
-  lock_type      TEXT NOT NULL,           -- 'agent' | 'room' | 'file' | 'workspace'
-  lock_key       TEXT NOT NULL,           -- agentId / roomId / file path / workspaceId
-  workspace_id   TEXT,                    -- file / workspace 类型必填，agent / room 可空；用于 workspace ↔ file 跨类型互斥扫描
-  run_id         TEXT NOT NULL,
-  acquired_at    INTEGER NOT NULL,
-  PRIMARY KEY (lock_type, lock_key)
-);
-CREATE INDEX idx_run_locks_runid ON run_locks (run_id);
-CREATE INDEX idx_run_locks_workspace ON run_locks (workspace_id, lock_type);   -- 加速跨类型互斥扫描
-```
-
-**释放语义**：RunQueue Worker 订阅 `agent.run.completed` / `.failed` / `.cancelled` 事件，在事务内 `DELETE FROM run_locks WHERE run_id = ?` + 调用 `scheduleTick()`。
-
-**崩溃恢复 startup hook（两阶段）**：
-
-启动时 daemon **不**再一刀切把所有非终结 run 标 failed。改为以下两阶段流程，避免误杀可恢复 session 与可重新调度的 queued/waiting：
-
-```text
-Stage 1 — 锁清理（无副作用，全部清空）
-  DELETE FROM run_locks                     # 锁是进程内调度状态，重启后必须重置
-
-Stage 2 — 按 status 与 adapter_session_id 分类决策（每条独立事务）
-  对每条 status NOT IN ('completed','failed','cancelled') 的 run：
-
-    case status='queued' / 'waiting':
-      # 没有外部副作用：保留状态，等待 RunQueue Worker 重新调度
-      # 不调 fail，不发 agent.run.failed
-      continue
-
-    case status='claimed' AND claimed_at < now() - 30s:
-      # worker 拿锁但 markStarting 之前崩溃；adapter 没启动，无外部副作用
-      runLifecycleService.fail(null, runId, "claim_aborted", "transient")
-
-    case status='starting' AND adapter_session_id IS NULL:
-      # markStarting 已发 agent.run.started 但 adapter 没握手成功
-      runLifecycleService.fail(null, runId, "daemon_restarted_before_session", "transient")
-
-    case status IN ('starting','running','waiting_permission') AND adapter_session_id IS NOT NULL AND pid_at_start ≠ current pid:
-      # 有外部 session：交给 ReclaimStaleClaimedRun 后台任务按 manifest.crashRecovery 决定 attach/restart/fail
-      enqueueReclaim(runId)
-
-    case status='cancelling':
-      # 用户已显式 cancel；adapter 进程已死，直接 cancelFinalized
-      runLifecycleService.cancelFinalized(null, runId)
-```
-
-`ReclaimStaleClaimedRun` 后续由 `bus-runtime/ReclaimStaleClaimedRun 后台任务` Requirement 详细规定 — attach 成功后的状态推进与当前 status 相关：`starting → markRunning`、`running / waiting_permission` 仅 `updateSessionState(pidAtStart)`；attach 失败 + `crashRecovery=resumable` → `fail("reclaim_attach_failed","fresh_session_required")`；`crashRecovery=restartable` → `fail("daemon_restarted","transient")`；`crashRecovery=fail_run` → `fail("daemon_restarted","retryable_visible")`。
-
-**活锁防护**：
-
-- 单 Run 等待锁默认超时 5 分钟，超时 → Worker 直接调 `runLifecycleService.fail(null, runId, "lock_timeout", "transient")`（`fail` 允许从 `waiting` 进入，详见上方状态机契约）；不再自动重试（避免反复失败造成的事件风暴）。
-- 多文件锁按"按文件路径字典序排序"分阶段获取，避免循环依赖死锁；事务内一次性获取（要么全拿要么全释放），避免部分持有。
-
-#### Scenario: 同 Agent 第二个 Run 排队
-
-- **WHEN** Builder Agent 当前 run_A 跑了 30 秒，用户又发消息触发 run_B
-- **THEN** run_B `agent.run.queued` 事件已写但 RunQueue 拿不到 Agent 锁 → 发 `agent.run.waiting { reason: "agent_lock_held_by", runId: run_A }`；run_A 完成（任意 terminal 状态）→ 锁释放 → run_B `agent.run.started`
-
-#### Scenario: 文件锁字典序
-
-- **WHEN** run_A 声明 `targetFiles = ["a.ts", "b.ts"]`，run_B 声明 `["b.ts", "a.ts"]`，并发到达
-- **THEN** RunQueue 内部按字典序申请：run_A 申到 "a.ts" 后申 "b.ts"；run_B 必须等 a.ts 然后等 b.ts；不会出现 A 持 a.ts 等 b.ts、B 持 b.ts 等 a.ts 的死锁
-
-#### Scenario: 锁超时降级
-
-- **WHEN** run_B 等 5 分钟仍拿不到 a.ts 锁
-- **THEN** Worker 调 `runLifecycleService.fail(null, run_B, "lock_timeout", "transient")`（fail 允许从 `waiting` 进入）；同事务发 `agent.run.failed { reason: "lock_timeout", waitedFor: "file:a.ts", failureClass: "transient" }`；run_B 不静默重试（避免反复失败），UI 提供"重试"按钮
-
-#### Scenario: daemon 崩溃锁不残留
-
-- **WHEN** daemon 崩溃时 run_locks 表有 3 条 `(agent, builder, run_42)` 等
-- **THEN** 重启时 startup hook 两阶段：① `DELETE FROM run_locks` ② 按上文"崩溃恢复 startup hook（两阶段）" 分类决策；run_42 若 status=`running` + adapter_session_id 非空 → 进 Reclaim 队列（不直接 failed）；run_43 若 status=`queued` → 保留等待 RunQueue Worker 重新调度；新接 SSE 客户端不会被旧锁阻塞
-
-#### Scenario: queued / waiting 不在重启时被一刀切 failed
-
-- **WHEN** daemon 崩溃前 run_99 处于 `queued`，run_100 处于 `waiting{reason:"agent_lock_held_by:run_42"}`
-- **THEN** 重启后 run_99 / run_100 status 保持原样；`DELETE FROM run_locks` 把 run_42 的锁清掉；RunQueue Worker scheduleTick 把 run_99 / run_100 重新拿出来调度（run_99 直接进 markClaimed → markStarting；run_100 因为锁已清空也走 markClaimed → markStarting）；不发 `agent.run.failed`
-
-#### Scenario: claimed 中崩溃 Reclaim 走 transient
-
-- **WHEN** run_50 status='claimed' claimed_at=now-2min adapter_session_id IS NULL（worker 拿锁但 markStarting 之前 daemon 崩溃）
-- **THEN** Stage 2 case `claimed AND claimed_at < now-30s` 命中 → `runLifecycleService.fail(null, run_50, "claim_aborted", "transient")`；同事务发 `agent.run.failed`；UI 在 Run Detail 显示 "daemon 重启时已中断 — 可重试"
-
-#### Scenario: starting 中崩溃但握手前
-
-- **WHEN** run_60 status='starting' adapter_session_id IS NULL（markStarting 已 commit 发了 `agent.run.started`，但 adapter 还没回 session.opened 时 daemon 崩溃）
-- **THEN** Stage 2 case `starting AND adapter_session_id IS NULL` → `fail(null, run_60, "daemon_restarted_before_session", "transient")`
-
-#### Scenario: 锁与 markStarting 之间崩溃（两事务窗口）
-
-> **背景**：RunQueue Worker 拿锁是事务 1（`INSERT run_locks`），状态推进是事务 2（`RunLifecycleService.markStarting`）。POSIX SQLite 没有跨事务的两阶段提交，所以中间存在崩溃窗口：事务 1 commit 之后、事务 2 begin 之前 daemon 挂掉，会留下 `run_locks` 行但 `runs.status` 仍是 `queued` / `waiting`。
-
-- **WHEN** RunQueue Worker 在事务 1 提交 `(file, auth.ts) = run_99` 锁后、调用 `RunLifecycleService.markClaimed/markStarting(run_99)` 之前 daemon 崩溃
-- **THEN** 重启 startup hook 两阶段：① Stage 1 `DELETE FROM run_locks` 清理所有残留锁；② Stage 2 看 run_99 — 此时 run_99 仍是 `queued`（markClaimed 还没 commit），属于 `case status='queued'` → 不动 status / 不发 `agent.run.failed`；RunQueue Worker scheduleTick 重新调度 run_99 → markClaimed → markStarting；不会有"锁悬挂导致后续 run 永远 waiting"或"queued run 被错杀"的死状态
-
-#### Scenario: markStarting 状态机校验失败时锁回收
-
-- **WHEN** RunQueue Worker 拿到锁后，run_99 因为另一条 `CancelRun` 命令已经被推进到 `cancelling`，`markStarting` 抛 `IllegalTransition`
-- **THEN** Worker 立即 `DELETE FROM run_locks WHERE run_id = 'run_99'` 释放刚拿到的锁；不发 `agent.run.started`；不调 `AdapterManager.startRun`；触发 `scheduleTick()` 唤醒后续等待 run
-
-#### Scenario: 队列状态来自 runs 表非 events
-
-- **WHEN** RunQueue Worker 收到 `agent.run.queued` 事件，但实际数据库中 `runs.status` 已经被另一个事务推进到 'starting'（极少数竞态）
-- **THEN** Worker 重新读 `runs` 表确认 status，发现非 queued/waiting → 跳过本次调度；不会重复调度同一 run
-
-#### Scenario: waiting 事件去重避免刷屏
-
-- **WHEN** run_B 在 `waiting reason='agent_lock_held_by:run_A'` 状态停留 30 秒，期间 RunQueue Worker 因别的事件被唤醒 5 次重新检查
-- **THEN** 由于 run_B 的 status='waiting' 且 waiting_reason 未变，Worker 不重复发 `agent.run.waiting`；只在 reason 变化（如锁切换为 file:a.ts）或首次进入 waiting 时发
+- **WHEN** builder Run 1 持有 `src/auth.ts` file 锁，reviewer Run 1 申请同 file 锁
+- **THEN** reviewer Run 1 markWaiting reason='locked_by_builder_run_1'
+- **AND** builder Run 1 完成后 reviewer Run 1 自动被调度
 
 ### Requirement: SSE 反压（buffer 上限 + 慢消费者策略）
 

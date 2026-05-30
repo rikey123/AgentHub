@@ -5,129 +5,67 @@ TBD - created by archiving change add-agenthub-mvp. Update Purpose after archive
 ## Requirements
 ### Requirement: AgentProfile 数据模型
 
-The system SHALL persist AgentProfile loaded from markdown files at `<workspace>/.agenthub/agents/*.md` and `<userhome>/.agenthub/agents/*.md`. **V0.5 落实 chokidar 文件系统监听**（MVP §5.5 之前是 `notImplemented` stub）。
+The system SHALL migrate `AgentProfile` to `AgentBinding` in V1.0. An `AgentBinding` binds a Role to a Runtime (and optionally a ModelConfig), replacing the monolithic `AgentProfile` that combined Persona + Runtime + Model in a single entity.
+
+**V1.0 新数据模型**：
 
 ```ts
-type AgentProfile = {
-  id: string                          // 文件名去 .md 后的 kebab-case
-  name: string                        // 展示名
-  description?: string
-  avatar?: string                     // emoji 或 url
-  version?: string                    // V0.5 新增；用于内置模板更新检测
-  provider:
-    | "native"                        // AgentHub 自建（Mock）
-    | "claude-code"
-    | "opencode"                      // V0.5 起为真实现
-    | "codex"                         // V1.x stub
-    | "langgraph"                     // V1.3
-    | "a2a"                           // V1.3
-  adapterId: string                   // 实际 adapter 实例 id
-  model?: string                      // 如 "claude-sonnet-4-6"
-  prompt: string                      // system prompt（markdown body）
-  defaultPresence: "offline" | "observing" | "active"
-  capabilities: AgentCapability[]
-  permissionProfileId?: string
-  hidden?: boolean
+type AgentBinding = {
+  id: string                          // ULID
+  workspaceId?: string
+  roleId: string                      // → roles.id
+  runtimeId: string                   // → runtimes.id
+  modelConfigId?: string              // → model_configs.id（仅 runtime.kind="native" 必需）
+  overridePermissionProfileId?: string // 覆盖 role 的默认 permission profile
+  createdAt: number
+  updatedAt: number
 }
-
-type AgentCapability =
-  | "chat"
-  | "code.edit"
-  | "code.review"
-  | "terminal.run"
-  | "file.read"
-  | "file.write"
-  | "web.search"
-  | "web.fetch"
-  | "context.read"
-  | "context.write"
-  | "intervention.knock"
-  | "task.delegate"
-```
-
-markdown 配置文件示例：
-
-```markdown
----
-id: security-reviewer
-name: Security Reviewer
-avatar: 🛡️
-version: 1.0.0
-provider: claude-code
-adapterId: claude-code-default
-model: claude-sonnet-4-6
-defaultPresence: observing
-capabilities: [chat, code.review, context.read, context.write, intervention.knock]
-permissionProfileId: read-only
-hidden: false
----
-
-You are a senior security reviewer focused on auth, secret handling, and SQL injection. ...
 ```
 
 ```sql
--- V0.5 不重建 agent_profiles 表，不改现有列名，仅 ALTER TABLE ADD COLUMN 5 列。
--- 现有列映射（不变）：
---   id          ← frontmatter id
---   workspace_id ← NULL（用户级）或 workspace id
---   name        ← frontmatter name
---   adapter_id  ← frontmatter adapterId
---   model       ← frontmatter model
---   role_prompt ← markdown body（system prompt）
---   capabilities ← frontmatter capabilities（JSON array）
---   permission_profile_id ← frontmatter permissionProfileId
---   hidden      ← frontmatter hidden（0/1）
---   source_path ← 来源 markdown 路径
---   created_at / updated_at ← 自动
---
--- V0.5 新增字段（migration 0012_v05.sql）：
---   description TEXT NULL
---   avatar      TEXT NULL
---   version     TEXT NULL   -- 用于内置模板更新检测
---   provider    TEXT NULL   -- "native"|"claude-code"|"opencode"|...
---   default_presence TEXT NULL  -- "offline"|"observing"|"active"
---
--- 注：provider / default_presence / description / avatar 在 MVP 已通过 markdown frontmatter
--- 解析存入内存，V0.5 把它们持久化到 DB 列，便于 API 查询和 UI 展示。
--- 不改现有列名（role_prompt 保留，不改为 prompt）。
-ALTER TABLE agent_profiles ADD COLUMN description TEXT;
-ALTER TABLE agent_profiles ADD COLUMN avatar TEXT;
-ALTER TABLE agent_profiles ADD COLUMN version TEXT;
-ALTER TABLE agent_profiles ADD COLUMN provider TEXT;
-ALTER TABLE agent_profiles ADD COLUMN default_presence TEXT;
+CREATE TABLE agent_bindings (
+  id                        TEXT PRIMARY KEY,
+  workspace_id              TEXT,
+  role_id                   TEXT NOT NULL REFERENCES roles(id),
+  runtime_id                TEXT NOT NULL REFERENCES runtimes(id),
+  model_config_id           TEXT REFERENCES model_configs(id),
+  override_permission_profile_id TEXT,
+  created_at                INTEGER NOT NULL,
+  updated_at                INTEGER NOT NULL
+);
+CREATE INDEX idx_agent_bindings_role ON agent_bindings (role_id);
+CREATE INDEX idx_agent_bindings_runtime ON agent_bindings (runtime_id);
 ```
 
-V0.5 chokidar 监听规则：
+**V0.5 兼容层（3 个月）**：
 
-- daemon 启动时启用 chokidar 监听 `~/.agenthub/agents/` 与所有已知 workspace 的 `<workspace>/.agenthub/agents/`
-- `add` / `change` 事件 → 解析 markdown → upsert `agent_profiles` → emit `agent.profile.updated` durable event（visibility=detail）
-- `unlink` 事件 → 删除 `agent_profiles` 行（如存在 active Run 引用，标 `hidden=1` 而不删）→ emit `agent.profile.removed`
-- 解析失败（gray-matter 异常 / 缺字段）→ stderr 警告 + `agent.profile.error` ephemeral event；不删旧行
-- chokidar 配置：`ignoreInitial: false`（首启扫描）、`awaitWriteFinish: { stabilityThreshold: 200ms }`（避免编辑器半保存）
+- `agent_profiles` 表保留（标 deprecated，不再写入）；
+- V1.0 daemon 启动时运行 `0014_data.ts` 把每行 `agent_profiles` 拆成对应的 `roles` + `runtimes` + `model_configs` + `agent_bindings` 四表行；
+- HTTP middleware：收到旧 `agent_profile_id` 入参时自动 resolve 到对应 `agent_binding_id`；
+- 3 个月后 V1.4 删除兼容层 + `agent_profiles` 表。
 
-#### Scenario: 加载用户级 Agent 配置
+**Task 三层 assignee**（与 task-workflow-core 联动）：
 
-- **WHEN** daemon 启动时扫描 `~/.agenthub/agents/`
-- **THEN** 解析每个 `.md`（gray-matter）→ 写 `agent_profiles` 表 `workspace_id=NULL`，发 `agent.profile.loaded` durable 事件
+- `tasks.assignee_role_id`：逻辑归属（Role 维度，UI 主要展示）
+- `tasks.assignee_binding_id`：本次派发实际执行者（Run 创建时由 Room 内 role→binding resolve 后写入）
+- `tasks.assignee_agent_id`：V0.5 兼容字段，迁移脚本回填，3 个月后 V1.4 删除
 
-#### Scenario: workspace 级覆盖用户级
+#### Scenario: 创建 AgentBinding
 
-- **WHEN** `~/.agenthub/agents/builder.md` 与 `<workspace>/.agenthub/agents/builder.md` 同时存在
-- **THEN** workspace 级优先生效，用户级被覆盖；`GET /agents?workspaceId=<wid>` 返回 workspace 版
+- **WHEN** 用户在 Room 创建时选择 role=builder + runtime=claude-code-default
+- **THEN** daemon INSERT agent_bindings 行 + emit `agent_binding.created`（durable, visibility=detail）
+- **AND** Settings UI 用 POST response 更新本地列表
 
-#### Scenario: 配置文件热更新
+#### Scenario: native runtime binding 必须有 model_config
 
-- **WHEN** 用户编辑保存 `<workspace>/.agenthub/agents/security.md`（chokidar 监听）
-- **THEN** daemon 重新解析并 upsert agent_profiles 表，发 `agent.profile.updated` 事件
-- **AND** 正在跑的 Run **不受影响**（继续使用启动时的 snapshot prompt）
-- **AND** 下一次 wake 该 agent 时使用新 prompt
+- **WHEN** 用户创建 binding：role=builder + runtime=native-default，但未选 model_config
+- **THEN** 返回 400 + `{ error: "native_runtime_requires_model_config" }`
 
-#### Scenario: 配置文件解析失败
+#### Scenario: V0.5 旧 agent_profile_id 入参被兼容
 
-- **WHEN** 用户保存的 markdown 缺少 frontmatter `id` 字段
-- **THEN** stderr 警告 `agent profile parse failed at <path>: missing id`
-- **AND** 旧 `agent_profiles` 行保留（不删）
-- **AND** 发 ephemeral event `agent.profile.error { path, reason }` 用于 Debug Panel
+- **WHEN** V0.5 客户端发送 `POST /rooms { agentProfileId: "ap_123" }`
+- **THEN** daemon middleware 查 `agent_profiles` 表找到对应 `agent_binding_id`，继续处理
+- **AND** 响应中返回新的 `agentBindingId` 字段（同时保留旧字段 3 个月）
 
 ### Requirement: AgentPresence 状态机
 
@@ -536,4 +474,21 @@ The system SHALL distinguish between two path-like Run fields and SHALL NOT expo
 
 - **WHEN** RunQueue Worker 调 `AdapterManager.startRun(run)`，run.workspace_path=`/Users/u/code/myapp`，run.work_dir=`/Users/u/.agenthub/worktrees/run_42`
 - **THEN** spawn 的 adapter 子进程 cwd=`/Users/u/.agenthub/worktrees/run_42`；agent 在该 worktree 内自由实验，不影响真实 workspace
+
+### Requirement: AgentBinding CRUD API
+
+The system SHALL expose REST endpoints for AgentBinding management.
+
+| Method | Path | 描述 |
+|---|---|---|
+| `GET` | `/agent-bindings?workspaceId=<id>` | 列出 bindings（含 role + runtime + model_config 展开信息）|
+| `POST` | `/agent-bindings` | 创建 binding |
+| `PATCH` | `/agent-bindings/:id` | 更新 binding（如切换 runtime 或 model_config）|
+| `DELETE` | `/agent-bindings/:id` | 删除 binding（有 room_participants 引用时拒绝）|
+
+#### Scenario: GET /agent-bindings 展开关联信息
+
+- **WHEN** Settings UI 调 `GET /agent-bindings?workspaceId=w_1`
+- **THEN** 返回列表，每行含 `role: { id, name, avatar }` + `runtime: { id, kind, name, detectedVersion }` + `modelConfig?: { id, name, provider, model, apiKeyFingerprint }`
+- **AND** 不含 API key 明文
 

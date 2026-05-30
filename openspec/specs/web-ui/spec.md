@@ -5,25 +5,14 @@ TBD - created by archiving change add-agenthub-mvp. Update Purpose after archive
 ## Requirements
 ### Requirement: 三栏布局
 
-The system SHALL provide a three-pane layout:
+The FeatureRail SHALL add a Settings entry point.
 
-```
-┌──────────────┬─────────────────────────┬─────────────────────┐
-│  Rooms       │  Chat Stream            │  Side Panel         │
-│  (sidebar)   │   - messages            │   - Context View    │
-│              │   - cards               │   - Task Board      │
-│   - new      │   - input box           │   - Agent Presence  │
-│   - search   │                         │   - Debug Panel*    │
-│   - archive  │                         │                     │
-└──────────────┴─────────────────────────┴─────────────────────┘
-```
+**V1.0 新增**：FeatureRail 加 Settings 图标（齿轮）；点击打开 Settings modal（详见 settings-ui capability）。
 
-侧边栏可折叠；聊天面板固定中间；右侧 panel 通过 tab 切换 4 个视图。
+#### Scenario: FeatureRail Settings 入口
 
-#### Scenario: 缩窄窗口收起侧栏
-
-- **WHEN** 浏览器窗口宽度 < 1280px
-- **THEN** 左右侧边栏自动折叠为图标条；点击图标抽出浮层
+- **WHEN** 用户点 FeatureRail 的 Settings 图标
+- **THEN** Settings modal 打开，默认显示 Roles tab
 
 ### Requirement: 客户端 Projector
 
@@ -153,27 +142,27 @@ The input box SHALL support markdown preview, drag-drop attachments, message quo
 
 ### Requirement: Side Panel 视图
 
-The right-side panel SHALL provide tabs for Context / Tasks / Members / Debug / **Cost (V0.5 新增)** views. 共 5 tabs。
-
-每个 tab 加载策略：lazy（首次切到时加载），切换不卸载（保留 view state）。
+The Side Panel SHALL add a Tasks tab as a real implementation (V0.5 was a placeholder).
 
 | Tab | 数据源 | 主要交互 |
 |---|---|---|
-| Context | ContextLedger via SSE projector | 看 ContextItem 列表、confirm/discard draft、查看 conflict |
-| Tasks | tasks 表 via SSE projector | 看 Task 列表、状态切换、创建 Task |
+| Context | ContextLedger via SSE projector | 看 ContextItem 列表、confirm/discard draft |
+| **Tasks（V1.0 真实现）** | tasks 表 via SSE projector | 看 Task 列表（按 status 分组）、Task detail slide-over、activity timeline |
 | Members | room_participants + AgentPresence | 看 Room 成员 + presence dot |
-| Debug | events 表 via /debug/events | 过滤、回放、看 raw log（admin scope） |
-| **Cost** | `cost-panel-local` API | 看 cost 聚合，详见 `Cost 面板视图` Requirement |
+| Debug | events 表 via /debug/events | 过滤、回放（admin scope）|
+| Cost | cost-panel-local API | 看 cost 聚合（V0.5 已实现）|
 
-#### Scenario: 默认 Context tab
+**Tasks tab 布局**（参考 multica `packages/views/issues/components/`）：
 
-- **WHEN** 用户首次打开 Side Panel
-- **THEN** 默认显示 Context tab；其他 tab 未加载（lazy）
+- 列表 view，按 status 分组（Backlog / In Progress / Blocked / Review / Done）；
+- 每行：priority chip + title + assignee role avatar + status badge；
+- 点击 Task 打开 detail slide-over（含 activity timeline）；
+- **不做**拖拽（V1.1）。
 
-#### Scenario: 切到 Cost tab
+#### Scenario: Tasks tab 实时更新
 
-- **WHEN** 用户点 Cost tab
-- **THEN** 调 cost-summary API、渲染 Cost 面板（详见对应 Requirement）
+- **WHEN** Leader 调 `room.delegate` 创建新 Task，emit `task.delegation.created`（visibility=both）
+- **THEN** Side Panel Tasks tab 实时显示新 Task（projector 收到事件后更新 view model）
 
 ### Requirement: 房间切换与未读提示
 
@@ -253,41 +242,18 @@ The system SHALL provide:
 
 ### Requirement: Main Timeline 与 Agent Run Detail 双视图
 
-The Web UI SHALL render Main Timeline (default chat view) and Run Detail (slide-over) as two distinct views consuming different SSE subscriptions, per `messaging/主流摘要 / Agent Run Detail 双投影`. **V0.5 落实 7-tab 真信息**（MVP 5 个 E2E 已通过 tab 结构，V0.5 补内容）。
+The Run Detail Tools tab SHALL display multi-agent collaboration view for Squad/Team modes.
 
-Run Detail slide-over 7 tabs：
+**V1.0 新增**：Run Detail Tools tab 在 squad/team mode 下额外显示：
 
-| Tab | 内容 | V0 状态 | V0.5 改进 |
-|---|---|---|---|
-| Transcript | AdapterMessage[] 完整对话 | DONE | 加 PreCompact summary 高亮（来自 ContextItem.summary draft） |
-| Tools | tool.call.requested/completed 时间轴 + SubagentStart/Stop | DONE 但缺 subagent | V0.5 接入 subagent.* 事件 |
-| Context | Run 启动时的 context projection + 期间 context.item.* 变化 | DONE | 加 PreCompact 触发的 summary draft 显式标注 |
-| Permissions | permission.requested/resolved 历史 | DONE | 无改 |
-| Artifacts | artifact.diff.created / file / terminal / preview | DONE 但 terminal 缺 PTY 渲染 | V0.5 接入 TerminalCard 渲染 |
-| Raw Stream | adapter.raw.stdout/stderr live | DONE（admin scope） | 无改 |
-| Cost | 该 Run 的 cost / token 详情 | 显示字段（V0 §15.6 完成） | 加横向对比"同 agent 同期 Run 平均"（消费 cost-panel-local API） |
+- **Sibling Run 链路**：本 Run 的 wakeReason='delegated_task' 时，显示 parent Run（dispatch 自己的 Leader Run）+ sibling Run（同 Leader 派发的其他 teammate Run）；点击跳到 sibling Run Detail。
+- **Task 树**：本 Run 关联的 Task + 子 Task（按 parent_task_id 树形展开），状态用 colored chip 表示。
 
-slide-over 进入：URL 加 `?run=<id>` + `view=detail` SSE 订阅；关闭：移除 URL + Esc 键 + 点外部。
+#### Scenario: Run Detail 显示 Task 树
 
-#### Scenario: 进 Run Detail 看 7 tabs
-
-- **WHEN** 用户点主流某 brief
-- **THEN** Run Detail slide-over 打开，URL 加 `?run=<id>`，建立 view=detail SSE，7 tabs 全部可见可切换
-
-#### Scenario: Transcript 看 PreCompact summary
-
-- **WHEN** Run 中触发过 PreCompact
-- **THEN** Transcript tab 显示原对话 + summary draft 横幅（标注"会话已压缩，可在 Context tab 确认"）
-
-#### Scenario: Tools 看 subagent
-
-- **WHEN** Claude 在 Run 内 spawn 一个 subagent
-- **THEN** Tools tab 显示 subagent 时间轴节点（subagent.started / completed），含 cost / duration
-
-#### Scenario: Cost tab 看横向对比
-
-- **WHEN** 用户进 Run Detail Cost tab
-- **THEN** 显示该 Run cost + "同 agent 同期 Run 平均 cost" 对比线（来自 cost-panel-local API）
+- **WHEN** 用户打开 teammate Run 的 Run Detail
+- **THEN** Tools tab 显示该 Run 关联的 Task（含 parent Task + sibling Tasks）
+- **AND** 点击 Task 打开 Task detail slide-over
 
 ### Requirement: Pending Turn 与排队 UI
 

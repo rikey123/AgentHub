@@ -5,89 +5,22 @@ TBD - created by archiving change add-agenthub-mvp. Update Purpose after archive
 ## Requirements
 ### Requirement: Room 数据模型
 
-The system SHALL persist Room as the following entity.
-
-```ts
-type RoomMode =
-  | "solo"        // 1 用户 + 1 Agent（MVP）
-  | "assisted"    // 1 用户 + 1 Primary + N Observer（MVP）
-  | "team"        // V1.0：Leader 调度 Teammates（任务拆解派发）
-  | "squad"       // V1.0：长期 Leader 路由
-  | "war_room"    // V1.5：自由协作 + Leader 仲裁 + 终止条件
-
-type Room = {
-  id: string                          // ULID
-  workspaceId: string
-  title: string
-  mode: RoomMode
-  defaultContextScope: "conversation" | "task" | "workspace"
-  primaryAgentId?: string             // assisted 模式必填
-  participants: RoomParticipant[]     // 关联表实际存 room_participants
-  archivedAt?: number
-  createdAt: number
-  updatedAt: number
-}
-
-type RoomParticipant =
-  | {
-      type: "user"
-      userId: string
-      role: "owner" | "member"
-    }
-  | {
-      type: "agent"
-      agentId: string
-      role: "primary" | "observer" | "reviewer" | "specialist"
-      adapterId: string
-      adapterSessionId?: string      // adapter 维护的 session
-      defaultPresence: "offline" | "observing" | "active"
-    }
-```
-
-SQL：
+The system SHALL add `leader_role_id` to the rooms table for Squad/Team modes.
 
 ```sql
-CREATE TABLE rooms (
-  id                       TEXT PRIMARY KEY,
-  workspace_id             TEXT NOT NULL,
-  title                    TEXT NOT NULL,
-  mode                     TEXT NOT NULL,
-  default_context_scope    TEXT NOT NULL,
-  primary_agent_id         TEXT,
-  archived_at              INTEGER,
-  created_at               INTEGER NOT NULL,
-  updated_at               INTEGER NOT NULL,
-  FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
-);
-
-CREATE TABLE room_participants (
-  room_id              TEXT NOT NULL,
-  participant_id       TEXT NOT NULL,    -- userId 或 agentId
-  participant_type     TEXT NOT NULL,    -- 'user' | 'agent'
-  role                 TEXT NOT NULL,
-  adapter_id           TEXT,
-  adapter_session_id  TEXT,
-  default_presence     TEXT,
-  joined_at            INTEGER NOT NULL,
-  PRIMARY KEY (room_id, participant_id),
-  FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE
-);
+ALTER TABLE rooms ADD COLUMN leader_role_id TEXT;
+-- 仅 mode IN ('squad', 'team') 时必填（应用层校验）
 ```
 
-#### Scenario: 新建 Solo Room
+#### Scenario: 创建 squad room 需要 leaderRoleId
 
-- **WHEN** 用户调用 `POST /rooms` body 为 `{ title: "Refactor auth", mode: "solo", primaryAgentId: "claude-code-builder" }`
-- **THEN** daemon 写 rooms 表 + room_participants 表（用户 owner + Agent primary），发 `room.created` durable 事件，返回 201 + Room 实体
+- **WHEN** `POST /rooms { mode: "squad" }` 不带 leaderRoleId
+- **THEN** 返回 400 + `{ error: "squad_mode_requires_leader_role_id" }`
 
-#### Scenario: 新建 Assisted Room
+#### Scenario: 创建 solo room 不需要 leaderRoleId
 
-- **WHEN** 用户调用 `POST /rooms` body 含 `mode: "assisted"`、`primaryAgentId`、`observerAgentIds: [...]`
-- **THEN** daemon 创建 room、写所有 participant 行（observer 默认 `defaultPresence: "observing"`），发 `room.created` 事件
-
-#### Scenario: 缺少 primaryAgentId 拒绝
-
-- **WHEN** 创建 `assisted` 模式 Room 但未指定 `primaryAgentId`
-- **THEN** 返回 400 + `{ error: "assisted mode requires primaryAgentId" }`
+- **WHEN** `POST /rooms { mode: "solo" }` 不带 leaderRoleId
+- **THEN** 正常创建；`rooms.leader_role_id = NULL`
 
 ### Requirement: Room 列表与归档
 
@@ -189,24 +122,19 @@ The system SHALL support switching the active room from the client side and broa
 
 ### Requirement: Post-MVP Mode 占位
 
-The system SHALL accept `team` / `squad` / `war_room` in the `mode` enum at the type/database level for forward compatibility, but reject these modes at runtime with a 501 Not Implemented response. 各 mode 启用阶段：
+The system SHALL implement `squad` and `team` modes in V1.0. `war_room` remains V1.5.
 
-- `team`：V1.0
-- `squad`：V1.0
-- `war_room`：V1.5
+```ts
+type RoomMode =
+  | "solo"        // MVP
+  | "assisted"    // MVP
+  | "squad"       // V1.0：长期 Leader 路由
+  | "team"        // V1.0：任务拆解派发
+  | "war_room"    // V1.5：自由协作 + Leader 仲裁
+```
 
-#### Scenario: 试图在 MVP 创建 team 模式
+#### Scenario: squad/team mode 不再返回 501
 
-- **WHEN** 用户 `POST /rooms` body `{ mode: "team", ... }`
-- **THEN** daemon 返回 501 + `{ error: "team mode is V1.0; only solo and assisted are available in MVP", capability: "rooms" }`
-
-#### Scenario: 试图在 MVP 创建 squad 模式
-
-- **WHEN** 用户 `POST /rooms` body `{ mode: "squad", ... }`
-- **THEN** daemon 返回 501 + `{ error: "squad mode is V1.0; only solo and assisted are available in MVP", capability: "rooms" }`
-
-#### Scenario: 试图在 MVP 创建 war_room 模式
-
-- **WHEN** 用户 `POST /rooms` body `{ mode: "war_room", ... }`
-- **THEN** daemon 返回 501 + `{ error: "war_room mode is V1.5; only solo and assisted are available in MVP", capability: "rooms" }`
+- **WHEN** `POST /rooms { mode: "squad", leaderRoleId: "project-manager", ... }`
+- **THEN** 正常创建 squad room（V1.0 已实现）；**不**返回 501
 

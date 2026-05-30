@@ -3,22 +3,6 @@
 ## Purpose
 TBD - created by archiving change add-agenthub-mvp. Update Purpose after archive.
 ## Requirements
-### Requirement: V1.0 Squad / Team 模式占位
-
-The system SHALL accept `mode in ("squad", "team")` at the Room creation API level (data model already supports it per `rooms` capability) but reject with 501 in MVP and V0.5; V1.0 SHALL implement Squad（长期 Leader 路由）+ Team（任务拆解派发）共享同一 Orchestrator dispatch 引擎。
-
-`war_room` mode is reserved for V1.5（见 `war-room-mode`）。
-
-#### Scenario: 创建 squad room
-
-- **WHEN** `POST /rooms { mode: "squad", ... }`
-- **THEN** MVP / V0.5 返回 501 + `{ error: "squad mode is V1.0", capability: "v1-roadmap" }`
-
-#### Scenario: 创建 team room
-
-- **WHEN** `POST /rooms { mode: "team", ... }`
-- **THEN** MVP / V0.5 返回 501 + `{ error: "team mode is V1.0", capability: "v1-roadmap" }`
-
 ### Requirement: V1.0 Deployment(static / zip) 占位（deployment-static-zip）
 
 The system SHALL define Artifact `type=deployment` with subkind enum and route through Permission Engine (`shell.*` resource), but MVP MUST NOT implement any concrete protocol; V1.0 SHALL implement two subkinds:

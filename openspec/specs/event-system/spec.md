@@ -47,87 +47,68 @@ type EventVisibility = "main" | "detail" | "both"
 
 ### Requirement: 事件分级（durable / ephemeral）
 
-The system SHALL classify every event as either `durable`（落 events 表，永不丢）or `ephemeral`（不落库，可丢可合并），and apply the canonical mapping below.
+The canonical event registry SHALL be extended with the following V1.0 event types. All new types MUST be registered in `packages/protocol/src/events/registry.ts` and validated by `events:check` / `visibility:check` CI before any V1.0 capability spec references them.
 
-| 事件 | 类型 | durability | visibility |
-|---|---|---|---|
-| `message.created` | room/message | durable | both |
-| `message.part.delta` | room/message | ephemeral | detail |
-| `message.completed` | room/message | durable | both |
-| `message.cancelled` | room/message | durable | both |
-| `message.deleted` | room/message | durable | both |
-| `message.updated` | room/message | durable | both |
-| `message.brief.published` | room/message | durable | main |
-| `pending_turn.created` | room/message | durable | main |
-| `pending_turn.cancelled` | room/message | durable | main |
-| `pending_turn.scheduled` | room/message | durable | main |
-| `pending_turn.consumed` | room/message | durable | main |
-| `room.created` / `room.opened` / `room.closed` | room | durable | both |
-| `agent.profile.loaded` / `agent.profile.updated` | agent | durable | detail |
-| `agent.joined` / `agent.left` | agent | durable | both |
-| `agent.state.changed` | agent | durable | both |
-| `agent.blocked` | agent | durable | both |
-| `agent.capabilities.updated` | agent | durable | detail |
-| `agent.token.delta` | agent | ephemeral | detail |
-| `agent.typing` | agent | ephemeral | detail |
-| `agent.status_line.updated` | agent | ephemeral | main |
-| `agent.run.queued` / `agent.run.waiting` / `agent.run.started` / `agent.run.completed` / `agent.run.failed` / `agent.run.cancelled` | run | durable | both |
-| `agent.run.waiting_permission` | run | durable | both |
-| `agent.run.resumed` | run | durable | detail |
-| `run.heartbeat` | run | ephemeral | detail |
-| `tool.call.requested` / `tool.call.completed` | run | durable | detail |
-| `tool.update.diverted` | run | ephemeral | detail |
-| `tool.output.delta` | run | ephemeral | detail |
-| `subagent.started` / `subagent.completed` | run | durable | detail |
-| `role.created` / `role.updated` / `role.deleted` | role | durable | detail |
-| `runtime.detected` / `runtime.updated` / `runtime.removed` | runtime | durable | detail |
-| `model_config.created` / `model_config.updated` / `model_config.deleted` | model | durable | detail |
-| `agent_binding.created` / `agent_binding.updated` / `agent_binding.removed` | binding | durable | detail |
-| `task.created` / `task.assigned` / `task.status.changed` | task | durable | both |
-| `task.activity.added` / `task.delegation.created` / `task.delegation.completed` | task | durable | both |
-| `task.status.changed.rejected` | task | ephemeral | detail |
-| `team.dispatch.started` / `team.dispatch.completed` | team | durable | both |
-| `permission.run_summary` | permission | durable | detail |
-| `context.item.created` / `.proposed` / `.confirmed` / `.update_requested` / `.conflict_created` / `.deprecated` / `.visibility.changed` | context | durable | detail |
-| `context.snapshot` | context | durable | detail |
-| `permission.requested` / `permission.resolved` | permission | durable | both |
-| `intervention.requested` / `.approved` / `.ignored` / `.rejected` / `.snoozed` / `.injected` / `.resolved` / `.closed` | intervention | durable | both |
-| `intervention.invalid_transition` | intervention | durable | detail |
-| `artifact.diff.created` / `artifact.file.created` / `artifact.reviewing` / `artifact.accepted` / `artifact.applying` / `artifact.applied` / `artifact.rejected` / `artifact.failed` | artifact | durable | both |
-| `artifact.preview.started` / `.stopped` | artifact | durable | both |
-| `adapter.registered` / `adapter.session.created` / `.session.ended` / `.session.disposed` / `.crashed` | adapter | durable | detail |
-| `adapter.liveness.changed` | adapter | durable | detail |
-| `adapter.config.updated` | adapter | durable | both |
-| `adapter.raw.stdout` / `adapter.raw.stderr` | adapter | ephemeral | detail |
-| `mailbox.message.created` | mailbox | durable | detail |
-| `worktree.gc.removed` / `worktree.gc.skipped` | local-daemon | durable | detail |
-| `auth.token.issued` / `auth.token.revoked` | auth | durable | detail |
-| `handler.stalled` | bus | durable | detail |
-| `server.connected` / `server.shutting_down` | server | durable | detail |
-| `ui.toast.shown` / `ui.presence.changed` / `stream.chunk` | ui/transient | ephemeral | main |
-| `mailbox.delivery.failed` | mailbox | durable | both |
-| `agent.profile.removed` | agent | durable | detail |
-| `agent.profile.error` | agent | ephemeral | detail |
-| `artifact.diff.detected` | artifact | ephemeral | detail |
+**V1.0 新增 durable events（18 个）**：
 
-This table is the **single canonical event registry**. Other capabilities (notably `bus-runtime`'s publisher / subscriber matrix) MUST only reference event types listed here. Adding a new event type SHALL require a PR that updates this table first; lint / spec-validate jobs SHALL flag references in any other spec to event types not present here. The `visibility` column is also canonical — `bus-runtime` and `messaging` and `web-ui` MUST NOT redefine visibility per event; they only consume it.
+| 事件类型 | category | durability | visibility | 来源 capability | 备注 |
+|---|---|---|---|---|---|
+| `role.created` | role | durable | detail | role-system | Settings REST-only；不要求 projector handler |
+| `role.updated` | role | durable | detail | role-system | Settings REST-only；不要求 projector handler |
+| `role.deleted` | role | durable | detail | role-system | Settings REST-only；不要求 projector handler |
+| `runtime.detected` | runtime | durable | detail | runtime-settings | Settings REST-only；不要求 projector handler |
+| `runtime.updated` | runtime | durable | detail | runtime-settings | Settings REST-only；不要求 projector handler |
+| `runtime.removed` | runtime | durable | detail | runtime-settings | Settings REST-only；不要求 projector handler |
+| `model_config.created` | model | durable | detail | model-provider-settings | Settings REST-only；不要求 projector handler |
+| `model_config.updated` | model | durable | detail | model-provider-settings | Settings REST-only；不要求 projector handler |
+| `model_config.deleted` | model | durable | detail | model-provider-settings | Settings REST-only；不要求 projector handler |
+| `agent_binding.created` | binding | durable | detail | agents（MODIFIED） | Settings REST-only；不要求 projector handler |
+| `agent_binding.updated` | binding | durable | detail | agents | Settings REST-only；不要求 projector handler |
+| `agent_binding.removed` | binding | durable | detail | agents | Settings REST-only；不要求 projector handler |
+| `task.activity.added` | task | durable | both | task-workflow-core | 需要 projector handler（Task detail + Side Panel Tasks tab）|
+| `task.delegation.created` | task | durable | both | team-mode + squad-mode | 需要 projector handler（主流 brief + Run Detail Tools）|
+| `task.delegation.completed` | task | durable | both | squad-mode + team-mode | 需要 projector handler |
+| `team.dispatch.started` | team | durable | both | team-mode + squad-mode | 需要 projector handler（主流 brief）|
+| `team.dispatch.completed` | team | durable | both | team-mode + squad-mode | 需要 projector handler |
+| `permission.run_summary` | permission | durable | detail | permissions（V1.0 D8）| Run Detail Permissions tab；不要求 main projector handler |
 
-> **关于 `adapter.raw.stdout/stderr` 的 visibility**：表中记为 `detail` 仅作 schema 形式上的占位（`visibility:check` 要求每行非空）；这类 ephemeral raw 事件**不参与** `view=main` / `view=detail` SSE 路由。它们只通过独立的 `view=raw` 通道投递，并额外受 `admin` scope / 本地 `[debug] enabled=true` 控制（详见 `事件 visibility 字段` 的 raw 视图说明 + `security/Debug 授权边界`）。`view=detail` 的 Run Detail 客户端 MUST NOT 通过 visibility 矩阵收到 raw 帧。
+**V1.0 明确不引入的事件类型**（防止 spec agent 误加）：
 
-#### Scenario: durable 事件落 events 表
+- `task.updated`：状态变化走 `task.status.changed`（V0 已注册），非状态型活动走 `task.activity.added`
+- `task.deleted`：删除走 `task.status.changed { nextStatus: "cancelled" }`
+- `role.generation.delta` / `role.generation.completed` / `role.generation.failed`：role 生成走 REST job polling，不进 EventBus
+- `runtime.test.result` / `model_config.test.result`：test 操作结果走 REST response / job polling，不进 EventBus
 
-- **WHEN** producer 发出 `message.created` 事件
-- **THEN** EventBus 在 PubSub 派发前先 `INSERT INTO events ...` 持久化，事务失败则整个发布失败
+**projector 要求汇总**：
 
-#### Scenario: ephemeral 事件不进 events 表
+- visibility=both 的 V1.0 新事件（`task.activity.added` / `task.delegation.*` / `team.dispatch.*`）：**必须**在 `apps/web/src/hooks/useProjector.ts` 加 handler
+- visibility=detail 的 V1.0 新事件（role / runtime / model_config / agent_binding / permission.run_summary）：**不要求** projector handler；Settings UI 通过 REST 消费；Debug Panel 通过 `/debug/events` 查询
 
-- **WHEN** producer 发出 `message.part.delta` 事件
-- **THEN** EventBus 直接派发到 PubSub，不写 events 表；订阅者收到的 envelope 字段完整
+#### Scenario: events:check 校验 18 个新事件类型
 
-#### Scenario: 引用未登记事件失败
+- **WHEN** 开发者在代码中 emit 任何 V1.0 新事件（如 `role.created`、`task.activity.added`）
+- **THEN** `pnpm events:check` 通过（事件类型已在 registry 注册）
+- **AND** `pnpm visibility:check` 通过（visibility 字段与 registry 一致）
 
-- **WHEN** 任意其他 spec / 代码引用 `agent.run.aborted`（不在 canonical 清单内）
-- **THEN** `bun run events:check`（或 spec validate hook）报错 `event type 'agent.run.aborted' not found in event-system canonical registry`，CI 失败
+#### Scenario: task.updated 被拒绝
+
+- **WHEN** 开发者尝试 emit `task.updated` 事件
+- **THEN** `pnpm events:check` 失败，报 `event type 'task.updated' not found in event-system canonical registry`
+- **AND** 开发者应改用 `task.status.changed`（状态变化）或 `task.activity.added`（非状态型活动）
+
+#### Scenario: role.created 不触发 projector
+
+- **WHEN** daemon emit `role.created`（visibility=detail）
+- **THEN** SSE `?view=main` 不推送该事件（detail 不进 main 流）
+- **AND** Settings UI 不订阅 SSE，通过 `GET /roles` REST 拉取最新列表
+- **AND** Debug Panel 通过 `/debug/events?type=role.created` 或 Event Store audit query 可查到该事件；Run Detail **不**通过 Settings CRUD SSE 实时同步
+
+#### Scenario: task.activity.added 触发 projector
+
+- **WHEN** daemon emit `task.activity.added`（visibility=both）
+- **THEN** SSE `?view=main` 推送该事件
+- **AND** `useProjector.ts` 的 `task.activity.added` handler 更新 Task detail view model
+- **AND** Side Panel Tasks tab 实时显示新活动条目
 
 ### Requirement: events 表 Schema
 

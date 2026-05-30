@@ -16,7 +16,7 @@
 >   - 读路径：前端 projector 订阅 `task.created` / `task.status.changed` / `task.activity.added` / `task.delegation.*`（visibility=both），更新 Side Panel Tasks tab + Task detail view model
 >   - 失败路径：Task 超时 → emit `task.status.changed { nextStatus: "blocked", reason: "timeout" }`（durable, visibility=both）
 
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: 最小 Task 数据模型（MVP 必须实现）
 

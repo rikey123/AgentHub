@@ -84,107 +84,27 @@ CREATE TABLE message_parts (
 
 ### Requirement: Card 类型清单
 
-The system SHALL define exactly the following Card union types within `CardPart`. The 6 MVP cards (TaskCard / ContextCard / DiffCard / PreviewCard / PermissionCard / InterventionCard) are **MVP renderable** — daemon MUST emit them and Web UI MUST provide a renderer component. The 3 V1 cards (DecisionCard / TrustCard / MemoryCard) are **V1 placeholder** — they are schema-only:
+The system SHALL add `TaskStatusCard` to the card type list for V1.0 Squad/Team mode dispatch notifications.
 
-- 类型在 union 中预留，使前向兼容 (旧客户端能解析新枚举值)。
-- daemon 在 MVP MUST NOT emit these card types from any built-in path.
-- Web UI MUST NOT ship dedicated renderer components for placeholder cards in MVP；遇到时走未知 Card 降级路径（见 Scenario "未知 Card 类型降级"）。
+新增 Card 类型（V1.0）：
 
-```ts
-type Card =
-  // MVP renderable
-  | TaskCard
-  | ContextCard
-  | DiffCard
-  | PreviewCard
-  | PermissionCard
-  | InterventionCard
-  // V1 placeholder (schema-only, no MVP renderer)
-  | DecisionCard
-  | TrustCard
-  | MemoryCard
+| Card 类型 | visibility | 描述 |
+|---|---|---|
+| `TaskStatusCard` | main | Leader 派发 / Task review 通知；显示 task title + assignee role + status + "查看 Task" 链接 |
 
-type TaskCard = {
-  type: "task"
-  taskId: string
-  title: string
-  status: "todo" | "queued" | "running" | "waiting_approval" | "blocked" | "review" | "done" | "failed" | "cancelled"
-  assigneeAgentId?: string
-}
+`TaskCard` 升级（V1.0）：可显示 Task 树（child tasks + 状态 + activity 摘要）。
 
-type ContextCard = {
-  type: "context"
-  contextId: string
-  title: string
-  summary: string
-  status: "draft" | "confirmed" | "deprecated" | "disputed"
-  actions: ("confirm" | "edit" | "discard")[]
-}
+#### Scenario: Leader 派发后主流显示 TaskStatusCard
 
-type DiffCard = {
-  type: "diff"
-  artifactId: string
-  files: {
-    path: string
-    additions: number
-    deletions: number
-    status: "added" | "modified" | "deleted"
-  }[]
-  applyStatus: "draft" | "reviewing" | "accepted" | "applying" | "applied" | "rejected" | "failed"
-}
+- **WHEN** Leader 调 `room.delegate` 创建 Task，emit `task.delegation.created`（visibility=both）
+- **THEN** 主流显示 TaskStatusCard：`"<leader_name> dispatched '<task_title>' to <assignee_role_name>"`
+- **AND** 点击"查看 Task"打开 Task detail slide-over
 
-type PreviewCard = {
-  type: "preview"
-  artifactId: string
-  url: string                     // daemon 生成的临时 token URL
-  kind: "html" | "markdown" | "image"
-}
+#### Scenario: 所有子 Task 进 review 后主流显示 TaskStatusCard
 
-type PermissionCard = {
-  type: "permission"
-  permissionId: string
-  agentId: string
-  resource: PermissionResource    // 详见 permissions capability
-  reason?: string
-  status: "pending" | "allowed" | "denied" | "expired"
-}
-
-type InterventionCard = {
-  type: "intervention"
-  interventionId: string
-  agentId: string
-  reason: string
-  priority: "low" | "medium" | "high"
-  preview?: string
-  actions: ("approve" | "later" | "ignore" | "reject")[]
-  status: "pending_user_decision" | "approved" | "ignored" | "rejected" | "snoozed" | "injected" | "resolved" | "closed"
-}
-
-// V1 placeholder shapes — 仅作为占位，MVP 不绑定具体字段；V1 的 change 提案中再定义。
-type DecisionCard = { type: "decision"; [key: string]: unknown }
-type TrustCard    = { type: "trust";    [key: string]: unknown }
-type MemoryCard   = { type: "memory";   [key: string]: unknown }
-```
-
-#### Scenario: 渲染 DiffCard
-
-- **WHEN** Web UI 收到含 `DiffCard` 的 message part
-- **THEN** UI 渲染缩略文件列表 + "查看 / 应用 / 拒绝"按钮；点击查看打开 Monaco Diff 全屏视图
-
-#### Scenario: MVP 不发 V1 placeholder card
-
-- **WHEN** 在 MVP 期间任意内置路径（adapter / orchestrator / artifacts / interventions / context / permissions 等）尝试构造 DecisionCard / TrustCard / MemoryCard
-- **THEN** 该路径必须不存在；CI 通过 lint 校验内置代码不引用 V1 placeholder card 类型字面量
-
-#### Scenario: V1 placeholder card 走未知 Card 降级
-
-- **WHEN** 客户端收到 `card.type === "decision"` 的 part（来自旧客户端连了新服务端、或第三方插件提前发了 V1 形态）
-- **THEN** UI 走未知 Card 降级路径，渲染为"未知卡片：<json>"占位，不抛错
-
-#### Scenario: 未知 Card 类型降级
-
-- **WHEN** 客户端收到一个 `card.type` 不在 union 中的 Card（旧客户端 / 新服务端）
-- **THEN** UI 降级渲染为"未知卡片：<json>"并保留原 payload，不抛错
+- **WHEN** Team Mode 所有子 Task 进 review，emit `team.dispatch.started`（visibility=both）
+- **THEN** 主流显示 TaskStatusCard：`"<N> tasks ready for review"`
+- **AND** 点击"查看 Task"打开 Side Panel Tasks tab
 
 ### Requirement: 增量流（delta）合流
 

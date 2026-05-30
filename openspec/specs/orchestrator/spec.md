@@ -165,35 +165,20 @@ CREATE INDEX idx_mb_to_room_unread ON mailbox_messages (to_agent_id, room_id, re
 
 ### Requirement: Room MCP Tools
 
-The system SHALL expose the following Room MCP server tools to every Agent's adapter session, scoped to the agent's room.
+The system SHALL add `room.delegate` to the Room MCP Server tool list for V1.0 Squad/Team modes. All other existing tools remain unchanged.
+
+新增工具（V1.0）：
 
 | Tool | 描述 | 权限要求 |
 |---|---|---|
-| `room.list_members` | 列出当前 Room 成员（含 presence） | 无 |
-| `room.send_message` | 发消息到聊天流 | presence 必须 active；否则降级为 mailbox |
-| `room.read_mailbox` | 读自己的未读 mailbox **+ 当前 run 的未消费 run_next_turns（双源原子消费）** | 无（runId 由 adapter session 隐式注入，不允许 agent 伪造） |
-| `room.create_task` | 创建 Task（仅 leader / primary） | role=primary |
-| `room.update_task` | 更新 Task 状态 | 仅自己 assignee 或 leader |
-| `room.list_tasks` | 列出当前 Room 的 Task | 无 |
-| `room.read_context` | 读自己可见的 ContextItem | 无（visibility 过滤） |
-| `room.propose_context` | 写 draft ContextItem | capability `context.write` |
-| `room.write_context` | 写 confirmed ContextItem（仅 tool source） | source.type=tool + confidence=verified |
-| `room.deprecate_context` | 标记 ContextItem deprecated | 仅自己创建的或 leader |
-| `room.request_intervention` | 敲门 | capability `intervention.knock` |
-| `room.publish_artifact` | 发布 artifact | capability `code.edit` 或 `file.write` |
-| `room.ask_permission` | 主动请求权限 | 无 |
-| `room.ask_user` | 弹卡询问用户（如选项卡） | presence 必须 active |
-| `room.spawn_agent` | 临时启动子 Agent（仅 leader） | role=primary（V1.0 Team Mode 才完整支持） |
+| `room.delegate` | Leader 派发 Task 给 teammate（Squad/Team mode 专用）| role=leader |
 
-#### Scenario: Agent 通过 MCP 读 ContextItem
+`room.delegate` 完整规范见 `squad-mode/Squad 模式调度` Requirement。
 
-- **WHEN** Builder 在 Run 中调用 `room.read_context`
-- **THEN** Tool 返回 visibility 过滤后的 ContextItem 列表（content / type / status / version）；不返回未对该 Agent 可见的项
+#### Scenario: room.delegate 仅 leader 可调
 
-#### Scenario: Observer 调 room.send_message 被降级
-
-- **WHEN** Observer presence=`observing` 调 `room.send_message { text: "..." }`
-- **THEN** Tool 返回 `{ ok: true, downgraded: "mailbox", mailboxId: "mb_42" }`；UI 不在主聊天流显示，primary 的 mailbox 收到
+- **WHEN** observer agent 调 `room.delegate`
+- **THEN** 返回 `{ error: "delegate_requires_leader_role" }`；不创建 Task
 
 ### Requirement: Mention 解析
 
@@ -379,17 +364,22 @@ type TaskStatus =
 
 ### Requirement: V1.0 / V1.1 / V1.2 占位（Team / Squad / Board / DAG）
 
-The system SHALL accept the data model fields needed for post-MVP stages (`Task.dependencies`, `Task.parentTaskId`, `Task.priority`, Squad-related fields) but the Orchestrator MUST NOT execute parallel team/squad scheduling logic in MVP. 各占位字段的实际启用阶段：
+The system SHALL remove the Squad and Team mode placeholders from this requirement as they are now implemented in V1.0. War Room remains V1.5.
 
-- `Task.parentTaskId`：MVP 写表；**V1.0 Team Mode** 调度时启用层级派发
-- `Task.dependencies`（JSON array of taskId）：MVP 写表；**V1.2 collab-visualization Dependency 视图**消费；orchestrator 调度调度阶段不消费（不做 DAG 自动等待）
-- `Task.priority`：MVP 写表（默认 0）；**V1.1 task-board** `task.priority.changed` 启用
-- `tasks.board_column`：**V1.1 新加列**（MVP 不存在），用于用户覆盖 status→column 默认映射
+**V1.0 已实现**：`squad` mode（squad-mode capability）、`team` mode（team-mode capability）。
 
-#### Scenario: 用户在 Solo Room 创建 Task 含 dependencies
+**仍为占位**：`war_room` mode（V1.5）；Task dependencies DAG 调度（V1.2 collab-visualization）；Task Board 拖拽（V1.1 task-board）。
 
-- **WHEN** 用户 `POST /tasks { dependencies: [...] }`
-- **THEN** daemon 接受字段、写表，但 Orchestrator 调度时忽略 dependencies；UI 在 Task 详情显示"依赖关系将在 V1.0 Team Mode / V1.2 Dependency 视图启用"
+#### Scenario: 创建 squad room
+
+- **WHEN** `POST /rooms { mode: "squad", leaderRoleId: "project-manager", ... }`
+- **THEN** daemon 创建 squad room，leaderRoleId 写入 `rooms.leader_role_id`
+- **AND** **不**返回 501（V1.0 已实现）
+
+#### Scenario: 创建 war_room 仍返回 501
+
+- **WHEN** `POST /rooms { mode: "war_room", ... }`
+- **THEN** 返回 501 + `{ error: "war_room mode is V1.5", capability: "v1-roadmap" }`
 
 ### Requirement: Observing 是被动状态 + WakeAgent 是模型调用唯一入口
 

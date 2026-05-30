@@ -77,6 +77,8 @@ CREATE INDEX idx_agent_bindings_runtime ON agent_bindings (runtime_id);
 - **THEN** daemon middleware 查 `agent_profiles` 表找到对应 `agent_binding_id`，继续处理
 - **AND** 响应中返回新的 `agentBindingId` 字段（同时保留旧字段 3 个月）
 
+## ADDED Requirements
+
 ### Requirement: AgentBinding CRUD API
 
 The system SHALL expose REST endpoints for AgentBinding management.

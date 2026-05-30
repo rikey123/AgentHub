@@ -306,9 +306,7 @@ function resolveArgs(
 
 ### Requirement: Post-MVP Adapter Stub（接口存在但 detect 返回空）
 
-The system SHALL include stub implementations of `CodexAdapter`、`LangGraphAdapter`、`A2AAdapter` whose `detect()` returns `[]` and whose `startRun()` rejects with `AdapterNotImplemented`. **`OpenCodeAdapter` is no longer a stub as of V0.5** — see `OpenCodeACPAdapter 真实现` Requirement.
-
-各 stub 的目标启用阶段（与 `v1-roadmap` 对齐）：
+The system SHALL update the stub table to reflect that `OpenCodeAdapter` is now a real implementation (V0.5) and `NativeAgentAdapter` is a new real implementation (V1.0).
 
 | Stub | 启用阶段 | 备注 |
 |---|---|---|
@@ -316,20 +314,17 @@ The system SHALL include stub implementations of `CodexAdapter`、`LangGraphAdap
 | `LangGraphAdapter` | V1.3 | Python AI worker，依赖 plugin-system 隔离基座 |
 | `A2AAdapter`（即 `RemoteA2AAdapter`） | V1.3 | A2A Client 把外部 agent 装进 Room |
 
-#### Scenario: 创建 Codex adapter 的 Run 拒绝
+`OpenCodeAdapter`（V0.5 已实现）和 `NativeAgentAdapter`（V1.0 已实现）不再是 stub。
+
+#### Scenario: NativeAgentAdapter 不返回 501
+
+- **WHEN** 用户用 native runtime 创建 AgentBinding 并启动 Run
+- **THEN** NativeAgentAdapter 正常启动（V1.0 已实现）；**不**返回 501
+
+#### Scenario: CodexAdapter 仍返回 501
 
 - **WHEN** 用户尝试用 CodexAdapter 启动 run
 - **THEN** 返回 501 + `{ error: "CodexAdapter is V1.x (post V1.0)", capability: "adapter-framework" }`
-
-#### Scenario: 创建 LangGraph / A2A adapter 的 Run 拒绝
-
-- **WHEN** 用户尝试用 LangGraphAdapter 或 A2AAdapter 启动 run
-- **THEN** 返回 501 + `{ error: "<Adapter> is V1.3; depends on plugin-system isolation infrastructure", capability: "adapter-framework" }`
-
-#### Scenario: 创建 OpenCode adapter 的 Run 走真实现路径
-
-- **WHEN** 用户用 OpenCodeAdapter 启动 run
-- **THEN** **不**返回 501，而是走 `OpenCodeACPAdapter 真实现` 路径
 
 ### Requirement: Cost 字段上报
 
