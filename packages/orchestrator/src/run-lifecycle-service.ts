@@ -156,19 +156,24 @@ export class RunLifecycleService {
         }
       }
 
+      const participant = db
+        .prepare("SELECT adapter_id FROM room_participants WHERE room_id = ? AND participant_id = ? AND participant_type = 'agent' LIMIT 1")
+        .get(input.roomId, input.agentId) as { readonly adapter_id: string | null } | undefined;
+
       db.prepare(
         `INSERT INTO runs (
           id, workspace_id, task_id, room_id, agent_id, adapter_id, adapter_session_id, provider_conversation_id,
           parent_run_id, status, wake_reason, waiting_reason, workspace_path, work_dir, workspace_mode, context_version,
           target_files, mailbox_claim_count, pid_at_start, claimed_at, started_at, ended_at, input_tokens, output_tokens,
           cached_tokens, cost_usd, model_id, failure_class, error, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, ?, 'queued', ?, NULL, NULL, NULL, ?, NULL, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, 'queued', ?, NULL, NULL, NULL, ?, NULL, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)`
       ).run(
         input.runId,
         input.workspaceId,
         input.taskId ?? null,
         input.roomId,
         input.agentId,
+        participant?.adapter_id ?? null,
         input.parentRunId ?? null,
         input.wakeReason,
         input.workspaceMode ?? null,

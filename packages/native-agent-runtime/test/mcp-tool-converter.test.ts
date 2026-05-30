@@ -23,6 +23,7 @@ describe("convertMcpToolsToAiSdkTools", () => {
       new (class { handle = bridgeHandle; })() as never
     );
 
+    expect(toolSet["room.list_tasks"]!.inputSchema).toHaveProperty("jsonSchema");
     await toolSet["room.list_tasks"]!.execute?.({}, {} as never);
 
     expect(bridgeHandle).toHaveBeenCalledWith(expect.objectContaining({ type: "tool.call.requested", name: "room.list_tasks" }));

@@ -119,6 +119,32 @@ test.describe("V1.0 room creation", () => {
       })
     ]));
   });
+
+  test("keeps role choices persona-only and routes native leader runs away from mock", async ({ page }) => {
+    await page.goto(testUrl);
+    await page.locator('[data-testid="room-list-create-room"]').click();
+    await page.getByLabel("Title").fill("Native Leader Room");
+    await page.getByText("Team", { exact: true }).click();
+    await page.locator('[data-testid="new-room-leader-role"]').click();
+    await expect(page.getByRole("option", { name: "Leader E2E" })).toBeVisible();
+    await expect(page.getByRole("option", { name: /Mock Builder/u })).toHaveCount(0);
+    await expect(page.getByRole("option", { name: /Claude Code Builder/u })).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await chooseHeroSelect(page, "new-room-leader-role", "Leader E2E");
+    await chooseHeroSelect(page, "new-room-leader-runtime", "AgentHub Native");
+    await chooseHeroSelect(page, "new-room-leader-model", "Local E2E Model");
+    await page.getByRole("button", { name: "Create room" }).click();
+
+    await expect(page.getByRole("textbox", { name: "Message" })).toBeEnabled();
+    await page.getByRole("textbox", { name: "Message" }).fill("hello native leader");
+    await page.keyboard.press("Enter");
+
+    await expect.poll(() => {
+      const row = daemon.database.sqlite.prepare("SELECT adapter_id FROM runs WHERE room_id = (SELECT id FROM rooms WHERE title = ?) ORDER BY created_at DESC LIMIT 1").get("Native Leader Room") as { readonly adapter_id: string | null } | undefined;
+      return row?.adapter_id ?? null;
+    }).toBe("native");
+    await expect(page.getByText("Mock assistant reply")).toHaveCount(0);
+  });
 });
 
 async function chooseHeroSelect(page: import("@playwright/test").Page, testId: string, optionName: string): Promise<void> {

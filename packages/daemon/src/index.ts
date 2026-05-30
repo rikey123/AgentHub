@@ -134,8 +134,8 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     }
     emitPhase("startup", PHASE_SQLITE);
     const database = createDatabase({ path: options.databasePath, applyMigrations: true });
-    seedDefaultData(database, options.now?.() ?? Date.now());
     migrateAgentProfilesToV10(database, options.now?.() ?? Date.now());
+    seedDefaultData(database, options.now?.() ?? Date.now());
     seedBuiltInPermissionProfiles(database, options.now?.() ?? Date.now());
     cleanExpiredRoleDrafts(database, options.now?.() ?? Date.now());
     bootstrapBuiltInAgents();
@@ -1188,7 +1188,19 @@ function permissionRules(ctx: RouteContext, url: URL): void {
 
 function roles(ctx: RouteContext, url: URL): void {
   const workspaceId = url.searchParams.get("workspaceId") ?? "default-workspace";
-   json(ctx.res, 200, all(ctx.database, "SELECT * FROM roles WHERE workspace_id IS NULL OR workspace_id = ? ORDER BY name ASC", workspaceId).map((row) => normalizeRoleRow(row as Record<string, unknown>)));
+   json(ctx.res, 200, all(
+     ctx.database,
+     `SELECT *
+      FROM roles
+      WHERE (workspace_id IS NULL OR workspace_id = ?)
+        AND NOT EXISTS (
+          SELECT 1 FROM agent_profiles
+          WHERE agent_profiles.id = roles.id
+            AND roles.is_builtin = 0
+        )
+      ORDER BY is_builtin DESC, name ASC`,
+     workspaceId
+   ).map((row) => normalizeRoleRow(row as Record<string, unknown>)));
 }
 
 function createRole(ctx: RouteContext, input: Record<string, unknown>): void {
@@ -1657,9 +1669,30 @@ function sse(ctx: RouteContext, url: URL, scopes: readonly string[]): void {
   const roomId = url.searchParams.get("roomId") ?? undefined;
   const runId = url.searchParams.get("runId") ?? undefined;
   const filters = { view, ...(roomId !== undefined ? { roomId } : {}), ...(runId !== undefined ? { runId } : {}) };
+  let closed = false;
+  const sseState: {
+    heartbeat?: ReturnType<typeof setInterval>;
+    unsubscribe?: () => void;
+    unregisterClient?: () => void;
+  } = {};
+  const cleanup = () => {
+    if (closed) return;
+    closed = true;
+    if (sseState.heartbeat !== undefined) clearInterval(sseState.heartbeat);
+    sseState.unsubscribe?.();
+    sseState.unregisterClient?.();
+  };
+  const writeFrame = (frame: string) => {
+    if (closed || ctx.res.destroyed || ctx.res.writableEnded) return;
+    try {
+      ctx.res.write(frame);
+    } catch {
+      cleanup();
+    }
+  };
   const send = (event: EventEnvelope) => {
     if (!visible(event, view, filters.roomId, filters.runId)) return;
-    ctx.res.write(`${event.seq !== undefined ? `id: ${event.seq}\n` : ""}event: ${event.type}\ndata: ${redactAndTruncate(JSON.stringify(event), 64 * 1024)}\n\n`);
+    writeFrame(`${event.seq !== undefined ? `id: ${event.seq}\n` : ""}event: ${event.type}\ndata: ${redactAndTruncate(JSON.stringify(event), 64 * 1024)}\n\n`);
   };
   ctx.res.writeHead(200, {
     "content-type": "text/event-stream",
@@ -1681,14 +1714,21 @@ function sse(ctx: RouteContext, url: URL, scopes: readonly string[]): void {
   if (ctx.res.socket && typeof (ctx.res.socket as { setNoDelay?: (v: boolean) => void }).setNoDelay === "function") {
     (ctx.res.socket as { setNoDelay: (v: boolean) => void }).setNoDelay(true);
   }
-  ctx.res.write(": connected\n\n");
-  const client: SseClient = { res: ctx.res, close: () => { ctx.res.write(`event: server.shutting_down\ndata: {"status":"shutting_down"}\n\n`); ctx.res.end(); } };
-  const unregisterClient = ctx.registerSseClient(client);
+  writeFrame(": connected\n\n");
+  const client: SseClient = {
+    res: ctx.res,
+    close: () => {
+      writeFrame(`event: server.shutting_down\ndata: {"status":"shutting_down"}\n\n`);
+      cleanup();
+      if (!ctx.res.destroyed && !ctx.res.writableEnded) ctx.res.end();
+    }
+  };
+  sseState.unregisterClient = ctx.registerSseClient(client);
   const cursor = Number(url.searchParams.get("cursor") ?? ctx.req.headers["last-event-id"] ?? 0);
   for (const event of ctx.eventBus.replayDurableSinceSeq(Number.isFinite(cursor) ? cursor : 0, filters)) send(event);
-  const unsubscribe = ctx.eventBus.subscribeAll(send);
-  const heartbeat = setInterval(() => ctx.res.write(": heartbeat\n\n"), 10_000);
-  ctx.req.on("close", () => { clearInterval(heartbeat); unsubscribe(); unregisterClient(); });
+  sseState.unsubscribe = ctx.eventBus.subscribeAll(send);
+  sseState.heartbeat = setInterval(() => writeFrame(": heartbeat\n\n"), 10_000);
+  ctx.req.on("close", cleanup);
 }
 
 function visible(event: EventEnvelope, view: ReplayView, roomId?: string, runId?: string): boolean {

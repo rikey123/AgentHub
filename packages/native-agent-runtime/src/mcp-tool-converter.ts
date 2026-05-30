@@ -1,4 +1,4 @@
-import type { ToolSet } from "ai";
+import { jsonSchema, type ToolSet } from "ai";
 import { randomUUID } from "node:crypto";
 
 import type { AdapterBridge } from "../../orchestrator/src/index.ts";
@@ -25,7 +25,7 @@ export function convertMcpToolsToAiSdkTools(
       mcpTool.name,
       {
         description: mcpTool.description,
-        inputSchema: mcpTool.inputSchema as never,
+        inputSchema: jsonSchema(mcpTool.inputSchema as never),
         execute: async (input: unknown) => {
           const toolCallId = randomUUID();
           bridge.handle({ type: "tool.call.requested", toolCallId, name: mcpTool.name, input });

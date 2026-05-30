@@ -189,6 +189,27 @@ describe("daemon M1.4 composition", () => {
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'room.created' AND json_extract(payload, '$.leaderRoleId') = ?").get(leaderRoleId)).toMatchObject({ count: 1 });
   });
 
+  it("does not expose legacy agent profiles as role choices on fresh startup", async () => {
+    const response = await fetch(`${baseUrl}/roles`);
+    const roles = await response.json() as readonly { readonly id: string; readonly name: string }[];
+
+    expect(response.status).toBe(200);
+    expect(roles.map((role) => role.name)).toEqual([
+      "Archivist",
+      "Builder",
+      "Generalist",
+      "Project Manager",
+      "Reviewer"
+    ]);
+    expect(roles.map((role) => role.id)).not.toEqual(expect.arrayContaining([
+      "mock-builder",
+      "mock-reviewer",
+      "claude-code-builder",
+      "claude-code-reviewer",
+      "builder-opencode"
+    ]));
+  });
+
   it("keeps solo rooms compatible with primaryAgentId and participants", async () => {
     const created = await fetch(`${baseUrl}/rooms`, {
       method: "POST",
@@ -462,6 +483,45 @@ describe("daemon M1.4 composition", () => {
     expect(nativeAdapterRunManagedMock).toHaveBeenCalledWith(expect.objectContaining({ id: "run-native-deny-test" }));
     expect(resolveProviderMock).not.toHaveBeenCalled();
     expect(streamTextMock).not.toHaveBeenCalled();
+  });
+
+  it("routes V1 team room native bindings through NativeAgentAdapter instead of MockAdapter", async () => {
+    const runtimeId = "native-default";
+    const modelConfigId = `model-team-native-${Date.now()}`;
+    const roleId = `role-team-native-${Date.now()}`;
+    const bindingId = `binding-team-native-${Date.now()}`;
+    daemon.database.sqlite.transaction(() => {
+      daemon.database.sqlite.prepare("INSERT INTO roles (id, workspace_id, name, avatar, description, prompt, capabilities, default_permission_profile_id, tags, is_builtin, source_path, version, created_at, updated_at) VALUES (?, ?, ?, NULL, NULL, ?, '[]', NULL, NULL, 0, NULL, NULL, ?, ?)").run(roleId, "default-workspace", "Native Team Leader", "Native team prompt", Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO model_configs (id, workspace_id, name, provider, model, base_url, api_key_ref, api_key_fingerprint, temperature, max_tokens, reasoning, extra, profile, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)").run(modelConfigId, "default-workspace", "Native Team Model", "ollama", "team-native-model", Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NULL, ?, ?)").run(bindingId, "default-workspace", roleId, runtimeId, modelConfigId, Date.now(), Date.now());
+    })();
+
+    const created = await fetch(`${baseUrl}/rooms`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        title: "Native Team Room",
+        mode: "team",
+        leaderRoleId: roleId,
+        participants: [{ roleId, runtimeId, modelConfigId }]
+      })
+    });
+    const createdBody = await created.json() as { readonly data?: { readonly roomId?: string } };
+    expect(created.status).toBe(201);
+    const roomId = createdBody.data?.roomId ?? "";
+
+    const sent = await fetch(`${baseUrl}/rooms/${roomId}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "hello native", idempotencyKey: `native-team-${Date.now()}` })
+    });
+    expect(sent.ok).toBe(true);
+
+    await waitFor(
+      () => daemon.database.sqlite.prepare("SELECT adapter_id, status FROM runs WHERE room_id = ? AND agent_id = ? ORDER BY created_at DESC LIMIT 1").get(roomId, bindingId) as { readonly adapter_id: string | null; readonly status: string } | undefined,
+      (run) => run !== undefined && run.adapter_id === "native"
+    );
+    expect(nativeAdapterRunManagedMock).toHaveBeenCalledWith(expect.objectContaining({ agent_id: bindingId, adapter_id: "native" }));
   });
 
   it("rejects deleting a runtime with existing bindings", async () => {

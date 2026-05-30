@@ -7,7 +7,10 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 const streamTextMock = vi.hoisted(() => vi.fn());
 const resolveProviderMock = vi.hoisted(() => vi.fn());
 
-vi.mock("ai", () => ({ streamText: streamTextMock }));
+vi.mock("ai", () => ({
+  streamText: streamTextMock,
+  jsonSchema: (schema: unknown) => ({ jsonSchema: schema })
+}));
 vi.mock("../src/provider-registry.ts", () => ({ resolveProvider: resolveProviderMock }));
 
 import { CommandBus, EventBus, type CommandHandler } from "@agenthub/bus";
