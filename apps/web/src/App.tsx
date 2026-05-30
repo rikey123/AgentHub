@@ -306,7 +306,13 @@ export default function App() {
       <CommandPalette isOpen={paletteOpen} onOpenChange={setPaletteOpen} commands={commands} />
       <KeymapModal isOpen={keymapOpen} onOpenChange={setKeymapOpen} />
       <NewRoomDialog isOpen={newRoomOpen} onOpenChange={setNewRoomOpen} onCreate={handleCreateRoom} />
-      <SettingsModal isOpen={settingsOpen} selectedTab={settingsTab} onTabChange={handleSettingsTabChange} onOpenChange={handleSettingsOpenChange} />
+      <SettingsModal
+        isOpen={settingsOpen}
+        selectedTab={settingsTab}
+        onTabChange={handleSettingsTabChange}
+        onOpenChange={handleSettingsOpenChange}
+        fetchImpl={csrfFetch}
+      />
       <RunDetailDrawer
         isOpen={!!activeRunId}
         onOpenChange={(open) => { if (!open) setActiveRunId(undefined); }}

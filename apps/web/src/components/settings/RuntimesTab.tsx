@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Button, Card, Chip, Input, Label, Spinner, TextField } from "@heroui/react";
 import type { ChipColor } from "../../lib/status.ts";
 
-type RuntimeStatus = "connected" | "missing" | "error";
+type RuntimeStatus = "connected" | "ready" | "error";
 
 export interface RuntimeConfig {
   id: string;
@@ -356,16 +356,16 @@ export function normalizeRuntime(value: unknown): RuntimeConfig {
 function runtimeStatus(runtime: RuntimeConfig, result: RuntimeTestResult | undefined): RuntimeStatus {
   if (result?.ok) return "connected";
   if (result && !result.ok) return "error";
-  if (runtime.status === "connected" || runtime.status === "error" || runtime.status === "missing") return runtime.status;
+  if (runtime.status === "connected" || runtime.status === "error") return runtime.status;
   if (runtime.kind === "native" || runtime.detectedPath || runtime.detectedVersion) return "connected";
-  return "missing";
+  return "ready";
 }
 
 function runtimeStatusColor(status: RuntimeStatus): ChipColor {
   switch (status) {
     case "connected": return "success";
     case "error": return "danger";
-    case "missing":
+    case "ready":
     default: return "warning";
   }
 }
@@ -373,7 +373,7 @@ function runtimeStatusColor(status: RuntimeStatus): ChipColor {
 function runtimeStatusLabel(status: RuntimeStatus, version: string, result: RuntimeTestResult | undefined): string {
   if (status === "connected") return `Connected (v${result?.version ?? version})`;
   if (status === "error") return result?.error ?? "Detection failed";
-  return "Missing";
+  return "Ready to test";
 }
 
 function draftFromRuntime(runtime: RuntimeConfig): RuntimeDraft {

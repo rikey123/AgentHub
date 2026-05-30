@@ -1,5 +1,7 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { ROOM_MODE_OPTIONS, buildCreateRoomInput } from "./NewRoomDialog.tsx";
+import { ROOM_MODE_OPTIONS, RoleSelect, buildCreateRoomInput } from "./NewRoomDialog.tsx";
 
 describe("NewRoomDialog create-room contract", () => {
   it("offers all V1.0 room modes", () => {
@@ -9,6 +11,23 @@ describe("NewRoomDialog create-room contract", () => {
       "squad",
       "team"
     ]);
+  });
+
+  it("renders V1 role selection with HeroUI Select instead of a native select", () => {
+    const html = renderToStaticMarkup(createElement(RoleSelect, {
+      label: "Leader Role",
+      value: "role_lead",
+      roles: [
+        { id: "role_lead", name: "Lead", description: "Coordinates work", prompt: "", capabilities: ["task.delegate"], is_builtin: true },
+        { id: "role_review", name: "Reviewer", description: "Reviews work", prompt: "", capabilities: ["code.review"], is_builtin: true }
+      ],
+      onChange: () => undefined,
+      testId: "new-room-leader-role"
+    }));
+
+    expect(html).toContain("Leader Role");
+    expect(html).toContain("select__trigger");
+    expect(html).toContain("hidden-select-container");
   });
 
   it("builds a team payload with a leader role and role/runtime/model participants", () => {

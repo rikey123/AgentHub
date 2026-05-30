@@ -53,5 +53,6 @@ export function useCsrfFetch(): typeof fetch {
 
 function isAuthSessionRequest(input: RequestInfo | URL): boolean {
   const url = typeof input === "string" || input instanceof URL ? String(input) : input.url;
-  return new URL(url, window.location.href).pathname === "/auth/session";
+  const baseUrl = typeof window === "undefined" ? "http://agenthub.local" : window.location.href;
+  return new URL(url, baseUrl).pathname === "/auth/session";
 }

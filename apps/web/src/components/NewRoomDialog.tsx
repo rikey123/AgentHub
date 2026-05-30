@@ -6,10 +6,12 @@ import {
   Chip,
   Input,
   Label,
+  ListBox,
   Modal,
   Radio,
   RadioGroup,
   ScrollShadow,
+  Select,
   TextField
 } from "@heroui/react";
 import { useAgents, type AgentSummary } from "../hooks/useAgents.ts";
@@ -50,6 +52,14 @@ export const ROOM_MODE_OPTIONS: ReadonlyArray<{ value: RoomMode; title: string; 
 
 export type BuildV1ParticipantInput = V1RoomParticipant & {
   runtimeKind: string;
+};
+
+type SelectOption = {
+  id: string;
+  title: string;
+  description?: string | undefined;
+  badge?: string | undefined;
+  tone?: "default" | "accent" | "success" | "warning" | "danger" | undefined;
 };
 
 export function buildCreateRoomInput(input: {
@@ -136,6 +146,148 @@ function roleForAgent(agent: AgentSummary | undefined): RoomParticipantRole {
   if (agent?.capabilities.includes("code.review")) return "reviewer";
   if (agent?.capabilities.includes("task.delegate")) return "specialist";
   return "observer";
+}
+
+function selectValue(key: unknown): string {
+  if (key instanceof Set) return String(Array.from(key)[0] ?? "");
+  return String(key ?? "");
+}
+
+function selectLabel(options: readonly SelectOption[], value: string, placeholder: string): string {
+  return options.find((option) => option.id === value)?.title ?? placeholder;
+}
+
+function roleTone(capabilities: readonly string[]): SelectOption["tone"] {
+  if (capabilities.includes("task.delegate")) return "accent";
+  if (capabilities.includes("code.review")) return "warning";
+  if (capabilities.includes("code.edit")) return "success";
+  return "default";
+}
+
+function roleBadge(capabilities: readonly string[]): string {
+  if (capabilities.includes("task.delegate")) return "delegate";
+  if (capabilities.includes("code.review")) return "review";
+  if (capabilities.includes("code.edit")) return "builder";
+  return "role";
+}
+
+function roleOptions(roles: readonly { id: string; name: string; description?: string; capabilities: string[] }[]): SelectOption[] {
+  return roles.map((role) => ({
+    id: role.id,
+    title: role.name,
+    description: role.description,
+    badge: roleBadge(role.capabilities),
+    tone: roleTone(role.capabilities)
+  }));
+}
+
+function runtimeOptions(runtimes: readonly { id: string; name: string; kind: string; detectedVersion?: string | null; version?: string | null }[]): SelectOption[] {
+  return runtimes.map((runtime) => ({
+    id: runtime.id,
+    title: runtime.name,
+    description: runtime.detectedVersion ?? runtime.version ?? runtime.kind,
+    badge: runtime.kind,
+    tone: runtime.kind === "native" ? "success" : runtime.kind === "claude-code" ? "accent" : runtime.kind === "opencode" ? "warning" : "default"
+  }));
+}
+
+function modelOptions(modelConfigs: readonly { id: string; name: string; provider: string; model: string }[], placeholder: string): SelectOption[] {
+  return [
+    { id: "", title: placeholder, description: "Leave unset when this runtime does not require a model.", badge: "optional", tone: "default" },
+    ...modelConfigs.map((config) => ({
+      id: config.id,
+      title: config.name,
+      description: config.model,
+      badge: config.provider,
+      tone: config.provider === "openai" ? "accent" as const : config.provider === "anthropic" ? "warning" as const : config.provider === "ollama" ? "success" as const : "default" as const
+    }))
+  ];
+}
+
+const presenceOptions: SelectOption[] = [
+  { id: "active", title: "Active", description: "Starts ready to respond.", badge: "live", tone: "success" },
+  { id: "observing", title: "Observing", description: "Joins quietly and waits for delegation.", badge: "quiet", tone: "default" }
+];
+
+function StyledSelect({
+  label,
+  value,
+  options,
+  placeholder,
+  onChange,
+  testId,
+  isDisabled = false
+}: {
+  label: string;
+  value: string;
+  options: readonly SelectOption[];
+  placeholder: string;
+  onChange: (value: string) => void;
+  testId?: string | undefined;
+  isDisabled?: boolean | undefined;
+}) {
+  return (
+    <Select
+      aria-label={label}
+      className="w-full"
+      fullWidth
+      selectedKey={value}
+      isDisabled={isDisabled}
+      placeholder={placeholder}
+      variant="secondary"
+      onSelectionChange={(key: unknown) => onChange(selectValue(key))}
+    >
+      <Label className="text-xs font-semibold uppercase text-muted">{label}</Label>
+      <Select.Trigger className="min-h-12 bg-field-background" data-testid={testId}>
+        <Select.Value>
+          <span className="truncate font-semibold">{selectLabel(options, value, placeholder)}</span>
+        </Select.Value>
+        <Select.Indicator />
+      </Select.Trigger>
+      <Select.Popover className="max-h-72">
+        <ListBox aria-label={label}>
+          {options.map((option) => (
+            <ListBox.Item key={option.id || "__empty"} id={option.id} textValue={option.title}>
+              <div className="flex min-w-0 items-center gap-2 py-1">
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-semibold">{option.title}</div>
+                  {option.description ? <div className="truncate text-xs text-muted">{option.description}</div> : null}
+                </div>
+                {option.badge ? <Chip size="sm" variant="soft" color={option.tone ?? "default"}>{option.badge}</Chip> : null}
+                <ListBox.ItemIndicator />
+              </div>
+            </ListBox.Item>
+          ))}
+        </ListBox>
+      </Select.Popover>
+    </Select>
+  );
+}
+
+export function RoleSelect({
+  label,
+  value,
+  roles,
+  onChange,
+  testId
+}: {
+  label: string;
+  value: string;
+  roles: readonly { id: string; name: string; description?: string; prompt?: string; capabilities: string[]; is_builtin?: boolean }[];
+  onChange: (value: string) => void;
+  testId?: string;
+}) {
+  return (
+    <StyledSelect
+      label={label}
+      value={value}
+      options={roleOptions(roles)}
+      placeholder="Choose role"
+      onChange={onChange}
+      testId={testId}
+      isDisabled={roles.length === 0}
+    />
+  );
 }
 
 type V1ParticipantDraft = {
@@ -307,7 +459,7 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
   return (
     <Modal.Backdrop isOpen={isOpen} onOpenChange={onOpenChange}>
       <Modal.Container size="full" className="items-center justify-center p-4">
-        <Modal.Dialog className="max-h-[92vh] w-[min(96vw,1180px)] max-w-[1180px] overflow-hidden">
+        <Modal.Dialog className="flex h-[min(94vh,920px)] w-[min(96vw,1180px)] max-w-[1180px] overflow-hidden p-0">
           <Modal.CloseTrigger />
           <Modal.Header className="border-b border-border bg-[linear-gradient(135deg,var(--surface),var(--surface-secondary))] px-6 py-4">
             <div className="flex items-center gap-4">
@@ -323,9 +475,9 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
             </div>
           </Modal.Header>
 
-          <Modal.Body className="max-h-[70vh] gap-0 overflow-hidden p-0">
-            <ScrollShadow className="overflow-auto" orientation="vertical">
-              <div className="grid gap-4 p-5">
+          <Modal.Body className="min-h-0 flex-1 gap-0 overflow-hidden p-0">
+            <ScrollShadow className="h-full min-h-0 overflow-auto pb-8" orientation="vertical">
+              <div className="grid gap-4 p-5 pb-8">
                 <section className="rounded-2xl border border-border bg-overlay p-4 shadow-sm">
                   <div className="grid gap-4">
                     <TextField value={title} onChange={setTitle}>
@@ -424,18 +576,13 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
                     {optionsError ? <p className="mb-2 text-xs text-danger">{optionsError}</p> : null}
                     {optionsLoading ? <p className="mb-2 text-xs text-muted">Loading roles, runtimes, and models...</p> : null}
 
-                    <label className="grid gap-1 text-sm font-semibold">
-                      Leader Role
-                      <select
-                        className="rounded-xl border border-field-border bg-field-background px-3 py-2 text-sm text-foreground"
-                        value={leaderRoleId}
-                        onChange={(event) => setLeaderRoleId(event.currentTarget.value)}
-                        data-testid="new-room-leader-role"
-                      >
-                        <option value="" disabled>Choose leader role</option>
-                        {roles.map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}
-                      </select>
-                    </label>
+                    <RoleSelect
+                      label="Leader Role"
+                      value={leaderRoleId}
+                      roles={roles}
+                      onChange={setLeaderRoleId}
+                      testId="new-room-leader-role"
+                    />
 
                     <div className="mt-4 grid gap-3">
                       <div className="flex items-center justify-between gap-3">
@@ -453,56 +600,40 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate }: NewRoomDialogP
                         const runtime = runtimes.find((candidate) => candidate.id === participant.runtimeId);
                         const needsModel = runtime?.kind === "native";
                         return (
-                          <div key={participant.id} className="grid gap-3 rounded-xl border border-border bg-surface p-3 lg:grid-cols-[1fr_1fr_1fr_auto]">
-                            <label className="grid gap-1 text-xs font-semibold uppercase text-muted">
-                              Role
-                              <select
-                                className="rounded-xl border border-field-border bg-field-background px-3 py-2 text-sm normal-case text-foreground"
-                                value={participant.roleId}
-                                onChange={(event) => updateV1Participant(participant.id, { roleId: event.currentTarget.value })}
-                                data-testid={`new-room-participant-role-${index}`}
-                              >
-                                {roles.map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}
-                              </select>
-                            </label>
-                            <label className="grid gap-1 text-xs font-semibold uppercase text-muted">
-                              Runtime
-                              <select
-                                className="rounded-xl border border-field-border bg-field-background px-3 py-2 text-sm normal-case text-foreground"
-                                value={participant.runtimeId}
-                                onChange={(event) => updateV1Participant(participant.id, { runtimeId: event.currentTarget.value })}
-                                data-testid={`new-room-participant-runtime-${index}`}
-                              >
-                                {runtimes.map((runtimeOption) => (
-                                  <option key={runtimeOption.id} value={runtimeOption.id}>{runtimeOption.name} ({runtimeOption.kind})</option>
-                                ))}
-                              </select>
-                            </label>
-                            <label className="grid gap-1 text-xs font-semibold uppercase text-muted">
-                              Model
-                              <select
-                                className="rounded-xl border border-field-border bg-field-background px-3 py-2 text-sm normal-case text-foreground disabled:opacity-60"
-                                value={participant.modelConfigId}
-                                onChange={(event) => updateV1Participant(participant.id, { modelConfigId: event.currentTarget.value })}
-                                disabled={!needsModel && modelConfigs.length === 0}
-                                data-testid={`new-room-participant-model-${index}`}
-                              >
-                                <option value="">{needsModel ? "Choose model" : "No model override"}</option>
-                                {modelConfigs.map((config) => <option key={config.id} value={config.id}>{config.name} ({config.model})</option>)}
-                              </select>
-                            </label>
-                            <div className="flex items-end justify-between gap-2">
-                              <label className="grid flex-1 gap-1 text-xs font-semibold uppercase text-muted">
-                                Presence
-                                <select
-                                  className="rounded-xl border border-field-border bg-field-background px-3 py-2 text-sm normal-case text-foreground"
-                                  value={participant.defaultPresence}
-                                  onChange={(event) => updateV1Participant(participant.id, { defaultPresence: event.currentTarget.value as RoomPresence })}
-                                >
-                                  <option value="active">Active</option>
-                                  <option value="observing">Observing</option>
-                                </select>
-                              </label>
+                          <div key={participant.id} className="grid gap-3 rounded-xl border border-border bg-surface p-3 lg:grid-cols-[minmax(180px,1fr)_minmax(190px,1fr)_minmax(190px,1fr)_minmax(170px,0.8fr)_auto]">
+                            <RoleSelect
+                              label="Role"
+                              value={participant.roleId}
+                              roles={roles}
+                              onChange={(value) => updateV1Participant(participant.id, { roleId: value })}
+                              testId={`new-room-participant-role-${index}`}
+                            />
+                            <StyledSelect
+                              label="Runtime"
+                              value={participant.runtimeId}
+                              options={runtimeOptions(runtimes)}
+                              placeholder="Choose runtime"
+                              onChange={(value) => updateV1Participant(participant.id, { runtimeId: value })}
+                              testId={`new-room-participant-runtime-${index}`}
+                              isDisabled={runtimes.length === 0}
+                            />
+                            <StyledSelect
+                              label="Model"
+                              value={participant.modelConfigId}
+                              options={modelOptions(modelConfigs, needsModel ? "Choose model" : "No model override")}
+                              placeholder={needsModel ? "Choose model" : "No model override"}
+                              onChange={(value) => updateV1Participant(participant.id, { modelConfigId: value })}
+                              testId={`new-room-participant-model-${index}`}
+                              isDisabled={!needsModel && modelConfigs.length === 0}
+                            />
+                            <StyledSelect
+                              label="Presence"
+                              value={participant.defaultPresence}
+                              options={presenceOptions}
+                              placeholder="Choose presence"
+                              onChange={(value) => updateV1Participant(participant.id, { defaultPresence: value as RoomPresence })}
+                            />
+                            <div className="flex items-end justify-end gap-2">
                               <Button size="sm" variant="tertiary" onPress={() => removeV1Participant(participant.id)} isDisabled={v1Participants.length === 1}>
                                 Remove
                               </Button>

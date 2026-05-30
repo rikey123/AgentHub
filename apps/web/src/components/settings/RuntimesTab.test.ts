@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import {
+  RuntimesTab,
   deleteRuntimeConfig,
   normalizeRuntimeList,
   persistCustomRuntime,
@@ -112,6 +115,24 @@ describe("RuntimesTab REST integration contract", () => {
 
     await expect(deleteRuntimeConfig(fetchImpl, "custom-acp-bound")).rejects.toThrow("Runtime is still used by agent bindings");
     expect(fetchImpl).toHaveBeenCalledWith("/runtimes/custom-acp-bound", expect.objectContaining({ method: "DELETE" }));
+  });
+
+  it("shows seeded runtimes as ready to test instead of missing before connection test fails", () => {
+    const html = renderToStaticMarkup(createElement(RuntimesTab, {
+      data: [
+        customRuntime({
+          id: "custom-acp-seeded",
+          name: "Claude Code",
+          command: "claude",
+          kind: "custom-acp",
+          status: "missing"
+        })
+      ],
+      fetchImpl: vi.fn<typeof fetch>()
+    }));
+
+    expect(html).toContain("Ready to test");
+    expect(html).not.toContain(">Missing<");
   });
 });
 

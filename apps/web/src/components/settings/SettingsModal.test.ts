@@ -39,6 +39,17 @@ describe("SettingsModal integration contract", () => {
     expect(onSelect).not.toHaveBeenCalledWith("settings");
   });
 
+  it("labels the product rail as V1.0", () => {
+    const html = renderToStaticMarkup(createElement(FeatureRail, {
+      active: "chat",
+      onSelect: vi.fn(),
+      onOpenSettings: vi.fn()
+    }));
+
+    expect(html).toContain("v1.0");
+    expect(html).not.toContain("v0.5");
+  });
+
   it("bootstraps settings with six parallel REST requests including permission rules, then workspace metadata, and no EventSource", async () => {
     const previousEventSource = globalThis.EventSource;
     const eventSourceSpy = vi.fn();

@@ -63,7 +63,7 @@ export function FeatureRail({ active, onSelect, onOpenSettings }: FeatureRailPro
       </div>
 
       <div className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-overlay text-[10px] font-semibold text-muted shadow-sm">
-        v0.5
+        v1.0
       </div>
     </nav>
   );

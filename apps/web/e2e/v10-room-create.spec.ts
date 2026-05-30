@@ -42,13 +42,15 @@ test.describe("V1.0 room creation", () => {
     await page.getByLabel("Title").fill("Team E2E Room");
     await page.getByText("Team", { exact: true }).click();
     await expect(page.locator('[data-testid="new-room-leader-role"]')).toBeVisible();
-    await page.locator('[data-testid="new-room-leader-role"]').selectOption("role_e2e_leader");
-    await page.locator('[data-testid="new-room-participant-role-0"]').selectOption("role_e2e_leader");
-    await page.locator('[data-testid="new-room-participant-runtime-0"]').selectOption("native-default");
-    await page.locator('[data-testid="new-room-participant-model-0"]').selectOption("mc_e2e_native");
+    await chooseHeroSelect(page, "new-room-leader-role", "Leader E2E");
+    await chooseHeroSelect(page, "new-room-participant-role-0", "Leader E2E");
+    await chooseHeroSelect(page, "new-room-participant-runtime-0", "AgentHub Native");
+    await chooseHeroSelect(page, "new-room-participant-model-0", "Local E2E Model");
     await page.getByRole("button", { name: "Add participant" }).click();
-    await page.locator('[data-testid="new-room-participant-role-1"]').selectOption("role_e2e_reviewer");
-    await page.locator('[data-testid="new-room-participant-runtime-1"]').selectOption("runtime_e2e_claude");
+    await expect(page.locator('[data-testid="new-room-participant-role-1"]')).toBeVisible();
+    await expect(page.getByRole("button", { name: "Create room" })).toBeVisible();
+    await chooseHeroSelect(page, "new-room-participant-role-1", "Reviewer E2E");
+    await chooseHeroSelect(page, "new-room-participant-runtime-1", "Claude E2E ACP");
     await page.getByRole("button", { name: "Create room" }).click();
 
     await expect(page.getByRole("textbox", { name: "Message" })).toBeEnabled();
@@ -74,6 +76,11 @@ test.describe("V1.0 room creation", () => {
     ]);
   });
 });
+
+async function chooseHeroSelect(page: import("@playwright/test").Page, testId: string, optionName: string): Promise<void> {
+  await page.locator(`[data-testid="${testId}"]`).click();
+  await page.getByRole("option", { name: optionName }).click();
+}
 
 function seedTeamCreationOptions(daemon: DaemonApp): void {
   const now = Date.now();

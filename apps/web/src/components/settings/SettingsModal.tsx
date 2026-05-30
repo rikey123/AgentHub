@@ -138,7 +138,7 @@ export function SettingsModal({ isOpen, selectedTab, onTabChange, onOpenChange, 
   return (
     <Modal.Backdrop isOpen={isOpen} onOpenChange={onOpenChange}>
       <Modal.Container size="full" className="items-center justify-center p-4">
-        <Modal.Dialog className="max-h-[92vh] w-[min(96vw,1120px)] max-w-[1120px] overflow-hidden" aria-label="Settings">
+        <Modal.Dialog className="flex h-[min(92vh,900px)] w-[min(96vw,1120px)] max-w-[1120px] overflow-hidden p-0" aria-label="Settings">
           <Modal.CloseTrigger />
           <Modal.Header className="border-b border-border bg-[linear-gradient(135deg,var(--surface),var(--surface-secondary))] px-6 py-4">
             <div className="flex items-center gap-4">
@@ -157,8 +157,8 @@ export function SettingsModal({ isOpen, selectedTab, onTabChange, onOpenChange, 
             </div>
           </Modal.Header>
 
-          <Modal.Body className="max-h-[72vh] gap-0 overflow-hidden p-0">
-            <Tabs selectedKey={selectedTab} onSelectionChange={(key) => onTabChange(String(key) as SettingsTabId)} className="flex min-h-0 flex-1 flex-col">
+          <Modal.Body className="min-h-0 flex-1 gap-0 overflow-hidden p-0">
+            <Tabs selectedKey={selectedTab} onSelectionChange={(key) => onTabChange(String(key) as SettingsTabId)} className="flex h-full min-h-0 flex-1 flex-col">
               <Tabs.ListContainer>
                 <Tabs.List aria-label="Settings sections" data-testid="settings-tabs">
                   {SETTINGS_TABS.map((tab, index) => (
@@ -176,7 +176,7 @@ export function SettingsModal({ isOpen, selectedTab, onTabChange, onOpenChange, 
                 </Tabs.List>
               </Tabs.ListContainer>
 
-              <ScrollShadow className="flex-1 overflow-auto" orientation="vertical">
+              <ScrollShadow className="min-h-0 flex-1 overflow-auto pb-8" orientation="vertical">
                 {SETTINGS_TABS.map((tab) => (
                   <Tabs.Panel key={tab.id} id={tab.id}>
                     <SettingsPanel
