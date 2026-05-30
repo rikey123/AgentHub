@@ -36,6 +36,45 @@ describe("AgentHubClient", () => {
     expect("injectContext" in client).toBe(false);
   });
 
+  it("sends V1.0 team room creation fields without dropping role bindings", async () => {
+    const calls: Array<{ readonly url: string; readonly body: unknown }> = [];
+    const client = new AgentHubClient({
+      baseUrl: "http://daemon",
+      fetchImpl: (async (url, init) => {
+        calls.push({
+          url: String(url),
+          body: init?.body === undefined ? undefined : JSON.parse(String(init.body)) as unknown
+        });
+        return new Response(JSON.stringify({ data: { roomId: "room_team" } }), { status: 201 });
+      }) as typeof fetch
+    });
+
+    await client.createRoom({
+      title: "Team room",
+      mode: "team",
+      primaryAgentId: "binding_leader",
+      leaderRoleId: "role_leader",
+      participants: [
+        { roleId: "role_leader", runtimeId: "native-default", modelConfigId: "mc_1", defaultPresence: "active" },
+        { roleId: "role_reviewer", runtimeId: "claude-code-default", defaultPresence: "active" }
+      ]
+    });
+
+    expect(calls).toEqual([{
+      url: "http://daemon/rooms",
+      body: {
+        title: "Team room",
+        mode: "team",
+        primaryAgentId: "binding_leader",
+        leaderRoleId: "role_leader",
+        participants: [
+          { roleId: "role_leader", runtimeId: "native-default", modelConfigId: "mc_1", defaultPresence: "active" },
+          { roleId: "role_reviewer", runtimeId: "claude-code-default", defaultPresence: "active" }
+        ]
+      }
+    }]);
+  });
+
   it("builds intervention and debug API requests", async () => {
     const calls: string[] = [];
     const client = new AgentHubClient({

@@ -15,6 +15,7 @@ import { createPermissionCommandHandlers, PermissionEngine, seedBuiltInPermissio
 import type { EventEnvelope } from "@agenthub/protocol/events";
 import { attachmentMaxBytes, authenticateBrowserRequest, createKeychain, createKeychainAccount, issueBrowserSession, redactAndTruncate, storeAttachment, type BrowserAuthResult, type KeychainBridge } from "@agenthub/security";
 import { Effect } from "effect";
+import { generateRoleDraftWithModelConfig, type ModelConfigRow, type RoleDraft, type RoleDraftGenerationInput } from "@agenthub/native-agent-runtime";
 
 import { AdapterRegistry } from "./adapters/registry.ts";
 import { defaultBuiltinRolesDir, seedBuiltinRoles } from "./builtin-roles.ts";
@@ -35,7 +36,8 @@ export type DaemonStartupPhase =
   | "AdapterManager detect + register"
   | "CommandBus open"
   | "HTTP server bind + SSE accept";
-export type DaemonOptions = { readonly databasePath: string; readonly host?: string; readonly port?: number; readonly token?: string; readonly allowRemote?: boolean; readonly allowedOrigins?: readonly string[]; readonly adapterCommands?: { readonly claude?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv }; readonly opencode?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv } }; readonly now?: () => number; readonly modelTestFetch?: typeof fetch; readonly onLifecyclePhase?: (event: { readonly direction: "startup" | "shutdown"; readonly phase: DaemonStartupPhase }) => void };
+export type RoleDraftGenerator = (input: RoleDraftGenerationInput) => Promise<RoleDraft>;
+export type DaemonOptions = { readonly databasePath: string; readonly host?: string; readonly port?: number; readonly token?: string; readonly allowRemote?: boolean; readonly allowedOrigins?: readonly string[]; readonly adapterCommands?: { readonly claude?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv }; readonly opencode?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv } }; readonly now?: () => number; readonly modelTestFetch?: typeof fetch; readonly roleDraftGenerator?: RoleDraftGenerator; readonly onLifecyclePhase?: (event: { readonly direction: "startup" | "shutdown"; readonly phase: DaemonStartupPhase }) => void };
 export type DaemonCloseOptions = { readonly forceCancelAfterMs?: number };
 export type DaemonCloseResult = { readonly forced: boolean; readonly cancelledRunIds: readonly string[] };
 export type DaemonApp = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly lifecycle: RunLifecycleService; readonly roomMcpServer: RoomMcpServer; readonly adapterRegistry: AdapterRegistry; readonly mockAdapter: MockAdapterManager; readonly handle: (req: IncomingMessage, res: ServerResponse) => void; readonly inFlightRunIds: () => readonly string[]; start(): Promise<Server>; close(options?: DaemonCloseOptions): Promise<DaemonCloseResult> };
@@ -113,7 +115,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     if (stopping) return json(res, 503, { error: "service_stopping" });
     if (!ready) return json(res, 503, { error: "service_starting", retryAfterMs: 500 });
     const app = requireRuntime();
-    void route({ req, res, database: app.database, eventBus: app.eventBus, commandBus: app.commandBus, artifactService: app.artifactService, taskService: app.taskService, outbox: app.outbox, modelConfigSecrets, settingsJobs, modelTestFetch: options.modelTestFetch ?? globalThis.fetch.bind(globalThis), registerSseClient: (client) => { sseClients.add(client); return () => sseClients.delete(client); }, ...(options.token !== undefined ? { token: options.token } : {}), ...(options.allowedOrigins !== undefined ? { allowedOrigins: options.allowedOrigins } : {}), host: `${options.host ?? "127.0.0.1"}:${options.port ?? 6677}`, ...(options.now !== undefined ? { now: options.now } : {}) });
+    void route({ req, res, database: app.database, eventBus: app.eventBus, commandBus: app.commandBus, artifactService: app.artifactService, taskService: app.taskService, outbox: app.outbox, modelConfigSecrets, settingsJobs, modelTestFetch: options.modelTestFetch ?? globalThis.fetch.bind(globalThis), roleDraftGenerator: options.roleDraftGenerator ?? generateRoleDraftWithModelConfig, registerSseClient: (client) => { sseClients.add(client); return () => sseClients.delete(client); }, ...(options.token !== undefined ? { token: options.token } : {}), ...(options.allowedOrigins !== undefined ? { allowedOrigins: options.allowedOrigins } : {}), host: `${options.host ?? "127.0.0.1"}:${options.port ?? 6677}`, ...(options.now !== undefined ? { now: options.now } : {}) });
   };
 
   const start = async (): Promise<Server> => {
@@ -455,7 +457,7 @@ function withStatusLineCoalescing(eventBus: EventBus): StatusLineEventBus {
   return wrapped;
 }
 
-type RouteContext = { readonly req: IncomingMessage; readonly res: ServerResponse; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly artifactService: ArtifactService; readonly taskService: TaskService; readonly outbox: { drainPending(): Promise<void> }; readonly modelConfigSecrets: KeychainBridge; readonly settingsJobs: Map<string, SettingsJobRecord>; readonly modelTestFetch: typeof fetch; readonly registerSseClient: (client: SseClient) => () => void; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly host: string; readonly now?: () => number };
+type RouteContext = { readonly req: IncomingMessage; readonly res: ServerResponse; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly artifactService: ArtifactService; readonly taskService: TaskService; readonly outbox: { drainPending(): Promise<void> }; readonly modelConfigSecrets: KeychainBridge; readonly settingsJobs: Map<string, SettingsJobRecord>; readonly modelTestFetch: typeof fetch; readonly roleDraftGenerator: RoleDraftGenerator; readonly registerSseClient: (client: SseClient) => () => void; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly host: string; readonly now?: () => number };
 
 async function route(ctx: RouteContext): Promise<void> {
   const url = new URL(ctx.req.url ?? "/", "http://127.0.0.1");
@@ -1214,8 +1216,6 @@ function createRoleGenerationJob(ctx: RouteContext, input: Record<string, unknow
   const preferredTone = stringField(input["preferredTone"]);
   const capabilities = Array.isArray(input["capabilities"]) ? JSON.stringify(input["capabilities"].filter((value): value is string => typeof value === "string")) : null;
   if (description === undefined || modelConfigId === undefined) return json(ctx.res, 400, { error: "validation_failed", message: "description and modelConfigId are required" });
-  const modelConfig = get(ctx.database, "SELECT * FROM model_configs WHERE id = ?", modelConfigId) as Record<string, unknown> | null;
-  if (modelConfig === null) return json(ctx.res, 404, { error: "model_config_not_found" });
   const createdAt = now;
   const expiresAt = createdAt + 7 * 24 * 60 * 60 * 1000;
   ctx.database.sqlite.transaction(() => {
@@ -1254,14 +1254,14 @@ async function runRoleGenerationJob(ctx: RouteContext, jobId: string, modelConfi
     if (current === null) return;
     const modelConfig = get(ctx.database, "SELECT * FROM model_configs WHERE id = ?", modelConfigId) as Record<string, unknown> | null;
     if (modelConfig === null) throw new Error("model_config_not_found");
-    const draftJson = buildRoleDraft(current, modelConfig);
+    const draftJson = await buildRoleDraft(ctx, current, modelConfig);
     const completedAt = ctx.now?.() ?? Date.now();
     ctx.database.sqlite.transaction(() => {
       ctx.database.sqlite.prepare("UPDATE role_drafts SET draft_json = ?, status = ?, failure_reason = NULL, updated_at = ? WHERE job_id = ?").run(JSON.stringify(draftJson), "completed", completedAt, jobId);
     })();
   } catch (error) {
     const failedAt = ctx.now?.() ?? Date.now();
-    const failureReason = error instanceof Error ? error.message : "role_generation_failed";
+    const failureReason = roleGenerationFailureReason(error);
     finalizeFailedRoleGenerationJob(ctx, jobId, failureReason, failedAt);
   }
 }
@@ -1275,21 +1275,35 @@ export function finalizeFailedRoleGenerationJob(ctx: RouteContext, jobId: string
   })();
 }
 
-function buildRoleDraft(row: Record<string, unknown>, modelConfig: Record<string, unknown>): { readonly name: string; readonly description: string; readonly prompt: string; readonly capabilities: readonly string[]; readonly suggestedPermissionProfileId: string | null } {
+async function buildRoleDraft(ctx: RouteContext, row: Record<string, unknown>, modelConfig: Record<string, unknown>): Promise<RoleDraft> {
   const description = stringField(row.description) ?? "AI generated role";
-  const preferredTone = stringField(row.preferred_tone) ?? "concise";
-  const targetWork = stringField(row.target_work) ?? "coding";
+  const preferredTone = stringOrNull(row.preferred_tone);
+  const targetWork = stringOrNull(row.target_work);
   const capabilities = parseJsonField(row.capabilities, []) as unknown[];
   const normalizedCapabilities = capabilities.filter((value): value is string => typeof value === "string");
-  const modelName = stringField(modelConfig.name) ?? "model";
   const provider = stringField(modelConfig.provider) ?? "openai";
-  return {
-    name: `${targetWork === "code-review" ? "Reviewer" : targetWork === "planning" ? "Planner" : targetWork === "archiving" ? "Archivist" : "Builder"} Assistant`,
-    description,
-    prompt: `You are a ${preferredTone} role focused on ${description}. Use the ${provider}/${modelName} config to support ${targetWork}.`,
-    capabilities: normalizedCapabilities.length > 0 ? normalizedCapabilities : ["chat"],
-    suggestedPermissionProfileId: null
-  };
+  const apiKey = provider === "ollama" ? null : await resolveModelConfigApiKey(ctx, modelConfig);
+  return ctx.roleDraftGenerator({
+    modelConfig: modelConfigForGeneration(modelConfig),
+    ...(apiKey !== null ? { apiKey } : {}),
+    request: {
+      description,
+      targetWork,
+      preferredTone,
+      capabilities: normalizedCapabilities
+    }
+  });
+}
+
+function roleGenerationFailureReason(error: unknown): string {
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  if (message === "model_config_not_found") return "model_config_not_found";
+  if (message === "json_parse_failure") return "json_parse_failure";
+  if (message === "invalid_api_key") return "invalid_api_key";
+  const normalized = message.toLowerCase();
+  if (normalized.includes("json") && (normalized.includes("parse") || normalized.includes("malformed") || normalized.includes("invalid"))) return "json_parse_failure";
+  if (normalized.includes("api key") || normalized.includes("unauthorized") || normalized.includes("401")) return "invalid_api_key";
+  return message.trim().length > 0 ? message : "role_generation_failed";
 }
 
 function roleGenerationJobResponse(row: Record<string, unknown>): Record<string, unknown> {
@@ -1309,6 +1323,16 @@ function roleGenerationJobResponse(row: Record<string, unknown>): Record<string,
   };
   if (status === "pending" || status === "streaming" || status === "completed") response.draftJson = parseJsonField(row.draft_json, null);
   return response;
+}
+
+function modelConfigForGeneration(row: Record<string, unknown>): ModelConfigRow {
+  return {
+    id: stringField(row.id) ?? "",
+    provider: stringField(row.provider) ?? "openai",
+    model: stringField(row.model) ?? "",
+    base_url: stringOrNull(row.base_url),
+    api_key_ref: stringOrNull(row.api_key_ref)
+  };
 }
 
 function updateRole(ctx: RouteContext, roleId: string, input: Record<string, unknown>): void {

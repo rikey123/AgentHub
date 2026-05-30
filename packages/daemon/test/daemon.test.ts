@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AdapterRegistry } from "../src/adapters/registry.ts";
 import { seedBuiltinRoles } from "../src/builtin-roles.ts";
 import { migrateAgentProfilesToV10 } from "../src/migrations/0014_data.ts";
-import { createDaemon, finalizeFailedRoleGenerationJob, loadAgentHubConfig, type DaemonApp, type DaemonStartupPhase } from "../src/index.ts";
+import { createDaemon, finalizeFailedRoleGenerationJob, loadAgentHubConfig, type DaemonApp, type DaemonStartupPhase, type RoleDraftGenerator } from "../src/index.ts";
 import { checkTaskTimeouts } from "@agenthub/orchestrator";
 import { cleanExpiredRoleDrafts, startRoleDraftGC } from "../src/role-draft-gc.ts";
 import { CodexAdapterStub } from "../../adapters/codex/src/index.ts";
@@ -29,7 +29,7 @@ vi.mock("../../native-agent-runtime/src/provider-registry.ts", () => ({
   resolveProvider: resolveProviderMock
 }));
 
-vi.mock("C:/project/AgentHub/packages/native-agent-runtime/src/native-agent-adapter.ts", () => ({
+vi.mock("../../native-agent-runtime/src/native-agent-adapter.ts", () => ({
   NativeAgentAdapter: class {
     readonly options: { readonly permissions?: { readonly check?: (input: { readonly workspaceId: string; readonly roomId?: string; readonly agentId?: string; readonly runId: string; readonly resource: { readonly type: string; readonly provider: string } }) => { readonly status: "allow" | "deny" | "expire" } } };
 
@@ -55,9 +55,9 @@ vi.mock("C:/project/AgentHub/packages/native-agent-runtime/src/native-agent-adap
 
 let currentDaemon: DaemonApp | undefined;
 type TestKeychain = {
-  readonly set: ReturnType<typeof vi.fn>;
-  readonly get: ReturnType<typeof vi.fn>;
-  readonly delete: ReturnType<typeof vi.fn>;
+  readonly set: ReturnType<typeof vi.fn<(account: string, secret: string) => Promise<void>>>;
+  readonly get: ReturnType<typeof vi.fn<(account: string) => Promise<string | null>>>;
+  readonly delete: ReturnType<typeof vi.fn<(account: string) => Promise<boolean>>>;
 };
 let currentModelConfigKeychain: TestKeychain | undefined;
 type TestFetch = typeof fetch & ReturnType<typeof vi.fn>;
@@ -69,11 +69,11 @@ vi.mock("@agenthub/security", async (importOriginal) => {
     createKeychain: () => {
       const secrets = new Map<string, string>();
       const bridge: TestKeychain = {
-        set: vi.fn(async (account: string, secret: string) => {
+        set: vi.fn(async (account, secret) => {
           secrets.set(account, secret);
         }),
-        get: vi.fn(async (account: string) => secrets.get(account) ?? null),
-        delete: vi.fn(async (account: string) => secrets.delete(account))
+        get: vi.fn(async (account) => secrets.get(account) ?? null),
+        delete: vi.fn(async (account) => secrets.delete(account))
       };
       currentModelConfigKeychain = bridge;
       return bridge;
@@ -85,6 +85,7 @@ describe("daemon M1.4 composition", () => {
   let daemon: DaemonApp;
   let baseUrl: string;
   let modelTestFetchMock: TestFetch;
+  let roleDraftGeneratorMock: ReturnType<typeof vi.fn<RoleDraftGenerator>>;
 
   beforeEach(async () => {
     const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-test-"));
@@ -98,7 +99,14 @@ describe("daemon M1.4 composition", () => {
       }
       return new Response(JSON.stringify({ error: { message: "invalid api key" } }), { status: 401, headers: { "content-type": "application/json" } });
     }) as TestFetch;
-    daemon = createDaemon({ databasePath: join(dir, "agenthub.sqlite"), port: 0, modelTestFetch: modelTestFetchMock });
+    roleDraftGeneratorMock = vi.fn(async () => ({
+      name: "Generated Reviewer",
+      description: "AI generated reviewer",
+      prompt: "Review frontend refactors with care.",
+      capabilities: ["chat", "code.review"],
+      suggestedPermissionProfileId: "perm-readonly"
+    }));
+    daemon = createDaemon({ databasePath: join(dir, "agenthub.sqlite"), port: 0, modelTestFetch: modelTestFetchMock, roleDraftGenerator: roleDraftGeneratorMock });
     currentDaemon = daemon;
     const server = await daemon.start();
     const address = server.address();
@@ -498,9 +506,10 @@ describe("daemon M1.4 composition", () => {
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'runtime.test.result'").get()).toMatchObject({ count: 0 });
   });
 
-  it("creates, polls, and cancels role generation jobs without generation events", async () => {
+  it("creates, polls, and cancels role generation jobs through the configured model without generation events", async () => {
     const modelConfigId = `mc_role_gen_${Date.now()}`;
-    daemon.database.sqlite.prepare("INSERT INTO model_configs (id, workspace_id, name, provider, model, base_url, api_key_ref, api_key_fingerprint, temperature, max_tokens, reasoning, extra, profile, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)").run(modelConfigId, "default-workspace", "Role Generator", "openai", "gpt-4o", Date.now(), Date.now());
+    daemon.database.sqlite.prepare("INSERT INTO model_configs (id, workspace_id, name, provider, model, base_url, api_key_ref, api_key_fingerprint, temperature, max_tokens, reasoning, extra, profile, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?)").run(modelConfigId, "default-workspace", "Role Generator", "openai-compatible", "role-model", "https://models.example/v1", "role-generator-key", "test...key", Date.now(), Date.now());
+    await currentModelConfigKeychain?.set("role-generator-key", "real-secret-key");
 
     const started = await fetch(`${baseUrl}/roles/generate`, {
       method: "POST",
@@ -526,8 +535,23 @@ describe("daemon M1.4 composition", () => {
     if (completed === undefined) throw new Error("role generation job did not complete");
 
     expect(completed.status).toBe(200);
-    expect(completed.body.draftJson).toMatchObject({ name: "Reviewer Assistant" });
-    expect(String(completed.body.draftJson?.prompt ?? "")).toContain("frontend refactors");
+    expect(completed.body.draftJson).toMatchObject({ name: "Generated Reviewer", suggestedPermissionProfileId: "perm-readonly" });
+    expect(roleDraftGeneratorMock).toHaveBeenCalledWith(expect.objectContaining({
+      request: expect.objectContaining({
+        description: "Create a reviewer for frontend refactors",
+        targetWork: "code-review",
+        preferredTone: "concise",
+        capabilities: ["chat", "code.review"]
+      }),
+      modelConfig: expect.objectContaining({
+        id: modelConfigId,
+        provider: "openai-compatible",
+        model: "role-model",
+        base_url: "https://models.example/v1",
+        api_key_ref: "role-generator-key"
+      }),
+      apiKey: "real-secret-key"
+    }));
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type LIKE 'role.generation.%'").get()).toMatchObject({ count: 0 });
 
     const deleted = await fetch(`${baseUrl}/roles/generate/jobs/${jobId}`, { method: "DELETE" });
@@ -536,6 +560,90 @@ describe("daemon M1.4 composition", () => {
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM role_drafts WHERE job_id = ?").get(jobId)).toMatchObject({ count: 0 });
     const missing = await fetch(`${baseUrl}/roles/generate/jobs/${jobId}`);
     expect(missing.status).toBe(404);
+  });
+
+  it("marks role generation jobs failed when the model response cannot be parsed as a role draft", async () => {
+    roleDraftGeneratorMock.mockRejectedValueOnce(new Error("JSON parse failure: model returned malformed JSON"));
+    const modelConfigId = `mc_role_gen_parse_${Date.now()}`;
+    daemon.database.sqlite.prepare("INSERT INTO model_configs (id, workspace_id, name, provider, model, base_url, api_key_ref, api_key_fingerprint, temperature, max_tokens, reasoning, extra, profile, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)").run(modelConfigId, "default-workspace", "Role Generator", "openai", "gpt-4o", Date.now(), Date.now());
+
+    const started = await fetch(`${baseUrl}/roles/generate`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ description: "Create a reviewer", modelConfigId })
+    });
+    const startedBody = await started.json() as { readonly jobId?: string };
+    const jobId = startedBody.jobId ?? "";
+
+    let failed: { readonly status: number; readonly body: { readonly status?: string; readonly failureReason?: string; readonly draftJson?: unknown } } | undefined;
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline) {
+      const response = await fetch(`${baseUrl}/roles/generate/jobs/${jobId}`);
+      const body = await response.json() as { readonly status?: string; readonly failureReason?: string; readonly draftJson?: unknown };
+      failed = { status: response.status, body };
+      if (response.status === 200 && body.status === "failed") break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    expect(failed?.status).toBe(200);
+    expect(failed?.body).toMatchObject({ status: "failed", failureReason: "json_parse_failure" });
+    expect(failed?.body).not.toHaveProperty("draftJson");
+  });
+
+  it("creates a failed role generation job when the selected model config is missing", async () => {
+    const started = await fetch(`${baseUrl}/roles/generate`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ description: "Create a reviewer", modelConfigId: "mc_missing_role_generator" })
+    });
+    const startedBody = await started.json() as { readonly jobId?: string };
+
+    expect(started.status).toBe(202);
+    expect(startedBody.jobId).toEqual(expect.any(String));
+    const jobId = startedBody.jobId ?? "";
+
+    let failed: { readonly status: number; readonly body: { readonly status?: string; readonly failureReason?: string } } | undefined;
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline) {
+      const response = await fetch(`${baseUrl}/roles/generate/jobs/${jobId}`);
+      const body = await response.json() as { readonly status?: string; readonly failureReason?: string };
+      failed = { status: response.status, body };
+      if (response.status === 200 && body.status === "failed") break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    expect(failed?.status).toBe(200);
+    expect(failed?.body).toMatchObject({ status: "failed", failureReason: "model_config_not_found" });
+    expect(roleDraftGeneratorMock).not.toHaveBeenCalled();
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type LIKE 'role.generation.%'").get()).toMatchObject({ count: 0 });
+  });
+
+  it("normalizes invalid API key failures for role generation jobs", async () => {
+    roleDraftGeneratorMock.mockRejectedValueOnce(new Error("Provider returned 401 Unauthorized: invalid API key"));
+    const modelConfigId = `mc_role_gen_auth_${Date.now()}`;
+    daemon.database.sqlite.prepare("INSERT INTO model_configs (id, workspace_id, name, provider, model, base_url, api_key_ref, api_key_fingerprint, temperature, max_tokens, reasoning, extra, profile, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?)").run(modelConfigId, "default-workspace", "Role Generator", "openai", "gpt-4o", "role-generator-invalid-key", "test...bad", Date.now(), Date.now());
+    await currentModelConfigKeychain?.set("role-generator-invalid-key", "bad-secret-key");
+
+    const started = await fetch(`${baseUrl}/roles/generate`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ description: "Create a reviewer", modelConfigId })
+    });
+    const startedBody = await started.json() as { readonly jobId?: string };
+    const jobId = startedBody.jobId ?? "";
+
+    let failed: { readonly status: number; readonly body: { readonly status?: string; readonly failureReason?: string } } | undefined;
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline) {
+      const response = await fetch(`${baseUrl}/roles/generate/jobs/${jobId}`);
+      const body = await response.json() as { readonly status?: string; readonly failureReason?: string };
+      failed = { status: response.status, body };
+      if (response.status === 200 && body.status === "failed") break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    expect(failed?.status).toBe(200);
+    expect(failed?.body).toMatchObject({ status: "failed", failureReason: "invalid_api_key" });
   });
 
   it("removes failed role generation jobs from role_drafts", () => {

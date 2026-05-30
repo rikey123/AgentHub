@@ -1,4 +1,13 @@
 export type AgentHubClientOptions = { readonly baseUrl?: string; readonly token?: string; readonly fetchImpl?: typeof fetch };
+export type CreateRoomInput = {
+  readonly title?: string;
+  readonly mode?: "solo" | "assisted" | "squad" | "team";
+  readonly workspaceId?: string;
+  readonly primaryAgentId?: string;
+  readonly leaderRoleId?: string;
+  readonly agentBindingId?: string;
+  readonly participants?: readonly unknown[];
+};
 
 export class AgentHubClient {
   private readonly baseUrl: string;
@@ -12,7 +21,7 @@ export class AgentHubClient {
   health(): Promise<unknown> { return this.request("/healthz"); }
   openApi(): Promise<unknown> { return this.request("/openapi.json"); }
   listRooms(): Promise<unknown> { return this.request("/rooms"); }
-  createRoom(input: { readonly title?: string; readonly mode?: "solo" | "assisted"; readonly workspaceId?: string; readonly primaryAgentId?: string; readonly participants?: readonly unknown[] }): Promise<unknown> { return this.request("/rooms", { method: "POST", body: input }); }
+  createRoom(input: CreateRoomInput): Promise<unknown> { return this.request("/rooms", { method: "POST", body: input }); }
   listMessages(roomId: string): Promise<unknown> { return this.request(`/rooms/${encodeURIComponent(roomId)}/messages`); }
   sendMessage(roomId: string, input: { readonly text: string; readonly idempotencyKey?: string }): Promise<unknown> { return this.request(`/rooms/${encodeURIComponent(roomId)}/messages`, { method: "POST", body: input }); }
   listAgents(): Promise<unknown> { return this.request("/agents"); }
