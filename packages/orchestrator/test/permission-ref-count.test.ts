@@ -84,6 +84,57 @@ describe("RunLifecycleService permission ref-counting", () => {
     expect(statusOf("run_4")).toBe("waiting_permission");
     expect(eventTypes("run_4")).toEqual(["agent.run.queued", "agent.run.started", "agent.run.waiting_permission"]);
   });
+
+  test("mixed: first denied then allowed — run does NOT resume (fail-closed)", () => {
+    // Semantic decision: any denied/expired poisons the batch.
+    // Even if req2 is allowed, the run stays in waiting_permission because req1 was denied.
+    // This prevents a partially-denied run from silently resuming with reduced capabilities.
+    createRunningRun("run_5");
+
+    currentLifecycle().markWaitingPermission(null, "run_5", "req1");
+    currentLifecycle().markWaitingPermission(null, "run_5", "req2");
+
+    // req1 denied first
+    currentLifecycle().markPermissionResolved(null, "run_5", "req1", "denied");
+    expect(statusOf("run_5")).toBe("waiting_permission");
+
+    // req2 allowed — all pending resolved, but denied flag is set
+    currentLifecycle().markPermissionResolved(null, "run_5", "req2", "allowed");
+
+    // Run must NOT resume — fail-closed semantics
+    expect(statusOf("run_5")).toBe("waiting_permission");
+    expect(eventTypes("run_5")).not.toContain("agent.run.resumed");
+  });
+
+  test("mixed: first allowed then denied — run does NOT resume (fail-closed)", () => {
+    createRunningRun("run_6");
+
+    currentLifecycle().markWaitingPermission(null, "run_6", "req1");
+    currentLifecycle().markWaitingPermission(null, "run_6", "req2");
+
+    // req1 allowed first
+    currentLifecycle().markPermissionResolved(null, "run_6", "req1", "allowed");
+    expect(statusOf("run_6")).toBe("waiting_permission");
+
+    // req2 denied last — poisons the batch
+    currentLifecycle().markPermissionResolved(null, "run_6", "req2", "denied");
+
+    expect(statusOf("run_6")).toBe("waiting_permission");
+    expect(eventTypes("run_6")).not.toContain("agent.run.resumed");
+  });
+
+  test("expired permission also poisons the batch (fail-closed)", () => {
+    createRunningRun("run_7");
+
+    currentLifecycle().markWaitingPermission(null, "run_7", "req1");
+    currentLifecycle().markWaitingPermission(null, "run_7", "req2");
+
+    currentLifecycle().markPermissionResolved(null, "run_7", "req1", "expired");
+    currentLifecycle().markPermissionResolved(null, "run_7", "req2", "allowed");
+
+    expect(statusOf("run_7")).toBe("waiting_permission");
+    expect(eventTypes("run_7")).not.toContain("agent.run.resumed");
+  });
 });
 
 function currentDatabase(): AgentHubDatabase {

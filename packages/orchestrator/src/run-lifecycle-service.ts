@@ -131,6 +131,13 @@ export class RunLifecycleService {
   private readonly now: () => number;
   private readonly sideEffects: RunLifecycleSideEffects;
   private readonly permissionRequests = new Map<string, Set<string>>();
+  /**
+   * Tracks runs that have had at least one permission denied or expired.
+   * Fail-closed: once any permission is denied/expired, the run will NOT resume
+   * even if all other pending permissions are later allowed.
+   * Cleared when the run reaches a terminal state.
+   */
+  private readonly permissionDenied = new Set<string>();
 
   constructor(
     private readonly database: AgentHubDatabase,
@@ -264,11 +271,22 @@ export class RunLifecycleService {
       if (!requests || !requests.has(permissionId)) return;
 
       requests.delete(permissionId);
+
+      // Fail-closed: record any denied/expired decision so the run cannot resume
+      // even if subsequent permissions are allowed.
+      if (decision !== "allowed") {
+        this.permissionDenied.add(runId);
+      }
+
       if (requests.size > 0) return;
 
+      // All pending permissions resolved — clean up tracking state
       this.permissionRequests.delete(runId);
-      // Only resume the run if this permission was allowed; denied/expired should not resume
-      if (decision !== "allowed") return;
+      const wasDenied = this.permissionDenied.has(runId);
+      this.permissionDenied.delete(runId);
+
+      // Only resume the run if ALL permissions were allowed (fail-closed)
+      if (wasDenied) return;
 
       const run = this.getRun(db, runId);
       if (run.adapter_session_id === null) return;
