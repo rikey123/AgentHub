@@ -46,6 +46,13 @@ describe("buildRunPrompt prior-progress injection", () => {
     expect(prompt).toContain("<prior-progress>");
     expect(prompt).toContain("Built the ref-counting core");
     expect(prompt).toContain("packages/orchestrator/src/run-lifecycle-service.ts");
+
+    // Spec §mid-flight-handoff: <prior-progress> must appear BEFORE the role system prompt.
+    // Dev B will prepend <mission-brief> ahead of <prior-progress>; this test guards the
+    // relative order of prior-progress vs role prompt so that integration stays correct.
+    const priorProgressIndex = prompt.indexOf("<prior-progress>");
+    const rolePromptIndex = prompt.indexOf("---"); // separator between prior-progress and role prompt
+    expect(priorProgressIndex).toBeLessThan(rolePromptIndex);
   });
 
   test("run without task has no prior-progress block", () => {

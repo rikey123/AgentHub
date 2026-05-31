@@ -128,6 +128,20 @@ export class AdapterBridge {
     if (event.type === "fs.writeTextFile" || event.type === "fs.deleteFile") {
       const path = event.path;
       if (path.includes("..") || path.startsWith("/") || /^[a-zA-Z]:[/\\]/.test(path)) {
+        // Spec §path-traversal-guard: rejected paths return { error: "path_traversal_denied", path }.
+        // For adapter-sourced events the "caller" is the run itself; publish a visible tool.call.completed
+        // error so the run log records the rejection rather than silently dropping it.
+        this.input.eventBus.publish({
+          id: randomUUID(),
+          type: "tool.call.completed",
+          schemaVersion: 1,
+          workspaceId: this.input.workspaceId,
+          roomId: this.input.roomId,
+          runId: this.input.runId,
+          agentId: this.input.agentId,
+          payload: { runId: this.input.runId, toolCallId: `path-traversal:${path}`, ok: false, output: { error: "path_traversal_denied", path } },
+          createdAt: this.input.now?.() ?? Date.now()
+        });
         return;
       }
     }

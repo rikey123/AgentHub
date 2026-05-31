@@ -24,11 +24,14 @@ const MAX_LEADER_CONTEXT_CHARS = 10_000;
 
 export function buildRunPrompt(run: RunRow, database: AgentHubDatabase, options: RunPromptOptions = {}): string {
   const rolePrompt = buildFirstWakePrompt(run.id, run.agent_id, run.room_id, database);
+  // Per spec §mid-flight-handoff: <prior-progress> is injected AFTER <mission-brief> and
+  // BEFORE the role system prompt. Dev B will prepend <mission-brief> ahead of this block.
+  // Order: [missionBrief (Dev B)] → priorProgress → rolePrompt → leaderContext → input
   const priorProgress = run.task_id !== null ? buildPriorProgressBlock(database, run.task_id) : undefined;
   const batch = readCurrentRunMailbox(run, database, options);
   const input = renderBatch(batch) ?? renderQueuedRunInput(run, database) ?? `Run ${run.id} for agent ${run.agent_id}`;
   const leaderContext = renderLeaderRunContext(run, database);
-  return [rolePrompt, priorProgress, leaderContext, input].filter((part): part is string => part !== undefined && part.trim().length > 0).join("\n\n---\n\n");
+  return [priorProgress, rolePrompt, leaderContext, input].filter((part): part is string => part !== undefined && part.trim().length > 0).join("\n\n---\n\n");
 }
 
 function readCurrentRunMailbox(run: RunRow, database: AgentHubDatabase, options: RunPromptOptions): MailboxDeliveryBatch {

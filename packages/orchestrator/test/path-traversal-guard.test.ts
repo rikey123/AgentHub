@@ -33,47 +33,51 @@ afterEach(() => {
 });
 
 describe("AdapterBridge fs path traversal guard", () => {
-  test("fs.writeTextFile with .. path is silently dropped", () => {
-    const artifactFs = {
-      writeTextFile: vi.fn(),
-      deleteFile: vi.fn()
-    };
+  test("fs.writeTextFile with .. path is rejected with visible error event", () => {
+    const artifactFs = { writeTextFile: vi.fn(), deleteFile: vi.fn() };
+    const publishSpy = vi.spyOn(currentBus(), "publish");
     const bridge = createBridge(artifactFs);
 
     bridge.handle({ type: "fs.writeTextFile", path: "../../etc/passwd", content: "evil" });
 
+    // ArtifactFS must NOT be called
     expect(artifactFs.writeTextFile).not.toHaveBeenCalled();
+    // Spec §path-traversal-guard: rejected paths return { error: "path_traversal_denied", path }
+    // For adapter events, this is surfaced as a tool.call.completed error event
+    const errorEvents = (publishSpy.mock.calls as Array<[{ type: string; payload?: { output?: { error?: string; path?: string } } }]>)
+      .filter(([e]) => e.type === "tool.call.completed" && e.payload?.output?.error === "path_traversal_denied");
+    expect(errorEvents.length).toBeGreaterThanOrEqual(1);
+    expect(errorEvents[0]![0].payload?.output?.path).toBe("../../etc/passwd");
   });
 
-  test("fs.writeTextFile with absolute path is silently dropped", () => {
-    const artifactFs = {
-      writeTextFile: vi.fn(),
-      deleteFile: vi.fn()
-    };
+  test("fs.writeTextFile with absolute path is rejected with visible error event", () => {
+    const artifactFs = { writeTextFile: vi.fn(), deleteFile: vi.fn() };
+    const publishSpy = vi.spyOn(currentBus(), "publish");
     const bridge = createBridge(artifactFs);
 
     bridge.handle({ type: "fs.writeTextFile", path: "/etc/passwd", content: "evil" });
 
     expect(artifactFs.writeTextFile).not.toHaveBeenCalled();
+    const errorEvents = (publishSpy.mock.calls as Array<[{ type: string; payload?: { output?: { error?: string } } }]>)
+      .filter(([e]) => e.type === "tool.call.completed" && e.payload?.output?.error === "path_traversal_denied");
+    expect(errorEvents.length).toBeGreaterThanOrEqual(1);
   });
 
-  test("fs.deleteFile with .. path is silently dropped", () => {
-    const artifactFs = {
-      writeTextFile: vi.fn(),
-      deleteFile: vi.fn()
-    };
+  test("fs.deleteFile with .. path is rejected with visible error event", () => {
+    const artifactFs = { writeTextFile: vi.fn(), deleteFile: vi.fn() };
+    const publishSpy = vi.spyOn(currentBus(), "publish");
     const bridge = createBridge(artifactFs);
 
     bridge.handle({ type: "fs.deleteFile", path: "../secret.txt" });
 
     expect(artifactFs.deleteFile).not.toHaveBeenCalled();
+    const errorEvents = (publishSpy.mock.calls as Array<[{ type: string; payload?: { output?: { error?: string } } }]>)
+      .filter(([e]) => e.type === "tool.call.completed" && e.payload?.output?.error === "path_traversal_denied");
+    expect(errorEvents.length).toBeGreaterThanOrEqual(1);
   });
 
   test("valid relative path passes through to ArtifactFS", () => {
-    const artifactFs = {
-      writeTextFile: vi.fn(),
-      deleteFile: vi.fn()
-    };
+    const artifactFs = { writeTextFile: vi.fn(), deleteFile: vi.fn() };
     const bridge = createBridge(artifactFs);
 
     bridge.handle({ type: "fs.writeTextFile", path: "src/utils.ts", content: "code" });

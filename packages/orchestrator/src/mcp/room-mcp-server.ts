@@ -831,6 +831,14 @@ export class RoomMcpServer {
               if (taskResult.changes > 0) {
                 this.options.eventBus.publish({ id: randomUUID(), type: "task.status.changed", schemaVersion: 1, workspaceId: room.workspace_id, roomId: session.roomId, payload: { taskId, prevStatus, nextStatus: "blocked", blockerReason: "worktree_apply_conflict" }, createdAt: now });
               }
+              // Spec §file-conflict-isolation: "conflict diff SHALL be stored in task_activities as a blocker_set entry"
+              this.options.taskService.addTaskActivity({
+                taskId,
+                kind: "blocker_set",
+                byKind: "system",
+                by: "worktree-apply",
+                payload: { blockerReason: "worktree_apply_conflict", artifactId: artifact.id, conflictDiff: String(applyErr).slice(0, 2000) }
+              });
             }
             this.options.eventBus.publish({ id: randomUUID(), type: "worktree.conflict_detected", schemaVersion: 1, workspaceId: room.workspace_id, roomId: session.roomId, payload: { runId, taskId, artifactId: artifact.id, conflictDiff: String(applyErr) }, createdAt: now });
           })();
