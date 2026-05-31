@@ -501,8 +501,9 @@ export class ArtifactFSRunRegistry {
     const fs = this.runs.get(input.runId);
     if (!fs) return undefined;
     const options = artifactFSOptions(fs);
+    // Only handle isolated_worktree runs; for other modes, return undefined WITHOUT deleting
+    // the run so the caller can fall back to buildRunArtifact.
     if (options.mode !== "isolated_worktree" || options.isolatedRoot === undefined) {
-      this.runs.delete(input.runId);
       return undefined;
     }
     let artifact: Artifact | undefined;
@@ -512,7 +513,9 @@ export class ArtifactFSRunRegistry {
       if (patch.length === 0) return;
       const filesChanged = execFileSync("git", ["diff", "--name-only", "HEAD"], { cwd: options.isolatedRoot as string, encoding: "utf8" }).split(/\r?\n/).map((path) => path.trim()).filter((path) => path.length > 0);
       if (filesChanged.length === 0) return;
-      artifact = this.options.service.create({ workspaceId: options.workspaceId, ...(options.roomId !== undefined ? { roomId: options.roomId } : {}), ...(options.taskId !== undefined ? { taskId: options.taskId } : {}), runId: options.runId, ...(options.messageId !== undefined ? { messageId: options.messageId } : {}), type: "worktree_diff", title: input.title ?? `Run ${options.runId} worktree diff`, status: "ready_for_review", createdBy: options.createdBy, metadata: { patch, filesChanged, artifactFsMode: options.mode } }, {});
+      const additions = patch.split("\n").filter((line) => line.startsWith("+") && !line.startsWith("+++" )).length;
+      const deletions = patch.split("\n").filter((line) => line.startsWith("-") && !line.startsWith("---" )).length;
+      artifact = this.options.service.create({ workspaceId: options.workspaceId, ...(options.roomId !== undefined ? { roomId: options.roomId } : {}), ...(options.taskId !== undefined ? { taskId: options.taskId } : {}), runId: options.runId, ...(options.messageId !== undefined ? { messageId: options.messageId } : {}), type: "worktree_diff", title: input.title ?? `Run ${options.runId} worktree diff`, status: "ready_for_review", createdBy: options.createdBy, metadata: { filesChanged, artifactFsMode: options.mode }, files: [{ path: "worktree.patch", oldContent: "", newContent: patch, patch, additions, deletions, fileStatus: "modified" as const }] }, {});
       this.options.eventBus.publish({ id: randomUUID(), type: "worktree.diff.ready", schemaVersion: 1, workspaceId: options.workspaceId, ...(options.roomId !== undefined ? { roomId: options.roomId } : {}), ...(options.taskId !== undefined ? { taskId: options.taskId } : {}), runId: options.runId, payload: { runId: options.runId, ...(options.taskId !== undefined ? { taskId: options.taskId } : {}), artifactId: artifact.id, filesChanged }, createdAt: now() });
     })();
     this.runs.delete(input.runId);

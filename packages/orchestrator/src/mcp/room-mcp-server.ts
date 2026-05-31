@@ -774,7 +774,7 @@ export class RoomMcpServer {
     return { ok: true, data: { agentId: newAgentId, name: agentName, slug, adapterId, role: room.mode === "team" || room.mode === "squad" ? "teammate" : "observer" } };
   }
 
-  private async handleApplyWorktree(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): Promise<RoomMcpToolResult> {
+  async handleApplyWorktree(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): Promise<RoomMcpToolResult> {
     if (!isRecord(input) || typeof input.runId !== "string") return failure("validation_failed", "runId is required");
     const runId = input.runId;
 
@@ -787,6 +787,8 @@ export class RoomMcpServer {
     const patchFile = this.options.database.sqlite
       .prepare("SELECT patch FROM artifact_files WHERE artifact_id = ? LIMIT 1")
       .get(artifact.id) as { patch: string | null } | undefined;
+    const artifactMetadata = JSON.parse(artifact.metadata) as { readonly patch?: string };
+    const patchText = patchFile?.patch?.trim().length ? patchFile.patch : artifactMetadata.patch;
 
     const room = this.options.database.sqlite
       .prepare("SELECT workspace_id, workspace_path FROM rooms r LEFT JOIN workspaces w ON w.id = r.workspace_id WHERE r.id = ?")
@@ -798,7 +800,7 @@ export class RoomMcpServer {
 
     const now = this.options.now?.() ?? Date.now();
 
-    if (patchFile?.patch && patchFile.patch.trim().length > 0) {
+    if (patchText && patchText.trim().length > 0) {
       try {
         const { execFileSync } = await import("node:child_process");
         const { writeFileSync, unlinkSync } = await import("node:fs");
@@ -806,7 +808,7 @@ export class RoomMcpServer {
         const { randomUUID } = await import("node:crypto");
 
         const patchPath = join(workspaceRoot, `.agenthub-patch-${randomUUID()}.patch`);
-        writeFileSync(patchPath, patchFile.patch, "utf8");
+        writeFileSync(patchPath, patchText, "utf8");
         try {
           execFileSync("git", ["apply", "--check", patchPath], { cwd: workspaceRoot });
           execFileSync("git", ["apply", patchPath], { cwd: workspaceRoot });
@@ -852,7 +854,7 @@ export class RoomMcpServer {
     return { ok: true, data: { runId, artifactId: artifact.id, status: "applied" } };
   }
 
-  private async handleDiscardWorktree(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): Promise<RoomMcpToolResult> {
+  async handleDiscardWorktree(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): Promise<RoomMcpToolResult> {
     if (!isRecord(input) || typeof input.runId !== "string") return failure("validation_failed", "runId is required");
     const runId = input.runId;
 

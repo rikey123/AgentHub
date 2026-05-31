@@ -234,6 +234,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     const activeWakes = new ActiveWakesRegistry();
     const mailbox = new MailboxService(database, options.now, eventBus);
     const commandBusRef: { current?: CommandBus } = {};
+    const roomMcpServerRef: { current?: RoomMcpServer } = {};
     const pendingTurns = new PendingTurnService({ database, eventBus, getCommandBus: () => currentCommandBus(commandBusRef), ...(options.now !== undefined ? { now: options.now } : {}) });
     const runQueueRef: { current?: RunQueue } = {};
     const taskTerminalHooks = {
@@ -279,7 +280,6 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
       } }
     };
     const lifecycle = new RunLifecycleService(database, eventBus, lifecycleOptions);
-    const roomMcpServerRef: { current?: RoomMcpServer } = {};
     // Synchronous brief resolver. HeuristicBriefGenerator.generate returns Effect<string,never>,
     // which is a pure value; Effect.runSync extracts it without async overhead. Cast through
     // `unknown` to widen the input shape — adapter-bridge's BriefResolver uses string for
@@ -292,7 +292,14 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
         return "";
       }
     };
-    const adapterRegistry = new AdapterRegistry({ database, eventBus, lifecycle, permissionEngine, keychain: modelConfigSecrets, artifactFs, briefResolver, getRoomMcpServer: () => currentRoomMcpServer(roomMcpServerRef), getCommandBus: () => commandBusRef.current, ...(options.adapterCommands !== undefined ? { adapterCommands: options.adapterCommands } : {}), ...(options.now !== undefined ? { now: options.now } : {}) });
+    const artifactFsBoundary = {
+      beginRun: (input: Parameters<typeof artifactFs.beginRun>[0]) => artifactFs.beginRun(input),
+      writeTextFile: (input: Parameters<typeof artifactFs.writeTextFile>[0]) => artifactFs.writeTextFile(input),
+      deleteFile: (input: Parameters<typeof artifactFs.deleteFile>[0]) => artifactFs.deleteFile(input),
+      buildRunArtifact: (input: Parameters<typeof artifactFs.buildRunArtifact>[0]) => artifactFs.buildRunArtifact(input),
+      buildWorktreeDiffArtifact: (input: Parameters<typeof artifactFs.buildWorktreeDiffArtifact>[0]) => artifactFs.buildWorktreeDiffArtifact(input)
+    };
+    const adapterRegistry = new AdapterRegistry({ database, eventBus, lifecycle, permissionEngine, keychain: modelConfigSecrets, artifactFs: artifactFsBoundary, briefResolver, getRoomMcpServer: () => currentRoomMcpServer(roomMcpServerRef), getCommandBus: () => commandBusRef.current, ...(options.adapterCommands !== undefined ? { adapterCommands: options.adapterCommands } : {}), ...(options.now !== undefined ? { now: options.now } : {}) });
 
     emitPhase("startup", PHASE_OUTBOX);
     const handlers = createDurableHandlerRegistry({ database, retryDelaysMs: [0] });
@@ -374,7 +381,35 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
         CompleteTask: createCompleteTaskHandler(taskService),
         WakeAgent: createWakeAgentHandler({ database, activeWakes, mailbox, lifecycle }) as CommandHandler,
         ConsumePendingTurn: createConsumePendingTurnHandler(pendingTurns) as CommandHandler,
-        CancelRun: createCancelRunHandler({ lifecycle, adapterManager: adapterRegistry })
+        CancelRun: createCancelRunHandler({ lifecycle, adapterManager: adapterRegistry }),
+        ApplyWorktree: (command) => {
+          const server = roomMcpServerRef.current;
+          if (!server) return { ok: false, error: { code: "internal_error", message: "RoomMcpServer not initialized" } };
+          const roomId = typeof command.roomId === "string" ? command.roomId : undefined;
+          const runId = typeof command.runId === "string" ? command.runId : undefined;
+          if (!roomId || !runId) return { ok: false, error: { code: "validation_failed", message: "roomId and runId are required" } };
+          const room = database.sqlite.prepare("SELECT primary_agent_id FROM rooms WHERE id = ?").get(roomId) as { readonly primary_agent_id: string | null } | undefined;
+          const agentId = room?.primary_agent_id ?? "system";
+          const session = { roomId, agentId };
+          return Promise.resolve(server.handleApplyWorktree({ runId }, session, {})).then((result) => result.ok
+            ? { ok: true, data: result.data, emittedEvents: [] }
+            : { ok: false, error: { code: "internal_error" as const, message: (result.error as { message: string }).message } }
+          );
+        },
+        DiscardWorktree: (command) => {
+          const server = roomMcpServerRef.current;
+          if (!server) return { ok: false, error: { code: "internal_error", message: "RoomMcpServer not initialized" } };
+          const roomId = typeof command.roomId === "string" ? command.roomId : undefined;
+          const runId = typeof command.runId === "string" ? command.runId : undefined;
+          if (!roomId || !runId) return { ok: false, error: { code: "validation_failed", message: "roomId and runId are required" } };
+          const room = database.sqlite.prepare("SELECT primary_agent_id FROM rooms WHERE id = ?").get(roomId) as { readonly primary_agent_id: string | null } | undefined;
+          const agentId = room?.primary_agent_id ?? "system";
+          const session = { roomId, agentId };
+          return Promise.resolve(server.handleDiscardWorktree({ runId }, session, {})).then((result) => result.ok
+            ? { ok: true, data: result.data, emittedEvents: [] }
+            : { ok: false, error: { code: "internal_error" as const, message: (result.error as { message: string }).message } }
+          );
+        }
       }
     });
     commandBusRef.current = commandBus;

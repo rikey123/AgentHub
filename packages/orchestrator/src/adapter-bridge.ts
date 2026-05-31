@@ -42,6 +42,7 @@ export type AdapterArtifactFSBoundary = {
   readonly writeTextFile: (input: { readonly runId: string; readonly path: string; readonly content: string }) => void;
   readonly deleteFile: (input: { readonly runId: string; readonly path: string }) => void;
   readonly buildRunArtifact: (input: { readonly runId: string; readonly title?: string }) => unknown;
+  readonly buildWorktreeDiffArtifact?: (input: { readonly runId: string; readonly title?: string }) => unknown;
 };
 
 export class AdapterBridge {
@@ -103,7 +104,13 @@ export class AdapterBridge {
     }
     if (event.type === "session.ended") {
       this.clearWatchdog();
-      this.input.artifactFs?.buildRunArtifact({ runId: this.input.runId, title: `Run ${this.input.runId} changes` });
+      // For isolated_worktree runs, generate worktree diff artifact.
+      // buildWorktreeDiffArtifact returns undefined (without consuming the run) when mode
+      // is not isolated_worktree, so we fall back to the regular buildRunArtifact.
+      const worktreeArtifact = this.input.artifactFs?.buildWorktreeDiffArtifact?.({ runId: this.input.runId, title: `Run ${this.input.runId} changes` });
+      if (worktreeArtifact === undefined) {
+        this.input.artifactFs?.buildRunArtifact({ runId: this.input.runId, title: `Run ${this.input.runId} changes` });
+      }
       const cancelled = event.reason === "cancelled";
       const briefText = this.computeBriefText({ cancelled });
       if (cancelled) this.input.lifecycle.cancelFinalized(null, this.input.runId, briefText);
@@ -287,10 +294,37 @@ export class AdapterBridge {
       .get(this.input.taskId) as { max_turns: number | null } | undefined;
     if (!task?.max_turns || this.turnCount < task.max_turns) return;
 
+    const db = this.input.database;
+    const now = this.input.now?.() ?? Date.now();
+    const taskId = this.input.taskId;
+    const runId = this.input.runId;
+    const room = db.sqlite.prepare("SELECT workspace_id, primary_agent_id FROM rooms WHERE id = ?").get(this.input.roomId) as { workspace_id: string; primary_agent_id: string | null } | undefined;
+
+    if (room) {
+      db.sqlite.transaction(() => {
+        db.sqlite.prepare("UPDATE tasks SET status = 'blocked', blocker_reason = 'turn_limit_exceeded', updated_at = ? WHERE id = ? AND status NOT IN ('blocked', 'completed', 'cancelled')").run(now, taskId);
+        this.input.eventBus.publish({
+          id: randomUUID(),
+          type: "task.status.changed",
+          schemaVersion: 1,
+          workspaceId: room.workspace_id,
+          roomId: this.input.roomId,
+          payload: { taskId, nextStatus: "blocked", blockerReason: "turn_limit_exceeded", reason: "turn_limit_exceeded" },
+          createdAt: now
+        });
+      })();
+    }
+
     try {
+      if (room?.primary_agent_id) {
+        void this.input.getCommandBus?.()?.dispatch(
+          { type: "WakeAgent", roomId: this.input.roomId, agentId: room.primary_agent_id, workspaceId: room.workspace_id, reason: "task_blocked", taskId, idempotencyKey: `turn-limit:${runId}` },
+          { actor: { type: "system" }, traceId: `turn-limit:${runId}`, origin: "internal" }
+        );
+      }
       void this.input.getCommandBus?.()?.dispatch(
-        { type: "CancelRun", runId: this.input.runId, idempotencyKey: `turn-limit:${this.input.runId}` },
-        { actor: { type: "system" }, traceId: `turn-limit:${this.input.runId}`, origin: "internal" }
+        { type: "CancelRun", runId, idempotencyKey: `turn-limit:${runId}` },
+        { actor: { type: "system" }, traceId: `turn-limit:${runId}`, origin: "internal" }
       );
     } catch {
       /* best effort */

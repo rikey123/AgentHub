@@ -230,9 +230,8 @@ export class NativeAgentAdapter {
       this.options.lifecycle.markWaitingPermission(null, run.id, decided.requestId);
       const resolution = await decided.promise;
       decision = resolution.decision === "allowed" ? "allowed" : resolution.decision === "denied" ? "denied" : "expired";
-      if (decision === "allowed") {
-        this.options.lifecycle.markRunning(null, run.id, `native-${run.id}`);
-      }
+      // Use ref-count exit path instead of direct markRunning
+      this.options.lifecycle.markPermissionResolved(null, run.id, decided.requestId);
     } else {
       decision = "expired";
     }
