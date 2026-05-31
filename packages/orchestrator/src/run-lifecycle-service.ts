@@ -258,7 +258,7 @@ export class RunLifecycleService {
     });
   }
 
-  markPermissionResolved(tx: SqliteTx | null, runId: string, permissionId: string): void {
+  markPermissionResolved(tx: SqliteTx | null, runId: string, permissionId: string, decision: "allowed" | "denied" | "expired" = "allowed"): void {
     this.withTransaction(tx, (db) => {
       const requests = this.permissionRequests.get(runId);
       if (!requests || !requests.has(permissionId)) return;
@@ -267,6 +267,9 @@ export class RunLifecycleService {
       if (requests.size > 0) return;
 
       this.permissionRequests.delete(runId);
+      // Only resume the run if this permission was allowed; denied/expired should not resume
+      if (decision !== "allowed") return;
+
       const run = this.getRun(db, runId);
       if (run.adapter_session_id === null) return;
       this.markRunning(db, runId, run.adapter_session_id);

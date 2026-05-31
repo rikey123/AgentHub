@@ -393,7 +393,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
           const session = { roomId, agentId };
           return Promise.resolve(server.handleApplyWorktree({ runId }, session, {})).then((result) => result.ok
             ? { ok: true, data: result.data, emittedEvents: [] }
-            : { ok: false, error: { code: "internal_error" as const, message: (result.error as { message: string }).message } }
+            : { ok: false, error: { code: result.error.code as import("@agenthub/bus").CommandErrorCode, message: (result.error as { message: string }).message } }
           );
         },
         DiscardWorktree: (command) => {
@@ -407,7 +407,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
           const session = { roomId, agentId };
           return Promise.resolve(server.handleDiscardWorktree({ runId }, session, {})).then((result) => result.ok
             ? { ok: true, data: result.data, emittedEvents: [] }
-            : { ok: false, error: { code: "internal_error" as const, message: (result.error as { message: string }).message } }
+            : { ok: false, error: { code: result.error.code as import("@agenthub/bus").CommandErrorCode, message: (result.error as { message: string }).message } }
           );
         }
       }

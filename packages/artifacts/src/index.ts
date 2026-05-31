@@ -518,7 +518,12 @@ export class ArtifactFSRunRegistry {
       artifact = this.options.service.create({ workspaceId: options.workspaceId, ...(options.roomId !== undefined ? { roomId: options.roomId } : {}), ...(options.taskId !== undefined ? { taskId: options.taskId } : {}), runId: options.runId, ...(options.messageId !== undefined ? { messageId: options.messageId } : {}), type: "worktree_diff", title: input.title ?? `Run ${options.runId} worktree diff`, status: "ready_for_review", createdBy: options.createdBy, metadata: { filesChanged, artifactFsMode: options.mode }, files: [{ path: "worktree.patch", oldContent: "", newContent: patch, patch, additions, deletions, fileStatus: "modified" as const }] }, {});
       this.options.eventBus.publish({ id: randomUUID(), type: "worktree.diff.ready", schemaVersion: 1, workspaceId: options.workspaceId, ...(options.roomId !== undefined ? { roomId: options.roomId } : {}), ...(options.taskId !== undefined ? { taskId: options.taskId } : {}), runId: options.runId, payload: { runId: options.runId, ...(options.taskId !== undefined ? { taskId: options.taskId } : {}), artifactId: artifact.id, filesChanged }, createdAt: now() });
     })();
-    this.runs.delete(input.runId);
+    // Only consume the run from registry if we actually created a worktree diff artifact.
+    // If patch was empty (no file changes), leave the run in the registry so the caller
+    // can fall back to buildRunArtifact for a regular diff artifact.
+    if (artifact !== undefined) {
+      this.runs.delete(input.runId);
+    }
     return artifact;
   }
 

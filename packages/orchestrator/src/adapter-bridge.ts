@@ -50,6 +50,7 @@ export class AdapterBridge {
   private watchdogTimer: ReturnType<typeof setTimeout> | undefined;
   private level2Timer: ReturnType<typeof setTimeout> | undefined;
   private turnCount = 0;
+  private turnLimitTriggered = false;
   private readonly seenMessageIds = new Set<string>();
   private static readonly WATCHDOG_MS = 90_000; // 90s of silence → notify leader
   private static readonly LEVEL2_MS = 5 * 60 * 1000; // 5 minutes
@@ -237,12 +238,14 @@ export class AdapterBridge {
         ));
         const wakeData = wakeResult?.ok === true ? (wakeResult.data as { runId?: string; appendedToRunId?: string } | undefined) : undefined;
         const leaderRunId = wakeData?.runId ?? wakeData?.appendedToRunId;
-        if (leaderRunId && this.input.database) {
-          this.level2Timer = setTimeout(() => {
-            this.level2Timer = undefined;
-            this.checkLevel2Stall(leaderRunId);
-          }, AdapterBridge.LEVEL2_MS);
-        }
+
+        // Always start Level-2 timer regardless of whether WakeAgent succeeded.
+        // The timer checks if any leader run reached 'running' after Level-1 fired.
+        const level2StartTime = this.input.now?.() ?? Date.now();
+        this.level2Timer = setTimeout(() => {
+          this.level2Timer = undefined;
+          this.checkLevel2Stall(leaderRunId ?? null, level2StartTime);
+        }, AdapterBridge.LEVEL2_MS);
       } catch (err) {
         // eslint-disable-next-line no-console -- watchdog last-resort fallback when CommandBus dispatch fails; intentional console to avoid silent loss
         console.warn("[AdapterBridge] watchdog notification failed:", err);
@@ -250,16 +253,37 @@ export class AdapterBridge {
     });
   }
 
-  private checkLevel2Stall(leaderRunId: string): void {
+  private checkLevel2Stall(leaderRunId: string | null, since: number): void {
     const db = this.input.database;
     if (!db) return;
     try {
-      const leaderRun = db.sqlite.prepare("SELECT status FROM runs WHERE id = ?").get(leaderRunId) as { status: string } | undefined;
-      const isRunning = leaderRun?.status === "running" || leaderRun?.status === "completed";
-      if (isRunning) return; // Leader recovered in time
+      const room = db.sqlite.prepare("SELECT workspace_id, primary_agent_id FROM rooms WHERE id = ?").get(this.input.roomId) as { workspace_id: string; primary_agent_id: string | null } | undefined;
+      if (!room) return;
 
-      const reason = (leaderRun?.status === "failed" || leaderRun?.status === "cancelled")
-        ? "leader_failed" : "leader_unavailable";
+      // Check if leader recovered: any leader run created after Level-1 that reached running/completed
+      const leaderId = room.primary_agent_id;
+      if (leaderId) {
+        const recoveredRun = db.sqlite.prepare(
+          "SELECT id FROM runs WHERE room_id = ? AND agent_id = ? AND created_at >= ? AND status IN ('running', 'completed') LIMIT 1"
+        ).get(this.input.roomId, leaderId, since) as { id: string } | undefined;
+        if (recoveredRun) return; // Leader recovered in time
+      }
+
+      // If we have a specific leaderRunId, also check if it's still running
+      if (leaderRunId) {
+        const leaderRun = db.sqlite.prepare("SELECT status FROM runs WHERE id = ?").get(leaderRunId) as { status: string } | undefined;
+        if (leaderRun?.status === "running" || leaderRun?.status === "completed") return;
+      }
+
+      const leaderRun = leaderRunId
+        ? db.sqlite.prepare("SELECT status FROM runs WHERE id = ?").get(leaderRunId) as { status: string } | undefined
+        : undefined;
+      const reason = (() => {
+        if (leaderRunId) {
+          return (leaderRun?.status === "failed" || leaderRun?.status === "cancelled") ? "leader_failed" : "leader_unavailable";
+        }
+        return "leader_unavailable";
+      })();
 
       const stalledTasks = db.sqlite.prepare(
         "SELECT id FROM tasks WHERE room_id = ? AND status IN ('in_progress', 'blocked')"
@@ -267,8 +291,6 @@ export class AdapterBridge {
       const stalledTaskIds = stalledTasks.map((t) => t.id);
 
       const now = this.input.now?.() ?? Date.now();
-      const room = db.sqlite.prepare("SELECT workspace_id FROM rooms WHERE id = ?").get(this.input.roomId) as { workspace_id: string } | undefined;
-      if (!room) return;
 
       db.sqlite.transaction(() => {
         db.sqlite.prepare("UPDATE rooms SET stalled_at = ? WHERE id = ?").run(now, this.input.roomId);
@@ -288,11 +310,14 @@ export class AdapterBridge {
   }
 
   private checkTurnLimit(): void {
+    if (this.turnLimitTriggered) return;
     if (!this.input.taskId || !this.input.database) return;
     const task = this.input.database.sqlite
       .prepare("SELECT max_turns FROM tasks WHERE id = ?")
       .get(this.input.taskId) as { max_turns: number | null } | undefined;
     if (!task?.max_turns || this.turnCount < task.max_turns) return;
+
+    this.turnLimitTriggered = true;
 
     const db = this.input.database;
     const now = this.input.now?.() ?? Date.now();
@@ -302,16 +327,18 @@ export class AdapterBridge {
 
     if (room) {
       db.sqlite.transaction(() => {
-        db.sqlite.prepare("UPDATE tasks SET status = 'blocked', blocker_reason = 'turn_limit_exceeded', updated_at = ? WHERE id = ? AND status NOT IN ('blocked', 'completed', 'cancelled')").run(now, taskId);
-        this.input.eventBus.publish({
-          id: randomUUID(),
-          type: "task.status.changed",
-          schemaVersion: 1,
-          workspaceId: room.workspace_id,
-          roomId: this.input.roomId,
-          payload: { taskId, nextStatus: "blocked", blockerReason: "turn_limit_exceeded", reason: "turn_limit_exceeded" },
-          createdAt: now
-        });
+        const result = db.sqlite.prepare("UPDATE tasks SET status = 'blocked', blocker_reason = 'turn_limit_exceeded', updated_at = ? WHERE id = ? AND status NOT IN ('blocked', 'completed', 'cancelled')").run(now, taskId);
+        if (result.changes > 0) {
+          this.input.eventBus.publish({
+            id: randomUUID(),
+            type: "task.status.changed",
+            schemaVersion: 1,
+            workspaceId: room.workspace_id,
+            roomId: this.input.roomId,
+            payload: { taskId, nextStatus: "blocked", blockerReason: "turn_limit_exceeded", reason: "turn_limit_exceeded" },
+            createdAt: now
+          });
+        }
       })();
     }
 

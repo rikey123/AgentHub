@@ -800,6 +800,11 @@ export class RoomMcpServer {
 
     const now = this.options.now?.() ?? Date.now();
 
+    // Guard: if no patch is available, the artifact is invalid — do not mark as applied.
+    if (!patchText || patchText.trim().length === 0) {
+      return failure("conflict", "worktree_diff_has_no_patch");
+    }
+
     if (patchText && patchText.trim().length > 0) {
       try {
         const { execFileSync } = await import("node:child_process");
