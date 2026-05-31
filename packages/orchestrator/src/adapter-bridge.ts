@@ -42,12 +42,18 @@ export type AdapterArtifactFSBoundary = {
   readonly writeTextFile: (input: { readonly runId: string; readonly path: string; readonly content: string }) => void;
   readonly deleteFile: (input: { readonly runId: string; readonly path: string }) => void;
   readonly buildRunArtifact: (input: { readonly runId: string; readonly title?: string }) => unknown;
+  readonly buildWorktreeDiffArtifact?: (input: { readonly runId: string; readonly title?: string }) => unknown;
 };
 
 export class AdapterBridge {
   private readonly toolNamesByCallId = new Map<string, string>();
   private watchdogTimer: ReturnType<typeof setTimeout> | undefined;
+  private level2Timer: ReturnType<typeof setTimeout> | undefined;
+  private turnCount = 0;
+  private turnLimitTriggered = false;
+  private readonly seenMessageIds = new Set<string>();
   private static readonly WATCHDOG_MS = 90_000; // 90s of silence → notify leader
+  private static readonly LEVEL2_MS = 5 * 60 * 1000; // 5 minutes
 
   constructor(
     private readonly input: {
@@ -88,13 +94,24 @@ export class AdapterBridge {
       return;
     }
     if (event.type === "message.part.delta") {
+      if (!this.seenMessageIds.has(event.messageId)) {
+        this.seenMessageIds.add(event.messageId);
+        this.turnCount += 1;
+        this.checkTurnLimit();
+      }
       this.publishAdapterDomainEvent(event);
       this.onMessageDelta();
       return;
     }
     if (event.type === "session.ended") {
       this.clearWatchdog();
-      this.input.artifactFs?.buildRunArtifact({ runId: this.input.runId, title: `Run ${this.input.runId} changes` });
+      // For isolated_worktree runs, generate worktree diff artifact.
+      // buildWorktreeDiffArtifact returns undefined (without consuming the run) when mode
+      // is not isolated_worktree, so we fall back to the regular buildRunArtifact.
+      const worktreeArtifact = this.input.artifactFs?.buildWorktreeDiffArtifact?.({ runId: this.input.runId, title: `Run ${this.input.runId} changes` });
+      if (worktreeArtifact === undefined) {
+        this.input.artifactFs?.buildRunArtifact({ runId: this.input.runId, title: `Run ${this.input.runId} changes` });
+      }
       const cancelled = event.reason === "cancelled";
       const briefText = this.computeBriefText({ cancelled });
       if (cancelled) this.input.lifecycle.cancelFinalized(null, this.input.runId, briefText);
@@ -107,6 +124,26 @@ export class AdapterBridge {
       const briefText = this.computeBriefText({ failureClass: "adapter_error", failureReason: event.error });
       this.input.lifecycle.fail(null, this.input.runId, "adapter_session_crashed", "retryable_visible", event.error, briefText);
       return;
+    }
+    if (event.type === "fs.writeTextFile" || event.type === "fs.deleteFile") {
+      const path = event.path;
+      if (path.includes("..") || path.startsWith("/") || /^[a-zA-Z]:[/\\]/.test(path)) {
+        // Spec §path-traversal-guard: rejected paths return { error: "path_traversal_denied", path }.
+        // For adapter-sourced events the "caller" is the run itself; publish a visible tool.call.completed
+        // error so the run log records the rejection rather than silently dropping it.
+        this.input.eventBus.publish({
+          id: randomUUID(),
+          type: "tool.call.completed",
+          schemaVersion: 1,
+          workspaceId: this.input.workspaceId,
+          roomId: this.input.roomId,
+          runId: this.input.runId,
+          agentId: this.input.agentId,
+          payload: { runId: this.input.runId, toolCallId: `path-traversal:${path}`, ok: false, output: { error: "path_traversal_denied", path } },
+          createdAt: this.input.now?.() ?? Date.now()
+        });
+        return;
+      }
     }
     if (event.type === "fs.writeTextFile") {
       this.input.artifactFs?.writeTextFile({ runId: this.input.runId, path: event.path, content: event.content });
@@ -165,7 +202,7 @@ export class AdapterBridge {
     this.clearWatchdog();
     this.watchdogTimer = setTimeout(() => {
       this.watchdogTimer = undefined;
-      this.notifyLeaderOfStall();
+      void this.notifyLeaderOfStall();
     }, AdapterBridge.WATCHDOG_MS);
   }
 
@@ -174,43 +211,167 @@ export class AdapterBridge {
       clearTimeout(this.watchdogTimer);
       this.watchdogTimer = undefined;
     }
+    if (this.level2Timer !== undefined) {
+      clearTimeout(this.level2Timer);
+      this.level2Timer = undefined;
+    }
   }
 
   private notifyLeaderOfStall(): void {
     const db = this.input.database;
     if (db === undefined) return;
+    void Promise.resolve().then(async () => {
+      try {
+        const room = db.sqlite
+          .prepare("SELECT workspace_id, primary_agent_id, mode FROM rooms WHERE id = ?")
+          .get(this.input.roomId) as { workspace_id: string; primary_agent_id: string | null; mode: string } | undefined;
+        if (!room) return;
+        // Only notify in team/squad/assisted rooms where there is a distinct leader.
+        if (room.mode !== "team" && room.mode !== "squad" && room.mode !== "assisted") return;
+        const leaderId = room.primary_agent_id;
+        if (!leaderId || leaderId === this.input.agentId) return;
+
+        const now = this.input.now?.() ?? Date.now();
+        const mailboxMessageId = randomUUID();
+        const agentName = (db.sqlite.prepare("SELECT name FROM agent_profiles WHERE id = ?").get(this.input.agentId) as { name: string } | undefined)?.name ?? this.input.agentId;
+        const stallMessage = `[Watchdog] Agent **${agentName}** (run ${this.input.runId.slice(0, 8)}) has been silent for ${Math.round(AdapterBridge.WATCHDOG_MS / 1000)}s with no output. It may be stuck. Consider reassigning its task or cancelling the run.`;
+
+        db.sqlite.transaction(() => {
+          db.sqlite
+            .prepare(
+              "INSERT INTO mailbox_messages (id, workspace_id, room_id, from_type, from_id, to_agent_id, kind, content, files, read, claimed_run_id, claimed_at, delivery_batch_id, delivery_failure_reason, attempt_count, created_at, consumed_at) VALUES (?, ?, ?, 'system', 'watchdog', ?, 'message', ?, '[]', 0, NULL, NULL, NULL, NULL, 0, ?, NULL)"
+            )
+            .run(mailboxMessageId, room.workspace_id, this.input.roomId, leaderId, JSON.stringify({ text: stallMessage }), now);
+          this.input.eventBus.publish({ id: randomUUID(), type: "mailbox.message.created", schemaVersion: 1, workspaceId: room.workspace_id, roomId: this.input.roomId, agentId: leaderId, payload: { mailboxMessageId, roomId: this.input.roomId, fromAgentId: "watchdog", targetAgentId: leaderId }, createdAt: now });
+        })();
+
+        // Wake the leader so it sees the stall notification.
+        const wakeResult = await Promise.resolve(this.input.getCommandBus?.()?.dispatch(
+          { type: "WakeAgent", roomId: this.input.roomId, agentId: leaderId, workspaceId: room.workspace_id, reason: "agent_stalled", promptDelta: { kind: "delta_only", instructions: stallMessage }, idempotencyKey: `watchdog:${this.input.runId}:${now}` },
+          { actor: { type: "system" }, traceId: `watchdog:${this.input.runId}`, origin: "internal" }
+        ));
+        const wakeData = wakeResult?.ok === true ? (wakeResult.data as { runId?: string; appendedToRunId?: string } | undefined) : undefined;
+        const leaderRunId = wakeData?.runId ?? wakeData?.appendedToRunId;
+
+        // Always start Level-2 timer regardless of whether WakeAgent succeeded.
+        // The timer checks if any leader run reached 'running' after Level-1 fired.
+        const level2StartTime = this.input.now?.() ?? Date.now();
+        this.level2Timer = setTimeout(() => {
+          this.level2Timer = undefined;
+          this.checkLevel2Stall(leaderRunId ?? null, level2StartTime);
+        }, AdapterBridge.LEVEL2_MS);
+      } catch (err) {
+        // eslint-disable-next-line no-console -- watchdog last-resort fallback when CommandBus dispatch fails; intentional console to avoid silent loss
+        console.warn("[AdapterBridge] watchdog notification failed:", err);
+      }
+    });
+  }
+
+  private checkLevel2Stall(leaderRunId: string | null, since: number): void {
+    const db = this.input.database;
+    if (!db) return;
     try {
-      const room = db.sqlite
-        .prepare("SELECT workspace_id, primary_agent_id, mode FROM rooms WHERE id = ?")
-        .get(this.input.roomId) as { workspace_id: string; primary_agent_id: string | null; mode: string } | undefined;
+      const room = db.sqlite.prepare("SELECT workspace_id, primary_agent_id FROM rooms WHERE id = ?").get(this.input.roomId) as { workspace_id: string; primary_agent_id: string | null } | undefined;
       if (!room) return;
-      // Only notify in team/squad/assisted rooms where there is a distinct leader.
-      if (room.mode !== "team" && room.mode !== "squad" && room.mode !== "assisted") return;
+
+      // Check if leader recovered: any leader run created after Level-1 that reached running/completed
       const leaderId = room.primary_agent_id;
-      if (!leaderId || leaderId === this.input.agentId) return;
+      if (leaderId) {
+        const recoveredRun = db.sqlite.prepare(
+          "SELECT id FROM runs WHERE room_id = ? AND agent_id = ? AND created_at >= ? AND status IN ('running', 'completed') LIMIT 1"
+        ).get(this.input.roomId, leaderId, since) as { id: string } | undefined;
+        if (recoveredRun) return; // Leader recovered in time
+      }
 
-      const now = this.input.now?.() ?? Date.now();
-      const mailboxMessageId = randomUUID();
-      const agentName = (db.sqlite.prepare("SELECT name FROM agent_profiles WHERE id = ?").get(this.input.agentId) as { name: string } | undefined)?.name ?? this.input.agentId;
-      const stallMessage = `[Watchdog] Agent **${agentName}** (run ${this.input.runId.slice(0, 8)}) has been silent for ${Math.round(AdapterBridge.WATCHDOG_MS / 1000)}s with no output. It may be stuck. Consider reassigning its task or cancelling the run.`;
+      // If we have a specific leaderRunId, also check if it's still running
+      if (leaderRunId) {
+        const leaderRun = db.sqlite.prepare("SELECT status FROM runs WHERE id = ?").get(leaderRunId) as { status: string } | undefined;
+        if (leaderRun?.status === "running" || leaderRun?.status === "completed") return;
+      }
 
-      db.sqlite.transaction(() => {
-        db.sqlite
-          .prepare(
-            "INSERT INTO mailbox_messages (id, workspace_id, room_id, from_type, from_id, to_agent_id, kind, content, files, read, claimed_run_id, claimed_at, delivery_batch_id, delivery_failure_reason, attempt_count, created_at, consumed_at) VALUES (?, ?, ?, 'system', 'watchdog', ?, 'message', ?, '[]', 0, NULL, NULL, NULL, NULL, 0, ?, NULL)"
-          )
-          .run(mailboxMessageId, room.workspace_id, this.input.roomId, leaderId, JSON.stringify({ text: stallMessage }), now);
-        this.input.eventBus.publish({ id: randomUUID(), type: "mailbox.message.created", schemaVersion: 1, workspaceId: room.workspace_id, roomId: this.input.roomId, agentId: leaderId, payload: { mailboxMessageId, roomId: this.input.roomId, fromAgentId: "watchdog", targetAgentId: leaderId }, createdAt: now });
+      const leaderRun = leaderRunId
+        ? db.sqlite.prepare("SELECT status FROM runs WHERE id = ?").get(leaderRunId) as { status: string } | undefined
+        : undefined;
+      const reason = (() => {
+        if (leaderRunId) {
+          return (leaderRun?.status === "failed" || leaderRun?.status === "cancelled") ? "leader_failed" : "leader_unavailable";
+        }
+        return "leader_unavailable";
       })();
 
-      // Wake the leader so it sees the stall notification.
-      void this.input.getCommandBus?.()?.dispatch(
-        { type: "WakeAgent", roomId: this.input.roomId, agentId: leaderId, workspaceId: room.workspace_id, reason: "agent_crashed", promptDelta: { kind: "delta_only", instructions: stallMessage }, idempotencyKey: `watchdog:${this.input.runId}:${now}` },
-        { actor: { type: "system" }, traceId: `watchdog:${this.input.runId}`, origin: "internal" }
-      );
+      const stalledTasks = db.sqlite.prepare(
+        "SELECT id FROM tasks WHERE room_id = ? AND status IN ('in_progress', 'blocked')"
+      ).all(this.input.roomId) as { id: string }[];
+      const stalledTaskIds = stalledTasks.map((t) => t.id);
+
+      const now = this.input.now?.() ?? Date.now();
+
+      db.sqlite.transaction(() => {
+        db.sqlite.prepare("UPDATE rooms SET stalled_at = ? WHERE id = ?").run(now, this.input.roomId);
+        this.input.eventBus.publish({
+          id: randomUUID(),
+          type: "room.stalled",
+          schemaVersion: 1,
+          workspaceId: room.workspace_id,
+          roomId: this.input.roomId,
+          payload: { roomId: this.input.roomId, stalledTaskIds, reason },
+          createdAt: now
+        });
+      })();
     } catch (err) {
-      // eslint-disable-next-line no-console -- watchdog last-resort fallback when CommandBus dispatch fails; intentional console to avoid silent loss
-      console.warn("[AdapterBridge] watchdog notification failed:", err);
+      console.warn("[AdapterBridge] level-2 stall check failed:", err);
+    }
+  }
+
+  private checkTurnLimit(): void {
+    if (this.turnLimitTriggered) return;
+    if (!this.input.taskId || !this.input.database) return;
+    const task = this.input.database.sqlite
+      .prepare("SELECT max_turns FROM tasks WHERE id = ?")
+      .get(this.input.taskId) as { max_turns: number | null } | undefined;
+    if (!task?.max_turns || this.turnCount < task.max_turns) return;
+
+    this.turnLimitTriggered = true;
+
+    const db = this.input.database;
+    const now = this.input.now?.() ?? Date.now();
+    const taskId = this.input.taskId;
+    const runId = this.input.runId;
+    const room = db.sqlite.prepare("SELECT workspace_id, primary_agent_id FROM rooms WHERE id = ?").get(this.input.roomId) as { workspace_id: string; primary_agent_id: string | null } | undefined;
+
+    if (room) {
+      db.sqlite.transaction(() => {
+        // Read prevStatus before update so the event payload is accurate
+        const prevRow = db.sqlite.prepare("SELECT status FROM tasks WHERE id = ?").get(taskId) as { status: string } | undefined;
+        const prevStatus = prevRow?.status ?? "in_progress";
+        const result = db.sqlite.prepare("UPDATE tasks SET status = 'blocked', blocker_reason = 'turn_limit_exceeded', updated_at = ? WHERE id = ? AND status NOT IN ('blocked', 'completed', 'cancelled')").run(now, taskId);
+        if (result.changes > 0) {
+          this.input.eventBus.publish({
+            id: randomUUID(),
+            type: "task.status.changed",
+            schemaVersion: 1,
+            workspaceId: room.workspace_id,
+            roomId: this.input.roomId,
+            payload: { taskId, prevStatus, nextStatus: "blocked", blockerReason: "turn_limit_exceeded", reason: "turn_limit_exceeded" },
+            createdAt: now
+          });
+        }
+      })();
+    }
+
+    try {
+      if (room?.primary_agent_id) {
+        void this.input.getCommandBus?.()?.dispatch(
+          { type: "WakeAgent", roomId: this.input.roomId, agentId: room.primary_agent_id, workspaceId: room.workspace_id, reason: "task_blocked", taskId, idempotencyKey: `turn-limit:${runId}` },
+          { actor: { type: "system" }, traceId: `turn-limit:${runId}`, origin: "internal" }
+        );
+      }
+      void this.input.getCommandBus?.()?.dispatch(
+        { type: "CancelRun", runId, idempotencyKey: `turn-limit:${runId}` },
+        { actor: { type: "system" }, traceId: `turn-limit:${runId}`, origin: "internal" }
+      );
+    } catch {
+      /* best effort */
     }
   }
 

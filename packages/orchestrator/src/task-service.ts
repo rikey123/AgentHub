@@ -39,6 +39,7 @@ export type TaskRow = {
   readonly title: string;
   readonly description: string | null;
   readonly status: TaskStatus;
+  readonly blocker_reason: string | null;
   readonly assignee_agent_id: string | null;
   readonly assignee_role_id: string | null;
   readonly assignee_binding_id: string | null;
@@ -62,6 +63,7 @@ export type TaskView = {
   readonly title: string;
   readonly description?: string;
   readonly status: TaskStatus;
+  readonly blockerReason?: string;
   readonly assigneeAgentId?: string;
   readonly assigneeRoleId?: string;
   readonly assigneeBindingId?: string;
@@ -98,6 +100,7 @@ export type UpdateTaskStatusInput = {
   readonly taskId: string;
   readonly status: TaskStatus;
   readonly reason?: string;
+  readonly blockerReason?: string;
 };
 
 export type TaskActivityKind = "comment" | "artifact_linked" | "blocker_set" | "priority_change" | "status_change";
@@ -189,8 +192,12 @@ export class TaskService {
     if (!canTransition(existing.status, nextStatus)) return this.rejectTransition(existing, nextStatus, input.reason);
     const now = this.options.now?.() ?? Date.now();
     this.options.database.sqlite.transaction(() => {
-      this.options.database.sqlite.prepare("UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?").run(nextStatus, now, input.taskId);
-      this.options.eventBus.publish(taskEvent("task.status.changed", existing.workspace_id, existing.room_id ?? "", input.taskId, { taskId: input.taskId, prevStatus: existing.status, nextStatus, ...(input.reason !== undefined ? { reason: input.reason } : {}) }, now));
+      if (nextStatus === "blocked") {
+        this.options.database.sqlite.prepare("UPDATE tasks SET status = 'blocked', blocker_reason = ?, updated_at = ? WHERE id = ?").run(input.blockerReason ?? null, now, input.taskId);
+      } else {
+        this.options.database.sqlite.prepare("UPDATE tasks SET status = ?, blocker_reason = NULL, updated_at = ? WHERE id = ?").run(nextStatus, now, input.taskId);
+      }
+      this.options.eventBus.publish(taskEvent("task.status.changed", existing.workspace_id, existing.room_id ?? "", input.taskId, { taskId: input.taskId, prevStatus: existing.status, nextStatus, ...(input.reason !== undefined ? { reason: input.reason } : {}), ...(input.blockerReason !== undefined ? { blockerReason: input.blockerReason } : {}) }, now));
     })();
     if (nextStatus === "completed") {
       const completedTask = this.task(input.taskId);
@@ -242,8 +249,8 @@ export class TaskService {
     return { ok: true, data: { task: taskView(task), taskId }, emittedEvents: latestTaskEvents(this.options.database, taskId) };
   }
 
-  blockDelegatedRun(taskId: string, byRunId: string): CommandResult<{ readonly task: TaskView; readonly taskId: string }> {
-    return this.transitionDelegatedTask(taskId, "blocked", { reason: "delegated_run_failed", byRunId, activityKind: "status_change", activityPayload: { fromStatus: "in_progress", nextStatus: "blocked", byRunId } });
+  blockDelegatedRun(taskId: string, byRunId: string, blockerReason?: string): CommandResult<{ readonly task: TaskView; readonly taskId: string }> {
+    return this.transitionDelegatedTask(taskId, "blocked", { reason: "delegated_run_failed", byRunId, ...(blockerReason !== undefined ? { blockerReason } : {}), activityKind: "status_change", activityPayload: { fromStatus: "in_progress", nextStatus: "blocked", byRunId } });
   }
 
   addTaskActivity(input: AddTaskActivityInput): CommandResult<{ readonly task: TaskView; readonly taskId: string; readonly activityId: string }> {
@@ -342,7 +349,7 @@ export class TaskService {
   private transitionDelegatedTask(
     taskId: string,
     nextStatus: "in_progress" | "blocked" | "completed",
-    input: { readonly reason: string; readonly byRunId: string; readonly activityKind: TaskActivityKind; readonly activityPayload: Record<string, unknown> }
+    input: { readonly reason: string; readonly byRunId: string; readonly blockerReason?: string; readonly activityKind: TaskActivityKind; readonly activityPayload: Record<string, unknown> }
   ): CommandResult<{ readonly task: TaskView; readonly taskId: string }> {
     const existing = this.task(taskId);
     if (!existing) return failed("not_found", `Task '${taskId}' not found`);
@@ -353,8 +360,12 @@ export class TaskService {
 
     const now = this.options.now?.() ?? Date.now();
     this.options.database.sqlite.transaction(() => {
-      this.options.database.sqlite.prepare("UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?").run(nextStatus, now, taskId);
-      this.options.eventBus.publish(taskEvent("task.status.changed", existing.workspace_id, existing.room_id ?? "", taskId, { taskId, prevStatus: existing.status, nextStatus, reason: input.reason }, now));
+      if (nextStatus === "blocked") {
+        this.options.database.sqlite.prepare("UPDATE tasks SET status = 'blocked', blocker_reason = ?, updated_at = ? WHERE id = ?").run(input.blockerReason ?? null, now, taskId);
+      } else {
+        this.options.database.sqlite.prepare("UPDATE tasks SET status = ?, blocker_reason = NULL, updated_at = ? WHERE id = ?").run(nextStatus, now, taskId);
+      }
+      this.options.eventBus.publish(taskEvent("task.status.changed", existing.workspace_id, existing.room_id ?? "", taskId, { taskId, prevStatus: existing.status, nextStatus, reason: input.reason, ...(input.blockerReason !== undefined ? { blockerReason: input.blockerReason } : {}) }, now));
     })();
 
     const task = this.task(taskId);
@@ -403,7 +414,7 @@ export function createUpdateTaskHandler(service: TaskService): CommandHandler {
     const taskId = stringField(command, "taskId");
     const status = normalizeStatus(stringField(command, "status"));
     if (!taskId || status === undefined) return failed("validation_failed", "taskId and valid status are required");
-    return service.updateStatus({ taskId, status, ...(stringField(command, "reason") !== undefined ? { reason: stringField(command, "reason") as string } : {}) });
+    return service.updateStatus({ taskId, status, ...(stringField(command, "reason") !== undefined ? { reason: stringField(command, "reason") as string } : {}), ...(stringField(command, "blockerReason") !== undefined ? { blockerReason: stringField(command, "blockerReason") as string } : {}) });
   };
 }
 
@@ -453,6 +464,7 @@ function taskView(row: TaskRow): TaskView {
     dependencies: parseDependencies(row.dependencies),
     ...(row.priority !== null ? { priority: row.priority } : {}),
     expectsReview: row.expects_review !== 0,
+    ...(row.blocker_reason !== null ? { blockerReason: row.blocker_reason } : {}),
     ...(row.due_at !== null ? { dueAt: row.due_at } : {}),
     ...(row.created_by !== null ? { createdBy: row.created_by } : {}),
     createdAt: row.created_at,
@@ -497,9 +509,9 @@ export function checkTaskTimeouts(database: AgentHubDatabase, eventBus: EventBus
 
   database.sqlite.transaction(() => {
     for (const row of rows) {
-      const updated = database.sqlite.prepare("UPDATE tasks SET status = 'blocked', updated_at = ? WHERE id = ? AND status IN ('pending', 'in_progress') AND updated_at < ?").run(now, row.id, cutoff);
-      if (updated.changes !== 1) continue;
-      eventBus.publish(taskEvent("task.status.changed", row.workspace_id, row.room_id, row.id, { taskId: row.id, prevStatus: row.status, nextStatus: "blocked", reason: "timeout" }, now));
+       const updated = database.sqlite.prepare("UPDATE tasks SET status = 'blocked', blocker_reason = ?, updated_at = ? WHERE id = ? AND status IN ('pending', 'in_progress') AND updated_at < ?").run("timeout", now, row.id, cutoff);
+       if (updated.changes !== 1) continue;
+       eventBus.publish(taskEvent("task.status.changed", row.workspace_id, row.room_id, row.id, { taskId: row.id, prevStatus: row.status, nextStatus: "blocked", reason: "timeout", blockerReason: "timeout" }, now));
       if (row.primary_agent_id === null) continue;
       wakes.push({ taskId: row.id, roomId: row.room_id, workspaceId: row.workspace_id, agentId: row.primary_agent_id, mailboxMessageId: ensureTaskTimeoutMailbox(database, eventBus, row.workspace_id, row.room_id, row.primary_agent_id, row.id, now) });
     }

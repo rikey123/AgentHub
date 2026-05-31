@@ -130,6 +130,14 @@ export class RunLifecycleError extends Error {
 export class RunLifecycleService {
   private readonly now: () => number;
   private readonly sideEffects: RunLifecycleSideEffects;
+  private readonly permissionRequests = new Map<string, Set<string>>();
+  /**
+   * Tracks runs that have had at least one permission denied or expired.
+   * Fail-closed: once any permission is denied/expired, the run will NOT resume
+   * even if all other pending permissions are later allowed.
+   * Cleared when the run reaches a terminal state.
+   */
+  private readonly permissionDenied = new Set<string>();
 
   constructor(
     private readonly database: AgentHubDatabase,
@@ -245,9 +253,44 @@ export class RunLifecycleService {
   markWaitingPermission(tx: SqliteTx | null, runId: string, permissionId: string): void {
     this.withTransaction(tx, (db) => {
       const run = this.getRun(db, runId);
-      this.requireStatus(run, ["running"], "markWaitingPermission");
-      this.updateStatus(db, runId, "waiting_permission", { waiting_reason: `permission:${permissionId}` });
-      this.publishRunEvent(db, "agent.run.waiting_permission", runId, run.workspace_id, run.room_id, run.agent_id, { runId, permissionId });
+      this.requireStatus(run, ["running", "waiting_permission"], "markWaitingPermission");
+      const requests = this.permissionRequests.get(runId) ?? new Set<string>();
+      const wasAdded = !requests.has(permissionId);
+      requests.add(permissionId);
+      this.permissionRequests.set(runId, requests);
+      if (wasAdded && requests.size === 1) {
+        this.updateStatus(db, runId, "waiting_permission", { waiting_reason: `permission:${permissionId}` });
+        this.publishRunEvent(db, "agent.run.waiting_permission", runId, run.workspace_id, run.room_id, run.agent_id, { runId, permissionId });
+      }
+    });
+  }
+
+  markPermissionResolved(tx: SqliteTx | null, runId: string, permissionId: string, decision: "allowed" | "denied" | "expired" = "allowed"): void {
+    this.withTransaction(tx, (db) => {
+      const requests = this.permissionRequests.get(runId);
+      if (!requests || !requests.has(permissionId)) return;
+
+      requests.delete(permissionId);
+
+      // Fail-closed: record any denied/expired decision so the run cannot resume
+      // even if subsequent permissions are allowed.
+      if (decision !== "allowed") {
+        this.permissionDenied.add(runId);
+      }
+
+      if (requests.size > 0) return;
+
+      // All pending permissions resolved — clean up tracking state
+      this.permissionRequests.delete(runId);
+      const wasDenied = this.permissionDenied.has(runId);
+      this.permissionDenied.delete(runId);
+
+      // Only resume the run if ALL permissions were allowed (fail-closed)
+      if (wasDenied) return;
+
+      const run = this.getRun(db, runId);
+      if (run.adapter_session_id === null) return;
+      this.markRunning(db, runId, run.adapter_session_id);
     });
   }
 
@@ -295,6 +338,13 @@ export class RunLifecycleService {
         this.sideEffects.onTargetUnavailable?.(db, runId);
       }
       this.sideEffects.finalizeNextTurns?.(db, runId, failureClass, now);
+      if (run.task_id !== null) {
+        const lastAssistantText = this.getLastAssistantText(db, run.id);
+        const filesTouched = this.getFilesTouched(db, run.id);
+        db.prepare(
+          "INSERT INTO task_checkpoints (id, task_id, run_id, progress_summary, files_touched, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+        ).run(randomUUID(), run.task_id, run.id, lastAssistantText.slice(0, 2000), JSON.stringify(filesTouched), this.now());
+      }
       this.publishRunEvent(db, "agent.run.failed", runId, run.workspace_id, run.room_id, run.agent_id, { runId, reason, failureClass, error });
       this.publishBriefEvent(db, runId, run.workspace_id, run.room_id, run.agent_id, briefText);
     });
@@ -307,6 +357,13 @@ export class RunLifecycleService {
       const run = this.getRun(db, runId);
       this.requireStatus(run, ["cancelling"], "cancelFinalized");
       this.updateStatus(db, runId, "cancelled", { ended_at: this.now(), failure_class: "user_cancelled", waiting_reason: null });
+      if (run.task_id !== null) {
+        const lastAssistantText = this.getLastAssistantText(db, run.id);
+        const filesTouched = this.getFilesTouched(db, run.id);
+        db.prepare(
+          "INSERT INTO task_checkpoints (id, task_id, run_id, progress_summary, files_touched, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+        ).run(randomUUID(), run.task_id, run.id, lastAssistantText.slice(0, 2000), JSON.stringify(filesTouched), this.now());
+      }
       this.publishRunEvent(db, "agent.run.cancelled", runId, run.workspace_id, run.room_id, run.agent_id, { runId });
       this.publishBriefEvent(db, runId, run.workspace_id, run.room_id, run.agent_id, briefText);
     });
@@ -356,6 +413,33 @@ export class RunLifecycleService {
     const row = db.prepare("SELECT * FROM runs WHERE id = ?").get(runId) as RunRow | undefined;
     if (!row) throw new RunLifecycleError("not_found", `Run '${runId}' not found`);
     return row;
+  }
+
+  private getLastAssistantText(db: SqliteTx, runId: string): string {
+    const msg = db.prepare(
+      "SELECT id FROM messages WHERE run_id = ? AND role = 'assistant' AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1"
+    ).get(runId) as { id: string } | undefined;
+    if (!msg) return "";
+    const parts = db.prepare(
+      "SELECT payload FROM message_parts WHERE message_id = ? AND part_type IN ('text','code') ORDER BY seq ASC"
+    ).all(msg.id) as { payload: string }[];
+    return parts
+      .map((p) => {
+        try {
+          return (JSON.parse(p.payload) as { text?: string }).text ?? "";
+        } catch {
+          return "";
+        }
+      })
+      .join("\n")
+      .trim();
+  }
+
+  private getFilesTouched(db: SqliteTx, runId: string): string[] {
+    const rows = db.prepare(
+      "SELECT DISTINCT json_extract(payload, '$.path') AS path FROM events WHERE run_id = ? AND type = 'file.changed'"
+    ).all(runId) as { path: string | null }[];
+    return rows.map((r) => r.path).filter((p): p is string => p !== null);
   }
 
   private requireStatus(run: RunRow, allowed: readonly RunStatus[], method: string): void {

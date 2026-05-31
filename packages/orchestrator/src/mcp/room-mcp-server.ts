@@ -223,15 +223,15 @@ export class RoomMcpServer {
     if (name === "room.complete_task") return failure("not_implemented", "room.complete_task is not yet implemented (V1.1 feat/v11-B)");
     // V1.1 stub: room.add_participant — implementation lands in feat/v11-C (D10)
     if (name === "room.add_participant") return failure("not_implemented", "room.add_participant is not yet implemented (V1.1 feat/v11-C)");
-    // V1.1 stub: room.apply_worktree / room.discard_worktree — implementation lands in feat/v11-A (D3)
-    if (name === "room.apply_worktree") return failure("not_implemented", "room.apply_worktree is not yet implemented (V1.1 feat/v11-A)");
-    if (name === "room.discard_worktree") return failure("not_implemented", "room.discard_worktree is not yet implemented (V1.1 feat/v11-A)");
+    if (name === "room.apply_worktree") return await this.handleApplyWorktree(input, session, context);
+    if (name === "room.discard_worktree") return await this.handleDiscardWorktree(input, session, context);
     return toolNotFound(name);
   }
 
   private async handleFileRead(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): Promise<RoomMcpToolResult> {
     const path = isRecord(input) && typeof input.path === "string" ? input.path : undefined;
     if (!path) return failure("validation_failed", "path is required");
+    if (hasPathTraversal(path)) return failure("permission_denied", "path_traversal_denied");
     const workspaceRoot = this.workspaceRootFor(session.roomId);
     if (workspaceRoot === undefined) return failure("not_found", `Workspace for room '${session.roomId}' not found`);
     // Canonicalize before permission check so the engine sees the resolved path.
@@ -266,6 +266,7 @@ export class RoomMcpServer {
 
   private async handleFileWrite(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): Promise<RoomMcpToolResult> {
     if (!isRecord(input) || typeof input.path !== "string" || typeof input.content !== "string") return failure("validation_failed", "path and content are required");
+    if (hasPathTraversal(input.path)) return failure("permission_denied", "path_traversal_denied");
     const workspaceRoot = this.workspaceRootFor(session.roomId);
     if (workspaceRoot === undefined) return failure("not_found", `Workspace for room '${session.roomId}' not found`);
     // Canonicalize before permission check so the engine sees the resolved path.
@@ -773,6 +774,139 @@ export class RoomMcpServer {
     return { ok: true, data: { agentId: newAgentId, name: agentName, slug, adapterId, role: room.mode === "team" || room.mode === "squad" ? "teammate" : "observer" } };
   }
 
+  async handleApplyWorktree(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): Promise<RoomMcpToolResult> {
+    if (!isRecord(input) || typeof input.runId !== "string") return failure("validation_failed", "runId is required");
+    const runId = input.runId;
+
+    const artifact = this.options.database.sqlite
+      .prepare("SELECT id, status, metadata FROM artifacts WHERE run_id = ? AND type = 'worktree_diff' ORDER BY created_at DESC LIMIT 1")
+      .get(runId) as { id: string; status: string; metadata: string } | undefined;
+    if (!artifact) return failure("not_found", `No worktree_diff artifact found for run '${runId}'`);
+    if (artifact.status !== "ready_for_review") return failure("conflict", `Artifact is in '${artifact.status}' state, expected 'ready_for_review'`);
+
+    const patchFile = this.options.database.sqlite
+      .prepare("SELECT patch FROM artifact_files WHERE artifact_id = ? LIMIT 1")
+      .get(artifact.id) as { patch: string | null } | undefined;
+    const artifactMetadata = JSON.parse(artifact.metadata) as { readonly patch?: string };
+    const patchText = patchFile?.patch?.trim().length ? patchFile.patch : artifactMetadata.patch;
+
+    const room = this.options.database.sqlite
+      .prepare("SELECT workspace_id, workspace_path FROM rooms r LEFT JOIN workspaces w ON w.id = r.workspace_id WHERE r.id = ?")
+      .get(session.roomId) as { workspace_id: string; workspace_path?: string } | undefined;
+    if (!room) return failure("not_found", `Room '${session.roomId}' not found`);
+
+    const workspaceRoot = this.workspaceRootFor(session.roomId);
+    if (!workspaceRoot) return failure("not_found", `Workspace for room '${session.roomId}' not found`);
+
+    const now = this.options.now?.() ?? Date.now();
+
+    // Guard: if no patch is available, the artifact is invalid — do not mark as applied.
+    if (!patchText || patchText.trim().length === 0) {
+      return failure("conflict", "worktree_diff_has_no_patch");
+    }
+
+    if (patchText && patchText.trim().length > 0) {
+      try {
+        const { execFileSync } = await import("node:child_process");
+        const { writeFileSync, unlinkSync } = await import("node:fs");
+        const { join } = await import("node:path");
+        const { randomUUID } = await import("node:crypto");
+
+        const patchPath = join(workspaceRoot, `.agenthub-patch-${randomUUID()}.patch`);
+        writeFileSync(patchPath, patchText, "utf8");
+        try {
+          execFileSync("git", ["apply", "--check", patchPath], { cwd: workspaceRoot });
+          execFileSync("git", ["apply", patchPath], { cwd: workspaceRoot });
+          unlinkSync(patchPath);
+        } catch (applyErr) {
+          try { unlinkSync(patchPath); } catch { /* ignore */ }
+          const taskId = (this.options.database.sqlite.prepare("SELECT task_id FROM runs WHERE id = ?").get(runId) as { task_id: string | null } | undefined)?.task_id;
+          this.options.database.sqlite.transaction(() => {
+            this.options.database.sqlite.prepare("UPDATE artifacts SET status = 'conflict', updated_at = ? WHERE id = ?").run(now, artifact.id);
+            if (taskId) {
+              // Read prevStatus before update; only publish event if state actually changed
+              const prevRow = this.options.database.sqlite.prepare("SELECT status FROM tasks WHERE id = ?").get(taskId) as { status: string } | undefined;
+              const prevStatus = prevRow?.status ?? "in_progress";
+              const taskResult = this.options.database.sqlite.prepare("UPDATE tasks SET status = 'blocked', blocker_reason = 'worktree_apply_conflict', updated_at = ? WHERE id = ? AND status NOT IN ('blocked', 'completed', 'cancelled')").run(now, taskId);
+              if (taskResult.changes > 0) {
+                this.options.eventBus.publish({ id: randomUUID(), type: "task.status.changed", schemaVersion: 1, workspaceId: room.workspace_id, roomId: session.roomId, payload: { taskId, prevStatus, nextStatus: "blocked", blockerReason: "worktree_apply_conflict" }, createdAt: now });
+              }
+              // Spec §file-conflict-isolation: "conflict diff SHALL be stored in task_activities as a blocker_set entry"
+              this.options.taskService.addTaskActivity({
+                taskId,
+                kind: "blocker_set",
+                byKind: "system",
+                by: "worktree-apply",
+                payload: { blockerReason: "worktree_apply_conflict", artifactId: artifact.id, conflictDiff: String(applyErr).slice(0, 2000) }
+              });
+            }
+            this.options.eventBus.publish({ id: randomUUID(), type: "worktree.conflict_detected", schemaVersion: 1, workspaceId: room.workspace_id, roomId: session.roomId, payload: { runId, taskId, artifactId: artifact.id, conflictDiff: String(applyErr) }, createdAt: now });
+          })();
+          if (taskId) {
+            void this.options.commandBus.dispatch(
+              { type: "WakeAgent", roomId: session.roomId, agentId: session.agentId, workspaceId: room.workspace_id, reason: "task_blocked", taskId, idempotencyKey: `apply-conflict:${runId}` },
+              { actor: { type: "system" }, traceId: `apply-worktree:${runId}`, origin: "internal" }
+            );
+          }
+          return failure("conflict", "worktree_apply_conflict");
+        }
+      } catch (err) {
+        return failure("internal_error", err instanceof Error ? err.message : String(err));
+      }
+    }
+
+    const worktreePath = join(workspaceRoot, ".agenthub", "worktrees", runId);
+    const taskId = (this.options.database.sqlite.prepare("SELECT task_id FROM runs WHERE id = ?").get(runId) as { task_id: string | null } | undefined)?.task_id;
+    this.options.database.sqlite.transaction(() => {
+      this.options.database.sqlite.prepare("UPDATE artifacts SET status = 'applied', updated_at = ?, applied_at = ? WHERE id = ?").run(now, now, artifact.id);
+      this.options.eventBus.publish({ id: randomUUID(), type: "worktree.applied", schemaVersion: 1, workspaceId: room.workspace_id, roomId: session.roomId, payload: { runId, ...(taskId ? { taskId } : {}), artifactId: artifact.id }, createdAt: now });
+    })();
+
+    try {
+      const { execFileSync } = await import("node:child_process");
+      execFileSync("git", ["worktree", "remove", "--force", worktreePath], { cwd: workspaceRoot });
+    } catch { /* best effort cleanup */ }
+
+    return { ok: true, data: { runId, artifactId: artifact.id, status: "applied" } };
+  }
+
+  async handleDiscardWorktree(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): Promise<RoomMcpToolResult> {
+    if (!isRecord(input) || typeof input.runId !== "string") return failure("validation_failed", "runId is required");
+    const runId = input.runId;
+
+    const artifact = this.options.database.sqlite
+      .prepare("SELECT id, status FROM artifacts WHERE run_id = ? AND type = 'worktree_diff' ORDER BY created_at DESC LIMIT 1")
+      .get(runId) as { id: string; status: string } | undefined;
+
+    const room = this.options.database.sqlite
+      .prepare("SELECT workspace_id FROM rooms WHERE id = ?")
+      .get(session.roomId) as { workspace_id: string } | undefined;
+    if (!room) return failure("not_found", `Room '${session.roomId}' not found`);
+
+    const workspaceRoot = this.workspaceRootFor(session.roomId);
+    if (!workspaceRoot) return failure("not_found", `Workspace for room '${session.roomId}' not found`);
+
+    const now = this.options.now?.() ?? Date.now();
+    const taskId = (this.options.database.sqlite.prepare("SELECT task_id FROM runs WHERE id = ?").get(runId) as { task_id: string | null } | undefined)?.task_id;
+    const { join } = await import("node:path");
+    const { randomUUID } = await import("node:crypto");
+    const worktreePath = join(workspaceRoot, ".agenthub", "worktrees", runId);
+
+    this.options.database.sqlite.transaction(() => {
+      if (artifact) {
+        this.options.database.sqlite.prepare("UPDATE artifacts SET status = 'discarded', updated_at = ? WHERE id = ?").run(now, artifact.id);
+      }
+      this.options.eventBus.publish({ id: randomUUID(), type: "worktree.discarded", schemaVersion: 1, workspaceId: room.workspace_id, roomId: session.roomId, payload: { runId, ...(taskId ? { taskId } : {}), ...(artifact ? { artifactId: artifact.id } : {}) }, createdAt: now });
+    })();
+
+    try {
+      const { execFileSync } = await import("node:child_process");
+      execFileSync("git", ["worktree", "remove", "--force", worktreePath], { cwd: workspaceRoot });
+    } catch { /* best effort */ }
+
+    return { ok: true, data: { runId, status: "discarded" } };
+  }
+
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
@@ -954,4 +1088,16 @@ function realpathAncestorThenResolve(target: string, realRoot: string): string {
   }
   // Unreachable, but satisfies TypeScript.
   return realRoot;
+}
+
+function hasPathTraversal(path: string): boolean {
+  // Reject absolute paths (POSIX or Windows drive letter)
+  if (path.startsWith("/") || /^[a-zA-Z]:[/\\]/.test(path)) return true;
+  // Reject .. segments
+  const normalized = path.replace(/\\/g, "/");
+  const segments = normalized.split("/");
+  for (const seg of segments) {
+    if (seg === "..") return true;
+  }
+  return false;
 }

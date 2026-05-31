@@ -226,16 +226,15 @@ export class NativeAgentAdapter {
       decision = "allowed";
     } else if (decided.status === "deny") {
       decision = "denied";
-    } else if (decided.status === "ask") {
-      this.options.lifecycle.markWaitingPermission(null, run.id, decided.requestId);
-      const resolution = await decided.promise;
-      decision = resolution.decision === "allowed" ? "allowed" : resolution.decision === "denied" ? "denied" : "expired";
-      if (decision === "allowed") {
-        this.options.lifecycle.markRunning(null, run.id, `native-${run.id}`);
+      } else if (decided.status === "ask") {
+        this.options.lifecycle.markWaitingPermission(null, run.id, decided.requestId);
+        const resolution = await decided.promise;
+        decision = resolution.decision === "allowed" ? "allowed" : resolution.decision === "denied" ? "denied" : "expired";
+        // Use ref-count exit path instead of direct markRunning
+        this.options.lifecycle.markPermissionResolved(null, run.id, decided.requestId, decision);
+      } else {
+        decision = "expired";
       }
-    } else {
-      decision = "expired";
-    }
     const summary: PermissionDecisionSummary = { resource, decision, modelConfigId: modelConfig.id };
     this.permissionCache.set(cacheKey, { decision, summary });
     const active = this.activeRuns.get(run.id);

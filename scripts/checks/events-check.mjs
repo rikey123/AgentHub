@@ -47,7 +47,9 @@ const ignoredNonEventLiterals = new Set([
   "tool.update",
   "tool.update.stdout",
   "web.fetch",
-  "web.search"
+  "web.search",
+  // V1.1 artifact file paths (not event types)
+  "worktree.patch"
 ]);
 
 function expandSpecEventCell(cell) {
