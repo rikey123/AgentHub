@@ -47,7 +47,11 @@ export type AdapterArtifactFSBoundary = {
 export class AdapterBridge {
   private readonly toolNamesByCallId = new Map<string, string>();
   private watchdogTimer: ReturnType<typeof setTimeout> | undefined;
+  private level2Timer: ReturnType<typeof setTimeout> | undefined;
+  private turnCount = 0;
+  private readonly seenMessageIds = new Set<string>();
   private static readonly WATCHDOG_MS = 90_000; // 90s of silence → notify leader
+  private static readonly LEVEL2_MS = 5 * 60 * 1000; // 5 minutes
 
   constructor(
     private readonly input: {
@@ -88,6 +92,11 @@ export class AdapterBridge {
       return;
     }
     if (event.type === "message.part.delta") {
+      if (!this.seenMessageIds.has(event.messageId)) {
+        this.seenMessageIds.add(event.messageId);
+        this.turnCount += 1;
+        this.checkTurnLimit();
+      }
       this.publishAdapterDomainEvent(event);
       this.onMessageDelta();
       return;
@@ -107,6 +116,12 @@ export class AdapterBridge {
       const briefText = this.computeBriefText({ failureClass: "adapter_error", failureReason: event.error });
       this.input.lifecycle.fail(null, this.input.runId, "adapter_session_crashed", "retryable_visible", event.error, briefText);
       return;
+    }
+    if (event.type === "fs.writeTextFile" || event.type === "fs.deleteFile") {
+      const path = event.path;
+      if (path.includes("..") || path.startsWith("/") || /^[a-zA-Z]:[/\\]/.test(path)) {
+        return;
+      }
     }
     if (event.type === "fs.writeTextFile") {
       this.input.artifactFs?.writeTextFile({ runId: this.input.runId, path: event.path, content: event.content });
@@ -165,7 +180,7 @@ export class AdapterBridge {
     this.clearWatchdog();
     this.watchdogTimer = setTimeout(() => {
       this.watchdogTimer = undefined;
-      this.notifyLeaderOfStall();
+      void this.notifyLeaderOfStall();
     }, AdapterBridge.WATCHDOG_MS);
   }
 
@@ -174,43 +189,111 @@ export class AdapterBridge {
       clearTimeout(this.watchdogTimer);
       this.watchdogTimer = undefined;
     }
+    if (this.level2Timer !== undefined) {
+      clearTimeout(this.level2Timer);
+      this.level2Timer = undefined;
+    }
   }
 
   private notifyLeaderOfStall(): void {
     const db = this.input.database;
     if (db === undefined) return;
+    void Promise.resolve().then(async () => {
+      try {
+        const room = db.sqlite
+          .prepare("SELECT workspace_id, primary_agent_id, mode FROM rooms WHERE id = ?")
+          .get(this.input.roomId) as { workspace_id: string; primary_agent_id: string | null; mode: string } | undefined;
+        if (!room) return;
+        // Only notify in team/squad/assisted rooms where there is a distinct leader.
+        if (room.mode !== "team" && room.mode !== "squad" && room.mode !== "assisted") return;
+        const leaderId = room.primary_agent_id;
+        if (!leaderId || leaderId === this.input.agentId) return;
+
+        const now = this.input.now?.() ?? Date.now();
+        const mailboxMessageId = randomUUID();
+        const agentName = (db.sqlite.prepare("SELECT name FROM agent_profiles WHERE id = ?").get(this.input.agentId) as { name: string } | undefined)?.name ?? this.input.agentId;
+        const stallMessage = `[Watchdog] Agent **${agentName}** (run ${this.input.runId.slice(0, 8)}) has been silent for ${Math.round(AdapterBridge.WATCHDOG_MS / 1000)}s with no output. It may be stuck. Consider reassigning its task or cancelling the run.`;
+
+        db.sqlite.transaction(() => {
+          db.sqlite
+            .prepare(
+              "INSERT INTO mailbox_messages (id, workspace_id, room_id, from_type, from_id, to_agent_id, kind, content, files, read, claimed_run_id, claimed_at, delivery_batch_id, delivery_failure_reason, attempt_count, created_at, consumed_at) VALUES (?, ?, ?, 'system', 'watchdog', ?, 'message', ?, '[]', 0, NULL, NULL, NULL, NULL, 0, ?, NULL)"
+            )
+            .run(mailboxMessageId, room.workspace_id, this.input.roomId, leaderId, JSON.stringify({ text: stallMessage }), now);
+          this.input.eventBus.publish({ id: randomUUID(), type: "mailbox.message.created", schemaVersion: 1, workspaceId: room.workspace_id, roomId: this.input.roomId, agentId: leaderId, payload: { mailboxMessageId, roomId: this.input.roomId, fromAgentId: "watchdog", targetAgentId: leaderId }, createdAt: now });
+        })();
+
+        // Wake the leader so it sees the stall notification.
+        const wakeResult = await Promise.resolve(this.input.getCommandBus?.()?.dispatch(
+          { type: "WakeAgent", roomId: this.input.roomId, agentId: leaderId, workspaceId: room.workspace_id, reason: "agent_stalled", promptDelta: { kind: "delta_only", instructions: stallMessage }, idempotencyKey: `watchdog:${this.input.runId}:${now}` },
+          { actor: { type: "system" }, traceId: `watchdog:${this.input.runId}`, origin: "internal" }
+        ));
+        const wakeData = wakeResult?.ok === true ? (wakeResult.data as { runId?: string; appendedToRunId?: string } | undefined) : undefined;
+        const leaderRunId = wakeData?.runId ?? wakeData?.appendedToRunId;
+        if (leaderRunId && this.input.database) {
+          this.level2Timer = setTimeout(() => {
+            this.level2Timer = undefined;
+            this.checkLevel2Stall(leaderRunId);
+          }, AdapterBridge.LEVEL2_MS);
+        }
+      } catch (err) {
+        // eslint-disable-next-line no-console -- watchdog last-resort fallback when CommandBus dispatch fails; intentional console to avoid silent loss
+        console.warn("[AdapterBridge] watchdog notification failed:", err);
+      }
+    });
+  }
+
+  private checkLevel2Stall(leaderRunId: string): void {
+    const db = this.input.database;
+    if (!db) return;
     try {
-      const room = db.sqlite
-        .prepare("SELECT workspace_id, primary_agent_id, mode FROM rooms WHERE id = ?")
-        .get(this.input.roomId) as { workspace_id: string; primary_agent_id: string | null; mode: string } | undefined;
-      if (!room) return;
-      // Only notify in team/squad/assisted rooms where there is a distinct leader.
-      if (room.mode !== "team" && room.mode !== "squad" && room.mode !== "assisted") return;
-      const leaderId = room.primary_agent_id;
-      if (!leaderId || leaderId === this.input.agentId) return;
+      const leaderRun = db.sqlite.prepare("SELECT status FROM runs WHERE id = ?").get(leaderRunId) as { status: string } | undefined;
+      const isRunning = leaderRun?.status === "running" || leaderRun?.status === "completed";
+      if (isRunning) return; // Leader recovered in time
+
+      const reason = (leaderRun?.status === "failed" || leaderRun?.status === "cancelled")
+        ? "leader_failed" : "leader_unavailable";
+
+      const stalledTasks = db.sqlite.prepare(
+        "SELECT id FROM tasks WHERE room_id = ? AND status IN ('in_progress', 'blocked')"
+      ).all(this.input.roomId) as { id: string }[];
+      const stalledTaskIds = stalledTasks.map((t) => t.id);
 
       const now = this.input.now?.() ?? Date.now();
-      const mailboxMessageId = randomUUID();
-      const agentName = (db.sqlite.prepare("SELECT name FROM agent_profiles WHERE id = ?").get(this.input.agentId) as { name: string } | undefined)?.name ?? this.input.agentId;
-      const stallMessage = `[Watchdog] Agent **${agentName}** (run ${this.input.runId.slice(0, 8)}) has been silent for ${Math.round(AdapterBridge.WATCHDOG_MS / 1000)}s with no output. It may be stuck. Consider reassigning its task or cancelling the run.`;
+      const room = db.sqlite.prepare("SELECT workspace_id FROM rooms WHERE id = ?").get(this.input.roomId) as { workspace_id: string } | undefined;
+      if (!room) return;
 
       db.sqlite.transaction(() => {
-        db.sqlite
-          .prepare(
-            "INSERT INTO mailbox_messages (id, workspace_id, room_id, from_type, from_id, to_agent_id, kind, content, files, read, claimed_run_id, claimed_at, delivery_batch_id, delivery_failure_reason, attempt_count, created_at, consumed_at) VALUES (?, ?, ?, 'system', 'watchdog', ?, 'message', ?, '[]', 0, NULL, NULL, NULL, NULL, 0, ?, NULL)"
-          )
-          .run(mailboxMessageId, room.workspace_id, this.input.roomId, leaderId, JSON.stringify({ text: stallMessage }), now);
-        this.input.eventBus.publish({ id: randomUUID(), type: "mailbox.message.created", schemaVersion: 1, workspaceId: room.workspace_id, roomId: this.input.roomId, agentId: leaderId, payload: { mailboxMessageId, roomId: this.input.roomId, fromAgentId: "watchdog", targetAgentId: leaderId }, createdAt: now });
+        db.sqlite.prepare("UPDATE rooms SET stalled_at = ? WHERE id = ?").run(now, this.input.roomId);
+        this.input.eventBus.publish({
+          id: randomUUID(),
+          type: "room.stalled",
+          schemaVersion: 1,
+          workspaceId: room.workspace_id,
+          roomId: this.input.roomId,
+          payload: { roomId: this.input.roomId, stalledTaskIds, reason },
+          createdAt: now
+        });
       })();
-
-      // Wake the leader so it sees the stall notification.
-      void this.input.getCommandBus?.()?.dispatch(
-        { type: "WakeAgent", roomId: this.input.roomId, agentId: leaderId, workspaceId: room.workspace_id, reason: "agent_crashed", promptDelta: { kind: "delta_only", instructions: stallMessage }, idempotencyKey: `watchdog:${this.input.runId}:${now}` },
-        { actor: { type: "system" }, traceId: `watchdog:${this.input.runId}`, origin: "internal" }
-      );
     } catch (err) {
-      // eslint-disable-next-line no-console -- watchdog last-resort fallback when CommandBus dispatch fails; intentional console to avoid silent loss
-      console.warn("[AdapterBridge] watchdog notification failed:", err);
+      console.warn("[AdapterBridge] level-2 stall check failed:", err);
+    }
+  }
+
+  private checkTurnLimit(): void {
+    if (!this.input.taskId || !this.input.database) return;
+    const task = this.input.database.sqlite
+      .prepare("SELECT max_turns FROM tasks WHERE id = ?")
+      .get(this.input.taskId) as { max_turns: number | null } | undefined;
+    if (!task?.max_turns || this.turnCount < task.max_turns) return;
+
+    try {
+      void this.input.getCommandBus?.()?.dispatch(
+        { type: "CancelRun", runId: this.input.runId, idempotencyKey: `turn-limit:${this.input.runId}` },
+        { actor: { type: "system" }, traceId: `turn-limit:${this.input.runId}`, origin: "internal" }
+      );
+    } catch {
+      /* best effort */
     }
   }
 

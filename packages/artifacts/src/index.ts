@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, normalize, relative, resolve, sep } from "node:path";
@@ -5,11 +6,11 @@ import { dirname, normalize, relative, resolve, sep } from "node:path";
 import type { Command, CommandHandler, CommandMeta, CommandResult, EventBus, PublishInput } from "@agenthub/bus";
 import type { AgentHubDatabase } from "@agenthub/db";
 
-export type ArtifactType = "diff" | "file" | "preview" | "document" | "terminal" | "deployment";
-export type ArtifactStatus = "draft" | "reviewing" | "accepted" | "applying" | "applied" | "rejected" | "failed";
+export type ArtifactType = "diff" | "file" | "preview" | "document" | "terminal" | "deployment" | "worktree_diff";
+export type ArtifactStatus = "draft" | "reviewing" | "accepted" | "applying" | "applied" | "rejected" | "failed" | "ready_for_review" | "conflict" | "discarded";
 export type ArtifactFileStatus = "added" | "modified" | "deleted";
 export type AppliedState = "original" | "new" | "unknown";
-export type ArtifactEventType = "artifact.diff.created" | "artifact.file.created" | "artifact.reviewing" | "artifact.accepted" | "artifact.applying" | "artifact.applied" | "artifact.rejected" | "artifact.failed" | "artifact.preview.started" | "artifact.preview.stopped";
+export type ArtifactEventType = "artifact.diff.created" | "artifact.file.created" | "artifact.reviewing" | "artifact.accepted" | "artifact.applying" | "artifact.applied" | "artifact.rejected" | "artifact.failed" | "artifact.preview.started" | "artifact.preview.stopped" | "worktree.diff.ready";
 
 export type Artifact = {
   readonly id: string;
@@ -434,9 +435,38 @@ export class ArtifactFSRunRegistry {
     if (existing) return existing;
     const workspaceRoot = this.workspaceRoot(input.workspaceId);
     const terminalEnabled = input.terminalEnabled === true;
-    const mode = artifactFsMode(input.mode, terminalEnabled);
-    const isolatedRoot = mode === "shadow_buffer" ? undefined : input.workDir ?? this.options.rootForRun?.(input);
-    const fs = new ArtifactFS({ runId: input.runId, workspaceId: input.workspaceId, ...(input.roomId !== undefined ? { roomId: input.roomId } : {}), ...(input.taskId !== undefined ? { taskId: input.taskId } : {}), ...(input.messageId !== undefined ? { messageId: input.messageId } : {}), createdBy: input.agentId, mode, terminalEnabled, workspaceRoot, ...(isolatedRoot !== undefined ? { isolatedRoot } : {}), service: this.options.service, eventBus: this.options.eventBus, ...(this.options.now !== undefined ? { now: this.options.now } : {}) });
+
+    // For squad/team rooms, force isolated_worktree mode per spec §file-conflict-isolation.
+    const forceRoomIsolation = (() => {
+      if (input.roomId === undefined) return false;
+      const room = this.options.database.sqlite.prepare("SELECT mode FROM rooms WHERE id = ?").get(input.roomId) as { readonly mode: string } | undefined;
+      return room?.mode === "squad" || room?.mode === "team";
+    })();
+    const requestedMode = forceRoomIsolation ? "isolated_worktree" : input.mode;
+    const mode = artifactFsMode(requestedMode, terminalEnabled);
+
+    // For forced room isolation, prefer rootForRun over input.workDir.
+    // input.workDir may be process.cwd() (mock adapter default) which is NOT a valid isolated root.
+    // Only use input.workDir as isolated root when it is NOT the workspace root and NOT cwd.
+    const resolvedWorkspaceRoot = resolve(workspaceRoot);
+    const safeInputWorkDir =
+      input.workDir !== undefined &&
+      resolve(input.workDir) !== resolvedWorkspaceRoot &&
+      resolve(input.workDir) !== resolve(".")
+        ? input.workDir
+        : undefined;
+
+    const isolatedRoot =
+      mode === "shadow_buffer"
+        ? undefined
+        : forceRoomIsolation
+          ? (this.options.rootForRun?.(input) ?? safeInputWorkDir)
+          : (safeInputWorkDir ?? this.options.rootForRun?.(input));
+
+    // If isolated mode was requested but no valid root is available, fall back to shadow_buffer.
+    const effectiveFinalMode: ArtifactFSMode = (mode !== "shadow_buffer" && isolatedRoot === undefined) ? "shadow_buffer" : mode;
+
+    const fs = new ArtifactFS({ runId: input.runId, workspaceId: input.workspaceId, ...(input.roomId !== undefined ? { roomId: input.roomId } : {}), ...(input.taskId !== undefined ? { taskId: input.taskId } : {}), ...(input.messageId !== undefined ? { messageId: input.messageId } : {}), createdBy: input.agentId, mode: effectiveFinalMode, terminalEnabled, workspaceRoot, ...(isolatedRoot !== undefined ? { isolatedRoot } : {}), service: this.options.service, eventBus: this.options.eventBus, ...(this.options.now !== undefined ? { now: this.options.now } : {}) });
     this.runs.set(input.runId, fs);
     return fs;
   }
@@ -463,6 +493,28 @@ export class ArtifactFSRunRegistry {
     const fs = this.runs.get(input.runId);
     if (!fs) return undefined;
     const artifact = fs.buildRunArtifact(input.title);
+    this.runs.delete(input.runId);
+    return artifact;
+  }
+
+  buildWorktreeDiffArtifact(input: { readonly runId: string; readonly title?: string }): Artifact | undefined {
+    const fs = this.runs.get(input.runId);
+    if (!fs) return undefined;
+    const options = artifactFSOptions(fs);
+    if (options.mode !== "isolated_worktree" || options.isolatedRoot === undefined) {
+      this.runs.delete(input.runId);
+      return undefined;
+    }
+    let artifact: Artifact | undefined;
+    const now = this.options.now ?? Date.now;
+    this.options.database.sqlite.transaction(() => {
+      const patch = execFileSync("git", ["diff", "HEAD"], { cwd: options.isolatedRoot as string, encoding: "utf8" }).trim();
+      if (patch.length === 0) return;
+      const filesChanged = execFileSync("git", ["diff", "--name-only", "HEAD"], { cwd: options.isolatedRoot as string, encoding: "utf8" }).split(/\r?\n/).map((path) => path.trim()).filter((path) => path.length > 0);
+      if (filesChanged.length === 0) return;
+      artifact = this.options.service.create({ workspaceId: options.workspaceId, ...(options.roomId !== undefined ? { roomId: options.roomId } : {}), ...(options.taskId !== undefined ? { taskId: options.taskId } : {}), runId: options.runId, ...(options.messageId !== undefined ? { messageId: options.messageId } : {}), type: "worktree_diff", title: input.title ?? `Run ${options.runId} worktree diff`, status: "ready_for_review", createdBy: options.createdBy, metadata: { patch, filesChanged, artifactFsMode: options.mode } }, {});
+      this.options.eventBus.publish({ id: randomUUID(), type: "worktree.diff.ready", schemaVersion: 1, workspaceId: options.workspaceId, ...(options.roomId !== undefined ? { roomId: options.roomId } : {}), ...(options.taskId !== undefined ? { taskId: options.taskId } : {}), runId: options.runId, payload: { runId: options.runId, ...(options.taskId !== undefined ? { taskId: options.taskId } : {}), artifactId: artifact.id, filesChanged }, createdAt: now() });
+    })();
     this.runs.delete(input.runId);
     return artifact;
   }
@@ -593,8 +645,8 @@ function isObject(value: unknown): value is Record<string, unknown> { return typ
 function stringField(command: Record<string, unknown>, key: string): string | undefined { const value = command[key]; return typeof value === "string" && value.length > 0 ? value : undefined; }
 function numberField(command: Record<string, unknown>, key: string): number | undefined { const value = command[key]; return typeof value === "number" && Number.isFinite(value) ? value : undefined; }
 function requiredString(command: Record<string, unknown>, ...keys: readonly string[]): string { for (const key of keys) { const value = stringField(command, key); if (value !== undefined) return value; } throw new Error(`${keys.join("/")} is required`); }
-function artifactType(value: string): ArtifactType { if (["diff", "file", "preview", "document", "terminal", "deployment"].includes(value)) return value as ArtifactType; throw new Error("artifact type is invalid"); }
-function artifactStatus(value: string | undefined): ArtifactStatus | undefined { if (value === undefined) return undefined; if (["draft", "reviewing", "accepted", "applying", "applied", "rejected", "failed"].includes(value)) return value as ArtifactStatus; throw new Error("artifact status is invalid"); }
+function artifactType(value: string): ArtifactType { if (["diff", "file", "preview", "document", "terminal", "deployment", "worktree_diff"].includes(value)) return value as ArtifactType; throw new Error("artifact type is invalid"); }
+function artifactStatus(value: string | undefined): ArtifactStatus | undefined { if (value === undefined) return undefined; if (["draft", "reviewing", "accepted", "applying", "applied", "rejected", "failed", "ready_for_review", "conflict", "discarded"].includes(value)) return value as ArtifactStatus; throw new Error("artifact status is invalid"); }
 function artifactFsMode(value: string | undefined, terminalEnabled: boolean): ArtifactFSMode { if (value === "isolated_worktree" || value === "isolated_copy" || value === "shadow_buffer") return value; return terminalEnabled ? "isolated_worktree" : "shadow_buffer"; }
 function fileStatus(value: unknown): ArtifactFileStatus { if (value === "added" || value === "modified" || value === "deleted") return value; return "modified"; }
 function normalizePath(path: string): string { return normalize(path).replaceAll("\\", "/").replace(/^\.\//, ""); }
@@ -612,3 +664,4 @@ function globToRegExp(glob: string): string {
 }
 function escapeRegExp(value: string): string { return value.replace(/[.+?^${}()|[\]\\]/g, "\\$&"); }
 function failurePath(error: unknown): string | undefined { return error instanceof Error && error.message.length > 0 ? error.message : undefined; }
+function artifactFSOptions(fs: ArtifactFS): ArtifactFSOptions { return (fs as unknown as { readonly options: ArtifactFSOptions }).options; }

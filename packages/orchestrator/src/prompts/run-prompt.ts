@@ -3,6 +3,7 @@ import type { AgentHubDatabase } from "@agenthub/db";
 import { MailboxService, messageText, type MailboxDeliveryBatch, type MailboxMessageDelivery, type NextTurnDelivery } from "../mailbox-service.ts";
 import type { AgentPromptDelta, RunRow } from "../run-lifecycle-service.ts";
 import { buildFirstWakePrompt } from "./first-wake-prompt.ts";
+import { buildPriorProgressBlock } from "./prior-progress.ts";
 
 export type RunPromptOptions = {
   readonly now?: () => number;
@@ -23,10 +24,11 @@ const MAX_LEADER_CONTEXT_CHARS = 10_000;
 
 export function buildRunPrompt(run: RunRow, database: AgentHubDatabase, options: RunPromptOptions = {}): string {
   const rolePrompt = buildFirstWakePrompt(run.id, run.agent_id, run.room_id, database);
+  const priorProgress = run.task_id !== null ? buildPriorProgressBlock(database, run.task_id) : undefined;
   const batch = readCurrentRunMailbox(run, database, options);
   const input = renderBatch(batch) ?? renderQueuedRunInput(run, database) ?? `Run ${run.id} for agent ${run.agent_id}`;
   const leaderContext = renderLeaderRunContext(run, database);
-  return [rolePrompt, leaderContext, input].filter((part): part is string => part !== undefined && part.trim().length > 0).join("\n\n---\n\n");
+  return [rolePrompt, priorProgress, leaderContext, input].filter((part): part is string => part !== undefined && part.trim().length > 0).join("\n\n---\n\n");
 }
 
 function readCurrentRunMailbox(run: RunRow, database: AgentHubDatabase, options: RunPromptOptions): MailboxDeliveryBatch {

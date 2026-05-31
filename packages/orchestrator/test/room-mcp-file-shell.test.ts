@@ -124,7 +124,7 @@ describe("RoomMcpServer file and shell safeguards", () => {
 
     const result = await currentServer().callTool("file.read", { path: "../../etc/passwd" }, session(), context());
 
-    expect(result).toMatchObject({ ok: false, error: { code: "permission_denied", message: "path must be within workspace" } });
+    expect(result).toMatchObject({ ok: false, error: { code: "permission_denied", message: "path_traversal_denied" } });
     expect(readFileSyncMock).not.toHaveBeenCalled();
   });
 
@@ -135,7 +135,7 @@ describe("RoomMcpServer file and shell safeguards", () => {
 
     const result = await currentServer().callTool("file.write", { path: "../../evil.txt", content: "pwned" }, session(), context());
 
-    expect(result).toMatchObject({ ok: false, error: { code: "permission_denied", message: "path must be within workspace" } });
+    expect(result).toMatchObject({ ok: false, error: { code: "permission_denied", message: "path_traversal_denied" } });
     expect(writeFileSyncMock).not.toHaveBeenCalled();
     expect(mkdirSyncMock).not.toHaveBeenCalled();
   });

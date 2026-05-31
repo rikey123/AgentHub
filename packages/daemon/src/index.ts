@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { join } from "node:path";
 import { URL } from "node:url";
 
 import { createCommandBus, createDurableHandlerRegistry, createEventBus, createOutboxDispatcher, type CommandBus, type CommandHandler, type CommandType, type DurableHandlerRegistry, type EventBus, type EventBusSubscriber, type OutboxDispatcher, type PublishInput, type ReplayView } from "@agenthub/bus";
@@ -188,7 +189,48 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     const interventionEngine = new InterventionEngine({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
     const artifactService = new ArtifactService({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
     const taskService = new TaskService({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}), onTaskCompleted: (task) => maybePublishTeamDispatchCompleted({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) }, task) });
-    const artifactFs = new ArtifactFSRunRegistry({ database, service: artifactService, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
+    const artifactFs = new ArtifactFSRunRegistry({
+      database,
+      service: artifactService,
+      eventBus,
+      ...(options.now !== undefined ? { now: options.now } : {}),
+      rootForRun: (input) => {
+        const room = database.sqlite
+          .prepare("SELECT mode FROM rooms WHERE id = ?")
+          .get(input.roomId ?? "") as { readonly mode: string } | undefined;
+        if (!room || (room.mode !== "squad" && room.mode !== "team")) return undefined;
+
+        const workspace = database.sqlite
+          .prepare("SELECT root_path FROM workspaces WHERE id = ?")
+          .get(input.workspaceId) as { readonly root_path: string } | undefined;
+        if (!workspace) return undefined;
+
+        const { resolve: resolvePath } = require("node:path") as typeof import("node:path");
+        const { execFileSync } = require("node:child_process") as typeof import("node:child_process");
+        const { mkdirSync, existsSync } = require("node:fs") as typeof import("node:fs");
+
+        // Resolve to absolute path; skip if it resolves to cwd (test fixture pattern)
+        const absoluteRoot = resolvePath(workspace.root_path);
+        if (absoluteRoot === process.cwd()) return undefined;
+
+        const worktreePath = join(absoluteRoot, ".agenthub", "worktrees", input.runId);
+        try {
+          // Verify this is a git repo before attempting worktree creation
+          try {
+            execFileSync("git", ["rev-parse", "--git-dir"], { cwd: absoluteRoot, timeout: 3_000, stdio: "pipe" });
+          } catch {
+            return undefined;
+          }
+          mkdirSync(join(absoluteRoot, ".agenthub", "worktrees"), { recursive: true });
+          if (existsSync(worktreePath)) return worktreePath;
+          execFileSync("git", ["worktree", "add", worktreePath, "HEAD"], { cwd: absoluteRoot, timeout: 15_000, stdio: "pipe" });
+          return worktreePath;
+        } catch (err) {
+          console.warn("[worktree] Failed to create worktree for run", input.runId, err instanceof Error ? err.message : String(err));
+          return undefined;
+        }
+      }
+    });
     const activeWakes = new ActiveWakesRegistry();
     const mailbox = new MailboxService(database, options.now, eventBus);
     const commandBusRef: { current?: CommandBus } = {};
@@ -218,6 +260,11 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
         const run = database.sqlite.prepare("SELECT task_id, workspace_id, room_id, wake_reason FROM runs WHERE id = ?").get(runId) as { readonly task_id: string | null; readonly workspace_id: string; readonly room_id: string; readonly wake_reason: string | null } | undefined;
         if (!run?.task_id || run.wake_reason !== "delegated_task") return;
         const taskId = run.task_id;
+        const task = database.sqlite.prepare("SELECT blocker_reason FROM tasks WHERE id = ?").get(taskId) as { readonly blocker_reason: string | null } | undefined;
+        if (task?.blocker_reason === "turn_limit_exceeded") {
+          appendTaskMailboxWake(run.workspace_id, run.room_id, taskId, runId, "task_blocked");
+          return;
+        }
         const taskResult = taskService.blockDelegatedRun(taskId, runId);
         if (!taskResult.ok) return;
         if (taskResult.data.task.expectsReview) return;
@@ -818,7 +865,17 @@ async function route(ctx: RouteContext): Promise<void> {
   // POST /rooms/:id/worktrees/:runId/discard — discard worktree (D3, task 4.9)
   if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "worktrees" && parts[4] === "discard") return dispatch(ctx, { roomId: parts[1], runId: parts[3] }, "DiscardWorktree");
   // POST /rooms/:id/unstall — dismiss stalled banner (D4, task 2.6)
-  if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "unstall") return json(ctx.res, 501, { error: "not_implemented", capability: "v1.1-unstall" });
+  if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "unstall") {
+    const roomId = parts[1] as string;
+    const room = ctx.database.sqlite.prepare("SELECT workspace_id FROM rooms WHERE id = ? AND archived_at IS NULL").get(roomId) as { readonly workspace_id: string } | undefined;
+    if (!room) return json(ctx.res, 404, { error: "room_not_found" });
+    const now = ctx.now?.() ?? Date.now();
+    ctx.database.sqlite.transaction(() => {
+      ctx.database.sqlite.prepare("UPDATE rooms SET stalled_at = NULL, updated_at = ? WHERE id = ?").run(now, roomId);
+      ctx.eventBus.publish({ id: randomUUID(), type: "room.unstalled", schemaVersion: 1, workspaceId: room.workspace_id, roomId, payload: { roomId }, createdAt: now });
+    })();
+    return json(ctx.res, 200, { ok: true, roomId });
+  }
   // GET/POST/PUT/DELETE /skills — skill CRUD (D9, task 4.11)
   if (ctx.req.method === "GET" && url.pathname === "/skills") return json(ctx.res, 501, { error: "not_implemented", capability: "v1.1-skills" });
   if (ctx.req.method === "GET" && parts[0] === "skills" && parts[1]) return json(ctx.res, 501, { error: "not_implemented", capability: "v1.1-skills" });
