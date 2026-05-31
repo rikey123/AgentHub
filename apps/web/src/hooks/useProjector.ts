@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { EventEnvelope } from "@agenthub/protocol/events";
 import { EVENT_REGISTRY } from "@agenthub/protocol/events";
-import type { RoomViewModel, ProjectorState, MessageViewModel, BriefViewModel, RunViewModel, PermissionViewModel, InterventionViewModel, TaskActivityViewModel, TaskDelegationViewModel, TaskViewModel } from "../types.ts";
+import type { RoomViewModel, ProjectorState, MessageViewModel, BriefViewModel, RunViewModel, PermissionViewModel, InterventionViewModel, TaskActivityViewModel, TaskDelegationViewModel, TaskViewModel, SkillErrorViewModel } from "../types.ts";
 import { ensureAuthSession } from "./useSdk.ts";
 
 type ProjectorListener = (state: ProjectorState) => void;
@@ -863,6 +863,169 @@ class Projector {
             createdAt: event.createdAt
           };
           room = { ...room, messages: [...room.messages, diffMessage] };
+          this.rooms.set(roomId, room);
+          changed = true;
+        }
+        break;
+      }
+      // -----------------------------------------------------------------------
+      // V1.1 projector handlers (contract week stubs — full UI in feat/v11-C)
+      // -----------------------------------------------------------------------
+      case "task.column.moved": {
+        // D11: update boardColumn on the task so Kanban renders the correct column
+        if (payload && typeof payload.taskId === "string") {
+          const existing = room.tasks.find((t) => t.id === payload.taskId);
+          if (existing) {
+            room = this.upsertTask(room, {
+              ...existing,
+              boardColumn: typeof payload.toColumn === "string" ? payload.toColumn : existing.boardColumn
+            });
+            this.rooms.set(roomId, room);
+            changed = true;
+          }
+        }
+        break;
+      }
+      case "task.plan.created": {
+        // D8: store execution plan on the room's task (identified by runId → taskId lookup)
+        // The plan is surfaced in the side panel as a collapsible "Execution Plan" card.
+        // For now we store the planId on the room so the UI can fetch it via REST.
+        if (payload && typeof payload.planId === "string") {
+          // Attach plan to the run's associated task if known
+          const runId = typeof payload.runId === "string" ? payload.runId : undefined;
+          const run = runId !== undefined ? room.runs.find((r) => r.id === runId) : undefined;
+          const taskId = run?.taskId;
+          if (taskId) {
+            const existing = room.tasks.find((t) => t.id === taskId);
+            if (existing) {
+              room = this.upsertTask(room, {
+                ...existing,
+                executionPlan: typeof payload.planId === "string" ? payload.planId : existing.executionPlan
+              });
+              this.rooms.set(roomId, room);
+              changed = true;
+            }
+          }
+        }
+        break;
+      }
+      case "run.file_changes.recorded": {
+        // D12: update file-change badge count on the associated task card
+        if (payload && typeof payload.filesChangedCount === "number") {
+          const taskId = typeof payload.taskId === "string" ? payload.taskId : undefined;
+          if (taskId) {
+            const existing = room.tasks.find((t) => t.id === taskId);
+            if (existing) {
+              room = this.upsertTask(room, {
+                ...existing,
+                fileChangesCount: (existing.fileChangesCount ?? 0) + payload.filesChangedCount
+              });
+              this.rooms.set(roomId, room);
+              changed = true;
+            }
+          }
+        }
+        break;
+      }
+      case "worktree.diff.ready": {
+        // D3: show "Ready to apply" badge on the task card
+        if (payload) {
+          const taskId = typeof payload.taskId === "string" ? payload.taskId : undefined;
+          if (taskId) {
+            const existing = room.tasks.find((t) => t.id === taskId);
+            if (existing) {
+              room = this.upsertTask(room, {
+                ...existing,
+                worktreeStatus: "ready_for_review",
+                worktreeArtifactId: typeof payload.artifactId === "string" ? payload.artifactId : existing.worktreeArtifactId
+              });
+              this.rooms.set(roomId, room);
+              changed = true;
+            }
+          }
+        }
+        break;
+      }
+      case "worktree.applied": {
+        // D3: clear "Ready to apply" badge after successful apply
+        if (payload) {
+          const taskId = typeof payload.taskId === "string" ? payload.taskId : undefined;
+          if (taskId) {
+            const existing = room.tasks.find((t) => t.id === taskId);
+            if (existing) {
+              room = this.upsertTask(room, { ...existing, worktreeStatus: "applied" });
+              this.rooms.set(roomId, room);
+              changed = true;
+            }
+          }
+        }
+        break;
+      }
+      case "worktree.discarded": {
+        // D3: clear badge after discard
+        if (payload) {
+          const taskId = typeof payload.taskId === "string" ? payload.taskId : undefined;
+          if (taskId) {
+            const existing = room.tasks.find((t) => t.id === taskId);
+            if (existing) {
+              room = this.upsertTask(room, { ...existing, worktreeStatus: "discarded" });
+              this.rooms.set(roomId, room);
+              changed = true;
+            }
+          }
+        }
+        break;
+      }
+      case "worktree.conflict_detected": {
+        // D3: show "Conflict" badge on the task card
+        if (payload) {
+          const taskId = typeof payload.taskId === "string" ? payload.taskId : undefined;
+          if (taskId) {
+            const existing = room.tasks.find((t) => t.id === taskId);
+            if (existing) {
+              room = this.upsertTask(room, {
+                ...existing,
+                worktreeStatus: "conflict",
+                worktreeArtifactId: typeof payload.artifactId === "string" ? payload.artifactId : existing.worktreeArtifactId
+              });
+              this.rooms.set(roomId, room);
+              changed = true;
+            }
+          }
+        }
+        break;
+      }
+      case "room.stalled": {
+        // D4: show dismissible stalled banner in chat view
+        if (payload) {
+          room = {
+            ...room,
+            stalledAt: event.createdAt,
+            stalledTaskIds: Array.isArray(payload.stalledTaskIds) ? (payload.stalledTaskIds as string[]) : [],
+            stalledReason: typeof payload.reason === "string" ? payload.reason : undefined
+          };
+          this.rooms.set(roomId, room);
+          changed = true;
+        }
+        break;
+      }
+      case "room.unstalled": {
+        // D4: dismiss stalled banner
+        room = { ...room, stalledAt: undefined, stalledTaskIds: undefined, stalledReason: undefined };
+        this.rooms.set(roomId, room);
+        changed = true;
+        break;
+      }
+      case "skill.materialization_failed": {
+        // D9: show inline error in chat view
+        if (payload && typeof payload.skillId === "string" && typeof payload.runId === "string") {
+          const error: SkillErrorViewModel = {
+            skillId: payload.skillId,
+            runId: payload.runId,
+            error: typeof payload.error === "string" ? payload.error : "Skill materialization failed",
+            createdAt: event.createdAt
+          };
+          room = { ...room, skillErrors: [...(room.skillErrors ?? []), error] };
           this.rooms.set(roomId, room);
           changed = true;
         }

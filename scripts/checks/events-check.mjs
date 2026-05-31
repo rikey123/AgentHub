@@ -37,6 +37,11 @@ const ignoredNonEventLiterals = new Set([
   "room.list_members",
   "room.spawn_agent",
   "room.delegate",
+  // V1.1 MCP tool names (not event types)
+  "room.complete_task",
+  "room.add_participant",
+  "room.apply_worktree",
+  "room.discard_worktree",
   "task.delegate",
   "terminal.run",
   "tool.update",

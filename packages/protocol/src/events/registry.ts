@@ -22,7 +22,9 @@ export type EventCategory =
   | "auth"
   | "bus"
   | "server"
-  | "ui";
+  | "ui"
+  | "skill"
+  | "worktree";
 
 export type EventRegistryEntry = {
   readonly type: string;
@@ -182,7 +184,31 @@ export const EVENT_REGISTRY = [
   { type: "server.shutting_down", category: "server", durability: "durable", visibility: "detail", schemaVersion: 1 },
   { type: "ui.toast.shown", category: "ui", durability: "ephemeral", visibility: "main", schemaVersion: 1 },
   { type: "ui.presence.changed", category: "ui", durability: "ephemeral", visibility: "main", schemaVersion: 1 },
-  { type: "stream.chunk", category: "ui", durability: "ephemeral", visibility: "main", schemaVersion: 1 }
+  { type: "stream.chunk", category: "ui", durability: "ephemeral", visibility: "main", schemaVersion: 1 },
+  // ---------------------------------------------------------------------------
+  // V1.1 new event types (contract week — all 16 registered here before branching)
+  // ---------------------------------------------------------------------------
+  // task category additions
+  { type: "task.column.moved", category: "task", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "task.plan.created", category: "task", durability: "durable", visibility: "main", schemaVersion: 1 },
+  // run category additions
+  { type: "run.file_changes.recorded", category: "run", durability: "durable", visibility: "both", schemaVersion: 1 },
+  // worktree category (new in V1.1)
+  { type: "worktree.diff.ready", category: "worktree", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "worktree.applied", category: "worktree", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "worktree.discarded", category: "worktree", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "worktree.conflict_detected", category: "worktree", durability: "durable", visibility: "both", schemaVersion: 1 },
+  // room category additions
+  { type: "room.stalled", category: "room", durability: "durable", visibility: "main", schemaVersion: 1 },
+  { type: "room.unstalled", category: "room", durability: "durable", visibility: "main", schemaVersion: 1 },
+  // skill category (new in V1.1)
+  { type: "skill.created", category: "skill", durability: "durable", visibility: "detail", schemaVersion: 1 },
+  { type: "skill.updated", category: "skill", durability: "durable", visibility: "detail", schemaVersion: 1 },
+  { type: "skill.deleted", category: "skill", durability: "durable", visibility: "detail", schemaVersion: 1 },
+  { type: "skill.imported", category: "skill", durability: "durable", visibility: "detail", schemaVersion: 1 },
+  { type: "skill.activated", category: "skill", durability: "durable", visibility: "detail", schemaVersion: 1 },
+  { type: "skill.deactivated", category: "skill", durability: "durable", visibility: "detail", schemaVersion: 1 },
+  { type: "skill.materialization_failed", category: "skill", durability: "durable", visibility: "main", schemaVersion: 1 }
 ] as const satisfies readonly EventRegistryEntry[];
 
 export type EventType = (typeof EVENT_REGISTRY)[number]["type"];

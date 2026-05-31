@@ -53,7 +53,15 @@ const drizzleTables = [
   { exportName: "handlerCursors", table: schema.handlerCursors },
   { exportName: "deadLetterEvents", table: schema.deadLetterEvents },
   { exportName: "runLocks", table: schema.runLocks },
-  { exportName: "commandRecords", table: schema.commandRecords }
+  { exportName: "commandRecords", table: schema.commandRecords },
+  // V1.1 new tables
+  { exportName: "agentSkills", table: schema.agentSkills },
+  { exportName: "roomSkills", table: schema.roomSkills },
+  { exportName: "runFileChanges", table: schema.runFileChanges },
+  { exportName: "skillFiles", table: schema.skillFiles },
+  { exportName: "skills", table: schema.skills },
+  { exportName: "taskCheckpoints", table: schema.taskCheckpoints },
+  { exportName: "taskPlans", table: schema.taskPlans }
 ] satisfies readonly TableContract[];
 
 const drizzleSmokeRows = {
@@ -297,6 +305,54 @@ const drizzleSmokeRows = {
     status: "succeeded",
     createdAt: 1,
     expiresAt: 2
+  },
+  // V1.1 new tables
+  taskCheckpoints: {
+    id: "ckpt_drizzle",
+    taskId: "task_drizzle",
+    runId: "run_drizzle",
+    progressSummary: "Completed steps 1-3",
+    filesTouched: "[]",
+    createdAt: 1
+  },
+  taskPlans: {
+    id: "plan_drizzle",
+    roomId: "room_drizzle",
+    runId: "run_drizzle",
+    planJson: "{}",
+    createdAt: 1
+  },
+  runFileChanges: {
+    id: "rfc_drizzle",
+    runId: "run_drizzle",
+    filesChanged: "[]",
+    createdAt: 1
+  },
+  skills: {
+    id: "skill_drizzle",
+    workspaceId: "ws_drizzle",
+    name: "task-planner",
+    description: "Plans tasks",
+    content: "# SKILL.md\n---\nname: task-planner\n---\n",
+    origin: "builtin",
+    createdAt: 1,
+    updatedAt: 1
+  },
+  skillFiles: {
+    id: "sf_drizzle",
+    skillId: "skill_drizzle",
+    path: "examples/example.md",
+    content: "# Example"
+  },
+  roomSkills: {
+    roomId: "room_drizzle",
+    skillId: "skill_drizzle",
+    enabled: 1
+  },
+  agentSkills: {
+    roomParticipantId: "agent_drizzle",
+    skillId: "skill_drizzle",
+    mode: "add"
   }
 } as const;
 
@@ -327,7 +383,8 @@ function applyAllMigrations(): void {
     "0011_bus_runtime.sql",
     "0012_v05.sql",
     "0013_messages_pinned.sql",
-    "0014_v10.sql"
+    "0014_v10.sql",
+    "0015_v11.sql"
   ]);
 }
 
@@ -414,7 +471,7 @@ describe("SQLite pragmas and migrations", () => {
 
   test("applies all migrations once and records them", () => {
     applyAllMigrations();
-    expect(countRows("__agenthub_migrations")).toBe(14);
+    expect(countRows("__agenthub_migrations")).toBe(15);
     expect(applyMigrations(currentDb())).toEqual([]);
 
     expect(tableNames()).toEqual([
@@ -422,6 +479,7 @@ describe("SQLite pragmas and migrations", () => {
       "agent_bindings",
       "agent_presence",
       "agent_profiles",
+      "agent_skills",
       "artifact_files",
       "artifacts",
       "attachments",
@@ -446,13 +504,19 @@ describe("SQLite pragmas and migrations", () => {
       "role_drafts",
       "roles",
       "room_participants",
+      "room_skills",
       "rooms",
+      "run_file_changes",
       "run_locks",
       "run_next_turns",
       "runs",
       "runtimes",
       "sessions",
+      "skill_files",
+      "skills",
       "task_activities",
+      "task_checkpoints",
+      "task_plans",
       "task_runs",
       "tasks",
       "workspaces"
@@ -517,6 +581,24 @@ describe("SQLite pragmas and migrations", () => {
     expect(rolesIsBuiltin?.type).toBe("INTEGER");
     expect(rolesIsBuiltin?.notnull).toBe(1);
     expect(rolesIsBuiltin?.dflt_value).toBe("0");
+
+    // V1.1 new columns
+    expect(columnNames("tasks")).toEqual(
+      expect.arrayContaining(["blocker_reason", "max_turns", "board_column"])
+    );
+    expect(columnNames("rooms")).toContain("stalled_at");
+
+    // V1.1 new tables
+    expect(tableNames()).toEqual(expect.arrayContaining(["task_checkpoints", "task_plans", "run_file_changes", "skills", "skill_files", "room_skills", "agent_skills"]));
+    expect(columnNames("skills")).toEqual(
+      expect.arrayContaining(["id", "workspace_id", "name", "description", "content", "origin", "source_url", "created_at", "updated_at"])
+    );
+    expect(columnNames("task_checkpoints")).toEqual(
+      expect.arrayContaining(["id", "task_id", "run_id", "progress_summary", "files_touched", "created_at"])
+    );
+    expect(columnNames("run_file_changes")).toEqual(
+      expect.arrayContaining(["id", "run_id", "task_id", "files_changed", "created_at"])
+    );
   });
 
   test("creates run_locks schema required by bus runtime", () => {

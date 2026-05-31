@@ -733,6 +733,10 @@ async function route(ctx: RouteContext): Promise<void> {
   if (ctx.req.method === "GET" && parts[0] === "rooms" && parts.length === 2) return json(ctx.res, 200, { room: get(ctx.database, "SELECT * FROM rooms WHERE id = ?", parts[1]) });
   if (ctx.req.method === "GET" && parts[0] === "rooms" && parts[2] === "tasks") return tasks(ctx, parts[1] as string, url);
   if (ctx.req.method === "GET" && parts[0] === "tasks" && parts[1] && parts[2] === "activities") return taskActivities(ctx, parts[1] as string);
+  // V1.1: POST /rooms/:id/tasks/:taskId/column MUST come before the generic POST /rooms/:id/tasks
+  // to avoid route shadowing (both match parts[2]==="tasks").
+  // Returns 501 stub — full implementation (UpdateTask with boardColumn field) lands in feat/v11-C.
+  if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "tasks" && parts[4] === "column") return json(ctx.res, 501, { error: "not_implemented", capability: "v1.1-kanban-column" });
   if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "tasks") return dispatchCreated(ctx, { ...(await body(ctx)), roomId: parts[1] }, "CreateTask");
   if (ctx.req.method === "POST" && parts[0] === "tasks" && parts[2] === "complete") return dispatch(ctx, { taskId: parts[1] }, "CompleteTask");
   if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "archive") return dispatch(ctx, { roomId: parts[1] }, "ArchiveRoom");
@@ -804,6 +808,24 @@ async function route(ctx: RouteContext): Promise<void> {
   if (ctx.req.method === "POST" && parts[0] === "workspaces" && parts[2] === "cost-budget") return json(ctx.res, 501, { error: "budget alerts are V1.5 (permission-dsl)" });
   if (ctx.req.method === "GET" && parts[0] === "workspaces" && parts[1]) return workspace(ctx, parts[1] as string);
   if (ctx.req.method === "GET" && (url.pathname === "/board" || url.pathname === "/timeline")) return json(ctx.res, 404, { error: "not_found", capability: "v1-roadmap" });
+  // ---------------------------------------------------------------------------
+  // V1.1 REST endpoint stubs (contract week — implementations land in feature branches)
+  // ---------------------------------------------------------------------------
+  // POST /rooms/:id/participants — add a participant to a running room (D10, task 4.7)
+  if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "participants") return dispatch(ctx, { ...(await body(ctx)), roomId: parts[1] }, "AddParticipant");
+  // POST /rooms/:id/worktrees/:runId/apply — apply worktree diff (D3, task 4.9)
+  if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "worktrees" && parts[4] === "apply") return dispatch(ctx, { roomId: parts[1], runId: parts[3] }, "ApplyWorktree");
+  // POST /rooms/:id/worktrees/:runId/discard — discard worktree (D3, task 4.9)
+  if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "worktrees" && parts[4] === "discard") return dispatch(ctx, { roomId: parts[1], runId: parts[3] }, "DiscardWorktree");
+  // POST /rooms/:id/unstall — dismiss stalled banner (D4, task 2.6)
+  if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "unstall") return json(ctx.res, 501, { error: "not_implemented", capability: "v1.1-unstall" });
+  // GET/POST/PUT/DELETE /skills — skill CRUD (D9, task 4.11)
+  if (ctx.req.method === "GET" && url.pathname === "/skills") return json(ctx.res, 501, { error: "not_implemented", capability: "v1.1-skills" });
+  if (ctx.req.method === "GET" && parts[0] === "skills" && parts[1]) return json(ctx.res, 501, { error: "not_implemented", capability: "v1.1-skills" });
+  if (ctx.req.method === "POST" && url.pathname === "/skills") return json(ctx.res, 501, { error: "not_implemented", capability: "v1.1-skills" });
+  if (ctx.req.method === "POST" && url.pathname === "/skills/import") return json(ctx.res, 501, { error: "not_implemented", capability: "v1.1-skills" });
+  if (ctx.req.method === "PUT" && parts[0] === "skills" && parts[1]) return json(ctx.res, 501, { error: "not_implemented", capability: "v1.1-skills" });
+  if (ctx.req.method === "DELETE" && parts[0] === "skills" && parts[1]) return json(ctx.res, 501, { error: "not_implemented", capability: "v1.1-skills" });
   return json(ctx.res, 404, { error: "not_found" });
 }
 

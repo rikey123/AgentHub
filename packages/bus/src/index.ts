@@ -117,7 +117,11 @@ export type CommandType =
   | "WakeAgent"
   | "RetryRun"
   | "InjectContext"
-  | "ConsumePendingTurn";
+  | "ConsumePendingTurn"
+  // V1.1 additions
+  | "AddParticipant"    // POST /rooms/:id/participants — user-initiated team expansion (D10)
+  | "ApplyWorktree"     // POST /rooms/:id/worktrees/:runId/apply — apply worktree diff (D3)
+  | "DiscardWorktree";  // POST /rooms/:id/worktrees/:runId/discard — discard worktree (D3)
 
 export type Command = {
   readonly type: CommandType;
@@ -234,7 +238,11 @@ const canonicalCommandTypes = new Set<CommandType>([
   "WakeAgent",
   "RetryRun",
   "InjectContext",
-  "ConsumePendingTurn"
+  "ConsumePendingTurn",
+  // V1.1 additions
+  "AddParticipant",
+  "ApplyWorktree",
+  "DiscardWorktree"
 ]);
 
 const internalOnlyCommandTypes = new Set<CommandType>(["WakeAgent", "RetryRun", "InjectContext", "ConsumePendingTurn"]);

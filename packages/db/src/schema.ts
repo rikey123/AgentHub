@@ -18,7 +18,9 @@ export const rooms = sqliteTable("rooms", {
   leaderRoleId: text("leader_role_id"),
   archivedAt: integer("archived_at"),
   createdAt: integer("created_at").notNull(),
-  updatedAt: integer("updated_at").notNull()
+  updatedAt: integer("updated_at").notNull(),
+  // V1.1: set when Level-2 timeout fires (D4)
+  stalledAt: integer("stalled_at")
 });
 
 export const roomParticipants = sqliteTable(
@@ -216,7 +218,11 @@ export const tasks = sqliteTable("tasks", {
   dueAt: integer("due_at"),
   createdBy: text("created_by"),
   createdAt: integer("created_at").notNull(),
-  updatedAt: integer("updated_at").notNull()
+  updatedAt: integer("updated_at").notNull(),
+  // V1.1 additions
+  blockerReason: text("blocker_reason"),
+  maxTurns: integer("max_turns"),
+  boardColumn: text("board_column")
 });
 
 export const roleDrafts = sqliteTable("role_drafts", {
@@ -552,4 +558,76 @@ export const commandRecords = sqliteTable(
     expiresAt: integer("expires_at").notNull()
   },
   (table) => [primaryKey({ columns: [table.actorType, table.actorId, table.idempotencyKey] })]
+);
+
+// ---------------------------------------------------------------------------
+// V1.1 new tables
+// ---------------------------------------------------------------------------
+
+export const taskCheckpoints = sqliteTable("task_checkpoints", {
+  id: text("id").primaryKey(),
+  taskId: text("task_id").notNull(),
+  runId: text("run_id").notNull(),
+  progressSummary: text("progress_summary").notNull(),
+  filesTouched: text("files_touched").notNull(),
+  createdAt: integer("created_at").notNull()
+});
+
+export const taskPlans = sqliteTable("task_plans", {
+  id: text("id").primaryKey(),
+  roomId: text("room_id").notNull(),
+  runId: text("run_id").notNull(),
+  planJson: text("plan_json").notNull(),
+  createdAt: integer("created_at").notNull()
+});
+
+export const runFileChanges = sqliteTable("run_file_changes", {
+  id: text("id").primaryKey(),
+  runId: text("run_id").notNull(),
+  taskId: text("task_id"),
+  filesChanged: text("files_changed").notNull(),
+  createdAt: integer("created_at").notNull()
+});
+
+export const skills = sqliteTable("skills", {
+  id: text("id").primaryKey(),
+  workspaceId: text("workspace_id").notNull(),
+  name: text("name").notNull(),
+  description: text("description").notNull(),
+  content: text("content").notNull(),
+  origin: text("origin").notNull(),
+  sourceUrl: text("source_url"),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull()
+}, (table) => [index("idx_skills_workspace").on(table.workspaceId, table.name)]);
+
+export const skillFiles = sqliteTable(
+  "skill_files",
+  {
+    id: text("id").primaryKey(),
+    skillId: text("skill_id").notNull(),
+    path: text("path").notNull(),
+    content: text("content").notNull()
+  },
+  (table) => [uniqueIndex("skill_files_skill_id_path_unique").on(table.skillId, table.path)]
+);
+
+export const roomSkills = sqliteTable(
+  "room_skills",
+  {
+    roomId: text("room_id").notNull(),
+    skillId: text("skill_id").notNull(),
+    enabled: integer("enabled").notNull().default(1)
+  },
+  (table) => [primaryKey({ columns: [table.roomId, table.skillId] })]
+);
+
+export const agentSkills = sqliteTable(
+  "agent_skills",
+  {
+    roomParticipantId: text("room_participant_id").notNull(),
+    skillId: text("skill_id").notNull(),
+    mode: text("mode").notNull()
+  },
+  (table) => [primaryKey({ columns: [table.roomParticipantId, table.skillId] })]
 );

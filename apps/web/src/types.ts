@@ -106,6 +106,12 @@ export type TaskViewModel = {
   readonly sourceRunId?: string | undefined;
   readonly activities?: TaskActivityViewModel[] | undefined;
   readonly delegations?: TaskDelegationViewModel[] | undefined;
+  // V1.1 additions
+  readonly boardColumn?: string | undefined;           // user-overridden Kanban column (D11)
+  readonly worktreeStatus?: "ready_for_review" | "applied" | "discarded" | "conflict" | undefined; // worktree badge (D3)
+  readonly worktreeArtifactId?: string | undefined;    // artifact id for apply/discard actions
+  readonly fileChangesCount?: number | undefined;      // aggregate file-change badge (D12)
+  readonly executionPlan?: string | undefined;         // first 300 chars of PlanDocument (D8)
 };
 
 export type RunViewModel = {
@@ -136,6 +142,14 @@ export type MailboxFailureViewModel = {
   readonly failedAt: number;
 };
 
+// V1.1 additions
+export type SkillErrorViewModel = {
+  readonly skillId: string;
+  readonly runId: string;
+  readonly error: string;
+  readonly createdAt: number;
+};
+
 export type RoomViewModel = {
   readonly id: string;
   readonly title: string;
@@ -153,6 +167,11 @@ export type RoomViewModel = {
   readonly mailboxFailures: MailboxFailureViewModel[];
   readonly cursor?: string | undefined;
   readonly unreadCount: number;
+  // V1.1 additions
+  readonly stalledAt?: number | undefined;             // set when Level-2 timeout fires (D4)
+  readonly stalledTaskIds?: readonly string[] | undefined; // tasks that triggered stall
+  readonly stalledReason?: string | undefined;         // "leader_unavailable" | "leader_failed"
+  readonly skillErrors?: readonly SkillErrorViewModel[] | undefined; // skill.materialization_failed (D9)
 };
 
 export type ProjectorState = {

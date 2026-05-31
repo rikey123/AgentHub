@@ -49,6 +49,108 @@ type EventVisibility = "main" | "detail" | "both"
 
 The canonical event registry SHALL be extended with the following V1.0 event types. All new types MUST be registered in `packages/protocol/src/events/registry.ts` and validated by `events:check` / `visibility:check` CI before any V1.0 capability spec references them.
 
+**V0 baseline events（已在 registry 注册，补录到 canonical table）**：
+
+| 事件类型 | category | durability | visibility | 来源 capability | 备注 |
+|---|---|---|---|---|---|
+| `message.created` | message | durable | both | messaging | 需要 projector handler |
+| `message.part.delta` | message | ephemeral | detail | messaging | streaming delta |
+| `message.completed` | message | durable | both | messaging | 需要 projector handler |
+| `message.cancelled` | message | durable | both | messaging | 需要 projector handler |
+| `message.deleted` | message | durable | both | messaging | 需要 projector handler |
+| `message.updated` | message | durable | both | messaging | 需要 projector handler |
+| `message.brief.published` | message | durable | main | messaging | 需要 projector handler |
+| `pending_turn.created` | message | durable | main | messaging | 需要 projector handler |
+| `pending_turn.cancelled` | message | durable | main | messaging | 需要 projector handler |
+| `pending_turn.scheduled` | message | durable | main | messaging | 需要 projector handler |
+| `pending_turn.consumed` | message | durable | main | messaging | 需要 projector handler |
+| `room.created` | room | durable | both | rooms | 需要 projector handler |
+| `room.opened` | room | durable | both | rooms | 需要 projector handler |
+| `room.closed` | room | durable | both | rooms | 需要 projector handler |
+| `agent.profile.loaded` | agent | durable | detail | agents | Settings REST-only |
+| `agent.profile.updated` | agent | durable | detail | agents | Settings REST-only |
+| `agent.profile.removed` | agent | durable | detail | agents | Settings REST-only |
+| `agent.profile.error` | agent | ephemeral | detail | agents | 错误通知 |
+| `agent.joined` | agent | durable | both | agents | 需要 projector handler |
+| `agent.left` | agent | durable | both | agents | 需要 projector handler |
+| `agent.state.changed` | agent | durable | both | agents | 需要 projector handler |
+| `agent.blocked` | agent | durable | both | agents | 需要 projector handler |
+| `agent.capabilities.updated` | agent | durable | detail | agents | Settings REST-only |
+| `agent.token.delta` | agent | ephemeral | detail | agents | streaming delta |
+| `agent.typing` | agent | ephemeral | detail | agents | typing indicator |
+| `agent.status_line.updated` | agent | ephemeral | main | agents | status line |
+| `agent.run.queued` | run | durable | both | run-lifecycle | 需要 projector handler |
+| `agent.run.waiting` | run | durable | both | run-lifecycle | 需要 projector handler |
+| `agent.run.started` | run | durable | both | run-lifecycle | 需要 projector handler |
+| `agent.run.completed` | run | durable | both | run-lifecycle | 需要 projector handler |
+| `agent.run.failed` | run | durable | both | run-lifecycle | 需要 projector handler |
+| `agent.run.cancelled` | run | durable | both | run-lifecycle | 需要 projector handler |
+| `agent.run.waiting_permission` | run | durable | both | run-lifecycle | 需要 projector handler |
+| `agent.run.resumed` | run | durable | detail | run-lifecycle | Run Detail only |
+| `run.heartbeat` | run | ephemeral | detail | run-lifecycle | heartbeat |
+| `tool.call.requested` | run | durable | detail | run-lifecycle | Run Detail only |
+| `tool.call.completed` | run | durable | detail | run-lifecycle | Run Detail only |
+| `tool.update.diverted` | run | ephemeral | detail | run-lifecycle | streaming |
+| `tool.output.delta` | run | ephemeral | detail | run-lifecycle | streaming |
+| `subagent.started` | run | durable | detail | run-lifecycle | Run Detail only |
+| `subagent.completed` | run | durable | detail | run-lifecycle | Run Detail only |
+| `file.changed` | run | durable | detail | run-lifecycle | Run Detail only |
+| `task.created` | task | durable | both | task-workflow-core | 需要 projector handler |
+| `task.assigned` | task | durable | both | task-workflow-core | 需要 projector handler |
+| `task.status.changed` | task | durable | both | task-workflow-core | 需要 projector handler |
+| `task.status.changed.rejected` | task | ephemeral | detail | task-workflow-core | 错误通知 |
+| `context.item.created` | context | durable | detail | context-ledger | Settings REST-only |
+| `context.item.proposed` | context | durable | detail | context-ledger | Settings REST-only |
+| `context.item.confirmed` | context | durable | detail | context-ledger | Settings REST-only |
+| `context.item.update_requested` | context | durable | detail | context-ledger | Settings REST-only |
+| `context.item.conflict_created` | context | durable | detail | context-ledger | Settings REST-only |
+| `context.item.deprecated` | context | durable | detail | context-ledger | Settings REST-only |
+| `context.item.visibility.changed` | context | durable | detail | context-ledger | Settings REST-only |
+| `context.snapshot` | context | durable | detail | context-ledger | Settings REST-only |
+| `permission.requested` | permission | durable | both | permissions | 需要 projector handler |
+| `permission.resolved` | permission | durable | both | permissions | 需要 projector handler |
+| `intervention.requested` | intervention | durable | both | interventions | 需要 projector handler |
+| `intervention.approved` | intervention | durable | both | interventions | 需要 projector handler |
+| `intervention.ignored` | intervention | durable | both | interventions | 需要 projector handler |
+| `intervention.rejected` | intervention | durable | both | interventions | 需要 projector handler |
+| `intervention.snoozed` | intervention | durable | both | interventions | 需要 projector handler |
+| `intervention.injected` | intervention | durable | both | interventions | 需要 projector handler |
+| `intervention.resolved` | intervention | durable | both | interventions | 需要 projector handler |
+| `intervention.closed` | intervention | durable | both | interventions | 需要 projector handler |
+| `intervention.invalid_transition` | intervention | durable | detail | interventions | 错误通知 |
+| `artifact.diff.created` | artifact | durable | both | artifacts | 需要 projector handler |
+| `artifact.diff.detected` | artifact | ephemeral | detail | artifacts | 检测通知 |
+| `artifact.file.created` | artifact | durable | both | artifacts | 需要 projector handler |
+| `artifact.reviewing` | artifact | durable | both | artifacts | 需要 projector handler |
+| `artifact.accepted` | artifact | durable | both | artifacts | 需要 projector handler |
+| `artifact.applying` | artifact | durable | both | artifacts | 需要 projector handler |
+| `artifact.applied` | artifact | durable | both | artifacts | 需要 projector handler |
+| `artifact.rejected` | artifact | durable | both | artifacts | 需要 projector handler |
+| `artifact.failed` | artifact | durable | both | artifacts | 需要 projector handler |
+| `artifact.preview.started` | artifact | durable | both | artifacts | 需要 projector handler |
+| `artifact.preview.stopped` | artifact | durable | both | artifacts | 需要 projector handler |
+| `adapter.registered` | adapter | durable | detail | adapter-framework | Settings REST-only |
+| `adapter.session.created` | adapter | durable | detail | adapter-framework | Run Detail only |
+| `adapter.session.ended` | adapter | durable | detail | adapter-framework | Run Detail only |
+| `adapter.session.disposed` | adapter | durable | detail | adapter-framework | Run Detail only |
+| `adapter.crashed` | adapter | durable | detail | adapter-framework | Run Detail only |
+| `adapter.liveness.changed` | adapter | durable | detail | adapter-framework | Settings REST-only |
+| `adapter.config.updated` | adapter | durable | both | adapter-framework | 需要 projector handler |
+| `adapter.raw.stdout` | adapter | ephemeral | detail | adapter-framework | streaming |
+| `adapter.raw.stderr` | adapter | ephemeral | detail | adapter-framework | streaming |
+| `mailbox.message.created` | mailbox | durable | detail | mailbox | Run Detail only |
+| `mailbox.delivery.failed` | mailbox | durable | both | mailbox | 需要 projector handler |
+| `worktree.gc.removed` | local-daemon | durable | detail | local-daemon | 内部 GC |
+| `worktree.gc.skipped` | local-daemon | durable | detail | local-daemon | 内部 GC |
+| `auth.token.issued` | auth | durable | detail | auth | Settings REST-only |
+| `auth.token.revoked` | auth | durable | detail | auth | Settings REST-only |
+| `handler.stalled` | bus | durable | detail | bus | 内部监控 |
+| `server.connected` | server | durable | detail | server | 内部监控 |
+| `server.shutting_down` | server | durable | detail | server | 内部监控 |
+| `ui.toast.shown` | ui | ephemeral | main | ui | toast 通知 |
+| `ui.presence.changed` | ui | ephemeral | main | ui | presence 更新 |
+| `stream.chunk` | ui | ephemeral | main | ui | streaming chunk |
+
 **V1.0 新增 durable events（18 个）**：
 
 | 事件类型 | category | durability | visibility | 来源 capability | 备注 |
@@ -71,6 +173,27 @@ The canonical event registry SHALL be extended with the following V1.0 event typ
 | `team.dispatch.started` | team | durable | both | team-mode + squad-mode | 需要 projector handler（主流 brief）|
 | `team.dispatch.completed` | team | durable | both | team-mode + squad-mode | 需要 projector handler |
 | `permission.run_summary` | permission | durable | detail | permissions（V1.0 D8）| Run Detail Permissions tab；不要求 main projector handler |
+
+**V1.1 新增 durable events（16 个）**：
+
+| 事件类型 | category | durability | visibility | 来源 capability | 备注 |
+|---|---|---|---|---|---|
+| `task.column.moved` | task | durable | both | kanban-board | 需要 projector handler（更新 boardColumns map）|
+| `task.plan.created` | task | durable | main | planning-phase | 需要 projector handler（侧边栏 Execution Plan 卡片）|
+| `run.file_changes.recorded` | run | durable | both | worktree-isolation | 需要 projector handler（Kanban 卡片 file-change badge）|
+| `worktree.diff.ready` | worktree | durable | both | worktree-isolation | 需要 projector handler（"Ready to apply" badge）|
+| `worktree.applied` | worktree | durable | both | worktree-isolation | 需要 projector handler（清除 badge）|
+| `worktree.discarded` | worktree | durable | both | worktree-isolation | 需要 projector handler（清除 badge）|
+| `worktree.conflict_detected` | worktree | durable | both | worktree-isolation | 需要 projector handler（"Conflict" badge）|
+| `room.stalled` | room | durable | main | timeout-escalation | 需要 projector handler（stalled banner）|
+| `room.unstalled` | room | durable | main | timeout-escalation | 需要 projector handler（dismiss banner）|
+| `skill.created` | skill | durable | detail | skill-system | Settings REST-only；不要求 projector handler |
+| `skill.updated` | skill | durable | detail | skill-system | Settings REST-only；不要求 projector handler |
+| `skill.deleted` | skill | durable | detail | skill-system | Settings REST-only；不要求 projector handler |
+| `skill.imported` | skill | durable | detail | skill-system | Settings REST-only；不要求 projector handler |
+| `skill.activated` | skill | durable | detail | skill-system | Members panel REST-only；不要求 projector handler |
+| `skill.deactivated` | skill | durable | detail | skill-system | Members panel REST-only；不要求 projector handler |
+| `skill.materialization_failed` | skill | durable | main | skill-system | 需要 projector handler（chat view inline error）|
 
 **V1.0 明确不引入的事件类型**（防止 spec agent 误加）：
 

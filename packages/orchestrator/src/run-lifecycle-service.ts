@@ -40,7 +40,11 @@ export type WakeReason =
   | "phase_completed"
   | "agent_crashed"
   | "consume_pending_turn"
-  | "mailbox_message";
+  | "mailbox_message"
+  // V1.1 additions
+  | "plan"          // leader's planning-phase wake (D8)
+  | "execute"       // leader's execution-phase wake immediately after plan (D8)
+  | "agent_stalled"; // Level-2 timeout escalation wake (D4)
 
 export type AgentPromptDelta =
   | { readonly kind: "first_wake"; readonly fullRolePrompt: string }

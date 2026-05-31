@@ -7,6 +7,50 @@ import { ActiveWakesRegistry } from "./active-wakes.ts";
 import { hasMeaningfulPromptDelta, MailboxService } from "./mailbox-service.ts";
 import { RunLifecycleError, RunLifecycleService, type AgentPromptDelta, type WakeReason } from "./run-lifecycle-service.ts";
 
+// ---------------------------------------------------------------------------
+// V1.1 command type stubs (contract week — implementations land in feature branches)
+// ---------------------------------------------------------------------------
+
+/** Add a participant (agent binding) to an existing room. D10. */
+export type AddParticipantCommand = Command & {
+  readonly type: "AddParticipant";
+  readonly roomId: string;
+  readonly agentBindingId: string;
+  readonly displayNameOverride?: string;
+};
+
+/**
+ * V1.1 structured task completion report (D6).
+ * Teammates MUST call this before ending their turn.
+ * `task-service.ts` processes this inside a transaction:
+ *   - resolves effective target status (respecting `expects_review` gate for team mode)
+ *   - updates `tasks.status` and `tasks.blocker_reason`
+ *   - publishes `task.status.changed` and `task.delegation.completed`
+ */
+export type CompleteTaskCommand = Command & {
+  readonly type: "CompleteTask";
+  readonly taskId: string;
+  readonly status: "completed" | "blocked" | "review";
+  readonly summary: string;
+  readonly blockerReason?: string;
+  readonly artifactIds?: readonly string[];
+  readonly filesChanged?: readonly string[];
+};
+
+/** Apply a worktree diff artifact to the primary workspace. D3. */
+export type ApplyWorktreeCommand = Command & {
+  readonly type: "ApplyWorktree";
+  readonly roomId: string;
+  readonly runId: string;
+};
+
+/** Discard a worktree and its diff artifact. D3. */
+export type DiscardWorktreeCommand = Command & {
+  readonly type: "DiscardWorktree";
+  readonly roomId: string;
+  readonly runId: string;
+};
+
 export type WakeAgentCommand = Command & {
   readonly type: "WakeAgent";
   readonly roomId: string;
@@ -190,5 +234,9 @@ const zeroMailboxAllowed = new Set<WakeReason>([
   "task_blocked",
   "consume_pending_turn",
   "delegated_task",
-  "mailbox_message"  // agent-to-agent messages via room.send_message MCP tool
+  "mailbox_message",  // agent-to-agent messages via room.send_message MCP tool
+  // V1.1 additions
+  "plan",             // planning-phase wake has no mailbox input (D8)
+  "execute",          // execution-phase wake triggered immediately after plan (D8)
+  "agent_stalled"     // Level-2 timeout escalation (D4)
 ]);
