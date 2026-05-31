@@ -66,6 +66,7 @@ export type NativeAgentAdapterOptions = {
   readonly mcpTools?: readonly McpToolDefinition[];
   readonly mcpToolExecutor?: McpToolExecutor;
   readonly tools?: ToolSet;
+  readonly onPlanPhaseEnded?: (runId: string) => void | Promise<void>;
   readonly now?: () => number;
 };
 

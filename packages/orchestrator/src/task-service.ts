@@ -103,6 +103,17 @@ export type UpdateTaskStatusInput = {
   readonly blockerReason?: string;
 };
 
+export type CompleteTaskInput = {
+  readonly taskId: string;
+  readonly roomId: string;
+  readonly callerAgentId: string;
+  readonly status: "completed" | "blocked" | "review" | "needs_review";
+  readonly summary: string;
+  readonly blockerReason?: string;
+  readonly artifactIds?: readonly string[];
+  readonly filesChanged?: readonly string[];
+};
+
 export type TaskActivityKind = "comment" | "artifact_linked" | "blocker_set" | "priority_change" | "status_change";
 
 export type TaskActivityByKind = "user" | "role" | "system";
@@ -203,6 +214,36 @@ export class TaskService {
       const completedTask = this.task(input.taskId);
       if (completedTask) this.options.onTaskCompleted?.(completedTask);
     }
+    const task = this.task(input.taskId);
+    if (!task) return failed("internal_error", `Task '${input.taskId}' was not persisted`);
+    return { ok: true, data: { task: taskView(task), taskId: input.taskId }, emittedEvents: latestTaskEvents(this.options.database, input.taskId) };
+  }
+
+  completeTask(input: CompleteTaskInput): CommandResult<{ readonly task: TaskView; readonly taskId: string }> {
+    if (input.summary.trim().length === 0) return failed("validation_failed", "summary is required");
+
+    const existing = this.task(input.taskId);
+    if (!existing) return failed("not_found", `Task '${input.taskId}' not found`);
+    if (existing.room_id !== input.roomId) return failed("not_found", `Task '${input.taskId}' not found`);
+    if (existing.assignee_agent_id !== input.callerAgentId) return failed("permission_denied", "task not assigned to calling agent");
+
+    const nextStatus = resolveCompleteTaskStatus(existing, input.status);
+    if (nextStatus === undefined) return failed("validation_failed", "invalid task status");
+    if (nextStatus === "blocked" && (input.blockerReason === undefined || input.blockerReason.trim().length === 0)) {
+      return failed("validation_failed", "blockerReason is required when status is blocked");
+    }
+
+    const now = this.options.now?.() ?? Date.now();
+    this.options.database.sqlite.transaction(() => {
+      if (nextStatus === "blocked") {
+        this.options.database.sqlite.prepare("UPDATE tasks SET status = 'blocked', blocker_reason = ?, updated_at = ? WHERE id = ?").run(input.blockerReason ?? null, now, input.taskId);
+      } else {
+        this.options.database.sqlite.prepare("UPDATE tasks SET status = ?, blocker_reason = NULL, updated_at = ? WHERE id = ?").run(nextStatus, now, input.taskId);
+      }
+      this.options.eventBus.publish(taskEvent("task.status.changed", existing.workspace_id, existing.room_id ?? "", input.taskId, { taskId: input.taskId, prevStatus: existing.status, nextStatus, ...(input.blockerReason !== undefined ? { blockerReason: input.blockerReason } : {}) }, now));
+      this.options.eventBus.publish(taskEvent("task.delegation.completed", existing.workspace_id, existing.room_id ?? "", input.taskId, { taskId: input.taskId, finalStatus: nextStatus }, now));
+    })();
+
     const task = this.task(input.taskId);
     if (!task) return failed("internal_error", `Task '${input.taskId}' was not persisted`);
     return { ok: true, data: { task: taskView(task), taskId: input.taskId }, emittedEvents: latestTaskEvents(this.options.database, input.taskId) };
@@ -430,6 +471,13 @@ export function normalizeStatus(value: unknown): TaskStatus | undefined {
   if (value === "open") return "pending";
   if (value === "done") return "completed";
   if (value === "pending" || value === "in_progress" || value === "blocked" || value === "review" || value === "completed" || value === "cancelled") return value;
+  return undefined;
+}
+
+function resolveCompleteTaskStatus(existing: TaskRow, status: "completed" | "blocked" | "review" | "needs_review"): TaskStatus | undefined {
+  if (status === "blocked") return "blocked";
+  if (status === "review" || status === "needs_review") return "review";
+  if (status === "completed") return existing.expects_review === 0 ? "completed" : "review";
   return undefined;
 }
 

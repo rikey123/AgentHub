@@ -33,7 +33,7 @@
 - [ ] 3.5 Implement `roles.capabilities` validation: validate against well-known token set on role create/update; return 400 for unknown tokens
 - [ ] 3.6 Update `room.list_members` to return `capabilities: string[]` per member
 - [ ] 3.7 Update leader prompt to include teammate capabilities summary
-- [ ] 3.8 Implement sub-agent tool isolation: enforce `LEADER_ONLY_TOOLS` and `TEAMMATE_ONLY_TOOLS` at MCP dispatch; add `spawnDepth` check to prevent recursive spawn
+- [x] 3.8 Implement sub-agent tool isolation: enforce `LEADER_ONLY_TOOLS` and `TEAMMATE_ONLY_TOOLS` at MCP dispatch; add `spawnDepth` check to prevent recursive spawn
 - [ ] 3.9 Create `packages/skills` package: `SkillRegistry` with parse/validate SKILL.md, store skill + skill_files, resolve active skill set per (room, agent)
 - [ ] 3.10 Implement skill materialization: write selected skills to runtime skill directory before run start; block run on materialization failure; publish `skill.materialization_failed`; cleanup in run terminal hook
 - [ ] 3.11 Implement skill lifecycle events: publish `skill.created/updated/deleted/imported/activated/deactivated` on corresponding CRUD operations

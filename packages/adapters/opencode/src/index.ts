@@ -32,6 +32,7 @@ export type OpenCodeAdapterOptions = {
   readonly mcpServer?: RoomMcpServer;
   readonly permissionEngine?: PermissionEngine;
   readonly onWarmSessionFailed?: (input: { readonly roomId: string; readonly agentId: string; readonly adapterSessionId: string }) => void;
+  readonly onPlanPhaseEnded?: (runId: string) => void | Promise<void>;
   readonly now?: () => number;
 };
 

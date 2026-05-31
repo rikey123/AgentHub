@@ -6,6 +6,7 @@ import type { AdapterArtifactFSBoundary, ReclaimAdapter, RoomMcpServer, RunLifec
 import type { CommandBus, EventBus } from "@agenthub/bus";
 import type { PermissionEngine } from "@agenthub/permissions";
 import type { KeychainBridge } from "@agenthub/security";
+import type { SkillRegistry } from "@agenthub/skills";
 
 export type RuntimeAdapterId = "mock" | "claude-code" | "opencode" | "native";
 
@@ -19,6 +20,9 @@ export type AdapterRegistryOptions = {
   readonly briefResolver?: BriefResolver;
   readonly getRoomMcpServer?: () => RoomMcpServer;
   readonly getCommandBus?: () => CommandBus | undefined;
+  readonly onSessionEndedWithoutCompletion?: (taskId: string) => void | Promise<void>;
+  readonly onPlanPhaseEnded?: (runId: string) => void | Promise<void>;
+  readonly skillRegistry?: SkillRegistry;
   readonly mockAdapter?: MockAdapterManager;
   readonly claudeAdapter?: WarmableManagedAdapter;
   readonly opencodeAdapter?: WarmableManagedAdapter;
@@ -67,19 +71,24 @@ export class AdapterRegistry {
   async runAgent(run: RunRow): Promise<void> {
     const adapterId = this.adapterIdForRun(run);
     this.runAdapters.set(run.id, adapterId);
-    if (adapterId === "claude-code") {
-      await this.claude().runManaged(run);
-      return;
+    try {
+      this.options.skillRegistry?.materializeForRun(this.skillRunInput(run, adapterId));
+      if (adapterId === "claude-code") {
+        await this.claude().runManaged(run);
+        return;
+      }
+      if (adapterId === "opencode") {
+        await this.opencode().runManaged(run);
+        return;
+      }
+      if (adapterId === "native") {
+        await this.native().then((adapter) => adapter.runManaged(run));
+        return;
+      }
+      await this.mockAdapter.runAgent(run);
+    } finally {
+      this.options.skillRegistry?.cleanupRun(run.id);
     }
-    if (adapterId === "opencode") {
-      await this.opencode().runManaged(run);
-      return;
-    }
-    if (adapterId === "native") {
-      await this.native().then((adapter) => adapter.runManaged(run));
-      return;
-    }
-    await this.mockAdapter.runAgent(run);
   }
 
   prewarmRoomAgents(roomId: string): void {
@@ -174,6 +183,8 @@ export class AdapterRegistry {
       services: { database: this.options.database, eventBus: this.options.eventBus, ...(this.options.getCommandBus !== undefined ? { getCommandBus: this.options.getCommandBus } : {}), ...(this.options.permissionEngine !== undefined ? { permissionEngine: this.options.permissionEngine } : {}), ...(this.options.artifactFs !== undefined ? { artifactFs: this.options.artifactFs } : {}), ...(this.options.briefResolver !== undefined ? { briefResolver: this.options.briefResolver } : {}) },
       lifecycle: this.options.lifecycle,
       workspaceId: "default-workspace",
+      ...(this.options.onSessionEndedWithoutCompletion !== undefined ? { onSessionEndedWithoutCompletion: this.options.onSessionEndedWithoutCompletion } : {}),
+      ...(this.options.onPlanPhaseEnded !== undefined ? { onPlanPhaseEnded: this.options.onPlanPhaseEnded } : {}),
       ...(this.options.adapterCommands?.claude !== undefined ? this.options.adapterCommands.claude : {}),
       ...(this.options.permissionEngine !== undefined ? { permissionEngine: this.options.permissionEngine } : {}),
       ...(this.options.getRoomMcpServer !== undefined ? { mcpServer: this.options.getRoomMcpServer() } : {}),
@@ -188,6 +199,8 @@ export class AdapterRegistry {
       services: { database: this.options.database, eventBus: this.options.eventBus, ...(this.options.getCommandBus !== undefined ? { getCommandBus: this.options.getCommandBus } : {}), ...(this.options.permissionEngine !== undefined ? { permissionEngine: this.options.permissionEngine } : {}), ...(this.options.artifactFs !== undefined ? { artifactFs: this.options.artifactFs } : {}), ...(this.options.briefResolver !== undefined ? { briefResolver: this.options.briefResolver } : {}) },
       lifecycle: this.options.lifecycle,
       workspaceId: "default-workspace",
+      ...(this.options.onSessionEndedWithoutCompletion !== undefined ? { onSessionEndedWithoutCompletion: this.options.onSessionEndedWithoutCompletion } : {}),
+      ...(this.options.onPlanPhaseEnded !== undefined ? { onPlanPhaseEnded: this.options.onPlanPhaseEnded } : {}),
       ...(this.options.adapterCommands?.opencode !== undefined ? this.options.adapterCommands.opencode : {}),
       ...(this.options.permissionEngine !== undefined ? { permissionEngine: this.options.permissionEngine } : {}),
       ...(this.options.getRoomMcpServer !== undefined ? { mcpServer: this.options.getRoomMcpServer() } : {}),
@@ -207,6 +220,8 @@ export class AdapterRegistry {
       ...(this.options.keychain !== undefined ? { apiKey: await this.nativeApiKey() } : {}),
       getModelConfigForRun: (run: RunRow) => this.resolveRunModelConfig(run),
       getApiKeyForRun: (run: RunRow) => this.resolveRunApiKey(run),
+      ...(this.options.onSessionEndedWithoutCompletion !== undefined ? { onSessionEndedWithoutCompletion: this.options.onSessionEndedWithoutCompletion } : {}),
+      ...(this.options.onPlanPhaseEnded !== undefined ? { onPlanPhaseEnded: this.options.onPlanPhaseEnded } : {}),
       ...(this.options.getRoomMcpServer !== undefined ? { getRoomMcpServer: this.options.getRoomMcpServer } : {}),
       ...(this.options.artifactFs !== undefined ? { artifactFs: this.options.artifactFs } : {}),
       ...(this.options.now !== undefined ? { now: this.options.now } : {})
@@ -274,6 +289,23 @@ export class AdapterRegistry {
 
   private adapterIdForRun(run: RunRow): RuntimeAdapterId {
     return this.classify(run.adapter_id, run.agent_id);
+  }
+
+  private skillRunInput(run: RunRow, runtimeId: RuntimeAdapterId): { readonly runId: string; readonly roomId: string; readonly participantId: string; readonly workspaceRoot: string; readonly runtimeId: string; readonly taskId?: string } {
+    return {
+      runId: run.id,
+      roomId: run.room_id,
+      participantId: run.agent_id,
+      workspaceRoot: this.workspaceRootForRun(run),
+      runtimeId,
+      ...(run.task_id !== null ? { taskId: run.task_id } : {})
+    };
+  }
+
+  private workspaceRootForRun(run: RunRow): string {
+    if (run.workspace_path !== null && run.workspace_path.length > 0) return run.workspace_path;
+    const row = this.options.database.sqlite.prepare("SELECT root_path FROM workspaces WHERE id = ?").get(run.workspace_id) as { readonly root_path: string } | undefined;
+    return row?.root_path ?? process.cwd();
   }
 
   private adapterIdForPersistedRun(runId: string): RuntimeAdapterId {

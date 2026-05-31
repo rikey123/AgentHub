@@ -1,28 +1,38 @@
 export type LeaderPromptParams = {
   readonly agentName: string;
-  readonly teammates: ReadonlyArray<{ readonly agentId: string; readonly name: string; readonly slug: string; readonly role: string; readonly presence: string }>;
+  readonly teammates: ReadonlyArray<{ readonly agentId: string; readonly name: string; readonly slug: string; readonly role: string; readonly presence: string; readonly capabilities?: readonly string[] }>;
   readonly teamWorkspace?: string;
   readonly availableAdapters?: ReadonlyArray<{ readonly adapterId: string; readonly name: string }>;
 };
 
-export function buildLeaderPrompt(params: LeaderPromptParams): string {
-  const { agentName, teammates, teamWorkspace, availableAdapters } = params;
+function renderTeammateList(teammates: LeaderPromptParams["teammates"]): string {
+  return teammates.length === 0
+    ? "(no teammates yet - propose the lineup to the user first, then use room.spawn_agent only after they confirm)"
+    : teammates
+        .map((t) => {
+          const capabilities = t.capabilities !== undefined && t.capabilities.length > 0 ? `, capabilities: ${t.capabilities.join(", ")}` : "";
+          return `- **${t.name}** (@${t.slug}) - role: ${t.role}, presence: ${t.presence}${capabilities}`;
+        })
+        .join("\n");
+}
 
-  const teammateList =
-    teammates.length === 0
-      ? "(no teammates yet - propose the lineup to the user first, then use room.spawn_agent only after they confirm)"
-      : teammates
-          .map((t) => `- **${t.name}** (@${t.slug}) - role: ${t.role}, presence: ${t.presence}`)
-          .join("\n");
-
-  const workspaceSection = teamWorkspace
+function renderWorkspaceSection(teamWorkspace?: string): string {
+  return teamWorkspace
     ? `\n\n## Team Workspace\nYour working directory \`${teamWorkspace}\` is the shared team workspace.\nAll teammates work in this directory for project-related operations.`
     : "";
+}
 
-  const adaptersSection =
-    availableAdapters && availableAdapters.length > 0
-      ? `\n\n## Available Agent Types for Spawning\n${availableAdapters.map((a) => `- \`${a.adapterId}\` - ${a.name}`).join("\n")}`
-      : "";
+function renderAdaptersSection(availableAdapters?: LeaderPromptParams["availableAdapters"]): string {
+  return availableAdapters && availableAdapters.length > 0
+    ? `\n\n## Available Agent Types for Spawning\n${availableAdapters.map((a) => `- \`${a.adapterId}\` - ${a.name}`).join("\n")}`
+    : "";
+}
+
+export function buildLeaderPrompt(params: LeaderPromptParams): string {
+  const { agentName, teammates, teamWorkspace, availableAdapters } = params;
+  const teammateList = renderTeammateList(teammates);
+  const workspaceSection = renderWorkspaceSection(teamWorkspace);
+  const adaptersSection = renderAdaptersSection(availableAdapters);
 
   return `# You are the Team Leader
 
@@ -87,4 +97,32 @@ When the user asks to dismiss a teammate, use \`room.send_message @slug shutdown
 - Refer to teammates by name, not by agent ID
 - If a teammate fails, reassign or adjust the plan
 - Do NOT duplicate work teammates are already doing`;
+}
+
+export function buildPlanPhasePrompt(params: LeaderPromptParams): string {
+  const { agentName, teammates, teamWorkspace, availableAdapters } = params;
+  const teammateList = renderTeammateList(teammates);
+  const workspaceSection = renderWorkspaceSection(teamWorkspace);
+  const adaptersSection = renderAdaptersSection(availableAdapters);
+
+  return `# You are the Team Leader
+
+## Your Identity
+Name: ${agentName}
+
+## Planning Phase
+This is the visible-only planning phase for a squad/team room.
+Your job is to produce a structured plan before execution begins.
+
+## Output Rules
+- Output ONLY a JSON block fenced with \`\`\`json ... \`\`\`
+- The JSON must be a single PlanDocument object with this shape:
+  - \`goal: string\`
+  - \`tasks: Array<{ title: string; description: string; assigneeRole: string; dependsOn?: string[]; maxTurns?: number }>\`
+- Do not call any tools.
+- Do not delegate any work in this turn.
+- Do not add any text outside the JSON block.
+
+## Your Teammates
+${teammateList}${workspaceSection}${adaptersSection}`;
 }
