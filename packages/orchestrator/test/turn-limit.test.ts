@@ -27,7 +27,7 @@ beforeEach(() => {
     lifecycle: {} as unknown as RunLifecycleService,
     eventBus: currentBus(),
     now: () => now,
-    getCommandBus: () => ({ dispatch: currentDispatch } as never),
+    getCommandBus: () => ({ dispatch: (...args: [unknown, unknown]) => (dispatchSpy as (...a: unknown[]) => unknown)(...args) } as never),
     database: currentDatabase()
   });
 
@@ -112,23 +112,14 @@ function currentPublishSpy(): ReturnType<typeof vi.spyOn> {
 }
 
 function taskStatusChangedEvents(): Array<{ readonly type: string }> {
-  return currentPublishSpy().mock.calls
-    .map(([event]) => event as { readonly type: string })
+  return (currentPublishSpy().mock.calls as Array<[{ readonly type: string }]>)
+    .map(([event]) => event)
     .filter((event) => event.type === "task.status.changed");
 }
 
 function currentDispatchSpy(): ReturnType<typeof vi.fn> {
   expect(dispatchSpy).toBeDefined();
   return dispatchSpy as ReturnType<typeof vi.fn>;
-}
-
-function currentDispatch(...args: Parameters<NonNullable<ReturnType<typeof currentCommandBus>['dispatch']>>): ReturnType<typeof dispatchSpy> {
-  expect(dispatchSpy).toBeDefined();
-  return dispatchSpy!(...args);
-}
-
-function currentCommandBus(): { readonly dispatch: typeof currentDispatch } {
-  return { dispatch: currentDispatch };
 }
 
 function seedWorkspaceRoomTask(): void {

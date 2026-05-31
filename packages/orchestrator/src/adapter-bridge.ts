@@ -327,6 +327,9 @@ export class AdapterBridge {
 
     if (room) {
       db.sqlite.transaction(() => {
+        // Read prevStatus before update so the event payload is accurate
+        const prevRow = db.sqlite.prepare("SELECT status FROM tasks WHERE id = ?").get(taskId) as { status: string } | undefined;
+        const prevStatus = prevRow?.status ?? "in_progress";
         const result = db.sqlite.prepare("UPDATE tasks SET status = 'blocked', blocker_reason = 'turn_limit_exceeded', updated_at = ? WHERE id = ? AND status NOT IN ('blocked', 'completed', 'cancelled')").run(now, taskId);
         if (result.changes > 0) {
           this.input.eventBus.publish({
@@ -335,7 +338,7 @@ export class AdapterBridge {
             schemaVersion: 1,
             workspaceId: room.workspace_id,
             roomId: this.input.roomId,
-            payload: { taskId, nextStatus: "blocked", blockerReason: "turn_limit_exceeded", reason: "turn_limit_exceeded" },
+            payload: { taskId, prevStatus, nextStatus: "blocked", blockerReason: "turn_limit_exceeded", reason: "turn_limit_exceeded" },
             createdAt: now
           });
         }

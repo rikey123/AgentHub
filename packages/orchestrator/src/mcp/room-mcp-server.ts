@@ -824,12 +824,15 @@ export class RoomMcpServer {
           this.options.database.sqlite.transaction(() => {
             this.options.database.sqlite.prepare("UPDATE artifacts SET status = 'conflict', updated_at = ? WHERE id = ?").run(now, artifact.id);
             if (taskId) {
-              this.options.database.sqlite.prepare("UPDATE tasks SET status = 'blocked', blocker_reason = 'worktree_apply_conflict', updated_at = ? WHERE id = ?").run(now, taskId);
+              // Read prevStatus before update; only publish event if state actually changed
+              const prevRow = this.options.database.sqlite.prepare("SELECT status FROM tasks WHERE id = ?").get(taskId) as { status: string } | undefined;
+              const prevStatus = prevRow?.status ?? "in_progress";
+              const taskResult = this.options.database.sqlite.prepare("UPDATE tasks SET status = 'blocked', blocker_reason = 'worktree_apply_conflict', updated_at = ? WHERE id = ? AND status NOT IN ('blocked', 'completed', 'cancelled')").run(now, taskId);
+              if (taskResult.changes > 0) {
+                this.options.eventBus.publish({ id: randomUUID(), type: "task.status.changed", schemaVersion: 1, workspaceId: room.workspace_id, roomId: session.roomId, payload: { taskId, prevStatus, nextStatus: "blocked", blockerReason: "worktree_apply_conflict" }, createdAt: now });
+              }
             }
             this.options.eventBus.publish({ id: randomUUID(), type: "worktree.conflict_detected", schemaVersion: 1, workspaceId: room.workspace_id, roomId: session.roomId, payload: { runId, taskId, artifactId: artifact.id, conflictDiff: String(applyErr) }, createdAt: now });
-            if (taskId) {
-              this.options.eventBus.publish({ id: randomUUID(), type: "task.status.changed", schemaVersion: 1, workspaceId: room.workspace_id, roomId: session.roomId, payload: { taskId, nextStatus: "blocked", blockerReason: "worktree_apply_conflict" }, createdAt: now });
-            }
           })();
           if (taskId) {
             void this.options.commandBus.dispatch(

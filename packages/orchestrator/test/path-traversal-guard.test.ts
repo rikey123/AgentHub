@@ -98,7 +98,7 @@ function currentLifecycle(): RunLifecycleService {
   return lifecycle as RunLifecycleService;
 }
 
-function createBridge(artifactFs: { readonly writeTextFile: ReturnType<typeof vi.fn>; readonly deleteFile: ReturnType<typeof vi.fn> }): AdapterBridge {
+function createBridge(artifactFs: { readonly writeTextFile: ReturnType<typeof vi.fn>; readonly deleteFile: ReturnType<typeof vi.fn>; readonly buildRunArtifact?: ReturnType<typeof vi.fn> }): AdapterBridge {
   return new AdapterBridge({
     runId: "run_1",
     workspaceId: "ws_1",
@@ -106,6 +106,6 @@ function createBridge(artifactFs: { readonly writeTextFile: ReturnType<typeof vi
     agentId: "agent_1",
     lifecycle: currentLifecycle(),
     eventBus: currentBus(),
-    artifactFs
+    artifactFs: artifactFs as unknown as import("../src/adapter-bridge.ts").AdapterArtifactFSBoundary
   });
 }

@@ -11,18 +11,18 @@
 
 ## 2. Dev A Track — Multi-Agent Reliability (packages/orchestrator, packages/artifacts, packages/daemon)
 
-- [ ] 2.1 Implement worktree-per-run isolation: default `ArtifactFS` to `isolated_worktree` for squad/team rooms; create worktree at `{workspace}/.agenthub/worktrees/{runId}`
-- [ ] 2.2 On `session.ended`: compute diff, store `worktree_diff` artifact with `status = "ready_for_review"`, publish `worktree.diff.ready`
-- [ ] 2.3 Implement `room.apply_worktree`: run `git apply`, on success publish `worktree.applied`, on conflict mark artifact `conflict`, transition task to `blocked(worktree_apply_conflict)`, wake leader
-- [ ] 2.4 Implement `room.discard_worktree`: delete worktree directory, publish `worktree.discarded`
-- [ ] 2.5 Implement two-level timeout escalation: Level-2 fires if no leader run reaches `running` within 5 minutes of Level-1; publish `room.stalled`, set `rooms.stalled_at`
-- [ ] 2.6 Implement `POST /rooms/:id/unstall`: clear `rooms.stalled_at`, publish `room.unstalled`
+- [x] 2.1 Implement worktree-per-run isolation: default `ArtifactFS` to `isolated_worktree` for squad/team rooms; create worktree at `{workspace}/.agenthub/worktrees/{runId}`
+- [x] 2.2 On `session.ended`: compute diff, store `worktree_diff` artifact with `status = "ready_for_review"`, publish `worktree.diff.ready`
+- [x] 2.3 Implement `room.apply_worktree`: run `git apply`, on success publish `worktree.applied`, on conflict mark artifact `conflict`, transition task to `blocked(worktree_apply_conflict)`, wake leader
+- [x] 2.4 Implement `room.discard_worktree`: delete worktree directory, publish `worktree.discarded`
+- [x] 2.5 Implement two-level timeout escalation: Level-2 fires if no leader run reaches `running` within 5 minutes of Level-1; publish `room.stalled`, set `rooms.stalled_at`
+- [x] 2.6 Implement `POST /rooms/:id/unstall`: clear `rooms.stalled_at`, publish `room.unstalled`
 - [x] 2.7 Implement per-task turn limit: increment counter on each LLM response; when `max_turns` reached, cancel session, transition task to `blocked(turn_limit_exceeded)`, wake leader
-- [ ] 2.8 Implement mid-flight context handoff: on run terminal failure, write `task_checkpoints` row; inject `<prior-progress>` block on next wake for same task
+- [x] 2.8 Implement mid-flight context handoff: on run terminal failure, write `task_checkpoints` row; inject `<prior-progress>` block on next wake for same task
 - [x] 2.9 Implement `waitingPermissionCount` ref-counting in `RunLifecycleService` (replace boolean with counter)
-- [ ] 2.10 Implement path traversal validation on all file paths in MCP tool handlers (`file.read`, `file.write`, `fs.writeTextFile`, `fs.deleteFile`)
-- [ ] 2.11 Write unit tests for worktree lifecycle, timeout escalation, turn limit, checkpoint capture
-- [ ] 2.12 Write unit tests for permission ref-counting and path traversal guard
+- [x] 2.10 Implement path traversal validation on all file paths in MCP tool handlers (`file.read`, `file.write`, `fs.writeTextFile`, `fs.deleteFile`)
+- [x] 2.11 Write unit tests for worktree lifecycle, timeout escalation, turn limit, checkpoint capture
+- [x] 2.12 Write unit tests for permission ref-counting and path traversal guard
 
 ## 3. Dev B Track — Multi-Agent Intelligence + Skill System (packages/orchestrator, packages/skills)
 
