@@ -357,6 +357,9 @@ importers:
       '@agenthub/security':
         specifier: workspace:*
         version: link:../security
+      '@agenthub/skills':
+        specifier: workspace:*
+        version: link:../skills
       effect:
         specifier: ^3.19.6
         version: 3.21.2
@@ -462,6 +465,15 @@ importers:
       keytar:
         specifier: 7.9.0
         version: 7.9.0
+
+  packages/skills:
+    dependencies:
+      '@agenthub/bus':
+        specifier: workspace:*
+        version: link:../bus
+      '@agenthub/db':
+        specifier: workspace:*
+        version: link:../db
 
   packages/ui: {}
 

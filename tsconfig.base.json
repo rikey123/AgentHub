@@ -6,6 +6,12 @@
     "declaration": true,
     "declarationMap": true,
     "exactOptionalPropertyTypes": true,
+    "baseUrl": ".",
+    "paths": {
+      "@agenthub/bus": ["packages/bus/src/index.ts"],
+      "@agenthub/db": ["packages/db/src/index.ts"],
+      "@agenthub/skills": ["packages/skills/src/index.ts"]
+    },
     "isolatedModules": true,
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "module": "NodeNext",

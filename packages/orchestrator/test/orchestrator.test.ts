@@ -1196,9 +1196,11 @@ describe("startup recovery and reclaim", () => {
 
     const result = reconcileTerminalDelegatedTaskRuns({ database: currentDatabase(), eventBus: currentBus(), taskService: service, now: () => now });
 
-    expect(result.completedTaskIds).toEqual([task.data.taskId]);
-    expect(currentDatabase().sqlite.prepare("SELECT status, expects_review FROM tasks WHERE id = ?").get(task.data.taskId)).toMatchObject({ status: "completed", expects_review: 0 });
-    expect(currentDatabase().sqlite.prepare("SELECT type FROM events WHERE type = 'task.delegation.completed' AND task_id = ?").get(task.data.taskId)).toBeDefined();
+    // V1.1: room.complete_task is the authoritative path. A completed run without
+    // task.delegation.completed event means room.complete_task was never called.
+    // Recovery transitions the task to review(missing_completion_report).
+    expect(result.reviewedTaskIds).toEqual([task.data.taskId]);
+    expect(currentDatabase().sqlite.prepare("SELECT status, blocker_reason FROM tasks WHERE id = ?").get(task.data.taskId)).toMatchObject({ status: "review", blocker_reason: "missing_completion_report" });
   });
 });
 

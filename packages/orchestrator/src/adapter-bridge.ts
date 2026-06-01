@@ -61,6 +61,7 @@ export class AdapterBridge {
       readonly workspaceId: string;
       readonly roomId: string;
       readonly agentId: string;
+      readonly wakeReason?: string;
       readonly lifecycle: RunLifecycleService;
       readonly eventBus: EventBus;
       readonly now?: () => number;
@@ -70,6 +71,8 @@ export class AdapterBridge {
       readonly terminalEnabled?: boolean;
       readonly artifactFs?: AdapterArtifactFSBoundary;
       readonly getCommandBus?: () => CommandBus | undefined;
+      readonly onSessionEndedWithoutCompletion?: (taskId: string) => void | Promise<void>;
+      readonly onPlanPhaseEnded?: (runId: string) => void | Promise<void>;
       /** Optional brief resolver. When omitted, briefs default to "" (legacy behavior). */
       readonly briefResolver?: BriefResolver;
       /** Database used to look up the final assistant message text + artifact counts when computing the brief. */
@@ -116,6 +119,10 @@ export class AdapterBridge {
       const briefText = this.computeBriefText({ cancelled });
       if (cancelled) this.input.lifecycle.cancelFinalized(null, this.input.runId, briefText);
       else this.input.lifecycle.complete(null, this.input.runId, event.cost ?? zeroCost(), briefText);
+      if (this.input.wakeReason === "plan") void Promise.resolve(this.input.onPlanPhaseEnded?.(this.input.runId));
+      if (this.input.taskId !== undefined && !this.hasRecordedCompletionReport(this.input.taskId)) {
+        void Promise.resolve(this.input.onSessionEndedWithoutCompletion?.(this.input.taskId));
+      }
       return;
     }
     if (event.type === "session.crashed") {
@@ -192,6 +199,13 @@ export class AdapterBridge {
       payload: { runId: this.input.runId, ...event },
       createdAt: this.input.now?.() ?? Date.now()
     } satisfies PublishInput);
+  }
+
+  private hasRecordedCompletionReport(taskId: string): boolean {
+    const db = this.input.database;
+    if (db === undefined) return false;
+    if (db.sqlite.prepare("SELECT 1 FROM events WHERE task_id = ? AND type = 'task.delegation.completed' LIMIT 1").get(taskId) !== undefined) return true;
+    return db.sqlite.prepare("SELECT 1 FROM task_activities WHERE task_id = ? AND kind = 'status_change' AND by = 'room.complete_task' LIMIT 1").get(taskId) !== undefined;
   }
 
   // ---------------------------------------------------------------------------

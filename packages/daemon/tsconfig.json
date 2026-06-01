@@ -1,5 +1,13 @@
 {
   "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": "../..",
+    "paths": {
+      "@agenthub/skills": ["packages/skills/src/index.ts"],
+      "@agenthub/bus": ["packages/bus/src/index.ts"],
+      "@agenthub/db": ["packages/db/src/index.ts"]
+    }
+  },
   "include": ["src/**/*.ts", "src/**/*.tsx", "test/**/*.ts", "test/**/*.tsx", "e2e/**/*.ts"],
   "exclude": ["dist", "build", "node_modules"]
 }

@@ -2,6 +2,12 @@
   "$schema": "https://json.schemastore.org/tsconfig",
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@agenthub/bus": ["packages/bus/src/index.ts"],
+      "@agenthub/db": ["packages/db/src/index.ts"],
+      "@agenthub/skills": ["packages/skills/src/index.ts"]
+    },
     "types": ["node", "vitest/globals"],
     "jsx": "react-jsx"
   },

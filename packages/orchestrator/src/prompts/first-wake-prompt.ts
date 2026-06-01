@@ -39,14 +39,16 @@ export function buildFirstWakePrompt(
   const participants = db.sqlite
     .prepare(
       `SELECT rp.participant_id AS agentId, rp.role, ap.name, ap.adapter_id AS adapterId,
-              COALESCE(ap2.state, 'offline') AS presence
+              COALESCE(ap2.state, 'offline') AS presence, r.capabilities AS capabilities
        FROM room_participants rp
        LEFT JOIN agent_profiles ap ON ap.id = rp.participant_id
        LEFT JOIN agent_presence ap2 ON ap2.room_id = rp.room_id AND ap2.agent_id = rp.participant_id
+       LEFT JOIN agent_bindings ab ON ab.id = rp.agent_binding_id
+       LEFT JOIN roles r ON r.id = ab.role_id
        WHERE rp.room_id = ? AND rp.participant_type = 'agent'
        ORDER BY rp.joined_at ASC`
     )
-    .all(roomId) as { agentId: string; role: string; name: string | null; adapterId: string | null; presence: string }[];
+    .all(roomId) as { agentId: string; role: string; name: string | null; adapterId: string | null; presence: string; capabilities: string | null }[];
 
   const others = participants.filter((p) => p.agentId !== agentId);
   const othersFormatted = others.map((p) => ({
@@ -55,6 +57,7 @@ export function buildFirstWakePrompt(
     slug: nameToSlug(p.name ?? p.agentId),
     role: p.role,
     presence: p.presence,
+    capabilities: parseCapabilities(p.capabilities),
   }));
 
   // In team/squad mode, use structured leader/teammate prompts.
@@ -90,7 +93,10 @@ export function buildFirstWakePrompt(
   if (others.length === 0) return basePrompt.length > 0 ? basePrompt : undefined;
 
   const teammateLines = othersFormatted
-    .map((t) => `- **${t.name}** (@${t.slug}) — role: ${t.role}, presence: ${t.presence}`)
+    .map((t) => {
+      const capabilities = t.capabilities !== undefined && t.capabilities.length > 0 ? `, capabilities: ${t.capabilities.join(", ")}` : "";
+      return `- **${t.name}** (@${t.slug}) — role: ${t.role}, presence: ${t.presence}${capabilities}`;
+    })
     .join("\n");
 
   const firstTeammateSlug = othersFormatted[0]?.slug ?? "teammate";
@@ -116,4 +122,14 @@ Every \`room.send_message\` wakes the recipient. Replying to non-task messages c
 
   if (basePrompt.length === 0) return teammatesSection;
   return `${basePrompt}\n\n${teammatesSection}`;
+}
+
+function parseCapabilities(value: string | null): string[] {
+  if (value === null) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
 }

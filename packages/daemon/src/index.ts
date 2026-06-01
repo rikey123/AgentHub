@@ -11,9 +11,10 @@ import { ContextLedger, createContextCommandHandlers, HeuristicBriefGenerator } 
 import { createDatabase, type AgentHubDatabase } from "@agenthub/db";
 import { MockAdapterManager } from "@agenthub/adapter-mock";
 import { createInterventionCommandHandlers, InterventionEngine } from "@agenthub/interventions";
-import { ActiveWakesRegistry, checkTaskTimeouts, createCancelRunHandler, createCompleteTaskHandler, createConsumePendingTurnHandler, createCreateTaskHandler, createUpdateTaskHandler, createWakeAgentHandler, handleTeamDispatchReviewTerminal, MailboxService, maybePublishTeamDispatchCompleted, PendingTurnService, ReclaimStaleClaimedRun, reconcileTerminalDelegatedTaskRuns, RoomMcpServer, RunLifecycleService, RunQueue, StartupRecovery, TaskService, type BriefResolver } from "@agenthub/orchestrator";
+import { ActiveWakesRegistry, checkTaskTimeouts, createCancelRunHandler, createCompleteTaskHandler, createConsumePendingTurnHandler, createCreateTaskHandler, createUpdateTaskHandler, createWakeAgentHandler, handleTeamDispatchReviewTerminal, MailboxService, maybePublishTeamDispatchCompleted, PendingTurnService, ReclaimStaleClaimedRun, reconcileTerminalDelegatedTaskRuns, RoomMcpServer, RunLifecycleService, RunQueue, StartupRecovery, TaskService, WELL_KNOWN_CAPABILITY_TOKENS, type BriefResolver } from "@agenthub/orchestrator";
 import { createPermissionCommandHandlers, PermissionEngine, seedBuiltInPermissionProfiles } from "@agenthub/permissions";
 import type { EventEnvelope } from "@agenthub/protocol/events";
+import { SkillRegistry } from "@agenthub/skills";
 import { attachmentMaxBytes, authenticateBrowserRequest, createKeychain, createKeychainAccount, issueBrowserSession, redactAndTruncate, storeAttachment, type BrowserAuthResult, type KeychainBridge } from "@agenthub/security";
 import { Effect } from "effect";
 import { generateRoleDraftWithModelConfig, type ModelConfigRow, type RoleDraft, type RoleDraftGenerationInput } from "@agenthub/native-agent-runtime";
@@ -26,6 +27,57 @@ import { cleanExpiredRoleDrafts, startRoleDraftGC } from "./role-draft-gc.ts";
 import { createDaemonCommandHandlers, seedDefaultData } from "./commands.ts";
 export { daemonPidPath, defaultConfigPath, ensureAgentHubHome, ensureParentDirectory, loadAgentHubConfig, redactConfig, type AgentHubConfig, type ConfigOverrides } from "./config.ts";
 import { openApiDocument } from "./openapi.ts";
+
+type PlanDocument = {
+  readonly goal: string;
+  readonly tasks: ReadonlyArray<{ readonly title: string; readonly description: string; readonly assigneeRole: string; readonly dependsOn?: readonly string[]; readonly maxTurns?: number }>;
+};
+
+function parsePlanDocument(text: string): PlanDocument | undefined {
+  const match = text.match(/```json\s*([\s\S]*?)\s*```/iu);
+  if (match === null) return undefined;
+  try {
+    const jsonText = match[1];
+    if (jsonText === undefined) return undefined;
+    const parsed = JSON.parse(jsonText) as Partial<PlanDocument>;
+    if (typeof parsed.goal !== "string") return undefined;
+    if (!Array.isArray(parsed.tasks)) return undefined;
+    const tasks = parsed.tasks.map((task: unknown) => {
+      if (typeof task !== "object" || task === null) return undefined;
+      const record = task as Record<string, unknown>;
+      const title = typeof record.title === "string" ? record.title : undefined;
+      const description = typeof record.description === "string" ? record.description : undefined;
+      const assigneeRole = typeof record.assigneeRole === "string" ? record.assigneeRole : undefined;
+      if (title === undefined || description === undefined || assigneeRole === undefined) return undefined;
+      const dependsOn = Array.isArray(record.dependsOn) ? record.dependsOn.filter((value: unknown): value is string => typeof value === "string") : undefined;
+      const maxTurns = typeof record.maxTurns === "number" && Number.isFinite(record.maxTurns) ? record.maxTurns : undefined;
+      return { title, description, assigneeRole, ...(dependsOn !== undefined ? { dependsOn } : {}), ...(maxTurns !== undefined ? { maxTurns } : {}) };
+    }).filter((task): task is NonNullable<typeof task> => task !== undefined);
+    return { goal: parsed.goal, tasks };
+  } catch {
+    return undefined;
+  }
+}
+
+function recordPlanParseFailure(database: AgentHubDatabase, eventBus: EventBus, roomId: string, runId: string, now: number): void {
+  database.sqlite.transaction(() => {
+    const room = database.sqlite.prepare("SELECT workspace_id FROM rooms WHERE id = ?").get(roomId) as { readonly workspace_id: string } | undefined;
+    if (room === undefined) return;
+    eventBus.publish({ id: randomUUID(), type: "task.activity.added", schemaVersion: 1, workspaceId: room.workspace_id, roomId, runId, payload: { kind: "plan_parse_failed", runId }, createdAt: now });
+  })();
+}
+
+function messageText(database: AgentHubDatabase, messageId: string): string {
+  const rows = database.sqlite.prepare("SELECT payload FROM message_parts WHERE message_id = ? ORDER BY seq ASC").all(messageId) as { readonly payload: string }[];
+  return rows.map((row) => {
+    try {
+      const parsed = JSON.parse(row.payload) as { readonly text?: unknown };
+      return typeof parsed.text === "string" ? parsed.text : "";
+    } catch {
+      return "";
+    }
+  }).filter((text) => text.length > 0).join("\n");
+}
 
 export type DaemonStartupPhase =
   | "SQLite open + pragma + migrate"
@@ -147,6 +199,9 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     emitPhase("startup", PHASE_EVENT_BUS);
     const eventBus = withStatusLineCoalescing(createEventBus({ database }));
     seedBuiltinRoles(database, defaultBuiltinRolesDir(), eventBus, options.now?.() ?? Date.now());
+    const skillRegistry = new SkillRegistry({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
+    const workspaceRow = database.sqlite.prepare("SELECT id FROM workspaces ORDER BY created_at ASC LIMIT 1").get() as { readonly id: string } | undefined;
+    skillRegistry.seedBuiltins(workspaceRow?.id ?? "default-workspace");
     const agentProfiles = watchAgentProfiles({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
     await agentProfiles.ready;
     const roleDraftGcCleanup = startRoleDraftGC(database, () => undefined);
@@ -188,6 +243,24 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     const permissionEngine = new PermissionEngine({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
     const interventionEngine = new InterventionEngine({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
     const artifactService = new ArtifactService({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
+    const onSkillMaterializationFailed = (input: { readonly taskId?: string; readonly skillId: string; readonly skillName: string; readonly workspaceId: string; readonly runId: string; readonly error: string }): void => {
+      const now = options.now?.() ?? Date.now();
+      database.sqlite.transaction(() => {
+        if (input.taskId !== undefined) {
+          taskService.updateStatus({ taskId: input.taskId, status: "blocked", blockerReason: "skill_materialization_failed" });
+        }
+        eventBus.publish({
+          id: randomUUID(),
+          type: "skill.materialization_failed",
+          schemaVersion: 1,
+          workspaceId: input.workspaceId,
+          runId: input.runId,
+          ...(input.taskId !== undefined ? { taskId: input.taskId } : {}),
+          payload: { skillId: input.skillId, name: input.skillName, runId: input.runId, error: input.error },
+          createdAt: now
+        });
+      });
+    };
     const taskService = new TaskService({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}), onTaskCompleted: (task) => maybePublishTeamDispatchCompleted({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) }, task) });
     const artifactFs = new ArtifactFSRunRegistry({
       database,
@@ -244,18 +317,10 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
         taskService.startDelegatedRun(run.task_id, runId);
       },
       onRunCompleted: (runId: string) => {
-        const run = database.sqlite.prepare("SELECT task_id, workspace_id, room_id, wake_reason FROM runs WHERE id = ?").get(runId) as { readonly task_id: string | null; readonly workspace_id: string; readonly room_id: string; readonly wake_reason: string | null } | undefined;
+        const run = database.sqlite.prepare("SELECT task_id, wake_reason FROM runs WHERE id = ?").get(runId) as { readonly task_id: string | null; readonly wake_reason: string | null } | undefined;
         if (!run?.task_id || run.wake_reason !== "delegated_task") return;
-        const taskId = run.task_id;
-        const task = database.sqlite.prepare("SELECT expects_review FROM tasks WHERE id = ?").get(taskId) as { readonly expects_review: number } | undefined;
-        if (task?.expects_review === 1) {
-          const reviewResult = taskService.review(taskId);
-          if (!reviewResult.ok) return;
-          return;
-        }
-        const taskResult = taskService.completeDelegatedRun(taskId, runId);
-        if (!taskResult.ok) return;
-        appendTaskMailboxWake(run.workspace_id, run.room_id, taskId, runId, "task_completed");
+        // room.complete_task is now the authoritative completion path (D6).
+        // If the run ends without it, onSessionEndedWithoutCompletion handles the missing report path.
       },
       onRunFailed: (runId: string) => {
         const run = database.sqlite.prepare("SELECT task_id, workspace_id, room_id, wake_reason FROM runs WHERE id = ?").get(runId) as { readonly task_id: string | null; readonly workspace_id: string; readonly room_id: string; readonly wake_reason: string | null } | undefined;
@@ -271,6 +336,55 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
         if (taskResult.data.task.expectsReview) return;
         appendTaskMailboxWake(run.workspace_id, run.room_id, taskId, runId, "task_blocked");
       }
+    };
+    const onSessionEndedWithoutCompletion = (taskId: string): void => {
+      const task = database.sqlite.prepare("SELECT room_id, status FROM tasks WHERE id = ?").get(taskId) as { readonly room_id: string; readonly status: string } | undefined;
+      if (task === undefined || (task.status !== "pending" && task.status !== "in_progress")) return;
+      const room = database.sqlite.prepare("SELECT workspace_id, primary_agent_id FROM rooms WHERE id = ? AND archived_at IS NULL").get(task.room_id) as { readonly workspace_id: string; readonly primary_agent_id: string | null } | undefined;
+      if (room?.primary_agent_id === undefined || room.primary_agent_id === null) return;
+
+      const result = taskService.updateStatus({ taskId, status: "review", blockerReason: "missing_completion_report" });
+      if (!result.ok) return;
+
+      const now = options.now?.() ?? Date.now();
+      void commandBusRef.current?.dispatch(
+        {
+          type: "WakeAgent",
+          roomId: task.room_id,
+          agentId: room.primary_agent_id,
+          workspaceId: room.workspace_id,
+          reason: "task_review",
+          taskId,
+          promptDelta: { kind: "delta_only", instructions: `Task ${taskId} ended without a completion report. Please review it.` },
+          idempotencyKey: `missing-completion-report:${taskId}:${now}`
+        },
+        { actor: { type: "system" }, traceId: `missing-completion-report:${taskId}`, origin: "internal" }
+      );
+    };
+    const onPlanPhaseEnded = async (runId: string): Promise<void> => {
+      const run = database.sqlite.prepare("SELECT room_id, agent_id, workspace_id, wake_reason FROM runs WHERE id = ?").get(runId) as { readonly room_id: string; readonly agent_id: string; readonly workspace_id: string; readonly wake_reason: string | null } | undefined;
+      if (run === undefined || run.wake_reason !== "plan") return;
+
+      const assistantMessage = database.sqlite.prepare("SELECT id FROM messages WHERE run_id = ? AND role = 'assistant' AND deleted_at IS NULL ORDER BY created_at DESC, id DESC LIMIT 1").get(runId) as { readonly id: string } | undefined;
+      if (assistantMessage !== undefined) {
+        const text = messageText(database, assistantMessage.id) ?? "";
+        const plan = parsePlanDocument(text);
+        const now = options.now?.() ?? Date.now();
+        if (plan !== undefined) {
+          const planId = randomUUID();
+          database.sqlite.transaction(() => {
+            database.sqlite.prepare("INSERT INTO task_plans (id, room_id, run_id, plan_json, created_at) VALUES (?, ?, ?, ?, ?)").run(planId, run.room_id, runId, JSON.stringify(plan), now);
+            eventBus.publish({ id: randomUUID(), type: "task.plan.created", schemaVersion: 1, workspaceId: run.workspace_id, roomId: run.room_id, runId, agentId: run.agent_id, payload: { roomId: run.room_id, runId, planId, taskCount: plan.tasks.length }, createdAt: now });
+          })();
+        } else {
+          recordPlanParseFailure(database, eventBus, run.room_id, runId, now);
+        }
+      }
+
+      void commandBusRef.current?.dispatch(
+        { type: "WakeAgent", roomId: run.room_id, agentId: run.agent_id, workspaceId: run.workspace_id, reason: "execute", idempotencyKey: `plan-execute:${runId}` },
+        { actor: { type: "system" }, traceId: `plan-execute:${runId}`, idempotencyKey: `plan-execute:${runId}`, origin: "internal" }
+      );
     };
     const lifecycleOptions = {
       ...(options.now !== undefined ? { now: options.now } : {}),
@@ -299,7 +413,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
       buildRunArtifact: (input: Parameters<typeof artifactFs.buildRunArtifact>[0]) => artifactFs.buildRunArtifact(input),
       buildWorktreeDiffArtifact: (input: Parameters<typeof artifactFs.buildWorktreeDiffArtifact>[0]) => artifactFs.buildWorktreeDiffArtifact(input)
     };
-    const adapterRegistry = new AdapterRegistry({ database, eventBus, lifecycle, permissionEngine, keychain: modelConfigSecrets, artifactFs: artifactFsBoundary, briefResolver, getRoomMcpServer: () => currentRoomMcpServer(roomMcpServerRef), getCommandBus: () => commandBusRef.current, ...(options.adapterCommands !== undefined ? { adapterCommands: options.adapterCommands } : {}), ...(options.now !== undefined ? { now: options.now } : {}) });
+    const adapterRegistry = new AdapterRegistry({ database, eventBus, lifecycle, permissionEngine, keychain: modelConfigSecrets, artifactFs: artifactFsBoundary, briefResolver, getRoomMcpServer: () => currentRoomMcpServer(roomMcpServerRef), getCommandBus: () => commandBusRef.current, onSessionEndedWithoutCompletion, onPlanPhaseEnded, onSkillMaterializationFailed, skillRegistry, ...(options.adapterCommands !== undefined ? { adapterCommands: options.adapterCommands } : {}), ...(options.now !== undefined ? { now: options.now } : {}) });
 
     emitPhase("startup", PHASE_OUTBOX);
     const handlers = createDurableHandlerRegistry({ database, retryDelaysMs: [0] });
@@ -1327,8 +1441,13 @@ function createRole(ctx: RouteContext, input: Record<string, unknown>): void {
   const name = stringField(input["name"]);
   const prompt = stringField(input["prompt"]);
   if (name === undefined || prompt === undefined) return json(ctx.res, 400, { error: "validation_failed", message: "name and prompt are required" });
+  const capabilitiesInput = normalizeCapabilitiesInput(input["capabilities"]);
+  if (Array.isArray(capabilitiesInput)) {
+    const invalidToken = capabilitiesInput.find((token): token is string => typeof token === "string" && !WELL_KNOWN_CAPABILITY_TOKENS.has(token));
+    if (invalidToken !== undefined) return json(ctx.res, 400, { error: "unknown_capability_token", token: invalidToken });
+  }
   const roleId = randomUUID();
-  const role = roleRow({ id: roleId, workspaceId, name, prompt, input, now });
+  const role = roleRow({ id: roleId, workspaceId, name, prompt, input: { ...input, capabilities: capabilitiesInput }, now });
   const generationJobId = stringField(input["generationJobId"]);
   ctx.database.sqlite.transaction(() => {
     ctx.database.sqlite.prepare("INSERT INTO roles (id, workspace_id, name, avatar, description, prompt, capabilities, default_permission_profile_id, tags, is_builtin, source_path, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(role.id, role.workspace_id, role.name, role.avatar, role.description, role.prompt, role.capabilities, role.default_permission_profile_id, role.tags, role.is_builtin, role.source_path, role.version, role.created_at, role.updated_at);
@@ -1470,7 +1589,12 @@ function updateRole(ctx: RouteContext, roleId: string, input: Record<string, unk
   if (existing === null) return json(ctx.res, 404, { error: "role_not_found" });
   const now = ctx.now?.() ?? Date.now();
   const workspaceId = stringField(input["workspaceId"]) ?? stringField(existing["workspace_id"]) ?? "default-workspace";
-  const role = roleRow({ id: roleId, workspaceId, name: stringField(input["name"]) ?? stringField(existing["name"]) ?? "", prompt: stringField(input["prompt"]) ?? stringField(existing["prompt"]) ?? "", input, existing, now });
+  const capabilitiesInput = normalizeCapabilitiesInput(input["capabilities"]);
+  if (Array.isArray(capabilitiesInput)) {
+    const invalidToken = capabilitiesInput.find((token): token is string => typeof token === "string" && !WELL_KNOWN_CAPABILITY_TOKENS.has(token));
+    if (invalidToken !== undefined) return json(ctx.res, 400, { error: "unknown_capability_token", token: invalidToken });
+  }
+  const role = roleRow({ id: roleId, workspaceId, name: stringField(input["name"]) ?? stringField(existing["name"]) ?? "", prompt: stringField(input["prompt"]) ?? stringField(existing["prompt"]) ?? "", input: { ...input, capabilities: capabilitiesInput }, existing, now });
   ctx.database.sqlite.transaction(() => {
     ctx.database.sqlite.prepare("UPDATE roles SET workspace_id = ?, name = ?, avatar = ?, description = ?, prompt = ?, capabilities = ?, default_permission_profile_id = ?, tags = ?, is_builtin = ?, source_path = ?, version = ?, updated_at = ? WHERE id = ?").run(role.workspace_id, role.name, role.avatar, role.description, role.prompt, role.capabilities, role.default_permission_profile_id, role.tags, role.is_builtin, role.source_path, role.version, role.updated_at, roleId);
     ctx.eventBus.publish({ id: randomUUID(), type: "role.updated", schemaVersion: 1, workspaceId, payload: { roleId, workspaceId }, createdAt: now });
@@ -1713,6 +1837,15 @@ function stringOrNull(value: unknown): string | null { return typeof value === "
 function stringOrJson(value: unknown, fallback: string): string;
 function stringOrJson(value: unknown, fallback: string | null): string | null;
 function stringOrJson(value: unknown, fallback: string | null): string | null { if (value === undefined) return fallback; if (value === null) return null; return typeof value === "string" ? value : JSON.stringify(value); }
+
+function normalizeCapabilitiesInput(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return value;
+  }
+}
 
 async function dispatch(ctx: RouteContext, data: Record<string, unknown>, type: CommandType): Promise<void> {
   const result = await ctx.commandBus.dispatch({ ...data, type, idempotencyKey: typeof data.idempotencyKey === "string" ? data.idempotencyKey : randomUUID() }, { actor: { type: "user", id: "local" }, traceId: randomUUID(), origin: "http" });

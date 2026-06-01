@@ -233,8 +233,14 @@ function sendMessage(options: DaemonCommandHandlersOptions, command: Command, me
   // Per-agent wake reason: the primary always gets `primary_turn` (it owns the conversation
   // turn even when @-mentioned alongside others); explicitly mentioned non-primary agents get
   // `user_mention`; an agent woken without mentions gets `primary_turn` by default.
-  const wakeReasonFor = (agentId: string): "primary_turn" | "user_mention" => {
-    if (agentId === room.primary_agent_id) return "primary_turn";
+  const hasExistingPlan = room.mode === "team" || room.mode === "squad"
+    ? options.database.sqlite.prepare("SELECT 1 FROM task_plans WHERE room_id = ? LIMIT 1").get(roomId) !== undefined
+    : true;
+  const wakeReasonFor = (agentId: string): "primary_turn" | "user_mention" | "plan" => {
+    if (agentId === room.primary_agent_id) {
+      if ((room.mode === "team" || room.mode === "squad") && !hasExistingPlan) return "plan";
+      return "primary_turn";
+    }
     return mentions.includes(agentId) ? "user_mention" : "primary_turn";
   };
   const wakeResult = wakeAgents(options, meta, room, roomId, messageId, text, wakeTargets.filter((agentId) => !(busy && agentId === room.primary_agent_id)), wakeReasonFor);
@@ -244,7 +250,7 @@ function sendMessage(options: DaemonCommandHandlersOptions, command: Command, me
   return successMessage(options, roomId, messageId);
 }
 
-function wakeAgents(options: DaemonCommandHandlersOptions, meta: CommandMeta, room: RoomRow, roomId: string, messageId: string, text: string, agentIds: readonly string[], reason: "primary_turn" | "user_mention" | ((agentId: string) => "primary_turn" | "user_mention")): CommandResult | Promise<CommandResult> {
+function wakeAgents(options: DaemonCommandHandlersOptions, meta: CommandMeta, room: RoomRow, roomId: string, messageId: string, text: string, agentIds: readonly string[], reason: "primary_turn" | "user_mention" | "plan" | ((agentId: string) => "primary_turn" | "user_mention" | "plan")): CommandResult | Promise<CommandResult> {
   const reasonFor = typeof reason === "function" ? reason : () => reason;
   let chain: Promise<CommandResult> | undefined;
   for (const agentId of agentIds) {

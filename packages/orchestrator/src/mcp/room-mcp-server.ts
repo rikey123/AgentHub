@@ -18,6 +18,19 @@ import { writeTcpMessage, createTcpMessageReader } from "./tcp-helpers.ts";
 
 const execFileAsync = promisify(execFile);
 
+export const WELL_KNOWN_CAPABILITY_TOKENS = new Set<string>([
+  "chat",
+  "code.edit",
+  "code.review",
+  "file.read",
+  "file.write",
+  "terminal.run",
+  "context.read",
+  "context.write",
+  "intervention.knock",
+  "task.delegate"
+]);
+
 export type RoomMcpToolName = "room.create_task" | "room.update_task" | "room.list_tasks" | "room.read_mailbox" | "room.send_message" | "room.list_members" | "room.spawn_agent" | "room.delegate" | "room.complete_task" | "room.add_participant" | "room.apply_worktree" | "room.discard_worktree" | string;
 
 export type RoomMcpSessionContext = {
@@ -201,9 +214,10 @@ export class RoomMcpServer {
         .get(session.roomId, session.agentId) as { readonly role: string } | undefined;
       const isLeader = participant?.role === "primary";
       if (LEADER_ONLY_TOOLS.has(name) && !isLeader) {
-        return failure("permission_denied", `tool_not_permitted: '${name}' is restricted to the leader agent`);
+        return { ok: false, error: { code: "tool_not_permitted", message: `tool_not_permitted: ${name}` } };
       }
       if (TEAMMATE_ONLY_TOOLS.has(name) && isLeader) {
+        if (name === "room.complete_task") return failure("complete_task_not_for_leader", "complete_task_not_for_leader");
         return failure("permission_denied", `tool_not_permitted: '${name}' is restricted to teammate agents`);
       }
     }
@@ -219,8 +233,7 @@ export class RoomMcpServer {
     if (name === "room.list_members") return this.handleListMembers(session);
     if (name === "room.delegate") return this.handleDelegate(input, session, context);
     if (name === "room.spawn_agent") return this.handleSpawnAgent(input, session, context);
-    // V1.1 stub: room.complete_task — implementation lands in feat/v11-B (D6)
-    if (name === "room.complete_task") return failure("not_implemented", "room.complete_task is not yet implemented (V1.1 feat/v11-B)");
+    if (name === "room.complete_task") return this.handleCompleteTask(input, session, context);
     // V1.1 stub: room.add_participant — implementation lands in feat/v11-C (D10)
     if (name === "room.add_participant") return failure("not_implemented", "room.add_participant is not yet implemented (V1.1 feat/v11-C)");
     if (name === "room.apply_worktree") return await this.handleApplyWorktree(input, session, context);
@@ -380,7 +393,7 @@ export class RoomMcpServer {
     const rows = this.options.database.sqlite
       .prepare(
         `SELECT rp.participant_id AS agentId, rp.role, rp.agent_binding_id AS bindingId, ab.role_id AS roleId, COALESCE(ap.name, r.name) AS name, ap.adapter_id AS adapterId,
-                COALESCE(ap2.state, 'offline') AS presence
+                COALESCE(ap2.state, 'offline') AS presence, r.capabilities AS capabilities
          FROM room_participants rp
          LEFT JOIN agent_bindings ab ON ab.id = rp.agent_binding_id
          LEFT JOIN roles r ON r.id = ab.role_id
@@ -397,6 +410,7 @@ export class RoomMcpServer {
         readonly name: string | null;
         readonly adapterId: string | null;
         readonly presence: string;
+        readonly capabilities: string | null;
       }[];
 
     const members = rows.map((row) => ({
@@ -408,6 +422,7 @@ export class RoomMcpServer {
       ...(row.bindingId !== null ? { bindingId: row.bindingId } : {}),
       adapterId: row.adapterId ?? "unknown",
       presence: row.presence,
+      capabilities: parseCapabilities(row.capabilities),
       isSelf: row.agentId === session.agentId,
     }));
 
@@ -610,6 +625,67 @@ export class RoomMcpServer {
     return { ok: true, data: delegateResult as { readonly taskId: string; readonly runId: string } };
   }
 
+  private async handleCompleteTask(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): Promise<RoomMcpToolResult> {
+    if (!isRecord(input)) return failure("validation_failed", "input must be an object");
+    if (typeof input.taskId !== "string" || input.taskId.length === 0) return failure("validation_failed", "taskId is required");
+    if (typeof input.status !== "string" || input.status.length === 0) return failure("validation_failed", "status is required");
+    if (typeof input.summary !== "string" || input.summary.length === 0) return failure("validation_failed", "summary is required");
+
+    const normalizedStatus = input.status === "needs_review" ? "review" : normalizeStatus(input.status);
+    if (normalizedStatus !== "completed" && normalizedStatus !== "blocked" && normalizedStatus !== "review") return failure("validation_failed", "invalid task status");
+    if (normalizedStatus === "blocked" && (typeof input.blockerReason !== "string" || input.blockerReason.length === 0)) {
+      return failure("validation_failed", "blockerReason is required when status is blocked");
+    }
+    if (input.artifactIds !== undefined && (!Array.isArray(input.artifactIds) || !input.artifactIds.every((item): item is string => typeof item === "string"))) {
+      return failure("validation_failed", "artifactIds must be an array of strings");
+    }
+    if (input.filesChanged !== undefined && (!Array.isArray(input.filesChanged) || !input.filesChanged.every((item): item is string => typeof item === "string"))) {
+      return failure("validation_failed", "filesChanged must be an array of strings");
+    }
+
+    const runId = this.resolveRunId(session, context);
+    if (runId !== undefined) {
+      const run = this.options.database.sqlite.prepare("SELECT task_id FROM runs WHERE id = ?").get(runId) as { readonly task_id: string | null } | undefined;
+      if (run?.task_id !== undefined && run.task_id !== null && run.task_id !== input.taskId) {
+        return failure("not_found", `Task '${input.taskId}' not found`);
+      }
+    }
+
+    const result = this.options.taskService.completeTask({
+      taskId: input.taskId,
+      roomId: session.roomId,
+      callerAgentId: session.agentId,
+      ...(runId !== undefined ? { byRunId: runId } : {}),
+      status: normalizedStatus,
+      summary: input.summary,
+      ...(typeof input.blockerReason === "string" ? { blockerReason: input.blockerReason } : {}),
+      ...(Array.isArray(input.artifactIds) ? { artifactIds: input.artifactIds } : {}),
+      ...(Array.isArray(input.filesChanged) ? { filesChanged: input.filesChanged } : {})
+    });
+    if (!result.ok) return commandResult(result);
+
+    if (result.data.task.status === "review" || result.data.task.status === "blocked") {
+      const room = this.options.database.sqlite.prepare("SELECT workspace_id, primary_agent_id FROM rooms WHERE id = ? AND archived_at IS NULL").get(session.roomId) as { readonly workspace_id: string; readonly primary_agent_id: string | null } | undefined;
+      if (room?.primary_agent_id !== undefined && room.primary_agent_id !== null && room.primary_agent_id !== session.agentId) {
+        void this.options.commandBus.dispatch(
+          {
+            type: "WakeAgent",
+            roomId: session.roomId,
+            agentId: room.primary_agent_id,
+            workspaceId: room.workspace_id,
+            reason: result.data.task.status === "blocked" ? "task_blocked" : "task_review",
+            taskId: input.taskId,
+            promptDelta: { kind: "delta_only", instructions: `Task ${input.taskId} reported ${result.data.task.status}: ${input.summary}` },
+            idempotencyKey: `complete-task:${input.taskId}:${result.data.task.status}:${randomUUID()}`
+          },
+          { actor: { type: "system" }, traceId: `complete-task:${input.taskId}`, origin: "internal" }
+        );
+      }
+    }
+
+    return commandResult(result);
+  }
+
   private existingTaskForDelegate(
     taskId: string,
     roomId: string,
@@ -706,6 +782,15 @@ export class RoomMcpServer {
       .get(session.roomId, session.agentId) as { readonly role: string } | undefined;
     if (!callerParticipant) return failure("permission_denied", "agent is not a room participant");
     if (callerParticipant.role !== "primary") return failure("permission_denied", "only the leader (primary) agent can spawn new teammates");
+
+    // Check spawn depth — sub-agents cannot recursively spawn (D5).
+    const runId = this.resolveRunId(session, context);
+    if (runId !== undefined) {
+      const run = this.options.database.sqlite.prepare("SELECT parent_run_id FROM runs WHERE id = ?").get(runId) as { readonly parent_run_id: string | null } | undefined;
+      if (run?.parent_run_id !== null && run?.parent_run_id !== undefined) {
+        return failure("recursive_spawn_not_permitted", "recursive_spawn_not_permitted");
+      }
+    }
 
     const agentName = typeof input.name === "string" && input.name.trim().length > 0 ? input.name.trim() : undefined;
     if (!agentName) return failure("validation_failed", "name is required");
@@ -971,6 +1056,16 @@ export class RoomMcpServer {
       this.options.eventBus.publish({ id: randomUUID(), type: "mailbox.message.created", schemaVersion: 1, workspaceId, roomId, agentId: toAgentId, payload: { mailboxMessageId, roomId, fromAgentId, targetAgentId: toAgentId }, createdAt: now });
     })();
     return mailboxMessageId;
+  }
+}
+
+function parseCapabilities(value: string | null): string[] {
+  if (value === null) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
   }
 }
 

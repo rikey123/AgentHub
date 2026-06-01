@@ -107,8 +107,16 @@ export function reconcileTerminalDelegatedTaskRuns(input: { readonly database: A
         }
         continue;
       }
-      const completed = input.taskService.completeDelegatedRun(row.task_id, row.run_id);
-      if (completed.ok) pushUnique(completedTaskIds, row.task_id);
+      // V1.1: room.complete_task is the authoritative completion path (D6).
+      // A completed run whose task is still pending/in_progress means room.complete_task
+      // was never called (if it had been, task.status would already be completed/review/blocked
+      // and the recovery query would not have returned this row). Always treat as
+      // missing_completion_report — no auto-complete path exists in V1.1.
+      const review = input.taskService.updateStatus({ taskId: row.task_id, status: "review", blockerReason: "missing_completion_report" });
+      if (review.ok) {
+        pushUnique(reviewedTaskIds, row.task_id);
+        pushUnique(reviewDispatchRunIds, row.run_id);
+      }
       continue;
     }
 

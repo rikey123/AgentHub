@@ -1,13 +1,24 @@
 import type { AgentHubDatabase } from "@agenthub/db";
 
 import { MailboxService, messageText, type MailboxDeliveryBatch, type MailboxMessageDelivery, type NextTurnDelivery } from "../mailbox-service.ts";
+import { nameToSlug } from "../mention-parser.ts";
 import type { AgentPromptDelta, RunRow } from "../run-lifecycle-service.ts";
 import { buildFirstWakePrompt } from "./first-wake-prompt.ts";
+import { buildPlanPhasePrompt } from "./lead-prompt.ts";
+import { assembleMissionBrief, buildMissionBriefBlock } from "./mission-brief.ts";
 import { buildPriorProgressBlock } from "./prior-progress.ts";
 
 export type RunPromptOptions = {
   readonly now?: () => number;
   readonly deliveryBatchId?: string;
+  /**
+   * Optional pre-computed skills block for shared-mode runs.
+   * Per spec D9: for runtimes that cannot natively scan the skill overlay directory,
+   * inject skill index + full SKILL.md content into the first-message system prompt.
+   * Computed by AdapterRegistry before run start; undefined for isolated-worktree runs
+   * (skills are already in the worktree directory where the runtime can scan them).
+   */
+  readonly skillsBlock?: string;
 };
 
 type QueuedRunPayload = {
@@ -23,15 +34,60 @@ const MAX_TASK_RESULT_CHARS = 1_800;
 const MAX_LEADER_CONTEXT_CHARS = 10_000;
 
 export function buildRunPrompt(run: RunRow, database: AgentHubDatabase, options: RunPromptOptions = {}): string {
-  const rolePrompt = buildFirstWakePrompt(run.id, run.agent_id, run.room_id, database);
+  const room = database.sqlite.prepare("SELECT mode, primary_agent_id FROM rooms WHERE id = ?").get(run.room_id) as { readonly mode: string; readonly primary_agent_id: string | null } | undefined;
+  const isTeammate = (room?.mode === "squad" || room?.mode === "team") && room.primary_agent_id !== run.agent_id;
+  const missionBrief = isTeammate ? assembleMissionBrief(run.room_id, run.agent_id, database, run.task_id ?? undefined) : undefined;
+  const missionBriefBlock = missionBrief !== undefined ? buildMissionBriefBlock(missionBrief) : undefined;
+  const rolePrompt = run.wake_reason === "plan"
+    ? buildPlanPhasePrompt(buildLeaderPromptParams(run, database))
+    : buildFirstWakePrompt(run.id, run.agent_id, run.room_id, database);
   // Per spec §mid-flight-handoff: <prior-progress> is injected AFTER <mission-brief> and
   // BEFORE the role system prompt. Dev B will prepend <mission-brief> ahead of this block.
-  // Order: [missionBrief (Dev B)] → priorProgress → rolePrompt → leaderContext → input
+  // Order: [skillsBlock] → [missionBrief] → priorProgress → rolePrompt → leaderContext → input
+  // skillsBlock is only present for shared-mode runs (spec D9 fallback injection).
   const priorProgress = run.task_id !== null ? buildPriorProgressBlock(database, run.task_id) : undefined;
   const batch = readCurrentRunMailbox(run, database, options);
   const input = renderBatch(batch) ?? renderQueuedRunInput(run, database) ?? `Run ${run.id} for agent ${run.agent_id}`;
   const leaderContext = renderLeaderRunContext(run, database);
-  return [priorProgress, rolePrompt, leaderContext, input].filter((part): part is string => part !== undefined && part.trim().length > 0).join("\n\n---\n\n");
+  return [options.skillsBlock, missionBriefBlock, priorProgress, rolePrompt, leaderContext, input].filter((part): part is string => part !== undefined && part.trim().length > 0).join("\n\n---\n\n");
+}
+
+function buildLeaderPromptParams(run: RunRow, database: AgentHubDatabase): Parameters<typeof buildPlanPhasePrompt>[0] {
+  const participants = database.sqlite.prepare(
+    `SELECT rp.participant_id AS agentId, rp.role, ap.name, ap.adapter_id AS adapterId, COALESCE(ap2.state, 'offline') AS presence
+            , r.capabilities AS capabilities
+      FROM room_participants rp
+      LEFT JOIN agent_profiles ap ON ap.id = rp.participant_id
+      LEFT JOIN agent_presence ap2 ON ap2.room_id = rp.room_id AND ap2.agent_id = rp.participant_id
+      LEFT JOIN agent_bindings ab ON ab.id = rp.agent_binding_id
+      LEFT JOIN roles r ON r.id = ab.role_id
+      WHERE rp.room_id = ? AND rp.participant_type = 'agent'
+      ORDER BY rp.joined_at ASC`
+  ).all(run.room_id) as Array<{ readonly agentId: string; readonly role: string; readonly name: string | null; readonly adapterId: string | null; readonly presence: string; readonly capabilities: string | null }>;
+
+  return {
+    agentName: participants.find((participant) => participant.agentId === run.agent_id)?.name ?? run.agent_id,
+    teammates: participants
+      .filter((participant) => participant.agentId !== run.agent_id)
+      .map((participant) => ({
+        agentId: participant.agentId,
+        name: participant.name ?? participant.agentId,
+        slug: nameToSlug(participant.name ?? participant.agentId),
+        role: participant.role,
+        presence: participant.presence,
+        capabilities: parseCapabilities(participant.capabilities)
+      }))
+  };
+}
+
+function parseCapabilities(value: string | null): string[] {
+  if (value === null) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 function readCurrentRunMailbox(run: RunRow, database: AgentHubDatabase, options: RunPromptOptions): MailboxDeliveryBatch {

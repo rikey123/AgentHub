@@ -64,6 +64,9 @@ export type MockAdapterManagerOptions = {
   readonly artifactFs?: AdapterArtifactFSBoundary;
   readonly script?: MockAgentScript;
   readonly now?: () => number;
+  readonly onSessionEndedWithoutCompletion?: (taskId: string) => void | Promise<void>;
+  readonly onPlanPhaseEnded?: (runId: string) => void | Promise<void>;
+  readonly getSkillsBlock?: (runId: string) => string | undefined;
 };
 
 export class MockAdapterManager {
@@ -87,12 +90,16 @@ export class MockAdapterManager {
       agentId: run.agent_id,
       lifecycle: this.options.lifecycle,
       eventBus: this.options.eventBus,
+      database: this.options.database,
       now: this.now,
       ...(run.task_id !== null ? { taskId: run.task_id } : {}),
       messageId: `msg_${run.id}`,
       ...(run.workspace_mode !== null ? { workspaceMode: run.workspace_mode } : {}),
+      ...(run.wake_reason !== null ? { wakeReason: run.wake_reason } : {}),
       terminalEnabled: this.script.steps.some((step) => step.type === "tool" && step.name.toLowerCase().includes("bash")),
-      ...(this.options.artifactFs !== undefined ? { artifactFs: this.options.artifactFs } : {})
+      ...(this.options.artifactFs !== undefined ? { artifactFs: this.options.artifactFs } : {}),
+      ...(this.options.onSessionEndedWithoutCompletion !== undefined ? { onSessionEndedWithoutCompletion: this.options.onSessionEndedWithoutCompletion } : {}),
+      ...(this.options.onPlanPhaseEnded !== undefined ? { onPlanPhaseEnded: this.options.onPlanPhaseEnded } : {})
     });
 
     const sessionId = `mock-session-${run.id}`;

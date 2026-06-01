@@ -118,6 +118,35 @@ describe("NativeAgentAdapter", () => {
     expect(call?.messages?.[0]?.content).toBe("Implement login\n\nAdd the login flow");
   });
 
+  it("uses the planning-phase system prompt for plan wakes and keeps room.delegate out of system", async () => {
+    const publish = vi.fn();
+    const lifecycle = createLifecycle();
+    const database = createTeamDatabaseStub();
+    permissionCheckMock.mockReturnValue({ status: "allow", reason: "default_allow" });
+    streamTextMock.mockReturnValue({
+      fullStream: asyncGenerator([]),
+      usage: Promise.resolve({ inputTokens: 0, outputTokens: 0 })
+    });
+    const adapter = new NativeAgentAdapter({
+      database,
+      eventBus: { publish } as unknown as import("../../bus/src/index.ts").EventBus,
+      lifecycle: lifecycle as never,
+      permissions: { check: permissionCheckMock } as never,
+      modelConfig: { id: "mc-plan", provider: "openai", model: "gpt-4o", base_url: null, api_key_ref: null },
+      apiKey: "test-key",
+      getSkillsBlock: () => "<active-skills>skill block</active-skills>"
+    });
+
+    await adapter.runManaged(runRow({ id: "run-plan", wake_reason: "plan", agent_id: "agent-leader" }));
+
+    const call = streamTextMock.mock.calls[0]?.[0] as { readonly system?: string; readonly messages?: readonly { readonly content: string }[] } | undefined;
+    expect(call?.system).toContain("## Planning Phase");
+    expect(call?.system).toContain("Do not call any tools.");
+    expect(call?.system).not.toContain("room.delegate");
+    expect(call?.messages?.[0]?.content).toContain("<active-skills>skill block</active-skills>");
+    expect(call?.messages?.[0]?.content).not.toContain("## Planning Phase");
+  });
+
   it("denies before stream creation for model api calls", async () => {
     const publish = vi.fn();
     const lifecycle = createLifecycle();

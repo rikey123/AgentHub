@@ -32,6 +32,9 @@ export type OpenCodeAdapterOptions = {
   readonly mcpServer?: RoomMcpServer;
   readonly permissionEngine?: PermissionEngine;
   readonly onWarmSessionFailed?: (input: { readonly roomId: string; readonly agentId: string; readonly adapterSessionId: string }) => void;
+  readonly onSessionEndedWithoutCompletion?: (taskId: string) => void | Promise<void>;
+  readonly onPlanPhaseEnded?: (runId: string) => void | Promise<void>;
+  readonly getSkillsBlock?: (runId: string) => string | undefined;
   readonly now?: () => number;
 };
 
@@ -73,7 +76,7 @@ export class OpenCodeACPAdapter extends ACPAdapter {
     emitAdapterRegistered(this.options.services.eventBus, run.workspace_id, opencodeManifest, this.options.now?.() ?? Date.now());
     const artifactFs = this.options.artifactFs ?? this.options.services.artifactFs;
     const getCommandBus = this.options.services.getCommandBus;
-    const bridge = new AdapterBridge({ runId: run.id, workspaceId: run.workspace_id, roomId: run.room_id, agentId: run.agent_id, lifecycle: this.options.lifecycle, eventBus: this.options.services.eventBus, database: this.options.services.database, ...(getCommandBus !== undefined ? { getCommandBus } : {}), ...(this.options.services.briefResolver !== undefined ? { briefResolver: this.options.services.briefResolver } : {}), ...(this.options.now !== undefined ? { now: this.options.now } : {}), ...(run.task_id !== null ? { taskId: run.task_id } : {}), messageId: `msg_${run.id}`, ...(run.workspace_mode !== null ? { workspaceMode: run.workspace_mode } : {}), terminalEnabled: false, ...(artifactFs !== undefined ? { artifactFs } : {}) });
+    const bridge = new AdapterBridge({ runId: run.id, workspaceId: run.workspace_id, roomId: run.room_id, agentId: run.agent_id, lifecycle: this.options.lifecycle, eventBus: this.options.services.eventBus, database: this.options.services.database, ...(getCommandBus !== undefined ? { getCommandBus } : {}), ...(this.options.services.briefResolver !== undefined ? { briefResolver: this.options.services.briefResolver } : {}), ...(this.options.now !== undefined ? { now: this.options.now } : {}), ...(run.wake_reason !== null ? { wakeReason: run.wake_reason } : {}), ...(this.options.onSessionEndedWithoutCompletion !== undefined ? { onSessionEndedWithoutCompletion: this.options.onSessionEndedWithoutCompletion } : {}), ...(this.options.onPlanPhaseEnded !== undefined ? { onPlanPhaseEnded: this.options.onPlanPhaseEnded } : {}), ...(run.task_id !== null ? { taskId: run.task_id } : {}), messageId: `msg_${run.id}`, ...(run.workspace_mode !== null ? { workspaceMode: run.workspace_mode } : {}), terminalEnabled: false, ...(artifactFs !== undefined ? { artifactFs } : {}) });
     this.bridgeByRun.set(run.id, bridge);
     this.runById.set(run.id, run);
     this.workspaceByRun.set(run.id, run.workspace_id);
@@ -241,7 +244,8 @@ export class OpenCodeACPAdapter extends ACPAdapter {
   private promptFromRun(run: RunRow): string {
     const db = this.options.services?.database;
     if (db === undefined) return `Run ${run.id} for agent ${run.agent_id}`;
-    return buildRunPrompt(run, db, { ...(this.options.now !== undefined ? { now: this.options.now } : {}) });
+    const skillsBlock = this.options.getSkillsBlock?.(run.id);
+    return buildRunPrompt(run, db, { ...(this.options.now !== undefined ? { now: this.options.now } : {}), ...(skillsBlock !== undefined ? { skillsBlock } : {}) });
   }
 
 }

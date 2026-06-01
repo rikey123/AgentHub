@@ -126,14 +126,20 @@ describe("useProjector replay handling", () => {
     expect(brief).toMatchObject({ dispatchId: "team-dispatch:source_run_id:run-parent-1", runId: "run-lead-1" });
   });
 
-  it("preserves run collaboration fields across lifecycle updates", () => {
+  it("stores skill materialization failures with skill name for chat visibility", () => {
     const roomId = `room-${randomUUID()}`;
     const projector = getProjector();
     projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "team" }));
-    projector.apply(makeEvent("agent.run.started", roomId, { runId: "run-keep", taskId: "task-keep", parentRunId: "run-parent-keep" }));
-    projector.apply(makeEvent("agent.run.completed", roomId, { runId: "run-keep" }));
+    projector.apply(makeEvent("skill.materialization_failed", roomId, {
+      skillId: "skill-1",
+      name: "task-planner",
+      runId: "run-skill-1",
+      error: "disk full"
+    }));
 
-    const run = emittedState.rooms.get(roomId)?.runs.find((item) => item.id === "run-keep");
-    expect(run).toMatchObject({ id: "run-keep", taskId: "task-keep", parentRunId: "run-parent-keep", status: "completed" });
+    const room = emittedState.rooms.get(roomId);
+    expect(room?.skillErrors).toEqual([
+      expect.objectContaining({ skillId: "skill-1", skillName: "task-planner", runId: "run-skill-1", error: "disk full" })
+    ]);
   });
 });

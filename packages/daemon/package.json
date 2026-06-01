@@ -24,6 +24,7 @@
     "@agenthub/orchestrator": "workspace:*",
     "@agenthub/permissions": "workspace:*",
     "@agenthub/protocol": "workspace:*",
+    "@agenthub/skills": "workspace:*",
     "@agenthub/security": "workspace:*",
     "@agenthub/sdk": "workspace:*",
     "effect": "^3.19.6",

@@ -6,6 +6,7 @@ import type { AdapterArtifactFSBoundary, ReclaimAdapter, RoomMcpServer, RunLifec
 import type { CommandBus, EventBus } from "@agenthub/bus";
 import type { PermissionEngine } from "@agenthub/permissions";
 import type { KeychainBridge } from "@agenthub/security";
+import { SkillMaterializationError, type SkillRegistry } from "@agenthub/skills";
 
 export type RuntimeAdapterId = "mock" | "claude-code" | "opencode" | "native";
 
@@ -19,6 +20,10 @@ export type AdapterRegistryOptions = {
   readonly briefResolver?: BriefResolver;
   readonly getRoomMcpServer?: () => RoomMcpServer;
   readonly getCommandBus?: () => CommandBus | undefined;
+  readonly onSessionEndedWithoutCompletion?: (taskId: string) => void | Promise<void>;
+  readonly onPlanPhaseEnded?: (runId: string) => void | Promise<void>;
+  readonly onSkillMaterializationFailed?: (input: { readonly taskId?: string; readonly skillId: string; readonly skillName: string; readonly workspaceId: string; readonly runId: string; readonly error: string }) => void;
+  readonly skillRegistry?: SkillRegistry;
   readonly mockAdapter?: MockAdapterManager;
   readonly claudeAdapter?: WarmableManagedAdapter;
   readonly opencodeAdapter?: WarmableManagedAdapter;
@@ -53,12 +58,23 @@ type ModelConfigRow = {
 export class AdapterRegistry {
   readonly mockAdapter: MockAdapterManager;
   private readonly runAdapters = new Map<string, RuntimeAdapterId>();
+  /** Per-run skills prompt block for shared-mode runs (spec D9 fallback injection). */
+  private readonly runSkillsBlocks = new Map<string, string>();
   private claudeAdapter: WarmableManagedAdapter | undefined;
   private opencodeAdapter: WarmableManagedAdapter | undefined;
   private nativeAdapter: NativeManagedAdapter | undefined;
 
   constructor(private readonly options: AdapterRegistryOptions) {
-    this.mockAdapter = options.mockAdapter ?? new MockAdapterManager({ database: options.database, eventBus: options.eventBus, lifecycle: options.lifecycle, ...(options.artifactFs !== undefined ? { artifactFs: options.artifactFs } : {}), ...(options.now !== undefined ? { now: options.now } : {}) });
+    this.mockAdapter = options.mockAdapter ?? new MockAdapterManager({
+      database: options.database,
+      eventBus: options.eventBus,
+      lifecycle: options.lifecycle,
+      ...(options.artifactFs !== undefined ? { artifactFs: options.artifactFs } : {}),
+      ...(options.onSessionEndedWithoutCompletion !== undefined ? { onSessionEndedWithoutCompletion: options.onSessionEndedWithoutCompletion } : {}),
+      ...(options.onPlanPhaseEnded !== undefined ? { onPlanPhaseEnded: options.onPlanPhaseEnded } : {}),
+      getSkillsBlock: (runId) => this.getSkillsBlock(runId),
+      ...(options.now !== undefined ? { now: options.now } : {})
+    });
     this.claudeAdapter = options.claudeAdapter;
     this.opencodeAdapter = options.opencodeAdapter;
     this.nativeAdapter = options.nativeAdapter;
@@ -67,19 +83,44 @@ export class AdapterRegistry {
   async runAgent(run: RunRow): Promise<void> {
     const adapterId = this.adapterIdForRun(run);
     this.runAdapters.set(run.id, adapterId);
-    if (adapterId === "claude-code") {
-      await this.claude().runManaged(run);
+    try {
+      this.options.skillRegistry?.materializeForRun(this.skillRunInput(run, adapterId));
+      // For shared-mode runs, compute the skills prompt block (spec D9 fallback injection).
+      // Isolated-worktree runs have skills in the worktree directory where the runtime scans.
+      if (this.options.skillRegistry !== undefined && run.workspace_mode !== "isolated_worktree") {
+        const block = this.options.skillRegistry.buildSkillsPromptBlock(run.room_id, run.agent_id);
+        if (block !== undefined) this.runSkillsBlocks.set(run.id, block);
+      }
+    } catch (error) {
+      if (this.options.onSkillMaterializationFailed !== undefined && error instanceof SkillMaterializationError) {
+        this.options.onSkillMaterializationFailed({ ...(run.task_id !== null ? { taskId: run.task_id } : {}), ...error.details });
+      }
+      this.options.lifecycle.fail(null, run.id, "skill_materialization_failed", "fatal", error instanceof Error ? error.message : String(error), "");
       return;
     }
-    if (adapterId === "opencode") {
-      await this.opencode().runManaged(run);
-      return;
+    try {
+      if (adapterId === "claude-code") {
+        await this.claude().runManaged(run);
+        return;
+      }
+      if (adapterId === "opencode") {
+        await this.opencode().runManaged(run);
+        return;
+      }
+      if (adapterId === "native") {
+        await this.native().then((adapter) => adapter.runManaged(run));
+        return;
+      }
+      await this.mockAdapter.runAgent(run);
+    } finally {
+      this.options.skillRegistry?.cleanupRun(run.id);
+      this.runSkillsBlocks.delete(run.id);
     }
-    if (adapterId === "native") {
-      await this.native().then((adapter) => adapter.runManaged(run));
-      return;
-    }
-    await this.mockAdapter.runAgent(run);
+  }
+
+  /** Returns the pre-computed skills prompt block for a run (shared-mode only). */
+  getSkillsBlock(runId: string): string | undefined {
+    return this.runSkillsBlocks.get(runId);
   }
 
   prewarmRoomAgents(roomId: string): void {
@@ -174,6 +215,9 @@ export class AdapterRegistry {
       services: { database: this.options.database, eventBus: this.options.eventBus, ...(this.options.getCommandBus !== undefined ? { getCommandBus: this.options.getCommandBus } : {}), ...(this.options.permissionEngine !== undefined ? { permissionEngine: this.options.permissionEngine } : {}), ...(this.options.artifactFs !== undefined ? { artifactFs: this.options.artifactFs } : {}), ...(this.options.briefResolver !== undefined ? { briefResolver: this.options.briefResolver } : {}) },
       lifecycle: this.options.lifecycle,
       workspaceId: "default-workspace",
+      ...(this.options.onSessionEndedWithoutCompletion !== undefined ? { onSessionEndedWithoutCompletion: this.options.onSessionEndedWithoutCompletion } : {}),
+      ...(this.options.onPlanPhaseEnded !== undefined ? { onPlanPhaseEnded: this.options.onPlanPhaseEnded } : {}),
+      getSkillsBlock: (runId) => this.getSkillsBlock(runId),
       ...(this.options.adapterCommands?.claude !== undefined ? this.options.adapterCommands.claude : {}),
       ...(this.options.permissionEngine !== undefined ? { permissionEngine: this.options.permissionEngine } : {}),
       ...(this.options.getRoomMcpServer !== undefined ? { mcpServer: this.options.getRoomMcpServer() } : {}),
@@ -188,6 +232,9 @@ export class AdapterRegistry {
       services: { database: this.options.database, eventBus: this.options.eventBus, ...(this.options.getCommandBus !== undefined ? { getCommandBus: this.options.getCommandBus } : {}), ...(this.options.permissionEngine !== undefined ? { permissionEngine: this.options.permissionEngine } : {}), ...(this.options.artifactFs !== undefined ? { artifactFs: this.options.artifactFs } : {}), ...(this.options.briefResolver !== undefined ? { briefResolver: this.options.briefResolver } : {}) },
       lifecycle: this.options.lifecycle,
       workspaceId: "default-workspace",
+      ...(this.options.onSessionEndedWithoutCompletion !== undefined ? { onSessionEndedWithoutCompletion: this.options.onSessionEndedWithoutCompletion } : {}),
+      ...(this.options.onPlanPhaseEnded !== undefined ? { onPlanPhaseEnded: this.options.onPlanPhaseEnded } : {}),
+      getSkillsBlock: (runId) => this.getSkillsBlock(runId),
       ...(this.options.adapterCommands?.opencode !== undefined ? this.options.adapterCommands.opencode : {}),
       ...(this.options.permissionEngine !== undefined ? { permissionEngine: this.options.permissionEngine } : {}),
       ...(this.options.getRoomMcpServer !== undefined ? { mcpServer: this.options.getRoomMcpServer() } : {}),
@@ -207,6 +254,9 @@ export class AdapterRegistry {
       ...(this.options.keychain !== undefined ? { apiKey: await this.nativeApiKey() } : {}),
       getModelConfigForRun: (run: RunRow) => this.resolveRunModelConfig(run),
       getApiKeyForRun: (run: RunRow) => this.resolveRunApiKey(run),
+      ...(this.options.onSessionEndedWithoutCompletion !== undefined ? { onSessionEndedWithoutCompletion: this.options.onSessionEndedWithoutCompletion } : {}),
+      ...(this.options.onPlanPhaseEnded !== undefined ? { onPlanPhaseEnded: this.options.onPlanPhaseEnded } : {}),
+      getSkillsBlock: (runId: string) => this.getSkillsBlock(runId),
       ...(this.options.getRoomMcpServer !== undefined ? { getRoomMcpServer: this.options.getRoomMcpServer } : {}),
       ...(this.options.artifactFs !== undefined ? { artifactFs: this.options.artifactFs } : {}),
       ...(this.options.now !== undefined ? { now: this.options.now } : {})
@@ -274,6 +324,24 @@ export class AdapterRegistry {
 
   private adapterIdForRun(run: RunRow): RuntimeAdapterId {
     return this.classify(run.adapter_id, run.agent_id);
+  }
+
+  private skillRunInput(run: RunRow, runtimeId: RuntimeAdapterId): { readonly runId: string; readonly roomId: string; readonly participantId: string; readonly workspaceRoot: string; readonly runtimeId: string; readonly taskId?: string; readonly mode: "isolated_worktree" | "shared" } {
+    return {
+      runId: run.id,
+      roomId: run.room_id,
+      participantId: run.agent_id,
+      workspaceRoot: this.workspaceRootForRun(run),
+      runtimeId,
+      mode: run.workspace_mode === "isolated_worktree" ? "isolated_worktree" : "shared",
+      ...(run.task_id !== null ? { taskId: run.task_id } : {})
+    };
+  }
+
+  private workspaceRootForRun(run: RunRow): string {
+    if (run.workspace_path !== null && run.workspace_path.length > 0) return run.workspace_path;
+    const row = this.options.database.sqlite.prepare("SELECT root_path FROM workspaces WHERE id = ?").get(run.workspace_id) as { readonly root_path: string } | undefined;
+    return row?.root_path ?? process.cwd();
   }
 
   private adapterIdForPersistedRun(runId: string): RuntimeAdapterId {
