@@ -11,6 +11,14 @@ import { buildPriorProgressBlock } from "./prior-progress.ts";
 export type RunPromptOptions = {
   readonly now?: () => number;
   readonly deliveryBatchId?: string;
+  /**
+   * Optional pre-computed skills block for shared-mode runs.
+   * Per spec D9: for runtimes that cannot natively scan the skill overlay directory,
+   * inject skill index + full SKILL.md content into the first-message system prompt.
+   * Computed by AdapterRegistry before run start; undefined for isolated-worktree runs
+   * (skills are already in the worktree directory where the runtime can scan them).
+   */
+  readonly skillsBlock?: string;
 };
 
 type QueuedRunPayload = {
@@ -35,12 +43,13 @@ export function buildRunPrompt(run: RunRow, database: AgentHubDatabase, options:
     : buildFirstWakePrompt(run.id, run.agent_id, run.room_id, database);
   // Per spec §mid-flight-handoff: <prior-progress> is injected AFTER <mission-brief> and
   // BEFORE the role system prompt. Dev B will prepend <mission-brief> ahead of this block.
-  // Order: [missionBrief (Dev B)] → priorProgress → rolePrompt → leaderContext → input
+  // Order: [skillsBlock] → [missionBrief] → priorProgress → rolePrompt → leaderContext → input
+  // skillsBlock is only present for shared-mode runs (spec D9 fallback injection).
   const priorProgress = run.task_id !== null ? buildPriorProgressBlock(database, run.task_id) : undefined;
   const batch = readCurrentRunMailbox(run, database, options);
   const input = renderBatch(batch) ?? renderQueuedRunInput(run, database) ?? `Run ${run.id} for agent ${run.agent_id}`;
   const leaderContext = renderLeaderRunContext(run, database);
-  return [missionBriefBlock, priorProgress, rolePrompt, leaderContext, input].filter((part): part is string => part !== undefined && part.trim().length > 0).join("\n\n---\n\n");
+  return [options.skillsBlock, missionBriefBlock, priorProgress, rolePrompt, leaderContext, input].filter((part): part is string => part !== undefined && part.trim().length > 0).join("\n\n---\n\n");
 }
 
 function buildLeaderPromptParams(run: RunRow, database: AgentHubDatabase): Parameters<typeof buildPlanPhasePrompt>[0] {

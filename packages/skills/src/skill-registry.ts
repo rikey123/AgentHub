@@ -214,6 +214,30 @@ export class SkillRegistry {
     this.materializedRuns.delete(runId);
   }
 
+  /**
+   * Build a prompt block listing all active skills for a (room, participant) pair.
+   * Used as a fallback for shared-mode runs where the runtime cannot natively scan
+   * the skill overlay directory. Per spec D9: inject skill index + full SKILL.md content.
+   * Returns undefined if no skills are active.
+   */
+  buildSkillsPromptBlock(roomId: string, participantId: string): string | undefined {
+    const skills = this.resolveSkills(roomId, participantId);
+    if (skills.length === 0) return undefined;
+    const lines: string[] = [
+      "<active-skills>",
+      `<!-- ${skills.length} skill(s) are active for this run. Read and apply them. -->`
+    ];
+    for (const skill of skills) {
+      lines.push(`\n## Skill: ${skill.name}`);
+      lines.push(`Description: ${skill.description}`);
+      lines.push("```");
+      lines.push(skill.content);
+      lines.push("```");
+    }
+    lines.push("</active-skills>");
+    return lines.join("\n");
+  }
+
   seedBuiltins(workspaceId: string): void {
     const now = this.now();
     this.options.database.sqlite.transaction(() => {

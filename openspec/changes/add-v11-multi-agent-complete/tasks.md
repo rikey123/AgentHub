@@ -27,18 +27,18 @@
 ## 3. Dev B Track — Multi-Agent Intelligence + Skill System (packages/orchestrator, packages/skills)
 
 - [x] 3.1 Implement `room.complete_task` MCP tool: teammate-only enforcement, `expects_review` gate, state machine per spec, publish `task.status.changed` + `task.delegation.completed`
-- [ ] 3.2 Implement `assembleMissionBrief(roomId, agentId, taskId?)`: query live room state, build `MissionBrief` struct, inject as `<mission-brief>` XML block
-- [ ] 3.3 Implement Room Memory: query confirmed `context_items` with `scope='conversation'` for `roomMemory` field in MissionBrief
-- [ ] 3.4 Implement planning phase: `reason: "plan"` wake → leader produces PlanDocument → store in `task_plans` → publish `task.plan.created` → immediately trigger `reason: "execute"` wake; handle parse failure gracefully (write `task.activity.added { kind: "plan_parse_failed" }`, continue to execute)
-- [ ] 3.5 Implement `roles.capabilities` validation: validate against well-known token set on role create/update; return 400 for unknown tokens
-- [ ] 3.6 Update `room.list_members` to return `capabilities: string[]` per member
-- [ ] 3.7 Update leader prompt to include teammate capabilities summary
+- [x] 3.2 Implement `assembleMissionBrief(roomId, agentId, taskId?)`: query live room state, build `MissionBrief` struct, inject as `<mission-brief>` XML block
+- [x] 3.3 Implement Room Memory: query confirmed `context_items` with `scope='conversation'` for `roomMemory` field in MissionBrief
+- [x] 3.4 Implement planning phase: `reason: "plan"` wake → leader produces PlanDocument → store in `task_plans` → publish `task.plan.created` → immediately trigger `reason: "execute"` wake; handle parse failure gracefully (write `task.activity.added { kind: "plan_parse_failed" }`, continue to execute)
+- [x] 3.5 Implement `roles.capabilities` validation: validate against well-known token set on role create/update; return 400 for unknown tokens
+- [x] 3.6 Update `room.list_members` to return `capabilities: string[]` per member
+- [x] 3.7 Update leader prompt to include teammate capabilities summary
 - [x] 3.8 Implement sub-agent tool isolation: enforce `LEADER_ONLY_TOOLS` and `TEAMMATE_ONLY_TOOLS` at MCP dispatch; add `spawnDepth` check to prevent recursive spawn
-- [ ] 3.9 Create `packages/skills` package: `SkillRegistry` with parse/validate SKILL.md, store skill + skill_files, resolve active skill set per (room, agent)
-- [ ] 3.10 Implement skill materialization: write selected skills to runtime skill directory before run start; block run on materialization failure; publish `skill.materialization_failed`; cleanup in run terminal hook
-- [ ] 3.11 Implement skill lifecycle events: publish `skill.created/updated/deleted/imported/activated/deactivated` on corresponding CRUD operations
-- [ ] 3.12 Seed builtin skills (`task-planner`, `skill-creator`) on workspace first launch
-- [ ] 3.13 Write unit tests for complete_task state machine (squad vs team mode), MissionBrief assembly, planning phase, skill materialization
+- [x] 3.9 Create `packages/skills` package: `SkillRegistry` with parse/validate SKILL.md, store skill + skill_files, resolve active skill set per (room, agent)
+- [x] 3.10 Implement skill materialization: write selected skills to runtime skill directory before run start; block run on materialization failure; publish `skill.materialization_failed`; cleanup in run terminal hook
+- [x] 3.11 Implement skill lifecycle events: publish `skill.created/updated/deleted/imported/activated/deactivated` on corresponding CRUD operations
+- [x] 3.12 Seed builtin skills (`task-planner`, `skill-creator`) on workspace first launch
+- [x] 3.13 Write unit tests for complete_task state machine (squad vs team mode), MissionBrief assembly, planning phase, skill materialization
 
 ## 4. Dev C Track — Frontend: Kanban, Team Expansion, Skill Settings (apps/web, packages/daemon routes)
 

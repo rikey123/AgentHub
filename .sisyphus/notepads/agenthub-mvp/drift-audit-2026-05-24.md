@@ -29,7 +29,6 @@ Ran on current head (`task/remediation-implementation-plan`):
 
 ## 2. tasks.md Reconciliation (Step 2)
 
-322 items verified by 6 parallel Explore agent passes (one per section group). Each line tagged inline with `[DONE]` / `[PARTIAL]` / `[MISSING]` / `[UNCLEAR]` for grep-ability.
 
 | Status | Count | % |
 |---|---|---|

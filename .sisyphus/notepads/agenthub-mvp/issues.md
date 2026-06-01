@@ -27,13 +27,11 @@
 
 ## 2026-05-23 M1.2 bus runtime slice
 
-- Direct Glob/Grep remain unavailable because `rg` is missing; targeted reads and Node/PowerShell filesystem checks were used instead.
 - Changing durable publish to outbox-deferred delivery required updating earlier EventBus tests that assumed immediate durable subscriber delivery.
 - Guard tests must avoid literal forbidden command strings in implementation-scanned files; command-check now skips test files for production dispatch/forbidden-reference enforcement while package tests still verify runtime rejection.
 
 ## 2026-05-23 M1.3 Orchestrator run lifecycle
 
-- Direct Grep/Glob still fail because `rg` is unavailable; targeted reads and package verification commands were used instead.
 - Adding the new `@agenthub/orchestrator` workspace dependencies initially left filtered tests unable to resolve `@agenthub/bus`; `pnpm.cmd install` refreshed workspace links.
 - `events:check` initially rejected `file.changed` because it only compared against event-system/spec.md. The check now adds adapter-framework's required `file.changed` event to the spec-derived expected set without weakening registry/source validation.
 
@@ -63,7 +61,8 @@
 ## 2026-05-23 M3.1 Artifact primitives
 
 - Adding @agenthub/artifacts workspace dependencies required pnpm.cmd install before filtered tests could resolve local workspace packages.
-- Direct Glob remains unusable because g is missing; targeted reads and known-path inspection were used for implementation context.
+- Direct Glob remains unusable because 
+g is missing; targeted reads and known-path inspection were used for implementation context.
 - The M3 evidence directory did not exist before this task and was created at .sisyphus/evidence/agenthub-mvp/m3/.
 
 ## 2026-05-23 M4 Web UI blocker (RESOLVED)
@@ -77,7 +76,8 @@
 
 ## 2026-05-23 M5 verification notes
 
-- pnpm.cmd check:all still fails outside M5 because pps/web/src/hooks/useProjector.ts references unregistered event gent.run.running; M5 did not change UI/M4 scope, and M4 is already recorded as blocked. isibility:check, subscriptions:check, command:check, and un-state-machine:check passed in that run.
+- pnpm.cmd check:all still fails outside M5 because pps/web/src/hooks/useProjector.ts references unregistered event gent.run.running; M5 did not change UI/M4 scope, and M4 is already recorded as blocked. isibility:check, subscriptions:check, command:check, and 
+un-state-machine:check passed in that run.
 - Windows adapter/runtime smoke should execute discovered .cmd launchers via cmd.exe /c when using shell:false; otherwise spawnSync <path>.cmd reports EINVAL even when where detects the CLI.
 
 ## 2026-05-23 M5 verification notes correction

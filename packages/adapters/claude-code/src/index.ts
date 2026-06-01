@@ -31,6 +31,7 @@ export type ClaudeCodeAdapterOptions = {
   readonly onWarmSessionFailed?: (input: { readonly roomId: string; readonly agentId: string; readonly adapterSessionId: string }) => void;
   readonly onSessionEndedWithoutCompletion?: (taskId: string) => void | Promise<void>;
   readonly onPlanPhaseEnded?: (runId: string) => void | Promise<void>;
+  readonly getSkillsBlock?: (runId: string) => string | undefined;
   readonly now?: () => number;
 };
 
@@ -265,7 +266,8 @@ export class ClaudeCodeACPAdapter extends ACPAdapter {
   private promptFromRun(run: RunRow): string {
     const db = this.options.services?.database;
     if (db === undefined) return `Run ${run.id} for agent ${run.agent_id}`;
-    return buildRunPrompt(run, db, { ...(this.options.now !== undefined ? { now: this.options.now } : {}) });
+    const skillsBlock = this.options.getSkillsBlock?.(run.id);
+    return buildRunPrompt(run, db, { ...(this.options.now !== undefined ? { now: this.options.now } : {}), ...(skillsBlock !== undefined ? { skillsBlock } : {}) });
   }
 }
 

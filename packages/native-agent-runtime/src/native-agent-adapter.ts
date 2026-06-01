@@ -68,6 +68,7 @@ export type NativeAgentAdapterOptions = {
   readonly tools?: ToolSet;
   readonly onSessionEndedWithoutCompletion?: (taskId: string) => void | Promise<void>;
   readonly onPlanPhaseEnded?: (runId: string) => void | Promise<void>;
+  readonly getSkillsBlock?: (runId: string) => string | undefined;
   readonly now?: () => number;
 };
 
@@ -320,7 +321,8 @@ export class NativeAgentAdapter {
 
   private loadRunPrompt(run: RunRow): { readonly system?: string; readonly input: string } {
     const system = buildFirstWakePrompt(run.id, run.agent_id, run.room_id, this.options.database);
-    const rendered = buildRunPrompt(run, this.options.database, { now: this.now });
+    const skillsBlock = this.options.getSkillsBlock?.(run.id);
+    const rendered = buildRunPrompt(run, this.options.database, { now: this.now, ...(skillsBlock !== undefined ? { skillsBlock } : {}) });
     const input = system !== undefined && rendered.startsWith(`${system}\n\n---\n\n`)
       ? rendered.slice(system.length + "\n\n---\n\n".length)
       : rendered;
