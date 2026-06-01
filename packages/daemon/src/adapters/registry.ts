@@ -22,7 +22,7 @@ export type AdapterRegistryOptions = {
   readonly getCommandBus?: () => CommandBus | undefined;
   readonly onSessionEndedWithoutCompletion?: (taskId: string) => void | Promise<void>;
   readonly onPlanPhaseEnded?: (runId: string) => void | Promise<void>;
-  readonly onSkillMaterializationFailed?: (input: { readonly taskId: string; readonly skillId: string; readonly skillName: string; readonly workspaceId: string; readonly runId: string; readonly error: string }) => void;
+  readonly onSkillMaterializationFailed?: (input: { readonly taskId?: string; readonly skillId: string; readonly skillName: string; readonly workspaceId: string; readonly runId: string; readonly error: string }) => void;
   readonly skillRegistry?: SkillRegistry;
   readonly mockAdapter?: MockAdapterManager;
   readonly claudeAdapter?: WarmableManagedAdapter;
@@ -92,8 +92,8 @@ export class AdapterRegistry {
         if (block !== undefined) this.runSkillsBlocks.set(run.id, block);
       }
     } catch (error) {
-      if (run.task_id !== null && this.options.onSkillMaterializationFailed !== undefined && error instanceof SkillMaterializationError) {
-        this.options.onSkillMaterializationFailed({ taskId: run.task_id, ...error.details });
+      if (this.options.onSkillMaterializationFailed !== undefined && error instanceof SkillMaterializationError) {
+        this.options.onSkillMaterializationFailed({ ...(run.task_id !== null ? { taskId: run.task_id } : {}), ...error.details });
       }
       this.options.lifecycle.fail(null, run.id, "skill_materialization_failed", "fatal", error instanceof Error ? error.message : String(error), "");
       return;
