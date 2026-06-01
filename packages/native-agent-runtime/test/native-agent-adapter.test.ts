@@ -293,6 +293,34 @@ describe("NativeAgentAdapter", () => {
 
     expect(lifecycle.fail).toHaveBeenCalledWith(null, "run-1", "native_agent_runtime_error", "retryable_visible", "openai_error");
   });
+
+  it("classifies provider model availability failures as configuration errors", async () => {
+    const lifecycle = createLifecycle();
+    streamTextMock.mockReturnValue({
+      fullStream: asyncGenerator([{ type: "error", error: new Error("No available channel for model gpt-5.4-mini under group Codex 官方 (distributor)") }]),
+      usage: Promise.reject(new Error("No output generated. Check the stream for errors."))
+    });
+
+    const adapter = new NativeAgentAdapter({
+      database: createDatabaseStub(),
+      eventBus: { publish: vi.fn() } as unknown as import("../../bus/src/index.ts").EventBus,
+      lifecycle: lifecycle as never,
+      permissions: { check: permissionCheckMock } as never,
+      modelConfig: { id: "mc-model-missing", provider: "openai-compatible", model: "gpt-5.4-mini", base_url: "https://models.example/v1", api_key_ref: null }
+    });
+
+    permissionCheckMock.mockReturnValue({ status: "allow", reason: "default_allow" });
+
+    await adapter.runManaged(runRow());
+
+    expect(lifecycle.fail).toHaveBeenCalledWith(
+      null,
+      "run-1",
+      "native_agent_runtime_error",
+      "configuration",
+      "No available channel for model gpt-5.4-mini under group Codex 官方 (distributor)"
+    );
+  });
 });
 
 function createLifecycle() {

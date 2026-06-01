@@ -409,7 +409,7 @@ function isAbortError(error: unknown): boolean {
 
 function classifyFailureClass(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
-  if (/api key|auth|credentials|unsupported-provider|not found/i.test(message)) return "configuration" as const;
+  if (/api key|auth|credentials|unsupported-provider|not found|model_not_found|no available channel|unknown model|does not exist/i.test(message)) return "configuration" as const;
   return "retryable_visible" as const;
 }
 

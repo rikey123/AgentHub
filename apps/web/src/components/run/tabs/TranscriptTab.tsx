@@ -3,6 +3,7 @@ import { Alert, Avatar, Card, Chip, ScrollShadow } from "@heroui/react";
 import { formatTime, initials, truncate } from "../../../lib/format.ts";
 
 const COMPACT_RE = /(claude_compact|compact|summary)/i;
+type TranscriptEmptyState = { readonly title: string; readonly description?: string; readonly tone: "default" | "danger" };
 
 function findPreCompact(items: ContextItemViewModel[], runId: string): ContextItemViewModel | undefined {
   const matches = items.filter(
@@ -17,7 +18,20 @@ export function TranscriptTab({ room, runId }: { room: RoomViewModel; runId: str
   const preCompact = findPreCompact(room.contextItems, runId);
 
   if (messages.length === 0 && !preCompact) {
-    return <div className="p-6 text-center text-sm text-muted">No transcript for this run yet.</div>;
+    const emptyState = getTranscriptEmptyState(room, runId);
+    if (emptyState.tone === "danger") {
+      return (
+        <div className="p-3">
+          <Alert color="danger">
+            <Alert.Content>
+              <Alert.Title>{emptyState.title}</Alert.Title>
+              {emptyState.description ? <Alert.Description>{emptyState.description}</Alert.Description> : null}
+            </Alert.Content>
+          </Alert>
+        </div>
+      );
+    }
+    return <div className="p-6 text-center text-sm text-muted">{emptyState.title}</div>;
   }
   return (
     <ScrollShadow className="h-full overflow-auto" orientation="vertical">
@@ -60,4 +74,16 @@ export function TranscriptTab({ room, runId }: { room: RoomViewModel; runId: str
       </div>
     </ScrollShadow>
   );
+}
+
+export function getTranscriptEmptyState(room: RoomViewModel, runId: string): TranscriptEmptyState {
+  const run = room.runs.find((item) => item.id === runId);
+  if (run?.status === "failed") {
+    return {
+      title: "Run failed before a transcript was created.",
+      ...(run.error !== undefined && run.error.trim().length > 0 ? { description: run.error } : {}),
+      tone: "danger"
+    };
+  }
+  return { title: "No transcript for this run yet.", tone: "default" };
 }
