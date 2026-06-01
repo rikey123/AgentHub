@@ -38,11 +38,25 @@ describe("TaskService.completeTask", () => {
   test("squad mode completes when review is not expected", () => {
     const taskId = createTask({ roomId: "room_squad", assigneeAgentId: "agent_worker", expectsReview: false, status: "in_progress" });
 
-    const result = currentService().completeTask({ taskId, roomId: "room_squad", callerAgentId: "agent_worker", status: "completed", summary: "Done" });
+    const result = currentService().completeTask({
+      taskId,
+      roomId: "room_squad",
+      callerAgentId: "agent_worker",
+      byRunId: "run_1",
+      status: "completed",
+      summary: "Done",
+      artifactIds: ["artifact_1"],
+      filesChanged: ["src/app.ts"]
+    });
 
     expect(result.ok).toBe(true);
     expect(currentDatabase().sqlite.prepare("SELECT status, blocker_reason FROM tasks WHERE id = ?").get(taskId)).toMatchObject({ status: "completed", blocker_reason: null });
-    expect(eventsFor(taskId)).toEqual(["task.created", "task.assigned", "task.status.changed", "task.delegation.completed"]);
+    expect(eventsFor(taskId)).toEqual(["task.created", "task.assigned", "task.status.changed", "task.activity.added", "task.delegation.completed"]);
+    const activity = currentDatabase().sqlite.prepare("SELECT kind, by_kind, by, payload FROM task_activities WHERE task_id = ? AND kind = 'comment'").get(taskId) as { readonly kind: string; readonly by_kind: string; readonly by: string; readonly payload: string };
+    expect(activity).toMatchObject({ kind: "comment", by_kind: "role", by: "agent_worker" });
+    expect(JSON.parse(activity.payload)).toMatchObject({ reportType: "completion_report", summary: "Done", finalStatus: "completed", byRunId: "run_1", artifactIds: ["artifact_1"], filesChanged: ["src/app.ts"] });
+    const completedEvent = currentDatabase().sqlite.prepare("SELECT payload FROM events WHERE type = 'task.delegation.completed' AND task_id = ? ORDER BY seq DESC LIMIT 1").get(taskId) as { readonly payload: string };
+    expect(JSON.parse(completedEvent.payload)).toMatchObject({ taskId, finalStatus: "completed", byRunId: "run_1", summary: "Done", artifactIds: ["artifact_1"], filesChanged: ["src/app.ts"] });
   });
 
   test("team mode routes completed into review when review is expected", () => {
@@ -52,7 +66,7 @@ describe("TaskService.completeTask", () => {
 
     expect(result.ok).toBe(true);
     expect(currentDatabase().sqlite.prepare("SELECT status, blocker_reason FROM tasks WHERE id = ?").get(taskId)).toMatchObject({ status: "review", blocker_reason: null });
-    expect(eventsFor(taskId)).toEqual(["task.created", "task.assigned", "task.status.changed", "task.delegation.completed"]);
+    expect(eventsFor(taskId)).toEqual(["task.created", "task.assigned", "task.status.changed", "task.activity.added", "task.delegation.completed"]);
   });
 
   test("blocked status requires a blocker reason and stores it", () => {

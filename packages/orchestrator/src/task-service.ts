@@ -107,6 +107,7 @@ export type CompleteTaskInput = {
   readonly taskId: string;
   readonly roomId: string;
   readonly callerAgentId: string;
+  readonly byRunId?: string;
   readonly status: "completed" | "blocked" | "review" | "needs_review";
   readonly summary: string;
   readonly blockerReason?: string;
@@ -237,14 +238,55 @@ export class TaskService {
     }
 
     const now = this.options.now?.() ?? Date.now();
+    const activityId = randomUUID();
     this.options.database.sqlite.transaction(() => {
       if (nextStatus === "blocked") {
         this.options.database.sqlite.prepare("UPDATE tasks SET status = 'blocked', blocker_reason = ?, updated_at = ? WHERE id = ?").run(input.blockerReason ?? null, now, input.taskId);
       } else {
         this.options.database.sqlite.prepare("UPDATE tasks SET status = ?, blocker_reason = NULL, updated_at = ? WHERE id = ?").run(nextStatus, now, input.taskId);
       }
+      this.options.database.sqlite
+        .prepare("INSERT INTO task_activities (id, task_id, kind, by_kind, by, payload, created_at) VALUES (?, ?, 'comment', 'role', ?, ?, ?)")
+        .run(
+          activityId,
+          input.taskId,
+          input.callerAgentId,
+          JSON.stringify({
+            reportType: "completion_report",
+            summary: input.summary,
+            finalStatus: nextStatus,
+            ...(input.byRunId !== undefined ? { byRunId: input.byRunId } : {}),
+            ...(input.blockerReason !== undefined ? { blockerReason: input.blockerReason } : {}),
+            ...(input.artifactIds !== undefined ? { artifactIds: input.artifactIds } : {}),
+            ...(input.filesChanged !== undefined ? { filesChanged: input.filesChanged } : {})
+          }),
+          now
+        );
       this.options.eventBus.publish(taskEvent("task.status.changed", existing.workspace_id, existing.room_id ?? "", input.taskId, { taskId: input.taskId, prevStatus: existing.status, nextStatus, ...(input.blockerReason !== undefined ? { blockerReason: input.blockerReason } : {}) }, now));
-      this.options.eventBus.publish(taskEvent("task.delegation.completed", existing.workspace_id, existing.room_id ?? "", input.taskId, { taskId: input.taskId, finalStatus: nextStatus }, now));
+      this.options.eventBus.publish(taskEvent("task.activity.added", existing.workspace_id, existing.room_id ?? "", input.taskId, {
+        taskId: input.taskId,
+        activityId,
+        kind: "comment",
+        byKind: "role",
+        by: input.callerAgentId,
+        payload: {
+          reportType: "completion_report",
+          summary: input.summary,
+          finalStatus: nextStatus,
+          ...(input.byRunId !== undefined ? { byRunId: input.byRunId } : {}),
+          ...(input.blockerReason !== undefined ? { blockerReason: input.blockerReason } : {}),
+          ...(input.artifactIds !== undefined ? { artifactIds: input.artifactIds } : {}),
+          ...(input.filesChanged !== undefined ? { filesChanged: input.filesChanged } : {})
+        }
+      }, now));
+      this.options.eventBus.publish(taskEvent("task.delegation.completed", existing.workspace_id, existing.room_id ?? "", input.taskId, {
+        taskId: input.taskId,
+        finalStatus: nextStatus,
+        ...(input.byRunId !== undefined ? { byRunId: input.byRunId } : {}),
+        summary: input.summary,
+        ...(input.artifactIds !== undefined ? { artifactIds: input.artifactIds } : {}),
+        ...(input.filesChanged !== undefined ? { filesChanged: input.filesChanged } : {})
+      }, now));
     })();
 
     const task = this.task(input.taskId);

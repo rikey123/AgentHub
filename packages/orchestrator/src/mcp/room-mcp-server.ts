@@ -655,6 +655,7 @@ export class RoomMcpServer {
       taskId: input.taskId,
       roomId: session.roomId,
       callerAgentId: session.agentId,
+      ...(runId !== undefined ? { byRunId: runId } : {}),
       status: normalizedStatus,
       summary: input.summary,
       ...(typeof input.blockerReason === "string" ? { blockerReason: input.blockerReason } : {}),
