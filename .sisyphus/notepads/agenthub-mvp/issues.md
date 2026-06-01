@@ -74,8 +74,7 @@
 
 ## 2026-05-23 M5 verification notes
 
-- pnpm.cmd check:all still fails outside M5 because pps/web/src/hooks/useProjector.ts references unregistered event gent.run.running; M5 did not change UI/M4 scope, and M4 is already recorded as blocked. isibility:check, subscriptions:check, command:check, and 
-un-state-machine:check passed in that run.
+- pnpm.cmd check:all still failed outside M5 because apps/web/src/hooks/useProjector.ts referenced the unregistered event agent.run.running; M5 did not change UI/M4 scope, and M4 was still recorded as blocked. visibility:check, subscriptions:check, command:check, and run-state-machine:check passed in that run.
 - Windows adapter/runtime smoke should execute discovered .cmd launchers via cmd.exe /c when using shell:false; otherwise spawnSync <path>.cmd reports EINVAL even when where detects the CLI.
 
 ## 2026-05-23 M5 verification notes correction
