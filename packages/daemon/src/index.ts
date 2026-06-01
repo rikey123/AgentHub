@@ -1,7 +1,8 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import { existsSync, mkdirSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { join } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
 import { URL } from "node:url";
 
 import { createCommandBus, createDurableHandlerRegistry, createEventBus, createOutboxDispatcher, type CommandBus, type CommandHandler, type CommandType, type DurableHandlerRegistry, type EventBus, type EventBusSubscriber, type OutboxDispatcher, type PublishInput, type ReplayView } from "@agenthub/bus";
@@ -277,10 +278,6 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
           .prepare("SELECT root_path FROM workspaces WHERE id = ?")
           .get(input.workspaceId) as { readonly root_path: string } | undefined;
         if (!workspace) return undefined;
-
-        const { resolve: resolvePath } = require("node:path") as typeof import("node:path");
-        const { execFileSync } = require("node:child_process") as typeof import("node:child_process");
-        const { mkdirSync, existsSync } = require("node:fs") as typeof import("node:fs");
 
         // Resolve to absolute path; skip if it resolves to cwd (test fixture pattern)
         const absoluteRoot = resolvePath(workspace.root_path);

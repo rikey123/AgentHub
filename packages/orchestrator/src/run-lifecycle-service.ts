@@ -58,6 +58,8 @@ export type Cost = {
   readonly modelId: string;
 };
 
+type RunBriefKind = "run_completed" | "run_failed" | "run_cancelled";
+
 export type CreateRunInput = {
   readonly runId: string;
   readonly agentId: string;
@@ -317,7 +319,7 @@ export class RunLifecycleService {
         waiting_reason: null
       });
       this.publishRunEvent(db, "agent.run.completed", runId, run.workspace_id, run.room_id, run.agent_id, { runId, cost });
-      this.publishBriefEvent(db, runId, run.workspace_id, run.room_id, run.agent_id, briefText);
+      this.publishBriefEvent(db, runId, run.workspace_id, run.room_id, run.agent_id, "run_completed", briefText);
     });
     this.sideEffects.onCompleted?.(runId);
     this.sideEffects.onTerminal?.(runId);
@@ -346,7 +348,10 @@ export class RunLifecycleService {
         ).run(randomUUID(), run.task_id, run.id, lastAssistantText.slice(0, 2000), JSON.stringify(filesTouched), this.now());
       }
       this.publishRunEvent(db, "agent.run.failed", runId, run.workspace_id, run.room_id, run.agent_id, { runId, reason, failureClass, error });
-      this.publishBriefEvent(db, runId, run.workspace_id, run.room_id, run.agent_id, briefText);
+      this.publishBriefEvent(db, runId, run.workspace_id, run.room_id, run.agent_id, "run_failed", briefText, {
+        failureReason: reason,
+        failureClass
+      });
     });
     this.sideEffects.onFailed?.(runId, failureClass);
     this.sideEffects.onTerminal?.(runId);
@@ -365,7 +370,7 @@ export class RunLifecycleService {
         ).run(randomUUID(), run.task_id, run.id, lastAssistantText.slice(0, 2000), JSON.stringify(filesTouched), this.now());
       }
       this.publishRunEvent(db, "agent.run.cancelled", runId, run.workspace_id, run.room_id, run.agent_id, { runId });
-      this.publishBriefEvent(db, runId, run.workspace_id, run.room_id, run.agent_id, briefText);
+      this.publishBriefEvent(db, runId, run.workspace_id, run.room_id, run.agent_id, "run_cancelled", briefText);
     });
     this.sideEffects.onTerminal?.(runId);
   }
@@ -478,7 +483,16 @@ export class RunLifecycleService {
     void db;
   }
 
-  private publishBriefEvent(db: SqliteTx, runId: string, workspaceId: string, roomId: string, agentId: string, briefText?: string): void {
+  private publishBriefEvent(
+    db: SqliteTx,
+    runId: string,
+    workspaceId: string,
+    roomId: string,
+    agentId: string,
+    kind: RunBriefKind,
+    briefText?: string,
+    failure?: { readonly failureReason?: string; readonly failureClass?: RunFailureClass }
+  ): void {
     this.eventBus.publish({
       id: randomUUID(),
       type: "message.brief.published",
@@ -487,7 +501,12 @@ export class RunLifecycleService {
       roomId,
       runId,
       agentId,
-      payload: { text: briefText ?? "" },
+      payload: {
+        kind,
+        text: briefText ?? "",
+        ...(failure?.failureReason !== undefined ? { failureReason: failure.failureReason } : {}),
+        ...(failure?.failureClass !== undefined ? { failureClass: failure.failureClass } : {})
+      },
       createdAt: this.now()
     } satisfies PublishInput);
     db.prepare(

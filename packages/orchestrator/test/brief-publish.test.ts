@@ -42,7 +42,7 @@ describe("RunLifecycleService brief publishing", () => {
     currentLifecycle().complete(null, "run_complete", zeroCost(), "Brief text");
 
     expect(eventTypes("run_complete")).toEqual(["agent.run.queued", "agent.run.started", "agent.run.completed", "message.brief.published"]);
-    expect(eventPayload("message.brief.published", "run_complete")).toEqual({ text: "Brief text" });
+    expect(eventPayload("message.brief.published", "run_complete")).toEqual({ kind: "run_completed", text: "Brief text" });
     expect(assistantBriefPublishedAt("msg_complete")).toBe(2_000);
     expect(outboxTypes()).toEqual(["agent.run.queued", "agent.run.started", "agent.run.completed", "message.brief.published"]);
   });
@@ -75,8 +75,13 @@ describe("RunLifecycleService brief publishing", () => {
     currentLifecycle().markCancelling(null, "run_cancel");
     currentLifecycle().cancelFinalized(null, "run_cancel", "Cancel brief");
 
-    expect(eventPayload("message.brief.published", "run_fail")).toEqual({ text: "Failure brief" });
-    expect(eventPayload("message.brief.published", "run_cancel")).toEqual({ text: "Cancel brief" });
+    expect(eventPayload("message.brief.published", "run_fail")).toEqual({
+      kind: "run_failed",
+      text: "Failure brief",
+      failureReason: "fatal error",
+      failureClass: "fatal"
+    });
+    expect(eventPayload("message.brief.published", "run_cancel")).toEqual({ kind: "run_cancelled", text: "Cancel brief" });
     expect(eventTypes("run_fail")).toEqual(["agent.run.queued", "agent.run.failed", "message.brief.published"]);
     expect(eventTypes("run_cancel")).toEqual(["agent.run.queued", "agent.run.started", "agent.run.cancelled", "message.brief.published"]);
   });
@@ -86,7 +91,7 @@ describe("RunLifecycleService brief publishing", () => {
 
     expect(() => currentLifecycle().complete(null, "run_no_message", zeroCost())).not.toThrow();
 
-    expect(eventPayload("message.brief.published", "run_no_message")).toEqual({ text: "" });
+    expect(eventPayload("message.brief.published", "run_no_message")).toEqual({ kind: "run_completed", text: "" });
     expect(eventTypes("run_no_message")).toEqual(["agent.run.queued", "agent.run.started", "agent.run.completed", "message.brief.published"]);
   });
 });

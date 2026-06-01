@@ -13,6 +13,7 @@ function makeEvent<T extends EventType>(type: T, roomId: string, payload: Record
     visibility: "both" as const,
     workspaceId: "default-workspace",
     roomId,
+    runId: typeof payload.runId === "string" ? payload.runId : undefined,
     payload,
     createdAt
   };
@@ -141,5 +142,27 @@ describe("useProjector replay handling", () => {
     expect(room?.skillErrors).toEqual([
       expect.objectContaining({ skillId: "skill-1", skillName: "task-planner", runId: "run-skill-1", error: "disk full" })
     ]);
+  });
+
+  it("infers failed brief kind from run state when replaying legacy brief payloads", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "team" }));
+    projector.apply(makeEvent("agent.run.failed", roomId, {
+      runId: "run-failed-1",
+      reason: "adapter_start_failed",
+      failureClass: "configuration",
+      error: "require is not defined"
+    }));
+    projector.apply(makeEvent("message.brief.published", roomId, {
+      runId: "run-failed-1",
+      text: "Run updated"
+    }));
+
+    const brief = emittedState.rooms.get(roomId)?.briefs.find((item) => item.runId === "run-failed-1");
+    expect(brief).toMatchObject({
+      kind: "run_failed",
+      summary: "Run updated"
+    });
   });
 });

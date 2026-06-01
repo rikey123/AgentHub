@@ -291,9 +291,15 @@ class Projector {
       }
       case "message.brief.published": {
         if (payload) {
+          const runId = typeof event.runId === "string" ? event.runId : typeof payload.runId === "string" ? payload.runId : "";
+          const runStatus = room.runs.find((run) => run.id === runId)?.status;
+          const inferredKind =
+            runStatus === "failed" ? "run_failed" :
+            runStatus === "cancelled" ? "run_cancelled" :
+            "run_completed";
           const brief: BriefViewModel = {
-            kind: (typeof payload.kind === "string" ? payload.kind : "run_completed") as BriefViewModel["kind"],
-            runId: typeof event.runId === "string" ? event.runId : typeof payload.runId === "string" ? payload.runId : "",
+            kind: (typeof payload.kind === "string" ? payload.kind : inferredKind) as BriefViewModel["kind"],
+            runId,
             agentId: event.agentId ?? "",
             agentName: this.agentName(room, event.agentId ?? "") ?? "Agent",
             summary: typeof payload.text === "string" ? payload.text : typeof payload.summary === "string" ? payload.summary : "",
