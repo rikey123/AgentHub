@@ -323,10 +323,28 @@ export class NativeAgentAdapter {
     const system = buildFirstWakePrompt(run.id, run.agent_id, run.room_id, this.options.database);
     const skillsBlock = this.options.getSkillsBlock?.(run.id);
     const rendered = buildRunPrompt(run, this.options.database, { now: this.now, ...(skillsBlock !== undefined ? { skillsBlock } : {}) });
-    const input = system !== undefined && rendered.startsWith(`${system}\n\n---\n\n`)
-      ? rendered.slice(system.length + "\n\n---\n\n".length)
-      : rendered;
-    return { ...(system !== undefined ? { system } : {}), input };
+    // Strip the role system prompt from the user-turn input to avoid duplication.
+    // buildRunPrompt joins parts with "\n\n---\n\n"; system may appear at any position
+    // depending on whether skillsBlock or missionBrief precede it.
+    const separator = "\n\n---\n\n";
+    let input = rendered;
+    let separatedSystem = false;
+    if (system !== undefined && system.length > 0) {
+      const systemWithSep = `${system}${separator}`;
+      const idx = rendered.indexOf(systemWithSep);
+      if (idx !== -1) {
+        // Remove the system block and its trailing separator from the rendered string
+        input = rendered.slice(0, idx) + rendered.slice(idx + systemWithSep.length);
+        // Clean up any leading separator left behind
+        if (input.startsWith(separator)) input = input.slice(separator.length);
+        separatedSystem = true;
+      } else if (rendered === system) {
+        // Rendered is only the system prompt — nothing left for input
+        input = "";
+        separatedSystem = true;
+      }
+    }
+    return { ...(system !== undefined ? { system } : {}), input: separatedSystem ? input : rendered };
   }
 }
 

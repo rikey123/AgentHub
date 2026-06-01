@@ -90,6 +90,7 @@ export class MockAdapterManager {
       agentId: run.agent_id,
       lifecycle: this.options.lifecycle,
       eventBus: this.options.eventBus,
+      database: this.options.database,
       now: this.now,
       ...(run.task_id !== null ? { taskId: run.task_id } : {}),
       messageId: `msg_${run.id}`,
