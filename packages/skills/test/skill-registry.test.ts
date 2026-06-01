@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { EventBus } from "@agenthub/bus";
 import { createDatabase, type AgentHubDatabase } from "@agenthub/db";
 
-import { SkillRegistry } from "../src/index.ts";
+import { SkillMaterializationError, SkillRegistry } from "../src/index.ts";
 
 const writeFileSyncMock = vi.hoisted(() => vi.fn());
 
@@ -64,18 +64,17 @@ describe("SkillRegistry", () => {
     expect(currentDatabase().sqlite.prepare("SELECT name FROM skills WHERE workspace_id = 'ws_1' AND origin = 'builtin' ORDER BY name ASC").all().map((row) => (row as { readonly name: string }).name)).toEqual(["skill-creator", "task-planner"]);
   });
 
-  test("resolveSkills returns room pool and applies add and restrict overrides", () => {
+  test("resolveSkills returns room pool, adds extras, and excludes restricted room skills", () => {
     const roomSkill = createSkill("room-skill");
-    const addedSkill = createSkill("added-skill");
-    const restrictedSkill = createSkill("restricted-skill");
-    const ignoredSkill = createSkill("ignored-skill");
+    const terminalAccess = createSkill("terminal-access");
+    const agentExtra = createSkill("agent-extra");
     insertRoom("room_1", "agent_1");
     insertRoomSkill("room_1", roomSkill, 1);
-    insertAgentSkill("room_1", "agent_1", addedSkill, "add");
-    insertAgentSkill("room_1", "agent_1", restrictedSkill, "restrict");
-    insertRoomSkill("room_1", ignoredSkill, 1);
+    insertRoomSkill("room_1", terminalAccess, 1);
+    insertAgentSkill("room_1", "agent_1", agentExtra, "add");
+    insertAgentSkill("room_1", "agent_1", terminalAccess, "restrict");
 
-    expect(currentRegistry().resolveSkills("room_1", "agent_1").map((skill) => skill.name)).toEqual(["added-skill", "restricted-skill"]);
+    expect(currentRegistry().resolveSkills("room_1", "agent_1").map((skill) => skill.name)).toEqual(["agent-extra", "room-skill"]);
   });
 
   test("materializeForRun writes skill files and cleanupRun removes them", () => {
@@ -95,7 +94,7 @@ describe("SkillRegistry", () => {
     expect(fs.existsSync(join(tempWorkspaceRoot(), ".agenthub", "skill-overlays", "run_1", ".agenthub", "skills", "tooling-skill"))).toBe(false);
   });
 
-  test("materialization failures publish skill.materialization_failed", () => {
+  test("materialization failures throw structured SkillMaterializationError for daemon handling", () => {
     const skillId = createSkill("broken-skill");
     insertRoom("room_1", "agent_1");
     insertRoomSkill("room_1", skillId, 1);
@@ -103,8 +102,15 @@ describe("SkillRegistry", () => {
       throw new Error("disk full");
     });
 
-    expect(() => currentRegistry().materializeForRun({ runId: "run_error", roomId: "room_1", participantId: "agent_1", workspaceRoot: tempWorkspaceRoot(), runtimeId: "native" })).toThrow("disk full");
-    expect(currentDatabase().sqlite.prepare("SELECT type FROM events WHERE type = 'skill.materialization_failed' AND run_id = 'run_error'").get()).toBeDefined();
+    expect(() => currentRegistry().materializeForRun({ runId: "run_error", roomId: "room_1", participantId: "agent_1", workspaceRoot: tempWorkspaceRoot(), runtimeId: "native" })).toThrow(SkillMaterializationError);
+    try {
+      currentRegistry().materializeForRun({ runId: "run_error", roomId: "room_1", participantId: "agent_1", workspaceRoot: tempWorkspaceRoot(), runtimeId: "native" });
+    } catch (error) {
+      expect(error).toBeInstanceOf(SkillMaterializationError);
+      const structured = error as SkillMaterializationError;
+      expect(structured.details).toMatchObject({ skillId, skillName: "broken-skill", workspaceId: "ws_1", runId: "run_error", error: "disk full" });
+    }
+    expect(currentDatabase().sqlite.prepare("SELECT type FROM events WHERE type = 'skill.materialization_failed' AND run_id = 'run_error'").get()).toBeUndefined();
 
     writeFileSyncMock.mockReset();
   });

@@ -59,6 +59,21 @@ export type ParticipantSkillAssignmentInput = {
 
 type SkillFrontmatter = { readonly name: string; readonly description: string };
 
+export class SkillMaterializationError extends Error {
+  constructor(
+    readonly details: {
+      readonly skillId: string;
+      readonly skillName: string;
+      readonly workspaceId: string;
+      readonly runId: string;
+      readonly error: string;
+    }
+  ) {
+    super(details.error);
+    this.name = "SkillMaterializationError";
+  }
+}
+
 const RUNTIME_SKILL_DIRS: Record<string, string> = {
   "claude-code": ".claude/skills",
   codex: ".codex/skills",
@@ -165,11 +180,8 @@ export class SkillRegistry {
       else restrictIds.add(override.skill_id);
     }
     if (restrictIds.size > 0) {
-      for (const skillId of Array.from(pool.keys())) if (!restrictIds.has(skillId)) pool.delete(skillId);
-      for (const skillId of restrictIds) {
-        const row = this.getSkill(skillId);
-        if (row !== undefined) pool.set(row.id, row);
-      }
+      // `restrict` means exclude these skills from the room pool for this participant.
+      for (const skillId of restrictIds) pool.delete(skillId);
     }
     for (const skillId of addIds) {
       const row = this.getSkill(skillId);
@@ -202,8 +214,14 @@ export class SkillRegistry {
       this.materializedRuns.set(input.runId, runPaths);
     } catch (error) {
       this.cleanupPaths(runPaths);
-      this.options.eventBus.publish({ id: randomUUID(), type: "skill.materialization_failed", schemaVersion: 1, workspaceId, runId: input.runId, payload: { skillId: skills[0]?.id ?? "unknown", runId: input.runId, error: error instanceof Error ? error.message : String(error) }, createdAt: this.now() });
-      throw error instanceof Error ? error : new Error(String(error));
+      const failedSkill = skills[0];
+      throw new SkillMaterializationError({
+        skillId: failedSkill?.id ?? "unknown",
+        skillName: failedSkill?.name ?? "unknown",
+        workspaceId,
+        runId: input.runId,
+        error: error instanceof Error ? error.message : String(error)
+      });
     }
   }
 
