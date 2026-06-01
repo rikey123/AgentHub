@@ -381,7 +381,18 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
       }
 
       void commandBusRef.current?.dispatch(
-        { type: "WakeAgent", roomId: run.room_id, agentId: run.agent_id, workspaceId: run.workspace_id, reason: "execute", idempotencyKey: `plan-execute:${runId}` },
+        {
+          type: "WakeAgent",
+          roomId: run.room_id,
+          agentId: run.agent_id,
+          workspaceId: run.workspace_id,
+          reason: "execute",
+          promptDelta: {
+            kind: "delta_only",
+            instructions: "Planning phase is complete. Continue with the user's request now: answer directly for simple conversation, or use room.delegate / room.spawn_agent as appropriate for concrete multi-agent work."
+          },
+          idempotencyKey: `plan-execute:${runId}`
+        },
         { actor: { type: "system" }, traceId: `plan-execute:${runId}`, idempotencyKey: `plan-execute:${runId}`, origin: "internal" }
       );
     };

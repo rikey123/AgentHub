@@ -38,13 +38,24 @@ vi.mock("../../native-agent-runtime/src/native-agent-adapter.ts", () => ({
       this.options = options as never;
     }
 
-    async runManaged(run: { readonly id: string; readonly workspace_id: string; readonly room_id: string | null; readonly agent_id: string | null; readonly wake_reason?: string | null }) {
+    async runManaged(run: { readonly id: string; readonly workspace_id: string; readonly room_id: string | null; readonly agent_id: string | null; readonly wake_reason?: string | null; readonly status?: string }) {
       nativeAdapterRunManagedMock(run);
       const decision = this.options.permissions?.check?.({ workspaceId: run.workspace_id, ...(run.room_id !== null ? { roomId: run.room_id } : {}), ...(run.agent_id !== null ? { agentId: run.agent_id } : {}), runId: run.id, resource: { type: "model.api_call", provider: "openai" } }) ?? { status: "allow" as const };
       if (decision.status === "allow") {
         if (run.wake_reason === "plan") {
+          const lifecycle = (this.options as { readonly lifecycle?: { readonly markStarting?: (tx: null, runId: string, pid: number) => void; readonly markRunning?: (tx: null, runId: string, sessionId: string) => void; readonly complete?: (tx: null, runId: string, cost: { readonly inputTokens: number; readonly outputTokens: number; readonly cachedTokens: number; readonly costUsd: number; readonly modelId: string }, briefText?: string) => void } }).lifecycle;
+          if (run.status !== "starting") lifecycle?.markStarting?.(null, run.id, 1);
+          lifecycle?.markRunning?.(null, run.id, `session-${run.id}`);
+          lifecycle?.complete?.(null, run.id, { inputTokens: 1, outputTokens: 1, cachedTokens: 0, costUsd: 0, modelId: "test-plan" }, "plan completed");
           const options = this.options as { readonly onPlanPhaseEnded?: (runId: string, planText?: string) => Promise<void> | void };
           await options.onPlanPhaseEnded?.(run.id, "```json\n{\"goal\":\"ship\",\"tasks\":[{\"title\":\"Build\",\"description\":\"Implement it\",\"assigneeRole\":\"Builder\"}]}\n```");
+          return;
+        }
+        if (run.wake_reason === "execute") {
+          const lifecycle = (this.options as { readonly lifecycle?: { readonly markStarting?: (tx: null, runId: string, pid: number) => void; readonly markRunning?: (tx: null, runId: string, sessionId: string) => void; readonly complete?: (tx: null, runId: string, cost: { readonly inputTokens: number; readonly outputTokens: number; readonly cachedTokens: number; readonly costUsd: number; readonly modelId: string }, briefText?: string) => void } }).lifecycle;
+          if (run.status !== "starting") lifecycle?.markStarting?.(null, run.id, 1);
+          lifecycle?.markRunning?.(null, run.id, `session-${run.id}`);
+          lifecycle?.complete?.(null, run.id, { inputTokens: 1, outputTokens: 1, cachedTokens: 0, costUsd: 0, modelId: "test-execute" }, "execute completed");
           return;
         }
         resolveProviderMock({ id: "mock-native-config", provider: "openai", model: "gpt-4o", base_url: null, api_key_ref: null }, "test-key");
@@ -581,11 +592,17 @@ describe("daemon M1.4 composition", () => {
       daemon.database.sqlite.prepare("INSERT INTO runs (id, workspace_id, task_id, room_id, agent_id, adapter_id, adapter_session_id, provider_conversation_id, parent_run_id, status, wake_reason, waiting_reason, workspace_path, work_dir, workspace_mode, context_version, target_files, mailbox_claim_count, pid_at_start, claimed_at, started_at, ended_at, input_tokens, output_tokens, cached_tokens, cost_usd, model_id, failure_class, error, created_at, updated_at) VALUES (?, 'default-workspace', NULL, ?, ?, 'native', NULL, NULL, NULL, 'queued', 'plan', NULL, NULL, NULL, 'shadow_buffer', NULL, '[]', 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1, 1)").run(runId, roomId, agentId);
     })();
 
-    await daemon.adapterRegistry.runAgent(daemon.database.sqlite.prepare("SELECT * FROM runs WHERE id = ?").get(runId) as never);
+    await daemon.lifecycle.markClaimed(null, runId);
+    await daemon.adapterRegistry.runAgent(daemon.lifecycle.read(runId));
 
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM task_plans WHERE run_id = ?").get(runId)).toMatchObject({ count: 1 });
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE run_id = ? AND type = 'task.plan.created'").get(runId)).toMatchObject({ count: 1 });
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM messages WHERE run_id = ?").get(runId)).toMatchObject({ count: 0 });
+    await waitFor(
+      () => daemon.database.sqlite.prepare("SELECT id, status FROM runs WHERE room_id = ? AND wake_reason = 'execute' ORDER BY created_at DESC LIMIT 1").get(roomId) as { readonly id: string; readonly status: string } | undefined,
+      (run) => run !== undefined && run.status === "completed"
+    );
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE room_id = ? AND type = 'agent.run.queued' AND json_extract(payload, '$.wakeReason') = 'execute'").get(roomId)).toMatchObject({ count: 1 });
     const messagesResponse = await fetch(`${baseUrl}/rooms/${roomId}/messages`);
     expect(messagesResponse.status).toBe(200);
     const messagesBody = await messagesResponse.json() as { readonly messages: readonly unknown[] };
