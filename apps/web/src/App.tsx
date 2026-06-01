@@ -246,49 +246,66 @@ export default function App() {
   }, [rooms, openNewRoom, openSettings, leftCollapsed, rightCollapsed, setTheme, setDensity]);
 
   const center = activeRoom ? (
-    <ChatRoomLayout
-      chat={
-        <ChatStream
-          room={activeRoom}
-          selectedMessageId={selectedMessageId}
-          onSelectMessage={setSelectedMessageId}
-          onOpenRun={(runId) => setActiveRunId(runId)}
-          onQuote={handleQuoteMessage}
-          onPin={(id) => void handlePin(id)}
-          onRegenerate={(id) => void handleRegenerate(id)}
-          onDelete={(id) => void handleDelete(id)}
-          onOpenTask={handleOpenTask}
-          onOpenTasks={openTasksPanel}
-          onCancelPending={(id) => void handleCancelPending(id)}
-          onEditPending={handleEditPending}
-          csrfFetch={csrfFetch}
-          connectionStatus={projector.connectionStatus}
-          connectionError={projector.connectionError}
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      {(activeRoom.skillErrors?.length ?? 0) > 0 ? (
+        <div className="shrink-0 border-b border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-900 dark:border-danger-800 dark:bg-danger-950/40 dark:text-danger-100">
+          <div className="font-semibold">Skill loading errors</div>
+          <div className="mt-2 space-y-2">
+            {activeRoom.skillErrors!.map((skillError) => (
+              <div key={`${skillError.runId}:${skillError.skillId}:${skillError.createdAt}`}>
+                Skill '{skillError.skillName ?? skillError.skillId}' failed to load. The run has been stopped.
+                <div className="text-xs opacity-80">{skillError.error}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+      <div className="min-h-0 flex-1 overflow-hidden">
+        <ChatRoomLayout
+          chat={
+            <ChatStream
+              room={activeRoom}
+              selectedMessageId={selectedMessageId}
+              onSelectMessage={setSelectedMessageId}
+              onOpenRun={(runId) => setActiveRunId(runId)}
+              onQuote={handleQuoteMessage}
+              onPin={(id) => void handlePin(id)}
+              onRegenerate={(id) => void handleRegenerate(id)}
+              onDelete={(id) => void handleDelete(id)}
+              onOpenTask={handleOpenTask}
+              onOpenTasks={openTasksPanel}
+              onCancelPending={(id) => void handleCancelPending(id)}
+              onEditPending={handleEditPending}
+              csrfFetch={csrfFetch}
+              connectionStatus={projector.connectionStatus}
+              connectionError={projector.connectionError}
+            />
+          }
+          pendingTurns={
+            <PendingTurnList
+              turns={activeRoom.pendingTurns}
+              onCancel={(id) => void handleCancelPending(id)}
+              onEdit={handleEditPending}
+            />
+          }
+          input={
+            <InputBox
+              roomId={activeRoom.id}
+              participants={activeRoom.participants}
+              connectionStatus={projector.connectionStatus}
+              pendingCount={activeRoom.pendingTurns.length}
+              latestPendingMessageId={activeRoom.pendingTurns.length > 0 ? activeRoom.pendingTurns[activeRoom.pendingTurns.length - 1]!.id : undefined}
+              editingTurnId={editingTurnId}
+              onCancelEdit={() => setEditingTurnId(undefined)}
+              onRequestEdit={handleEditPending}
+              csrfFetch={csrfFetch}
+              onSend={handleSendMessage}
+              onEditSend={handleEditSend}
+            />
+          }
         />
-      }
-      pendingTurns={
-        <PendingTurnList
-          turns={activeRoom.pendingTurns}
-          onCancel={(id) => void handleCancelPending(id)}
-          onEdit={handleEditPending}
-        />
-      }
-      input={
-        <InputBox
-          roomId={activeRoom.id}
-          participants={activeRoom.participants}
-          connectionStatus={projector.connectionStatus}
-          pendingCount={activeRoom.pendingTurns.length}
-          latestPendingMessageId={activeRoom.pendingTurns.length > 0 ? activeRoom.pendingTurns[activeRoom.pendingTurns.length - 1]!.id : undefined}
-          editingTurnId={editingTurnId}
-          onCancelEdit={() => setEditingTurnId(undefined)}
-          onRequestEdit={handleEditPending}
-          csrfFetch={csrfFetch}
-          onSend={handleSendMessage}
-          onEditSend={handleEditSend}
-        />
-      }
-    />
+      </div>
+    </div>
   ) : (
     <HomeView rooms={rooms} onOpenRoom={setActiveRoomId} onCreate={openNewRoom} />
   );
