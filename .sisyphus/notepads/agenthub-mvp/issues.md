@@ -61,8 +61,6 @@
 ## 2026-05-23 M3.1 Artifact primitives
 
 - Adding @agenthub/artifacts workspace dependencies required pnpm.cmd install before filtered tests could resolve local workspace packages.
-- Direct Glob remains unusable because 
-g is missing; targeted reads and known-path inspection were used for implementation context.
 - The M3 evidence directory did not exist before this task and was created at .sisyphus/evidence/agenthub-mvp/m3/.
 
 ## 2026-05-23 M4 Web UI blocker (RESOLVED)
