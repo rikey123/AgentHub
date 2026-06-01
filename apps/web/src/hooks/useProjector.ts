@@ -1021,6 +1021,7 @@ class Projector {
         if (payload && typeof payload.skillId === "string" && typeof payload.runId === "string") {
           const error: SkillErrorViewModel = {
             skillId: payload.skillId,
+            ...(typeof payload.name === "string" ? { skillName: payload.name } : {}),
             runId: payload.runId,
             error: typeof payload.error === "string" ? payload.error : "Skill materialization failed",
             createdAt: event.createdAt

@@ -145,6 +145,7 @@ export type MailboxFailureViewModel = {
 // V1.1 additions
 export type SkillErrorViewModel = {
   readonly skillId: string;
+  readonly skillName?: string | undefined;
   readonly runId: string;
   readonly error: string;
   readonly createdAt: number;
