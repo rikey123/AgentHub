@@ -205,6 +205,9 @@ export class TaskService {
     this.options.database.sqlite.transaction(() => {
       if (nextStatus === "blocked") {
         this.options.database.sqlite.prepare("UPDATE tasks SET status = 'blocked', blocker_reason = ?, updated_at = ? WHERE id = ?").run(input.blockerReason ?? null, now, input.taskId);
+      } else if (nextStatus === "review" && input.blockerReason !== undefined) {
+        // Allow setting blocker_reason on review transitions (e.g. missing_completion_report)
+        this.options.database.sqlite.prepare("UPDATE tasks SET status = 'review', blocker_reason = ?, updated_at = ? WHERE id = ?").run(input.blockerReason, now, input.taskId);
       } else {
         this.options.database.sqlite.prepare("UPDATE tasks SET status = ?, blocker_reason = NULL, updated_at = ? WHERE id = ?").run(nextStatus, now, input.taskId);
       }

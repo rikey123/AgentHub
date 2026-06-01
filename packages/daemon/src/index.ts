@@ -243,6 +243,9 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     const permissionEngine = new PermissionEngine({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
     const interventionEngine = new InterventionEngine({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
     const artifactService = new ArtifactService({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
+    const onSkillMaterializationFailed = (taskId: string): void => {
+      taskService.updateStatus({ taskId, status: "blocked", blockerReason: "skill_materialization_failed" });
+    };
     const taskService = new TaskService({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}), onTaskCompleted: (task) => maybePublishTeamDispatchCompleted({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) }, task) });
     const artifactFs = new ArtifactFSRunRegistry({
       database,
@@ -299,18 +302,10 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
         taskService.startDelegatedRun(run.task_id, runId);
       },
       onRunCompleted: (runId: string) => {
-        const run = database.sqlite.prepare("SELECT task_id, workspace_id, room_id, wake_reason FROM runs WHERE id = ?").get(runId) as { readonly task_id: string | null; readonly workspace_id: string; readonly room_id: string; readonly wake_reason: string | null } | undefined;
+        const run = database.sqlite.prepare("SELECT task_id, wake_reason FROM runs WHERE id = ?").get(runId) as { readonly task_id: string | null; readonly wake_reason: string | null } | undefined;
         if (!run?.task_id || run.wake_reason !== "delegated_task") return;
-        const taskId = run.task_id;
-        const task = database.sqlite.prepare("SELECT expects_review FROM tasks WHERE id = ?").get(taskId) as { readonly expects_review: number } | undefined;
-        if (task?.expects_review === 1) {
-          const reviewResult = taskService.review(taskId);
-          if (!reviewResult.ok) return;
-          return;
-        }
-        const taskResult = taskService.completeDelegatedRun(taskId, runId);
-        if (!taskResult.ok) return;
-        appendTaskMailboxWake(run.workspace_id, run.room_id, taskId, runId, "task_completed");
+        // room.complete_task is now the authoritative completion path (D6).
+        // If the run ends without it, onSessionEndedWithoutCompletion handles the missing report path.
       },
       onRunFailed: (runId: string) => {
         const run = database.sqlite.prepare("SELECT task_id, workspace_id, room_id, wake_reason FROM runs WHERE id = ?").get(runId) as { readonly task_id: string | null; readonly workspace_id: string; readonly room_id: string; readonly wake_reason: string | null } | undefined;
@@ -403,7 +398,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
       buildRunArtifact: (input: Parameters<typeof artifactFs.buildRunArtifact>[0]) => artifactFs.buildRunArtifact(input),
       buildWorktreeDiffArtifact: (input: Parameters<typeof artifactFs.buildWorktreeDiffArtifact>[0]) => artifactFs.buildWorktreeDiffArtifact(input)
     };
-    const adapterRegistry = new AdapterRegistry({ database, eventBus, lifecycle, permissionEngine, keychain: modelConfigSecrets, artifactFs: artifactFsBoundary, briefResolver, getRoomMcpServer: () => currentRoomMcpServer(roomMcpServerRef), getCommandBus: () => commandBusRef.current, onSessionEndedWithoutCompletion, onPlanPhaseEnded, skillRegistry, ...(options.adapterCommands !== undefined ? { adapterCommands: options.adapterCommands } : {}), ...(options.now !== undefined ? { now: options.now } : {}) });
+    const adapterRegistry = new AdapterRegistry({ database, eventBus, lifecycle, permissionEngine, keychain: modelConfigSecrets, artifactFs: artifactFsBoundary, briefResolver, getRoomMcpServer: () => currentRoomMcpServer(roomMcpServerRef), getCommandBus: () => commandBusRef.current, onSessionEndedWithoutCompletion, onPlanPhaseEnded, onSkillMaterializationFailed, skillRegistry, ...(options.adapterCommands !== undefined ? { adapterCommands: options.adapterCommands } : {}), ...(options.now !== undefined ? { now: options.now } : {}) });
 
     emitPhase("startup", PHASE_OUTBOX);
     const handlers = createDurableHandlerRegistry({ database, retryDelaysMs: [0] });
@@ -1431,13 +1426,13 @@ function createRole(ctx: RouteContext, input: Record<string, unknown>): void {
   const name = stringField(input["name"]);
   const prompt = stringField(input["prompt"]);
   if (name === undefined || prompt === undefined) return json(ctx.res, 400, { error: "validation_failed", message: "name and prompt are required" });
-  const capabilitiesInput = input["capabilities"];
+  const capabilitiesInput = normalizeCapabilitiesInput(input["capabilities"]);
   if (Array.isArray(capabilitiesInput)) {
     const invalidToken = capabilitiesInput.find((token): token is string => typeof token === "string" && !WELL_KNOWN_CAPABILITY_TOKENS.has(token));
     if (invalidToken !== undefined) return json(ctx.res, 400, { error: "unknown_capability_token", token: invalidToken });
   }
   const roleId = randomUUID();
-  const role = roleRow({ id: roleId, workspaceId, name, prompt, input, now });
+  const role = roleRow({ id: roleId, workspaceId, name, prompt, input: { ...input, capabilities: capabilitiesInput }, now });
   const generationJobId = stringField(input["generationJobId"]);
   ctx.database.sqlite.transaction(() => {
     ctx.database.sqlite.prepare("INSERT INTO roles (id, workspace_id, name, avatar, description, prompt, capabilities, default_permission_profile_id, tags, is_builtin, source_path, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(role.id, role.workspace_id, role.name, role.avatar, role.description, role.prompt, role.capabilities, role.default_permission_profile_id, role.tags, role.is_builtin, role.source_path, role.version, role.created_at, role.updated_at);
@@ -1579,12 +1574,12 @@ function updateRole(ctx: RouteContext, roleId: string, input: Record<string, unk
   if (existing === null) return json(ctx.res, 404, { error: "role_not_found" });
   const now = ctx.now?.() ?? Date.now();
   const workspaceId = stringField(input["workspaceId"]) ?? stringField(existing["workspace_id"]) ?? "default-workspace";
-  const capabilitiesInput = input["capabilities"];
+  const capabilitiesInput = normalizeCapabilitiesInput(input["capabilities"]);
   if (Array.isArray(capabilitiesInput)) {
     const invalidToken = capabilitiesInput.find((token): token is string => typeof token === "string" && !WELL_KNOWN_CAPABILITY_TOKENS.has(token));
     if (invalidToken !== undefined) return json(ctx.res, 400, { error: "unknown_capability_token", token: invalidToken });
   }
-  const role = roleRow({ id: roleId, workspaceId, name: stringField(input["name"]) ?? stringField(existing["name"]) ?? "", prompt: stringField(input["prompt"]) ?? stringField(existing["prompt"]) ?? "", input, existing, now });
+  const role = roleRow({ id: roleId, workspaceId, name: stringField(input["name"]) ?? stringField(existing["name"]) ?? "", prompt: stringField(input["prompt"]) ?? stringField(existing["prompt"]) ?? "", input: { ...input, capabilities: capabilitiesInput }, existing, now });
   ctx.database.sqlite.transaction(() => {
     ctx.database.sqlite.prepare("UPDATE roles SET workspace_id = ?, name = ?, avatar = ?, description = ?, prompt = ?, capabilities = ?, default_permission_profile_id = ?, tags = ?, is_builtin = ?, source_path = ?, version = ?, updated_at = ? WHERE id = ?").run(role.workspace_id, role.name, role.avatar, role.description, role.prompt, role.capabilities, role.default_permission_profile_id, role.tags, role.is_builtin, role.source_path, role.version, role.updated_at, roleId);
     ctx.eventBus.publish({ id: randomUUID(), type: "role.updated", schemaVersion: 1, workspaceId, payload: { roleId, workspaceId }, createdAt: now });
@@ -1827,6 +1822,15 @@ function stringOrNull(value: unknown): string | null { return typeof value === "
 function stringOrJson(value: unknown, fallback: string): string;
 function stringOrJson(value: unknown, fallback: string | null): string | null;
 function stringOrJson(value: unknown, fallback: string | null): string | null { if (value === undefined) return fallback; if (value === null) return null; return typeof value === "string" ? value : JSON.stringify(value); }
+
+function normalizeCapabilitiesInput(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return value;
+  }
+}
 
 async function dispatch(ctx: RouteContext, data: Record<string, unknown>, type: CommandType): Promise<void> {
   const result = await ctx.commandBus.dispatch({ ...data, type, idempotencyKey: typeof data.idempotencyKey === "string" ? data.idempotencyKey : randomUUID() }, { actor: { type: "user", id: "local" }, traceId: randomUUID(), origin: "http" });

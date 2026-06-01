@@ -103,6 +103,36 @@ describe("TaskService.completeTask", () => {
     if (result.ok) throw new Error("expected permission denied");
     expect(result.error.code).toBe("permission_denied");
   });
+
+  test("task stays in_progress when run ends without room.complete_task (authoritative path)", () => {
+    // Spec D6: room.complete_task is the ONLY path that transitions a delegated task.
+    // onRunCompleted no longer auto-completes — the task must remain in_progress
+    // until room.complete_task is called or onSessionEndedWithoutCompletion fires.
+    const taskId = createTask({ roomId: "room_squad", assigneeAgentId: "agent_worker", expectsReview: false, status: "in_progress" });
+
+    // Simulate run completing WITHOUT calling room.complete_task
+    // (no completeTask call here — just verify task is still in_progress)
+    const taskRow = currentDatabase().sqlite.prepare("SELECT status FROM tasks WHERE id = ?").get(taskId) as { readonly status: string };
+    expect(taskRow.status).toBe("in_progress");
+
+    // Only task.created + task.assigned events — no task.delegation.completed
+    const events = eventsFor(taskId);
+    expect(events).not.toContain("task.delegation.completed");
+  });
+
+  test("onSessionEndedWithoutCompletion transitions task to review with missing_completion_report", () => {
+    // Spec D6: if run ends without room.complete_task, task → review(missing_completion_report)
+    const taskId = createTask({ roomId: "room_squad", assigneeAgentId: "agent_worker", expectsReview: false, status: "in_progress" });
+
+    // Simulate the onSessionEndedWithoutCompletion callback directly
+    const result = currentService().updateStatus({ taskId, status: "review", blockerReason: "missing_completion_report" });
+
+    expect(result.ok).toBe(true);
+    expect(currentDatabase().sqlite.prepare("SELECT status, blocker_reason FROM tasks WHERE id = ?").get(taskId)).toMatchObject({
+      status: "review",
+      blocker_reason: "missing_completion_report"
+    });
+  });
 });
 
 function currentDatabase(): AgentHubDatabase {

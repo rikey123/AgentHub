@@ -46,12 +46,15 @@ export function buildRunPrompt(run: RunRow, database: AgentHubDatabase, options:
 function buildLeaderPromptParams(run: RunRow, database: AgentHubDatabase): Parameters<typeof buildPlanPhasePrompt>[0] {
   const participants = database.sqlite.prepare(
     `SELECT rp.participant_id AS agentId, rp.role, ap.name, ap.adapter_id AS adapterId, COALESCE(ap2.state, 'offline') AS presence
-     FROM room_participants rp
-     LEFT JOIN agent_profiles ap ON ap.id = rp.participant_id
-     LEFT JOIN agent_presence ap2 ON ap2.room_id = rp.room_id AND ap2.agent_id = rp.participant_id
-     WHERE rp.room_id = ? AND rp.participant_type = 'agent'
-     ORDER BY rp.joined_at ASC`
-  ).all(run.room_id) as Array<{ readonly agentId: string; readonly role: string; readonly name: string | null; readonly adapterId: string | null; readonly presence: string }>;
+            , r.capabilities AS capabilities
+      FROM room_participants rp
+      LEFT JOIN agent_profiles ap ON ap.id = rp.participant_id
+      LEFT JOIN agent_presence ap2 ON ap2.room_id = rp.room_id AND ap2.agent_id = rp.participant_id
+      LEFT JOIN agent_bindings ab ON ab.id = rp.agent_binding_id
+      LEFT JOIN roles r ON r.id = ab.role_id
+      WHERE rp.room_id = ? AND rp.participant_type = 'agent'
+      ORDER BY rp.joined_at ASC`
+  ).all(run.room_id) as Array<{ readonly agentId: string; readonly role: string; readonly name: string | null; readonly adapterId: string | null; readonly presence: string; readonly capabilities: string | null }>;
 
   return {
     agentName: participants.find((participant) => participant.agentId === run.agent_id)?.name ?? run.agent_id,
@@ -62,9 +65,20 @@ function buildLeaderPromptParams(run: RunRow, database: AgentHubDatabase): Param
         name: participant.name ?? participant.agentId,
         slug: nameToSlug(participant.name ?? participant.agentId),
         role: participant.role,
-        presence: participant.presence
+        presence: participant.presence,
+        capabilities: parseCapabilities(participant.capabilities)
       }))
   };
+}
+
+function parseCapabilities(value: string | null): string[] {
+  if (value === null) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 function readCurrentRunMailbox(run: RunRow, database: AgentHubDatabase, options: RunPromptOptions): MailboxDeliveryBatch {

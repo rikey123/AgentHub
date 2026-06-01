@@ -66,6 +66,7 @@ export type NativeAgentAdapterOptions = {
   readonly mcpTools?: readonly McpToolDefinition[];
   readonly mcpToolExecutor?: McpToolExecutor;
   readonly tools?: ToolSet;
+  readonly onSessionEndedWithoutCompletion?: (taskId: string) => void | Promise<void>;
   readonly onPlanPhaseEnded?: (runId: string) => void | Promise<void>;
   readonly now?: () => number;
 };
@@ -105,6 +106,9 @@ export class NativeAgentAdapter {
       eventBus: this.options.eventBus,
       database: this.options.database,
       now: this.now,
+      ...(run.wake_reason !== null ? { wakeReason: run.wake_reason } : {}),
+      ...(this.options.onSessionEndedWithoutCompletion !== undefined ? { onSessionEndedWithoutCompletion: this.options.onSessionEndedWithoutCompletion } : {}),
+      ...(this.options.onPlanPhaseEnded !== undefined ? { onPlanPhaseEnded: this.options.onPlanPhaseEnded } : {}),
       ...(run.task_id !== null ? { taskId: run.task_id } : {}),
       messageId: `msg_${run.id}`,
       ...(run.workspace_mode !== null ? { workspaceMode: run.workspace_mode } : {}),

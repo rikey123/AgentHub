@@ -22,6 +22,7 @@ export type AdapterRegistryOptions = {
   readonly getCommandBus?: () => CommandBus | undefined;
   readonly onSessionEndedWithoutCompletion?: (taskId: string) => void | Promise<void>;
   readonly onPlanPhaseEnded?: (runId: string) => void | Promise<void>;
+  readonly onSkillMaterializationFailed?: (taskId: string) => void;
   readonly skillRegistry?: SkillRegistry;
   readonly mockAdapter?: MockAdapterManager;
   readonly claudeAdapter?: WarmableManagedAdapter;
@@ -73,6 +74,14 @@ export class AdapterRegistry {
     this.runAdapters.set(run.id, adapterId);
     try {
       this.options.skillRegistry?.materializeForRun(this.skillRunInput(run, adapterId));
+    } catch (error) {
+      if (run.task_id !== null && this.options.onSkillMaterializationFailed !== undefined) {
+        this.options.onSkillMaterializationFailed(run.task_id);
+      }
+      this.options.lifecycle.fail(null, run.id, "skill_materialization_failed", "fatal", error instanceof Error ? error.message : String(error), "");
+      return;
+    }
+    try {
       if (adapterId === "claude-code") {
         await this.claude().runManaged(run);
         return;
@@ -291,13 +300,14 @@ export class AdapterRegistry {
     return this.classify(run.adapter_id, run.agent_id);
   }
 
-  private skillRunInput(run: RunRow, runtimeId: RuntimeAdapterId): { readonly runId: string; readonly roomId: string; readonly participantId: string; readonly workspaceRoot: string; readonly runtimeId: string; readonly taskId?: string } {
+  private skillRunInput(run: RunRow, runtimeId: RuntimeAdapterId): { readonly runId: string; readonly roomId: string; readonly participantId: string; readonly workspaceRoot: string; readonly runtimeId: string; readonly taskId?: string; readonly mode: "isolated_worktree" | "shared" } {
     return {
       runId: run.id,
       roomId: run.room_id,
       participantId: run.agent_id,
       workspaceRoot: this.workspaceRootForRun(run),
       runtimeId,
+      mode: run.workspace_mode === "isolated_worktree" ? "isolated_worktree" : "shared",
       ...(run.task_id !== null ? { taskId: run.task_id } : {})
     };
   }

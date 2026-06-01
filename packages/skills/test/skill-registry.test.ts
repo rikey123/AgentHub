@@ -87,12 +87,12 @@ describe("SkillRegistry", () => {
 
     currentRegistry().materializeForRun({ runId: "run_1", roomId: "room_1", participantId: "agent_1", workspaceRoot: tempWorkspaceRoot(), runtimeId: "native" });
 
-    expect(fs.existsSync(join(tempWorkspaceRoot(), ".agenthub", "skills", "tooling-skill", "SKILL.md"))).toBe(true);
-    expect(fs.existsSync(join(tempWorkspaceRoot(), ".agenthub", "skills", "tooling-skill", "docs", "README.md"))).toBe(true);
+    expect(fs.existsSync(join(tempWorkspaceRoot(), ".agenthub", "skill-overlays", "run_1", ".agenthub", "skills", "tooling-skill", "SKILL.md"))).toBe(true);
+    expect(fs.existsSync(join(tempWorkspaceRoot(), ".agenthub", "skill-overlays", "run_1", ".agenthub", "skills", "tooling-skill", "docs", "README.md"))).toBe(true);
 
     currentRegistry().cleanupRun("run_1");
 
-    expect(fs.existsSync(join(tempWorkspaceRoot(), ".agenthub", "skills", "tooling-skill"))).toBe(false);
+    expect(fs.existsSync(join(tempWorkspaceRoot(), ".agenthub", "skill-overlays", "run_1", ".agenthub", "skills", "tooling-skill"))).toBe(false);
   });
 
   test("materialization failures publish skill.materialization_failed", () => {
@@ -147,7 +147,7 @@ function insertRoomSkill(roomId: string, skillId: string, enabled: 0 | 1): void 
 }
 
 function insertAgentSkill(roomId: string, participantId: string, skillId: string, mode: "add" | "restrict"): void {
-  currentDatabase().sqlite.prepare("INSERT INTO agent_skills (room_participant_id, skill_id, mode) VALUES (?, ?, ?)").run(participantId, skillId, mode);
+  currentDatabase().sqlite.prepare("INSERT INTO agent_skills (room_participant_id, skill_id, mode) VALUES (?, ?, ?)").run(`${roomId}:${participantId}`, skillId, mode);
 }
 
 function tempWorkspaceRoot(): string {

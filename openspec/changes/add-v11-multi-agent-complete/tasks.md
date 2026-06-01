@@ -26,7 +26,7 @@
 
 ## 3. Dev B Track — Multi-Agent Intelligence + Skill System (packages/orchestrator, packages/skills)
 
-- [ ] 3.1 Implement `room.complete_task` MCP tool: teammate-only enforcement, `expects_review` gate, state machine per spec, publish `task.status.changed` + `task.delegation.completed`
+- [x] 3.1 Implement `room.complete_task` MCP tool: teammate-only enforcement, `expects_review` gate, state machine per spec, publish `task.status.changed` + `task.delegation.completed`
 - [ ] 3.2 Implement `assembleMissionBrief(roomId, agentId, taskId?)`: query live room state, build `MissionBrief` struct, inject as `<mission-brief>` XML block
 - [ ] 3.3 Implement Room Memory: query confirmed `context_items` with `scope='conversation'` for `roomMemory` field in MissionBrief
 - [ ] 3.4 Implement planning phase: `reason: "plan"` wake → leader produces PlanDocument → store in `task_plans` → publish `task.plan.created` → immediately trigger `reason: "execute"` wake; handle parse failure gracefully (write `task.activity.added { kind: "plan_parse_failed" }`, continue to execute)

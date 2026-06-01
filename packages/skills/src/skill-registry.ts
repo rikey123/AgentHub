@@ -43,6 +43,20 @@ export type UpdateSkillInput = {
   readonly content?: string;
 };
 
+export type RoomSkillAssignmentInput = {
+  readonly skillId: string;
+  readonly roomId: string;
+  readonly workspaceId: string;
+};
+
+export type ParticipantSkillAssignmentInput = {
+  readonly skillId: string;
+  readonly roomId: string;
+  readonly participantId: string;
+  readonly workspaceId: string;
+  readonly mode: "add" | "restrict";
+};
+
 type SkillFrontmatter = { readonly name: string; readonly description: string };
 
 const RUNTIME_SKILL_DIRS: Record<string, string> = {
@@ -104,11 +118,45 @@ export class SkillRegistry {
     })();
   }
 
+  activateForRoom(input: RoomSkillAssignmentInput): void {
+    const now = this.now();
+    this.options.database.sqlite.transaction(() => {
+      this.options.database.sqlite.prepare("INSERT INTO room_skills (room_id, skill_id, enabled) VALUES (?, ?, 1) ON CONFLICT(room_id, skill_id) DO UPDATE SET enabled = 1").run(input.roomId, input.skillId);
+      this.options.eventBus.publish({ id: randomUUID(), type: "skill.activated", schemaVersion: 1, workspaceId: input.workspaceId, roomId: input.roomId, payload: { skillId: input.skillId, roomId: input.roomId }, createdAt: now });
+    })();
+  }
+
+  deactivateForRoom(input: RoomSkillAssignmentInput): void {
+    const now = this.now();
+    this.options.database.sqlite.transaction(() => {
+      this.options.database.sqlite.prepare("DELETE FROM room_skills WHERE room_id = ? AND skill_id = ?").run(input.roomId, input.skillId);
+      this.options.eventBus.publish({ id: randomUUID(), type: "skill.deactivated", schemaVersion: 1, workspaceId: input.workspaceId, roomId: input.roomId, payload: { skillId: input.skillId, roomId: input.roomId }, createdAt: now });
+    })();
+  }
+
+  activateForParticipant(input: ParticipantSkillAssignmentInput): void {
+    const now = this.now();
+    const roomParticipantId = compositeRoomParticipantId(input.roomId, input.participantId);
+    this.options.database.sqlite.transaction(() => {
+      this.options.database.sqlite.prepare("INSERT INTO agent_skills (room_participant_id, skill_id, mode) VALUES (?, ?, ?) ON CONFLICT(room_participant_id, skill_id) DO UPDATE SET mode = excluded.mode").run(roomParticipantId, input.skillId, input.mode);
+      this.options.eventBus.publish({ id: randomUUID(), type: "skill.activated", schemaVersion: 1, workspaceId: input.workspaceId, roomId: input.roomId, payload: { skillId: input.skillId, participantId: input.participantId }, createdAt: now });
+    })();
+  }
+
+  deactivateForParticipant(input: Pick<ParticipantSkillAssignmentInput, "skillId" | "roomId" | "participantId" | "workspaceId">): void {
+    const now = this.now();
+    const roomParticipantId = compositeRoomParticipantId(input.roomId, input.participantId);
+    this.options.database.sqlite.transaction(() => {
+      this.options.database.sqlite.prepare("DELETE FROM agent_skills WHERE room_participant_id = ? AND skill_id = ?").run(roomParticipantId, input.skillId);
+      this.options.eventBus.publish({ id: randomUUID(), type: "skill.deactivated", schemaVersion: 1, workspaceId: input.workspaceId, roomId: input.roomId, payload: { skillId: input.skillId, participantId: input.participantId }, createdAt: now });
+    })();
+  }
+
   resolveSkills(roomId: string, participantId: string): readonly SkillRow[] {
     const roomSkills = this.options.database.sqlite.prepare(`SELECT s.id, s.workspace_id, s.name, s.description, s.content, s.origin, s.source_url, s.created_at, s.updated_at FROM room_skills rs INNER JOIN skills s ON s.id = rs.skill_id WHERE rs.room_id = ? AND rs.enabled = 1 ORDER BY s.name ASC`).all(roomId) as SkillRow[];
     const participant = this.options.database.sqlite.prepare("SELECT participant_id FROM room_participants WHERE room_id = ? AND participant_id = ? AND participant_type = 'agent' LIMIT 1").get(roomId, participantId) as { readonly participant_id: string } | undefined;
     if (participant === undefined) return roomSkills;
-    const overrides = this.options.database.sqlite.prepare("SELECT skill_id, mode FROM agent_skills WHERE room_participant_id = ?").all(participant.participant_id) as { readonly skill_id: string; readonly mode: "add" | "restrict" }[];
+    const overrides = this.options.database.sqlite.prepare("SELECT skill_id, mode FROM agent_skills WHERE room_participant_id = ?").all(compositeRoomParticipantId(roomId, participant.participant_id)) as { readonly skill_id: string; readonly mode: "add" | "restrict" }[];
     const pool = new Map(roomSkills.map((skill) => [skill.id, skill] as const));
     const addIds = new Set<string>();
     const restrictIds = new Set<string>();
@@ -130,13 +178,15 @@ export class SkillRegistry {
     return Array.from(pool.values()).sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  materializeForRun(input: { readonly runId: string; readonly roomId: string; readonly participantId: string; readonly workspaceRoot: string; readonly runtimeId: string; readonly taskId?: string }): void {
+  materializeForRun(input: { readonly runId: string; readonly roomId: string; readonly participantId: string; readonly workspaceRoot: string; readonly runtimeId: string; readonly taskId?: string; readonly mode?: "isolated_worktree" | "shared" }): void {
     const skills = this.resolveSkills(input.roomId, input.participantId);
     if (skills.length === 0) return;
     const skillDir = RUNTIME_SKILL_DIRS[input.runtimeId] ?? ".agenthub/skills";
     const runPaths = new Set<string>();
     const workspaceId = this.roomWorkspaceId(input.roomId);
-    const materializedRoot = resolve(input.workspaceRoot, skillDir);
+    const materializedRoot = input.mode === "isolated_worktree"
+      ? resolve(input.workspaceRoot, skillDir)
+      : resolve(input.workspaceRoot, ".agenthub", "skill-overlays", input.runId, skillDir);
     try {
       for (const skill of skills) {
         const packageRoot = resolve(materializedRoot, skill.name);
@@ -231,4 +281,8 @@ function resolveWithinRoot(root: string, path: string): string {
   const rel = relative(root, resolved);
   if (rel.startsWith("..") || rel.split(sep).includes("..")) throw new Error("skill file path escapes skill package");
   return resolved;
+}
+
+function compositeRoomParticipantId(roomId: string, participantId: string): string {
+  return `${roomId}:${participantId}`;
 }

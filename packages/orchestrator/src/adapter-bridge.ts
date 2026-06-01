@@ -72,7 +72,7 @@ export class AdapterBridge {
       readonly artifactFs?: AdapterArtifactFSBoundary;
       readonly getCommandBus?: () => CommandBus | undefined;
       readonly onSessionEndedWithoutCompletion?: (taskId: string) => void | Promise<void>;
-      readonly onPlanPhaseEnded?: () => void | Promise<void>;
+      readonly onPlanPhaseEnded?: (runId: string) => void | Promise<void>;
       /** Optional brief resolver. When omitted, briefs default to "" (legacy behavior). */
       readonly briefResolver?: BriefResolver;
       /** Database used to look up the final assistant message text + artifact counts when computing the brief. */
@@ -119,9 +119,7 @@ export class AdapterBridge {
       const briefText = this.computeBriefText({ cancelled });
       if (cancelled) this.input.lifecycle.cancelFinalized(null, this.input.runId, briefText);
       else this.input.lifecycle.complete(null, this.input.runId, event.cost ?? zeroCost(), briefText);
-      if (this.input.wakeReason === "plan" && this.input.taskId === undefined) {
-        void Promise.resolve(this.input.onPlanPhaseEnded?.());
-      }
+      if (this.input.wakeReason === "plan") void Promise.resolve(this.input.onPlanPhaseEnded?.(this.input.runId));
       if (this.input.taskId !== undefined && !this.hasRecordedCompletionReport(this.input.taskId)) {
         void Promise.resolve(this.input.onSessionEndedWithoutCompletion?.(this.input.taskId));
       }
