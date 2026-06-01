@@ -243,8 +243,21 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     const permissionEngine = new PermissionEngine({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
     const interventionEngine = new InterventionEngine({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
     const artifactService = new ArtifactService({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
-    const onSkillMaterializationFailed = (taskId: string): void => {
-      taskService.updateStatus({ taskId, status: "blocked", blockerReason: "skill_materialization_failed" });
+    const onSkillMaterializationFailed = (input: { readonly taskId: string; readonly skillId: string; readonly skillName: string; readonly workspaceId: string; readonly runId: string; readonly error: string }): void => {
+      const now = options.now?.() ?? Date.now();
+      database.sqlite.transaction(() => {
+        taskService.updateStatus({ taskId: input.taskId, status: "blocked", blockerReason: "skill_materialization_failed" });
+        eventBus.publish({
+          id: randomUUID(),
+          type: "skill.materialization_failed",
+          schemaVersion: 1,
+          workspaceId: input.workspaceId,
+          runId: input.runId,
+          taskId: input.taskId,
+          payload: { skillId: input.skillId, name: input.skillName, runId: input.runId, error: input.error },
+          createdAt: now
+        });
+      });
     };
     const taskService = new TaskService({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}), onTaskCompleted: (task) => maybePublishTeamDispatchCompleted({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) }, task) });
     const artifactFs = new ArtifactFSRunRegistry({
