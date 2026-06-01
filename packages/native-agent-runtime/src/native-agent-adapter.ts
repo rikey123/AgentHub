@@ -3,7 +3,8 @@ import { randomUUID } from "node:crypto";
 import { stepCountIs, streamText, type LanguageModel, type ToolSet } from "ai";
 import type { EventBus, PublishInput } from "../../bus/src/index.ts";
 import type { AgentHubDatabase } from "../../db/src/index.ts";
-import { AdapterBridge, buildFirstWakePrompt, buildRunPrompt, type AdapterArtifactFSBoundary, type RunLifecycleService, type RunRow } from "../../orchestrator/src/index.ts";
+import { AdapterBridge, buildFirstWakePrompt, buildPlanPhasePrompt, buildRunPrompt, type AdapterArtifactFSBoundary, type RunLifecycleService, type RunRow } from "../../orchestrator/src/index.ts";
+import { nameToSlug } from "../../orchestrator/src/mention-parser.ts";
 import type { AgentAdapterManifest } from "../../protocol/src/index.ts";
 import type { PermissionEngine, PermissionResource } from "../../permissions/src/index.ts";
 
@@ -320,12 +321,14 @@ export class NativeAgentAdapter {
   }
 
   private loadRunPrompt(run: RunRow): { readonly system?: string; readonly input: string } {
-    const system = buildFirstWakePrompt(run.id, run.agent_id, run.room_id, this.options.database);
+    const system = run.wake_reason === "plan"
+      ? buildPlanPhasePrompt(buildPlanLeaderPromptParams(run, this.options.database))
+      : buildFirstWakePrompt(run.id, run.agent_id, run.room_id, this.options.database);
     const skillsBlock = this.options.getSkillsBlock?.(run.id);
     const rendered = buildRunPrompt(run, this.options.database, { now: this.now, ...(skillsBlock !== undefined ? { skillsBlock } : {}) });
-    // Strip the role system prompt from the user-turn input to avoid duplication.
-    // buildRunPrompt joins parts with "\n\n---\n\n"; system may appear at any position
-    // depending on whether skillsBlock or missionBrief precede it.
+    // Strip the system prompt from the user-turn input to avoid duplication.
+    // buildRunPrompt joins parts with "\n\n---\n\n"; the prompt block may appear after
+    // skillsBlock / missionBrief / priorProgress depending on wake reason and room mode.
     const separator = "\n\n---\n\n";
     let input = rendered;
     let separatedSystem = false;
@@ -333,18 +336,55 @@ export class NativeAgentAdapter {
       const systemWithSep = `${system}${separator}`;
       const idx = rendered.indexOf(systemWithSep);
       if (idx !== -1) {
-        // Remove the system block and its trailing separator from the rendered string
         input = rendered.slice(0, idx) + rendered.slice(idx + systemWithSep.length);
-        // Clean up any leading separator left behind
         if (input.startsWith(separator)) input = input.slice(separator.length);
         separatedSystem = true;
       } else if (rendered === system) {
-        // Rendered is only the system prompt — nothing left for input
         input = "";
         separatedSystem = true;
       }
     }
     return { ...(system !== undefined ? { system } : {}), input: separatedSystem ? input : rendered };
+  }
+}
+
+type NativePlanLeaderPromptParams = Parameters<typeof buildPlanPhasePrompt>[0];
+
+function buildPlanLeaderPromptParams(run: RunRow, database: AgentHubDatabase): NativePlanLeaderPromptParams {
+  const participants = database.sqlite.prepare(
+    `SELECT rp.participant_id AS agentId, rp.role, ap.name, ap.adapter_id AS adapterId, COALESCE(ap2.state, 'offline') AS presence
+            , r.capabilities AS capabilities
+      FROM room_participants rp
+      LEFT JOIN agent_profiles ap ON ap.id = rp.participant_id
+      LEFT JOIN agent_presence ap2 ON ap2.room_id = rp.room_id AND ap2.agent_id = rp.participant_id
+      LEFT JOIN agent_bindings ab ON ab.id = rp.agent_binding_id
+      LEFT JOIN roles r ON r.id = ab.role_id
+      WHERE rp.room_id = ? AND rp.participant_type = 'agent'
+      ORDER BY rp.joined_at ASC`
+  ).all(run.room_id) as Array<{ readonly agentId: string; readonly role: string; readonly name: string | null; readonly adapterId: string | null; readonly presence: string; readonly capabilities: string | null }>;
+
+  return {
+    agentName: participants.find((participant) => participant.agentId === run.agent_id)?.name ?? run.agent_id,
+    teammates: participants
+      .filter((participant) => participant.agentId !== run.agent_id)
+      .map((participant) => ({
+        agentId: participant.agentId,
+        name: participant.name ?? participant.agentId,
+        slug: nameToSlug(participant.name ?? participant.agentId),
+        role: participant.role,
+        presence: participant.presence,
+        capabilities: parseCapabilities(participant.capabilities)
+      }))
+  };
+}
+
+function parseCapabilities(value: string | null): string[] {
+  if (value === null) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
   }
 }
 
