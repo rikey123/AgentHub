@@ -358,13 +358,15 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
         { actor: { type: "system" }, traceId: `missing-completion-report:${taskId}`, origin: "internal" }
       );
     };
-    const onPlanPhaseEnded = async (runId: string): Promise<void> => {
+    const onPlanPhaseEnded = async (runId: string, planText?: string): Promise<void> => {
       const run = database.sqlite.prepare("SELECT room_id, agent_id, workspace_id, wake_reason FROM runs WHERE id = ?").get(runId) as { readonly room_id: string; readonly agent_id: string; readonly workspace_id: string; readonly wake_reason: string | null } | undefined;
       if (run === undefined || run.wake_reason !== "plan") return;
 
-      const assistantMessage = database.sqlite.prepare("SELECT id FROM messages WHERE run_id = ? AND role = 'assistant' AND deleted_at IS NULL ORDER BY created_at DESC, id DESC LIMIT 1").get(runId) as { readonly id: string } | undefined;
-      if (assistantMessage !== undefined) {
-        const text = messageText(database, assistantMessage.id) ?? "";
+      const assistantMessage = planText === undefined
+        ? database.sqlite.prepare("SELECT id FROM messages WHERE run_id = ? AND role = 'assistant' AND deleted_at IS NULL ORDER BY created_at DESC, id DESC LIMIT 1").get(runId) as { readonly id: string } | undefined
+        : undefined;
+      const text = planText ?? (assistantMessage !== undefined ? messageText(database, assistantMessage.id) : undefined);
+      if (text !== undefined) {
         const plan = parsePlanDocument(text);
         const now = options.now?.() ?? Date.now();
         if (plan !== undefined) {

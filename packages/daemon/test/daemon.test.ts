@@ -38,10 +38,15 @@ vi.mock("../../native-agent-runtime/src/native-agent-adapter.ts", () => ({
       this.options = options as never;
     }
 
-    async runManaged(run: { readonly id: string; readonly workspace_id: string; readonly room_id: string | null; readonly agent_id: string | null }) {
+    async runManaged(run: { readonly id: string; readonly workspace_id: string; readonly room_id: string | null; readonly agent_id: string | null; readonly wake_reason?: string | null }) {
       nativeAdapterRunManagedMock(run);
       const decision = this.options.permissions?.check?.({ workspaceId: run.workspace_id, ...(run.room_id !== null ? { roomId: run.room_id } : {}), ...(run.agent_id !== null ? { agentId: run.agent_id } : {}), runId: run.id, resource: { type: "model.api_call", provider: "openai" } }) ?? { status: "allow" as const };
       if (decision.status === "allow") {
+        if (run.wake_reason === "plan") {
+          const options = this.options as { readonly onPlanPhaseEnded?: (runId: string, planText?: string) => Promise<void> | void };
+          await options.onPlanPhaseEnded?.(run.id, "```json\n{\"goal\":\"ship\",\"tasks\":[{\"title\":\"Build\",\"description\":\"Implement it\",\"assigneeRole\":\"Builder\"}]}\n```");
+          return;
+        }
         resolveProviderMock({ id: "mock-native-config", provider: "openai", model: "gpt-4o", base_url: null, api_key_ref: null }, "test-key");
         streamTextMock({});
       }
@@ -559,6 +564,32 @@ describe("daemon M1.4 composition", () => {
       (run) => run !== undefined && run.adapter_id === "native"
     );
     expect(nativeAdapterRunManagedMock).toHaveBeenCalledWith(expect.objectContaining({ agent_id: bindingId, adapter_id: "native" }));
+  });
+
+  it("records plan wake output as a task plan without surfacing JSON in chat messages", async () => {
+    const runId = "run-native-plan-hidden";
+    const roomId = "room-native-plan-hidden";
+    const agentId = "native-agent-plan-hidden";
+    const planText = "```json\n{\"goal\":\"ship\",\"tasks\":[{\"title\":\"Build\",\"description\":\"Implement it\",\"assigneeRole\":\"Builder\"}]}\n```";
+
+    daemon.database.sqlite.transaction(() => {
+      daemon.database.sqlite.prepare("INSERT INTO model_configs (id, workspace_id, name, provider, model, base_url, api_key_ref, api_key_fingerprint, temperature, max_tokens, reasoning, extra, profile, created_at, updated_at) VALUES ('model-plan-hidden', 'default-workspace', 'Plan Model', 'ollama', 'plan-model', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1, 1)").run();
+      daemon.database.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES (?, 'default-workspace', 'project-manager', 'native-default', 'model-plan-hidden', NULL, 1, 1)").run(agentId);
+      daemon.database.sqlite.prepare("INSERT INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES (?, 'default-workspace', 'Planner', 'native', NULL, '', '[]', NULL, 0, NULL, 1, 1)").run(agentId);
+      daemon.database.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at, leader_role_id) VALUES (?, 'default-workspace', 'Plan Hidden', 'squad', 'conversation', ?, NULL, 1, 1, 'project-manager')").run(roomId, agentId);
+      daemon.database.sqlite.prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES (?, ?, 'agent', 'primary', 'native', NULL, ?, 'active', 1)").run(roomId, agentId, agentId);
+      daemon.database.sqlite.prepare("INSERT INTO runs (id, workspace_id, task_id, room_id, agent_id, adapter_id, adapter_session_id, provider_conversation_id, parent_run_id, status, wake_reason, waiting_reason, workspace_path, work_dir, workspace_mode, context_version, target_files, mailbox_claim_count, pid_at_start, claimed_at, started_at, ended_at, input_tokens, output_tokens, cached_tokens, cost_usd, model_id, failure_class, error, created_at, updated_at) VALUES (?, 'default-workspace', NULL, ?, ?, 'native', NULL, NULL, NULL, 'queued', 'plan', NULL, NULL, NULL, 'shadow_buffer', NULL, '[]', 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1, 1)").run(runId, roomId, agentId);
+    })();
+
+    await daemon.adapterRegistry.runAgent(daemon.database.sqlite.prepare("SELECT * FROM runs WHERE id = ?").get(runId) as never);
+
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM task_plans WHERE run_id = ?").get(runId)).toMatchObject({ count: 1 });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE run_id = ? AND type = 'task.plan.created'").get(runId)).toMatchObject({ count: 1 });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM messages WHERE run_id = ?").get(runId)).toMatchObject({ count: 0 });
+    const messagesResponse = await fetch(`${baseUrl}/rooms/${roomId}/messages`);
+    expect(messagesResponse.status).toBe(200);
+    const messagesBody = await messagesResponse.json() as { readonly messages: readonly unknown[] };
+    expect(messagesBody.messages).toEqual([]);
   });
 
   it("rejects deleting a runtime with existing bindings", async () => {

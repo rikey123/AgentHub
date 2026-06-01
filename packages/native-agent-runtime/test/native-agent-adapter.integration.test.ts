@@ -145,6 +145,31 @@ describe("NativeAgentAdapter integration", () => {
     expect(calls).toEqual([`running:${run.id}`, `completed:${run.id}`]);
   });
 
+  test("keeps plan wake JSON out of chat messages while retaining internal plan text", async () => {
+    const run = createStartingRun("run_native_plan", "plan");
+    const onPlanPhaseEnded = vi.fn();
+    streamTextMock.mockReturnValue({
+      fullStream: asyncGenerator([{ type: "text-delta", text: "```json\n{\"goal\":\"ship\",\"tasks\":[]}\n```" }]),
+      usage: Promise.resolve({ inputTokens: 5, outputTokens: 6 })
+    });
+
+    await new NativeAgentAdapter({
+      database: currentDatabase(),
+      eventBus: currentBus() as unknown as import("../../bus/src/index.ts").EventBus,
+      lifecycle: currentLifecycle(),
+      permissions: currentPermissions(),
+      modelConfig: openAiModelConfig(),
+      onPlanPhaseEnded,
+      now: () => now
+    }).runManaged(run);
+
+    expect(currentLifecycle().read(run.id).status).toBe("completed");
+    expect(eventTypesForRun(run.id)).not.toContain("message.created");
+    expect(eventTypesForRun(run.id)).not.toContain("message.completed");
+    expect(assistantMessage(run.id)).toBeUndefined();
+    expect(onPlanPhaseEnded).toHaveBeenCalledWith(run.id, "```json\n{\"goal\":\"ship\",\"tasks\":[]}\n```");
+  });
+
   test("denies model.api_call permission before creating the stream", async () => {
     seedPermissionRule("rule_deny_anthropic", "model.api_call.anthropic", "anthropic", "deny");
     const run = createStartingRun("run_native_permission_deny");
@@ -194,8 +219,8 @@ function seedSoloRoom(): void {
   currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, default_presence, joined_at) VALUES ('room_1', 'agent_1', 'agent', 'primary', 'native', NULL, 'active', ?)").run(now);
 }
 
-function createStartingRun(runId: string): RunRow {
-  currentLifecycle().create(null, { runId, workspaceId: "ws_1", roomId: "room_1", agentId: "agent_1", wakeReason: "primary_turn", workspaceMode: "shadow_buffer", messageId: `msg_${runId}` });
+function createStartingRun(runId: string, wakeReason: "primary_turn" | "plan" = "primary_turn"): RunRow {
+  currentLifecycle().create(null, { runId, workspaceId: "ws_1", roomId: "room_1", agentId: "agent_1", wakeReason, workspaceMode: "shadow_buffer", messageId: `msg_${runId}` });
   currentLifecycle().markClaimed(null, runId);
   currentLifecycle().markStarting(null, runId, 123);
   return currentLifecycle().read(runId);

@@ -68,7 +68,7 @@ export type NativeAgentAdapterOptions = {
   readonly mcpToolExecutor?: McpToolExecutor;
   readonly tools?: ToolSet;
   readonly onSessionEndedWithoutCompletion?: (taskId: string) => void | Promise<void>;
-  readonly onPlanPhaseEnded?: (runId: string) => void | Promise<void>;
+  readonly onPlanPhaseEnded?: (runId: string, planText?: string) => void | Promise<void>;
   readonly getSkillsBlock?: (runId: string) => string | undefined;
   readonly now?: () => number;
 };
@@ -110,7 +110,6 @@ export class NativeAgentAdapter {
       now: this.now,
       ...(run.wake_reason !== null ? { wakeReason: run.wake_reason } : {}),
       ...(this.options.onSessionEndedWithoutCompletion !== undefined ? { onSessionEndedWithoutCompletion: this.options.onSessionEndedWithoutCompletion } : {}),
-      ...(this.options.onPlanPhaseEnded !== undefined ? { onPlanPhaseEnded: this.options.onPlanPhaseEnded } : {}),
       ...(run.task_id !== null ? { taskId: run.task_id } : {}),
       messageId: `msg_${run.id}`,
       ...(run.workspace_mode !== null ? { workspaceMode: run.workspace_mode } : {}),
@@ -179,9 +178,10 @@ export class NativeAgentAdapter {
         }
       }
 
-      this.completeAssistantText(run, messageId);
+      const finalText = this.completeAssistantText(run, messageId);
       const usage = await usagePromise;
       bridge.handle({ type: "session.ended", sessionId, reason: "completed", cost: costFromUsage(usage, modelConfig.model) });
+      if (run.wake_reason === "plan") void Promise.resolve(this.options.onPlanPhaseEnded?.(run.id, finalText));
     } catch (error) {
       if (isAbortError(error)) {
         this.completeAssistantText(run, `msg_${run.id}`);
@@ -272,20 +272,21 @@ export class NativeAgentAdapter {
   private appendAssistantText(run: RunRow, messageId: string, delta: string, bridge: AdapterBridge): void {
     const existing = this.assistantTextByRun.get(run.id);
     if (existing === undefined) {
-      this.persistAssistantMessageStart(run, messageId);
+      if (run.wake_reason !== "plan") this.persistAssistantMessageStart(run, messageId);
       this.assistantTextByRun.set(run.id, delta);
     } else {
       this.assistantTextByRun.set(run.id, existing + delta);
     }
-    this.publishRunEvent(run, "message.part.delta", { messageId, text: delta });
+    if (run.wake_reason !== "plan") this.publishRunEvent(run, "message.part.delta", { messageId, text: delta });
     bridge.onMessageDelta();
   }
 
-  private completeAssistantText(run: RunRow, messageId: string): void {
+  private completeAssistantText(run: RunRow, messageId: string): string | undefined {
     const text = this.assistantTextByRun.get(run.id);
-    if (text === undefined) return;
+    if (text === undefined) return undefined;
     this.assistantTextByRun.delete(run.id);
-    this.persistAssistantMessageEnd(run, messageId, text);
+    if (run.wake_reason !== "plan") this.persistAssistantMessageEnd(run, messageId, text);
+    return text;
   }
 
   private persistAssistantMessageStart(run: RunRow, messageId: string): void {

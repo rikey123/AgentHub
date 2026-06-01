@@ -147,6 +147,33 @@ describe("NativeAgentAdapter", () => {
     expect(call?.messages?.[0]?.content).not.toContain("## Planning Phase");
   });
 
+  it("keeps planning-phase JSON internal instead of publishing it as chat messages", async () => {
+    const publish = vi.fn();
+    const lifecycle = createLifecycle();
+    const database = createTeamDatabaseStub();
+    permissionCheckMock.mockReturnValue({ status: "allow", reason: "default_allow" });
+    streamTextMock.mockReturnValue({
+      fullStream: asyncGenerator([{ type: "text-delta", text: "```json\n{\"goal\":\"ship\",\"tasks\":[]}\n```" }]),
+      usage: Promise.resolve({ inputTokens: 0, outputTokens: 0 })
+    });
+    const adapter = new NativeAgentAdapter({
+      database,
+      eventBus: { publish } as unknown as import("../../bus/src/index.ts").EventBus,
+      lifecycle: lifecycle as never,
+      permissions: { check: permissionCheckMock } as never,
+      modelConfig: { id: "mc-plan", provider: "openai", model: "gpt-4o", base_url: null, api_key_ref: null },
+      apiKey: "test-key"
+    });
+
+    await adapter.runManaged(runRow({ id: "run-plan", wake_reason: "plan", agent_id: "agent-leader" }));
+
+    const prepare = (database as { readonly sqlite: { readonly prepare: ReturnType<typeof vi.fn> } }).sqlite.prepare;
+    expect(prepare).not.toHaveBeenCalledWith(expect.stringContaining("INSERT OR IGNORE INTO messages"));
+    expect(publish).not.toHaveBeenCalledWith(expect.objectContaining({ type: "message.created" }));
+    expect(publish).not.toHaveBeenCalledWith(expect.objectContaining({ type: "message.completed" }));
+    expect(lifecycle.complete).toHaveBeenCalledWith(null, "run-plan", expect.any(Object), undefined);
+  });
+
   it("denies before stream creation for model api calls", async () => {
     const publish = vi.fn();
     const lifecycle = createLifecycle();
