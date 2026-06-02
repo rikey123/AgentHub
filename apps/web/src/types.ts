@@ -91,6 +91,37 @@ export type TaskDelegationViewModel = {
   readonly payload?: unknown;
 };
 
+export type TaskFileChangeViewModel = {
+  readonly path: string;
+  readonly change: string;
+  readonly linesAdded?: number | undefined;
+  readonly linesRemoved?: number | undefined;
+  readonly artifactId?: string | undefined;
+};
+
+export type TaskFileChangeRunViewModel = {
+  readonly runId: string;
+  readonly artifactId?: string | undefined;
+  readonly files: readonly TaskFileChangeViewModel[];
+  readonly createdAt: number;
+};
+
+export type WorktreeReviewViewModel = {
+  readonly runId: string;
+  readonly artifactId?: string | undefined;
+  readonly status: "ready_for_review" | "applied" | "discarded" | "conflict";
+  readonly filesChanged?: readonly string[] | undefined;
+  readonly conflictDiff?: string | undefined;
+  readonly updatedAt: number;
+};
+
+export type RoomExecutionPlanViewModel = {
+  readonly planId: string;
+  readonly runId: string;
+  readonly planJson: unknown;
+  readonly createdAt: number;
+};
+
 export type TaskViewModel = {
   readonly id: string;
   readonly title: string;
@@ -101,17 +132,22 @@ export type TaskViewModel = {
   readonly assigneeBindingId?: string | undefined;
   readonly assigneeAgentId?: string | undefined;
   readonly expectsReview?: boolean | undefined;
+  readonly blockerReason?: string | undefined;
+  readonly maxTurns?: number | undefined;
   readonly parentTaskId?: string | undefined;
   readonly delegationChain?: unknown[] | undefined;
   readonly sourceRunId?: string | undefined;
+  readonly dependencies?: readonly string[] | undefined;
   readonly activities?: TaskActivityViewModel[] | undefined;
   readonly delegations?: TaskDelegationViewModel[] | undefined;
   // V1.1 additions
   readonly boardColumn?: string | undefined;           // user-overridden Kanban column (D11)
   readonly worktreeStatus?: "ready_for_review" | "applied" | "discarded" | "conflict" | undefined; // worktree badge (D3)
   readonly worktreeArtifactId?: string | undefined;    // artifact id for apply/discard actions
+  readonly worktreeRunId?: string | undefined;
+  readonly worktreeReviews?: readonly WorktreeReviewViewModel[] | undefined;
   readonly fileChangesCount?: number | undefined;      // aggregate file-change badge (D12)
-  readonly executionPlan?: string | undefined;         // first 300 chars of PlanDocument (D8)
+  readonly fileChangeRuns?: readonly TaskFileChangeRunViewModel[] | undefined;
 };
 
 export type RunViewModel = {
@@ -173,6 +209,7 @@ export type RoomViewModel = {
   readonly stalledTaskIds?: readonly string[] | undefined; // tasks that triggered stall
   readonly stalledReason?: string | undefined;         // "leader_unavailable" | "leader_failed"
   readonly skillErrors?: readonly SkillErrorViewModel[] | undefined; // skill.materialization_failed (D9)
+  readonly executionPlan?: RoomExecutionPlanViewModel | undefined; // task.plan.created (D8)
 };
 
 export type ProjectorState = {
