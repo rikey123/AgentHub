@@ -1,13 +1,13 @@
 ## 1. Contract Week — Schema, Events, Command Stubs (all devs, merge to main before branching)
 
-- [ ] 1.1 Write `packages/db/migrations/0015_v11.sql`: new tables (`task_checkpoints`, `task_plans`, `run_file_changes`, `skills`, `skill_files`, `room_skills`, `agent_skills`) and new columns (`tasks.blocker_reason`, `tasks.max_turns`, `tasks.board_column`, `rooms.stalled_at`)
-- [ ] 1.2 Add `"skill"` and `"worktree"` to `EventCategory` union in `packages/protocol/src/events/registry.ts`
-- [ ] 1.3 Register all 16 V1.1 new event types in `registry.ts` per the Event Registry Contract table in `design.md`
-- [ ] 1.4 Add new `WakeReason` values (`"plan"`, `"execute"`, `"agent_stalled"`) to the enum in `packages/orchestrator/src/commands.ts`
-- [ ] 1.5 Add `room.complete_task` and `room.add_participant` and `room.apply_worktree` and `room.discard_worktree` command type stubs in `packages/orchestrator/src/commands.ts`
-- [ ] 1.6 Add REST endpoint type stubs in `packages/daemon/src/routes/`: `POST /rooms/:id/participants`, `POST /rooms/:id/tasks/:taskId/column`, `POST /rooms/:id/worktrees/:runId/apply`, `POST /rooms/:id/worktrees/:runId/discard`, `GET/POST/PUT/DELETE /skills`
-- [ ] 1.7 Add `TEAMMATE_ONLY_TOOLS` set alongside `LEADER_ONLY_TOOLS` in `packages/orchestrator/src/mcp/room-mcp-server.ts` (stubs only)
-- [ ] 1.8 Verify `pnpm check:all` passes on main with schema + event stubs before branching
+- [x] 1.1 Write `packages/db/migrations/0015_v11.sql`: new tables (`task_checkpoints`, `task_plans`, `run_file_changes`, `skills`, `skill_files`, `room_skills`, `agent_skills`) and new columns (`tasks.blocker_reason`, `tasks.max_turns`, `tasks.board_column`, `rooms.stalled_at`)
+- [x] 1.2 Add `"skill"` and `"worktree"` to `EventCategory` union in `packages/protocol/src/events/registry.ts`
+- [x] 1.3 Register all 16 V1.1 new event types in `registry.ts` per the Event Registry Contract table in `design.md`
+- [x] 1.4 Add new `WakeReason` values (`"plan"`, `"execute"`, `"agent_stalled"`) to the enum in `packages/orchestrator/src/commands.ts`
+- [x] 1.5 Add `room.complete_task` and `room.add_participant` and `room.apply_worktree` and `room.discard_worktree` command type stubs in `packages/orchestrator/src/commands.ts`
+- [x] 1.6 Add REST endpoint type stubs in `packages/daemon/src/routes/`: `POST /rooms/:id/participants`, `POST /rooms/:id/tasks/:taskId/column`, `POST /rooms/:id/worktrees/:runId/apply`, `POST /rooms/:id/worktrees/:runId/discard`, `GET/POST/PUT/DELETE /skills`
+- [x] 1.7 Add `TEAMMATE_ONLY_TOOLS` set alongside `LEADER_ONLY_TOOLS` in `packages/orchestrator/src/mcp/room-mcp-server.ts` (stubs only)
+- [x] 1.8 Verify `pnpm check:all` passes on main with schema + event stubs before branching
 
 ## 2. Dev A Track — Multi-Agent Reliability (packages/orchestrator, packages/artifacts, packages/daemon)
 
@@ -42,25 +42,25 @@
 
 ## 4. Dev C Track — Frontend: Kanban, Team Expansion, Skill Settings (apps/web, packages/daemon routes)
 
-- [ ] 4.1 Implement Kanban board component: columns, card anatomy (title, assignee, priority badge, blocker indicator, file-change badge, dependency indicator, turn count), drag-to-drop using `@dnd-kit`
-- [ ] 4.2 Wire Kanban to projector: handle `task.column.moved`, `task.status.changed`, `task.created`, `task.activity.added`, `run.file_changes.recorded` events; update board without page refresh
-- [ ] 4.3 Implement dependency arrows: SVG lines between cards with `dependencies` links; "Waiting on N tasks" indicator
-- [ ] 4.4 Implement task detail drawer enhancements: file changes section (per-run list), worktree apply/discard controls, "Execution Plan" card (from `task.plan.created`)
-- [ ] 4.5 Implement worktree UI: "Ready to apply" / "Conflict" badges on Kanban card; apply/discard buttons in task detail drawer; call `POST /rooms/:id/worktrees/:runId/apply|discard`
-- [ ] 4.6 Implement room stalled banner: projector handles `room.stalled` → show dismissible banner; dismiss calls `POST /rooms/:id/unstall`
-- [ ] 4.7 Implement `POST /rooms/:id/participants` daemon route (backend for add-participant)
-- [ ] 4.8 Implement `POST /rooms/:id/tasks/:taskId/column` daemon route (backend for drag-to-move)
-- [ ] 4.9 Implement `POST /rooms/:id/worktrees/:runId/apply|discard` daemon routes
-- [ ] 4.10 Implement Members panel enhancements: "+ Add teammate" button, add-participant modal (searchable binding dropdown), capability badges, real-time presence via `agent.state.changed`
-- [ ] 4.11 Implement skill CRUD daemon routes: `GET/POST/PUT/DELETE /skills`, `POST /skills/import`
-- [ ] 4.12 Implement Settings → Skills tab: skill list (name, description, origin badge), New Skill editor, Import from URL, Edit/Delete/View actions
-- [ ] 4.13 Implement room skill assignment UI: room creation dialog "Skills" section, room settings skill pool management
-- [ ] 4.14 Implement Members panel skill overrides: per-agent skill expand section showing effective skill set
-- [ ] 4.15 Write E2E tests for Kanban drag-to-move, add-participant flow, skill assignment
+- [x] 4.1 Implement Kanban board component: columns, card anatomy (title, assignee, priority badge, blocker indicator, file-change badge, dependency indicator, turn count), drag-to-drop using `@dnd-kit`
+- [x] 4.2 Wire Kanban to projector: handle `task.column.moved`, `task.status.changed`, `task.created`, `task.activity.added`, `run.file_changes.recorded` events; update board without page refresh
+- [x] 4.3 Implement dependency arrows: SVG lines between cards with `dependencies` links; "Waiting on N tasks" indicator
+- [x] 4.4 Implement task detail drawer enhancements: file changes section (per-run list), worktree apply/discard controls, "Execution Plan" card (from `task.plan.created`)
+- [x] 4.5 Implement worktree UI: "Ready to apply" / "Conflict" badges on Kanban card; apply/discard buttons in task detail drawer; call `POST /rooms/:id/worktrees/:runId/apply|discard`
+- [x] 4.6 Implement room stalled banner: projector handles `room.stalled` → show dismissible banner; dismiss calls `POST /rooms/:id/unstall`
+- [x] 4.7 Implement `POST /rooms/:id/participants` daemon route (backend for add-participant)
+- [x] 4.8 Implement `POST /rooms/:id/tasks/:taskId/column` daemon route (backend for drag-to-move)
+- [x] 4.9 Implement `POST /rooms/:id/worktrees/:runId/apply|discard` daemon routes
+- [x] 4.10 Implement Members panel enhancements: "+ Add teammate" button, add-participant modal (searchable binding dropdown), capability badges, real-time presence via `agent.state.changed`
+- [x] 4.11 Implement skill CRUD daemon routes: `GET/POST/PUT/DELETE /skills`, `POST /skills/import`
+- [x] 4.12 Implement Settings → Skills tab: skill list (name, description, origin badge), New Skill editor, Import from URL, Edit/Delete/View actions
+- [x] 4.13 Implement room skill assignment UI: room creation dialog "Skills" section, room settings skill pool management
+- [x] 4.14 Implement Members panel skill overrides: per-agent skill expand section showing effective skill set
+- [x] 4.15 Write E2E tests for Kanban drag-to-move, add-participant flow, skill assignment
 
 ## 5. Integration Week — End-to-End Verification
 
-- [ ] 5.1 Run full test suite (`pnpm test`, `pnpm typecheck`, `pnpm lint`, `pnpm check:all`) — all green
+- [x] 5.1 Run full test suite (`pnpm test`, `pnpm typecheck`, `pnpm lint`, `pnpm check:all`) — all green
 - [ ] 5.2 Manual E2E: create squad room with 3 agents, 5 tasks, verify Kanban board, drag-to-move, file-change badges
 - [ ] 5.3 Manual E2E: team mode — verify `expects_review=1` tasks enter `review` (not `completed`) after `room.complete_task`
 - [ ] 5.4 Manual E2E: worktree isolation — two agents write same file, apply first succeeds, apply second shows conflict badge
@@ -70,5 +70,5 @@
 - [ ] 5.8 Manual E2E: planning phase — first message in squad room shows "Execution Plan" card in side panel
 - [ ] 5.9 Manual E2E: room stalled — simulate leader failure after watchdog fires, verify stalled banner appears
 - [ ] 5.10 Manual E2E: MissionBrief — confirm teammate prompt contains `<mission-brief>` with goal, sibling tasks, room memory
-- [ ] 5.11 Verify all 16 new event types are registered in `registry.ts` and consumed by projector where `visibility` includes `main`
-- [ ] 5.12 Run `openspec validate add-v11-multi-agent-complete --strict` — valid
+- [x] 5.11 Verify all 16 new event types are registered in `registry.ts` and consumed by projector where `visibility` includes `main`
+- [x] 5.12 Run `openspec validate add-v11-multi-agent-complete --strict` — valid

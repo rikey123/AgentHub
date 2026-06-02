@@ -4,8 +4,10 @@ import { getSettingsSearch, getSettingsStateFromSearch, normalizeSettingsTab } f
 describe("settings URL deep link contract", () => {
   it("opens the Models tab from a deep link and falls back to Roles for invalid tabs", () => {
     expect(getSettingsStateFromSearch("?settings=models")).toEqual({ isOpen: true, tab: "models" });
+    expect(getSettingsStateFromSearch("?settings=skills")).toEqual({ isOpen: true, tab: "skills" });
     expect(getSettingsStateFromSearch("?settings=bogus")).toEqual({ isOpen: true, tab: "roles" });
     expect(normalizeSettingsTab("mcp")).toBe("mcp");
+    expect(normalizeSettingsTab("skills")).toBe("skills");
     expect(normalizeSettingsTab("bogus")).toBe("roles");
   });
 

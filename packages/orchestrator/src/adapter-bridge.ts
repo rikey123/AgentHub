@@ -333,7 +333,7 @@ export class AdapterBridge {
         });
       })();
     } catch (err) {
-      console.warn("[AdapterBridge] level-2 stall check failed:", err);
+      void err;
     }
   }
 

@@ -2,7 +2,7 @@
 
 ### Requirement: Kanban board view for tasks side panel (kanban-board)
 
-The system SHALL add a Kanban board view to the tasks side panel. The board displays all tasks in the current room as cards organized into columns. This replaces the existing flat task list as the primary task view.
+The system SHALL add a Kanban board view to the tasks side panel. The Tasks tab keeps a clear flat/grouped task list as the default view, and exposes the Kanban board from an "Open Kanban" button/modal for denser board operations. The board displays all active tasks in the current room as cards organized into columns.
 
 **Reference:** Hermes-Kanban `kanban-parser.ts` — `KanbanCard` / `KanbanBoard` data model; column-based state machine. Multica frontend uses `@dnd-kit/core` + `@dnd-kit/sortable` for drag-and-drop. AionUi `TaskManager.ts` — task status as source of truth with UI column as derived view.
 
@@ -45,7 +45,7 @@ Users can drag cards between columns. A drag sets `tasks.board_column` to the ta
 
 #### Scenario: User drags card to In Progress
 
-- **WHEN** the user drags a Backlog card to the In Progress column
+- **WHEN** the user opens the Kanban modal and drags a Backlog card to the In Progress column
 - **THEN** `POST /rooms/:id/tasks/:taskId/column { column: "In Progress" }` is called; `tasks.board_column = "In Progress"` is set; `task.column.moved` is published; all connected clients update without refresh
 
 #### Scenario: Blocked card shows reason on card face

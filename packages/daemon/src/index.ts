@@ -15,7 +15,7 @@ import { createInterventionCommandHandlers, InterventionEngine } from "@agenthub
 import { ActiveWakesRegistry, checkTaskTimeouts, createCancelRunHandler, createCompleteTaskHandler, createConsumePendingTurnHandler, createCreateTaskHandler, createUpdateTaskHandler, createWakeAgentHandler, handleTeamDispatchReviewTerminal, MailboxService, maybePublishTeamDispatchCompleted, PendingTurnService, ReclaimStaleClaimedRun, reconcileTerminalDelegatedTaskRuns, RoomMcpServer, RunLifecycleService, RunQueue, StartupRecovery, TaskService, WELL_KNOWN_CAPABILITY_TOKENS, type BriefResolver } from "@agenthub/orchestrator";
 import { createPermissionCommandHandlers, PermissionEngine, seedBuiltInPermissionProfiles } from "@agenthub/permissions";
 import type { EventEnvelope } from "@agenthub/protocol/events";
-import { SkillRegistry } from "@agenthub/skills";
+import { SkillRegistry, listRuntimeLocalSkills, loadRuntimeLocalSkillBundle } from "@agenthub/skills";
 import { attachmentMaxBytes, authenticateBrowserRequest, createKeychain, createKeychainAccount, issueBrowserSession, redactAndTruncate, storeAttachment, type BrowserAuthResult, type KeychainBridge } from "@agenthub/security";
 import { Effect } from "effect";
 import { generateRoleDraftWithModelConfig, type ModelConfigRow, type RoleDraft, type RoleDraftGenerationInput } from "@agenthub/native-agent-runtime";
@@ -28,6 +28,7 @@ import { cleanExpiredRoleDrafts, startRoleDraftGC } from "./role-draft-gc.ts";
 import { createDaemonCommandHandlers, seedDefaultData } from "./commands.ts";
 export { daemonPidPath, defaultConfigPath, ensureAgentHubHome, ensureParentDirectory, loadAgentHubConfig, redactConfig, type AgentHubConfig, type ConfigOverrides } from "./config.ts";
 import { openApiDocument } from "./openapi.ts";
+import { RUNTIME_DEFINITIONS, runtimeDefinitionForKind, runtimeSeedRows, type RuntimeDetection, type RuntimeSeedRow } from "./runtime-catalog.ts";
 
 type PlanDocument = {
   readonly goal: string;
@@ -126,6 +127,7 @@ type DaemonRuntime = {
   mockAdapter: MockAdapterManager;
   artifactService: ArtifactService;
   taskService: TaskService;
+  skillRegistry: SkillRegistry;
   outbox: OutboxDispatcher;
   handlers: DurableHandlerRegistry;
   runQueue: RunQueue;
@@ -141,6 +143,7 @@ type RuntimeJob = { status: "pending" | "completed" | "failed"; result?: Runtime
 type RuntimeTestResult = { readonly ok: boolean; readonly version?: string; readonly latencyMs: number; readonly error?: string };
 
 const runtimeTestJobs = new Map<string, RuntimeJob>();
+let runtimeCatalogDetectionCache: { readonly key: string; readonly promise: Promise<ReadonlyMap<string, RuntimeDetection>> } | undefined;
 
 export function createDaemon(options: DaemonOptions): DaemonApp {
   let runtime: DaemonRuntime | undefined;
@@ -169,7 +172,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     if (stopping) return json(res, 503, { error: "service_stopping" });
     if (!ready) return json(res, 503, { error: "service_starting", retryAfterMs: 500 });
     const app = requireRuntime();
-    void route({ req, res, database: app.database, eventBus: app.eventBus, commandBus: app.commandBus, artifactService: app.artifactService, taskService: app.taskService, outbox: app.outbox, modelConfigSecrets, settingsJobs, modelTestFetch: options.modelTestFetch ?? globalThis.fetch.bind(globalThis), roleDraftGenerator: options.roleDraftGenerator ?? generateRoleDraftWithModelConfig, registerSseClient: (client) => { sseClients.add(client); return () => sseClients.delete(client); }, ...(options.token !== undefined ? { token: options.token } : {}), ...(options.allowedOrigins !== undefined ? { allowedOrigins: options.allowedOrigins } : {}), host: `${options.host ?? "127.0.0.1"}:${options.port ?? 6677}`, ...(options.now !== undefined ? { now: options.now } : {}) });
+    void route({ req, res, database: app.database, eventBus: app.eventBus, commandBus: app.commandBus, artifactService: app.artifactService, taskService: app.taskService, skillRegistry: app.skillRegistry, outbox: app.outbox, modelConfigSecrets, settingsJobs, modelTestFetch: options.modelTestFetch ?? globalThis.fetch.bind(globalThis), roleDraftGenerator: options.roleDraftGenerator ?? generateRoleDraftWithModelConfig, registerSseClient: (client) => { sseClients.add(client); return () => sseClients.delete(client); }, ...(options.token !== undefined ? { token: options.token } : {}), ...(options.allowedOrigins !== undefined ? { allowedOrigins: options.allowedOrigins } : {}), host: `${options.host ?? "127.0.0.1"}:${options.port ?? 6677}`, ...(options.now !== undefined ? { now: options.now } : {}) });
   };
 
   const start = async (): Promise<Server> => {
@@ -208,37 +211,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     const roleDraftGcCleanup = startRoleDraftGC(database, () => undefined);
 
     const now = options.now?.() ?? Date.now();
-    database.sqlite.transaction(() => {
-      database.sqlite.prepare(
-        `INSERT INTO runtimes (
-          id, workspace_id, kind, name, command, args, env, detected_at, detected_path, detected_version,
-          supported_caps, version, status, manifest_json, created_at, updated_at
-        ) VALUES (?, NULL, 'native', ?, NULL, NULL, NULL, ?, NULL, NULL, ?, NULL, NULL, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-           workspace_id = excluded.workspace_id,
-           kind = excluded.kind,
-           name = excluded.name,
-           command = NULL,
-           args = NULL,
-           env = NULL,
-           detected_at = excluded.detected_at,
-           detected_path = NULL,
-           detected_version = NULL,
-           supported_caps = excluded.supported_caps,
-           version = NULL,
-           status = NULL,
-           manifest_json = excluded.manifest_json,
-           updated_at = excluded.updated_at`
-      ).run("native-default", "AgentHub Native", now, "[]", JSON.stringify({ runtimeKind: "native" }), now, now);
-      eventBus.publish({
-        id: randomUUID(),
-        type: "runtime.detected",
-        schemaVersion: 1,
-        workspaceId: "default-workspace",
-        payload: { runtimeId: "native-default", kind: "native", name: "AgentHub Native" },
-        createdAt: now
-      });
-    })();
+    await seedRuntimeCatalog(database, eventBus, now);
 
     const contextLedger = new ContextLedger({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
     const permissionEngine = new PermissionEngine({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
@@ -296,7 +269,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
           execFileSync("git", ["worktree", "add", worktreePath, "HEAD"], { cwd: absoluteRoot, timeout: 15_000, stdio: "pipe" });
           return worktreePath;
         } catch (err) {
-          console.warn("[worktree] Failed to create worktree for run", input.runId, err instanceof Error ? err.message : String(err));
+          void err;
           return undefined;
         }
       }
@@ -556,7 +529,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     };
     taskTimeoutTimer = setInterval(runTaskTimeoutSweep, 60_000);
     taskTimeoutTimer.unref?.();
-    runtime = { database, eventBus, commandBus, roomMcpServer, adapterRegistry, mockAdapter, artifactService, taskService, outbox, handlers, runQueue, agentProfiles, roleDraftGcCleanup, lifecycle };
+    runtime = { database, eventBus, commandBus, roomMcpServer, adapterRegistry, mockAdapter, artifactService, taskService, skillRegistry, outbox, handlers, runQueue, agentProfiles, roleDraftGcCleanup, lifecycle };
 
     emitPhase("startup", PHASE_HTTP);
     return await new Promise<Server>((resolve) => {
@@ -667,7 +640,7 @@ function withStatusLineCoalescing(eventBus: EventBus): StatusLineEventBus {
   return wrapped;
 }
 
-type RouteContext = { readonly req: IncomingMessage; readonly res: ServerResponse; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly artifactService: ArtifactService; readonly taskService: TaskService; readonly outbox: { drainPending(): Promise<void> }; readonly modelConfigSecrets: KeychainBridge; readonly settingsJobs: Map<string, SettingsJobRecord>; readonly modelTestFetch: typeof fetch; readonly roleDraftGenerator: RoleDraftGenerator; readonly registerSseClient: (client: SseClient) => () => void; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly host: string; readonly now?: () => number };
+type RouteContext = { readonly req: IncomingMessage; readonly res: ServerResponse; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly artifactService: ArtifactService; readonly taskService: TaskService; readonly skillRegistry: SkillRegistry; readonly outbox: { drainPending(): Promise<void> }; readonly modelConfigSecrets: KeychainBridge; readonly settingsJobs: Map<string, SettingsJobRecord>; readonly modelTestFetch: typeof fetch; readonly roleDraftGenerator: RoleDraftGenerator; readonly registerSseClient: (client: SseClient) => () => void; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly host: string; readonly now?: () => number };
 
 async function route(ctx: RouteContext): Promise<void> {
   const url = new URL(ctx.req.url ?? "/", "http://127.0.0.1");
@@ -759,25 +732,29 @@ async function route(ctx: RouteContext): Promise<void> {
     const input = await body(ctx) as Record<string, unknown>;
     const now = ctx.now?.() ?? Date.now();
     const id = typeof input.id === "string" && input.id.length > 0 ? input.id : randomUUID();
-    const name = typeof input.name === "string" && input.name.length > 0 ? input.name : "Custom ACP Runtime";
-    const command = typeof input.command === "string" ? input.command : null;
-    const args = Array.isArray(input.args) ? JSON.stringify(input.args) : null;
+    const requestedKind = typeof input.kind === "string" && input.kind.length > 0 ? input.kind : "custom-acp";
+    const definition = runtimeDefinitionForKind(requestedKind);
+    if (requestedKind !== "custom-acp" && definition === undefined) return json(ctx.res, 400, { error: "unsupported_runtime_kind" });
+    const kind = definition?.kind ?? "custom-acp";
+    const name = typeof input.name === "string" && input.name.length > 0 ? input.name : definition?.name ?? "Custom ACP Runtime";
+    const command = typeof input.command === "string" ? input.command : definition?.command ?? null;
+    const args = Array.isArray(input.args) ? JSON.stringify(input.args) : definition !== undefined ? JSON.stringify(definition.args) : null;
     const env = input.env !== null && typeof input.env === "object" && !Array.isArray(input.env) ? JSON.stringify(input.env) : null;
     const supportedCaps = Array.isArray(input.supportedCaps) ? JSON.stringify(input.supportedCaps) : JSON.stringify([]);
     const manifestJson = typeof input.manifestJson === "string"
       ? input.manifestJson
-      : JSON.stringify({ runtimeKind: "custom-acp" });
+      : JSON.stringify({ runtimeKind: kind, ...(definition?.detectCommand !== undefined ? { detectCommand: definition.detectCommand } : {}), ...(definition?.skillDir !== undefined ? { skillDir: definition.skillDir } : {}) });
     const workspaceId = typeof input.workspaceId === "string" ? input.workspaceId : null;
     ctx.database.sqlite.transaction(() => {
       ctx.database.sqlite.prepare(
-        "INSERT INTO runtimes (id, workspace_id, kind, name, command, args, env, detected_at, detected_path, detected_version, supported_caps, version, status, manifest_json, created_at, updated_at) VALUES (?, ?, 'custom-acp', ?, ?, ?, ?, NULL, NULL, NULL, ?, NULL, NULL, ?, ?, ?)"
-      ).run(id, workspaceId, name, command, args, env, supportedCaps, manifestJson, now, now);
+        "INSERT INTO runtimes (id, workspace_id, kind, name, command, args, env, detected_at, detected_path, detected_version, supported_caps, version, status, manifest_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, NULL, NULL, ?, ?, ?)"
+      ).run(id, workspaceId, kind, name, command, args, env, supportedCaps, manifestJson, now, now);
       ctx.eventBus.publish({
         id: randomUUID(),
         type: "runtime.detected",
         schemaVersion: 1,
         workspaceId: workspaceId ?? "default-workspace",
-        payload: { runtimeId: id, kind: "custom-acp", name },
+        payload: { runtimeId: id, kind, name },
         createdAt: now
       });
     })();
@@ -894,6 +871,8 @@ async function route(ctx: RouteContext): Promise<void> {
   }
   if (ctx.req.method === "POST" && parts[0] === "runtimes" && parts[1] && parts[2] === "detect") return detectRuntime(ctx, parts[1]);
   if (ctx.req.method === "POST" && parts[0] === "runtimes" && parts[1] && parts[2] === "test") return testRuntime(ctx, parts[1], await body(ctx));
+  if (ctx.req.method === "GET" && parts[0] === "runtimes" && parts[1] && parts[2] === "local-skills" && parts.length === 3) return runtimeLocalSkills(ctx, parts[1]);
+  if (ctx.req.method === "POST" && parts[0] === "runtimes" && parts[1] && parts[2] === "local-skills" && parts[3] === "import") return importRuntimeLocalSkill(ctx, parts[1], await body(ctx));
   if (ctx.req.method === "DELETE" && parts[0] === "runtimes" && parts[1]) {
     const existing = get(ctx.database, "SELECT * FROM runtimes WHERE id = ?", parts[1]) as Record<string, unknown> | undefined;
     if (existing === undefined) return json(ctx.res, 404, { error: "runtime_not_found" });
@@ -1022,7 +1001,12 @@ async function route(ctx: RouteContext): Promise<void> {
   // V1.1 REST endpoint stubs (contract week — implementations land in feature branches)
   // ---------------------------------------------------------------------------
   // POST /rooms/:id/participants — add a participant to a running room (D10, task 4.7)
-  if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "participants") return dispatch(ctx, { ...(await body(ctx)), roomId: parts[1] }, "AddParticipant");
+  if (ctx.req.method === "GET" && parts[0] === "rooms" && parts[2] === "skills") return roomSkills(ctx, parts[1] as string);
+  if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "skills") return assignRoomSkill(ctx, parts[1] as string, await body(ctx));
+  if (ctx.req.method === "GET" && parts[0] === "rooms" && parts[2] === "participants" && parts[4] === "skills") return participantSkills(ctx, parts[1] as string, parts[3] as string);
+  if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "participants" && parts[4] === "skills") return assignParticipantSkill(ctx, parts[1] as string, parts[3] as string, await body(ctx));
+  if (ctx.req.method === "DELETE" && parts[0] === "rooms" && parts[2] === "participants" && parts[4] === "skills" && parts[5]) return removeParticipantSkill(ctx, parts[1] as string, parts[3] as string, parts[5]);
+  if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "participants") return dispatchCreated(ctx, { ...(await body(ctx)), roomId: parts[1] }, "AddParticipant");
   // POST /rooms/:id/worktrees/:runId/apply — apply worktree diff (D3, task 4.9)
   if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "worktrees" && parts[4] === "apply") return dispatch(ctx, { roomId: parts[1], runId: parts[3] }, "ApplyWorktree");
   // POST /rooms/:id/worktrees/:runId/discard — discard worktree (D3, task 4.9)
@@ -1040,12 +1024,12 @@ async function route(ctx: RouteContext): Promise<void> {
     return json(ctx.res, 200, { ok: true, roomId });
   }
   // GET/POST/PUT/DELETE /skills — skill CRUD (D9, task 4.11)
-  if (ctx.req.method === "GET" && url.pathname === "/skills") return json(ctx.res, 501, { error: "not_implemented", capability: "v1.1-skills" });
-  if (ctx.req.method === "GET" && parts[0] === "skills" && parts[1]) return json(ctx.res, 501, { error: "not_implemented", capability: "v1.1-skills" });
-  if (ctx.req.method === "POST" && url.pathname === "/skills") return json(ctx.res, 501, { error: "not_implemented", capability: "v1.1-skills" });
-  if (ctx.req.method === "POST" && url.pathname === "/skills/import") return json(ctx.res, 501, { error: "not_implemented", capability: "v1.1-skills" });
-  if (ctx.req.method === "PUT" && parts[0] === "skills" && parts[1]) return json(ctx.res, 501, { error: "not_implemented", capability: "v1.1-skills" });
-  if (ctx.req.method === "DELETE" && parts[0] === "skills" && parts[1]) return json(ctx.res, 501, { error: "not_implemented", capability: "v1.1-skills" });
+  if (ctx.req.method === "GET" && url.pathname === "/skills") return skills(ctx, url);
+  if (ctx.req.method === "POST" && url.pathname === "/skills/import") return importSkill(ctx, await body(ctx));
+  if (ctx.req.method === "GET" && parts[0] === "skills" && parts[1]) return skill(ctx, parts[1]);
+  if (ctx.req.method === "POST" && url.pathname === "/skills") return createSkill(ctx, await body(ctx));
+  if (ctx.req.method === "PUT" && parts[0] === "skills" && parts[1]) return updateSkill(ctx, parts[1], await body(ctx));
+  if (ctx.req.method === "DELETE" && parts[0] === "skills" && parts[1]) return deleteSkill(ctx, parts[1]);
   return json(ctx.res, 404, { error: "not_found" });
 }
 
@@ -1058,7 +1042,7 @@ async function detectRuntime(ctx: RouteContext, runtimeId: string): Promise<void
   const changed = existing.detected_path !== detection.detectedPath || existing.detected_version !== detection.detectedVersion || existing.detected_at === null;
   if (changed) {
     ctx.database.sqlite.transaction(() => {
-      ctx.database.sqlite.prepare("UPDATE runtimes SET detected_at = ?, detected_path = ?, detected_version = ?, updated_at = ? WHERE id = ?").run(now, detection.detectedPath, detection.detectedVersion, now, runtimeId);
+      ctx.database.sqlite.prepare("UPDATE runtimes SET detected_at = ?, detected_path = ?, detected_version = ?, status = 'connected', version = COALESCE(?, version), updated_at = ? WHERE id = ?").run(now, detection.detectedPath, detection.detectedVersion, detection.detectedVersion, now, runtimeId);
       ctx.eventBus.publish({
         id: randomUUID(),
         type: "runtime.detected",
@@ -1090,7 +1074,7 @@ async function testRuntime(ctx: RouteContext, runtimeId: string, input: Record<s
 
 async function runRuntimeDetection(runtime: Record<string, unknown>): Promise<{ readonly ok: true; readonly detectedPath: string | null; readonly detectedVersion: string | null } | { readonly ok: false; readonly error: string }> {
   if (runtime.kind === "native") return { ok: true, detectedPath: "agenthub-native", detectedVersion: "native" };
-  const command = stringField(runtime.command);
+  const command = runtimeDetectCommand(runtime);
   if (command === undefined) return { ok: false, error: "binary not found" };
   const args = parseStringArray(runtime.args);
   const env = parseEnv(runtime.env);
@@ -1106,7 +1090,7 @@ async function runRuntimeDetection(runtime: Record<string, unknown>): Promise<{ 
 async function runRuntimeTest(runtime: Record<string, unknown>): Promise<RuntimeTestResult> {
   const started = Date.now();
   if (runtime.kind === "native") return { ok: true, version: stringOrNull(runtime.detected_version) ?? "native", latencyMs: Date.now() - started };
-  const command = stringField(runtime.command);
+  const command = runtimeDetectCommand(runtime);
   if (command === undefined) return { ok: false, error: "binary not found", latencyMs: Date.now() - started };
   const probe = await runCommandProbe(command, ["--version"], parseEnv(runtime.env));
   const latencyMs = Date.now() - started;
@@ -1141,6 +1125,141 @@ async function runCommandProbe(command: string, args: readonly string[], env: Re
 function firstOutputLine(output: string): string | null {
   const line = output.split(/\r?\n/u).map((part) => part.trim()).find((part) => part.length > 0);
   return line ?? null;
+}
+
+async function seedRuntimeCatalog(database: AgentHubDatabase, eventBus: EventBus, now: number): Promise<void> {
+  const detections = await detectRuntimeCatalogCommands();
+  const rows = runtimeSeedRows({ now, detections });
+  database.sqlite.transaction(() => {
+    for (const row of rows) {
+      upsertRuntimeSeedRow(database, row);
+      if (row.status === "connected") {
+        eventBus.publish({
+          id: randomUUID(),
+          type: "runtime.detected",
+          schemaVersion: 1,
+          workspaceId: row.workspaceId ?? "default-workspace",
+          payload: { runtimeId: row.id, kind: row.kind, name: row.name, detectedPath: row.detectedPath, detectedVersion: row.detectedVersion },
+          createdAt: now
+        });
+      }
+    }
+  })();
+}
+
+function upsertRuntimeSeedRow(database: AgentHubDatabase, row: RuntimeSeedRow): void {
+  database.sqlite.prepare(
+    `INSERT INTO runtimes (
+      id, workspace_id, kind, name, command, args, env, detected_at, detected_path, detected_version,
+      supported_caps, version, status, manifest_json, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       workspace_id = excluded.workspace_id,
+       kind = excluded.kind,
+       name = excluded.name,
+       command = excluded.command,
+       args = excluded.args,
+       env = excluded.env,
+       detected_at = excluded.detected_at,
+       detected_path = excluded.detected_path,
+       detected_version = excluded.detected_version,
+       supported_caps = excluded.supported_caps,
+       version = excluded.version,
+       status = excluded.status,
+       manifest_json = excluded.manifest_json,
+       updated_at = excluded.updated_at`
+  ).run(
+    row.id,
+    row.workspaceId,
+    row.kind,
+    row.name,
+    row.command,
+    JSON.stringify(row.args),
+    JSON.stringify(row.env),
+    row.detectedAt,
+    row.detectedPath,
+    row.detectedVersion,
+    JSON.stringify(row.supportedCaps),
+    row.version,
+    row.status,
+    JSON.stringify(row.manifestJson),
+    row.createdAt,
+    row.updatedAt
+  );
+}
+
+async function detectRuntimeCatalogCommands(): Promise<ReadonlyMap<string, RuntimeDetection>> {
+  const cacheKey = `${process.platform}:${process.env.PATH ?? ""}:${process.env.Path ?? ""}:${process.env.PATHEXT ?? ""}`;
+  if (runtimeCatalogDetectionCache?.key === cacheKey) return runtimeCatalogDetectionCache.promise;
+  const promise = detectRuntimeCatalogCommandsUncached();
+  runtimeCatalogDetectionCache = { key: cacheKey, promise };
+  return promise;
+}
+
+async function detectRuntimeCatalogCommandsUncached(): Promise<ReadonlyMap<string, RuntimeDetection>> {
+  const commandByRuntimeKind = new Map<string, string>();
+  for (const definition of RUNTIME_DEFINITIONS) {
+    const command = definition.detectCommand ?? definition.command;
+    if (command !== null && command !== undefined && /^[A-Za-z0-9_.-]+$/u.test(command)) commandByRuntimeKind.set(definition.kind, command);
+  }
+  const availableCommands = await batchCheckCliAvailability(Array.from(new Set(commandByRuntimeKind.values())));
+  const detections = new Map<string, RuntimeDetection>();
+  await Promise.all(Array.from(commandByRuntimeKind.entries()).map(async ([kind, command]) => {
+    const detectedPath = availableCommands.get(command);
+    if (detectedPath === undefined) return;
+    const versionProbe = await runCommandProbe(command, ["--version"], {}, 1_500);
+    detections.set(kind, { path: detectedPath, version: versionProbe.ok ? firstOutputLine(versionProbe.output) : null });
+  }));
+  return detections;
+}
+
+async function batchCheckCliAvailability(commands: readonly string[]): Promise<ReadonlyMap<string, string>> {
+  const safe = Array.from(new Set(commands.filter((command) => /^[A-Za-z0-9_.-]+$/u.test(command))));
+  const found = new Map<string, string>();
+  if (safe.length === 0) return found;
+  if (process.platform === "win32") return detectWindowsCommands(safe);
+  await Promise.all(safe.map(async (command) => {
+    const detectedPath = await detectPosixCommand(command);
+    if (detectedPath !== null) found.set(command, detectedPath);
+  }));
+  return found;
+}
+
+async function detectWindowsCommands(commands: readonly string[]): Promise<ReadonlyMap<string, string>> {
+  const found = new Map<string, string>();
+  const missing: string[] = [];
+  await Promise.all(commands.map(async (command) => {
+    const where = await runCommandProbe("where", [command], {}, 1_500);
+    if (where.ok) {
+      found.set(command, firstOutputLine(where.output) ?? command);
+      return;
+    }
+    missing.push(command);
+  }));
+  if (missing.length === 0) return found;
+  const encodedCommands = JSON.stringify(missing);
+  const powershell = await runCommandProbe("powershell", [
+    "-NoProfile",
+    "-NonInteractive",
+    "-Command",
+    `$commands = ConvertFrom-Json '${encodedCommands.replace(/'/gu, "''")}'; foreach ($cmd in $commands) { $hit = Get-Command -All $cmd -ErrorAction SilentlyContinue | Select-Object -First 1; if ($hit) { Write-Output ($cmd + [char]9 + $hit.Source) } }`
+  ], {}, 3_000);
+  if (!powershell.ok) return found;
+  for (const line of powershell.output.split(/\r?\n/u)) {
+    const [command, detectedPath] = line.split("\t");
+    if (command && detectedPath && missing.includes(command)) found.set(command, detectedPath);
+  }
+  return found;
+}
+
+async function detectPosixCommand(command: string): Promise<string | null> {
+  const probe = await runCommandProbe("sh", ["-lc", `command -v '${command}'`], {}, 3_000);
+  return probe.ok ? firstOutputLine(probe.output) ?? command : null;
+}
+
+function runtimeDetectCommand(runtime: Record<string, unknown>): string | undefined {
+  const manifest = parseJsonField(runtime.manifest_json, {}) as Record<string, unknown>;
+  return stringField(manifest.detectCommand) ?? stringField(runtime.command);
 }
 
 function parseStringArray(value: unknown): readonly string[] {
@@ -1253,6 +1372,243 @@ function taskActivities(ctx: RouteContext, taskId: string): void {
   if (task === null) return json(ctx.res, 404, { error: "task_not_found" });
   const activities = all(ctx.database, "SELECT * FROM task_activities WHERE task_id = ? ORDER BY created_at DESC, id DESC", taskId);
   json(ctx.res, 200, { activities });
+}
+
+function skills(ctx: RouteContext, url: URL): void {
+  const workspaceId = url.searchParams.get("workspaceId") ?? defaultWorkspaceId(ctx.database);
+  const rows = all(
+    ctx.database,
+    "SELECT s.*, (SELECT COUNT(*) FROM skill_files sf WHERE sf.skill_id = s.id) AS file_count FROM skills s WHERE s.workspace_id = ? ORDER BY CASE s.origin WHEN 'builtin' THEN 0 WHEN 'workspace' THEN 1 ELSE 2 END, s.name ASC",
+    workspaceId
+  ) as Array<Record<string, unknown>>;
+  json(ctx.res, 200, { skills: rows.map(normalizeSkillRow) });
+}
+
+function skill(ctx: RouteContext, skillId: string): void {
+  const row = skillRowWithFileCount(ctx, skillId);
+  if (row === null) return json(ctx.res, 404, { error: "skill_not_found" });
+  json(ctx.res, 200, skillDetailResponse(ctx, row));
+}
+
+function createSkill(ctx: RouteContext, input: Record<string, unknown>): void {
+  const workspaceId = stringField(input.workspaceId) ?? defaultWorkspaceId(ctx.database);
+  const name = stringField(input.name);
+  const description = stringField(input.description);
+  const content = stringField(input.content);
+  if (name === undefined || description === undefined || content === undefined) return json(ctx.res, 400, { error: "validation_failed", message: "name, description, and content are required" });
+  const files = skillFilesFromInput(input.files);
+  try {
+    const created = ctx.skillRegistry.create({ workspaceId, name, description, content, origin: "workspace", ...(files.length > 0 ? { files } : {}) });
+    const row = skillRowWithFileCount(ctx, created.skillId);
+    return json(ctx.res, 201, row === null ? { skill: { id: created.skillId, workspace_id: workspaceId, workspaceId, name, description, content, origin: "workspace", fileCount: files.length, file_count: files.length }, files } : skillDetailResponse(ctx, row));
+  } catch (error) {
+    return json(ctx.res, 400, { error: "skill_validation_failed", message: errorMessage(error) });
+  }
+}
+
+function updateSkill(ctx: RouteContext, skillId: string, input: Record<string, unknown>): void {
+  const existing = get(ctx.database, "SELECT * FROM skills WHERE id = ?", skillId) as Record<string, unknown> | null;
+  if (existing === null) return json(ctx.res, 404, { error: "skill_not_found" });
+  if (existing.origin === "builtin") return json(ctx.res, 403, { error: "builtin_skill_readonly" });
+  try {
+    const hasFiles = Object.prototype.hasOwnProperty.call(input, "files");
+    ctx.skillRegistry.update({
+      skillId,
+      ...(typeof input.name === "string" ? { name: input.name } : {}),
+      ...(typeof input.description === "string" ? { description: input.description } : {}),
+      ...(typeof input.content === "string" ? { content: input.content } : {}),
+      ...(hasFiles ? { files: skillFilesFromInput(input.files) } : {})
+    });
+    const row = skillRowWithFileCount(ctx, skillId);
+    return json(ctx.res, 200, row === null ? { skill: null, files: [] } : skillDetailResponse(ctx, row));
+  } catch (error) {
+    return json(ctx.res, 400, { error: "skill_validation_failed", message: errorMessage(error) });
+  }
+}
+
+function deleteSkill(ctx: RouteContext, skillId: string): void {
+  const existing = get(ctx.database, "SELECT * FROM skills WHERE id = ?", skillId) as Record<string, unknown> | null;
+  if (existing === null) return json(ctx.res, 404, { error: "skill_not_found" });
+  if (existing.origin === "builtin") return json(ctx.res, 403, { error: "builtin_skill_readonly" });
+  ctx.skillRegistry.delete(skillId);
+  json(ctx.res, 200, { ok: true, skillId });
+}
+
+async function importSkill(ctx: RouteContext, input: Record<string, unknown>): Promise<void> {
+  const url = stringField(input.url);
+  if (url === undefined) return json(ctx.res, 400, { error: "validation_failed", message: "url is required" });
+  try {
+    const imported = await fetchSkillPackage(ctx, url);
+    const content = imported.content;
+    const frontmatter = skillFrontmatter(content);
+    if (frontmatter === undefined) return json(ctx.res, 400, { error: "skill_validation_failed", message: "skill content must include YAML frontmatter" });
+    const workspaceId = stringField(input.workspaceId) ?? defaultWorkspaceId(ctx.database);
+    const created = ctx.skillRegistry.create({ workspaceId, name: frontmatter.name, description: frontmatter.description, content, origin: "imported", sourceUrl: url, ...(imported.files.length > 0 ? { files: imported.files } : {}) });
+    const row = skillRowWithFileCount(ctx, created.skillId);
+    return json(ctx.res, 201, row === null ? { skill: null, files: [] } : skillDetailResponse(ctx, row));
+  } catch (error) {
+    return json(ctx.res, 400, { error: "skill_import_failed", message: errorMessage(error) });
+  }
+}
+
+function runtimeLocalSkills(ctx: RouteContext, runtimeId: string): void {
+  const runtime = get(ctx.database, "SELECT * FROM runtimes WHERE id = ?", runtimeId) as Record<string, unknown> | null;
+  if (runtime === null) return json(ctx.res, 404, { error: "runtime_not_found" });
+  const provider = localSkillProviderForRuntime(runtime);
+  try {
+    const result = listRuntimeLocalSkills(provider);
+    return json(ctx.res, 200, {
+      runtimeId,
+      provider: result.provider,
+      supported: result.supported,
+      roots: result.roots,
+      skills: result.skills.map((skill) => ({
+        ...skill,
+        source_path: skill.sourcePath,
+        file_count: skill.fileCount
+      }))
+    });
+  } catch (error) {
+    return json(ctx.res, 400, { error: "local_skill_list_failed", message: errorMessage(error) });
+  }
+}
+
+function importRuntimeLocalSkill(ctx: RouteContext, runtimeId: string, input: Record<string, unknown>): void {
+  const runtime = get(ctx.database, "SELECT * FROM runtimes WHERE id = ?", runtimeId) as Record<string, unknown> | null;
+  if (runtime === null) return json(ctx.res, 404, { error: "runtime_not_found" });
+  const skillKey = stringField(input.skillKey) ?? stringField(input.skill_key);
+  if (skillKey === undefined) return json(ctx.res, 400, { error: "validation_failed", message: "skillKey is required" });
+  const provider = localSkillProviderForRuntime(runtime);
+  try {
+    const loaded = loadRuntimeLocalSkillBundle(provider, skillKey);
+    if (!loaded.supported) return json(ctx.res, 400, { error: "local_skills_unsupported", provider: loaded.provider });
+    if (loaded.skill === null) return json(ctx.res, 404, { error: "local_skill_not_found" });
+    const fallbackDescription = loaded.skill.description ?? `Imported from ${loaded.provider}`;
+    const name = stringField(input.name) ?? loaded.skill.name;
+    const description = stringField(input.description) ?? fallbackDescription;
+    const content = rewriteSkillFrontmatter(loaded.skill.content, name, description);
+    const workspaceId = stringField(input.workspaceId) ?? defaultWorkspaceId(ctx.database);
+    const sourceUrl = `local://${loaded.provider}/${loaded.skill.key}`;
+    const created = ctx.skillRegistry.create({ workspaceId, name, description, content, origin: "imported", sourceUrl, ...(loaded.skill.files.length > 0 ? { files: loaded.skill.files } : {}) });
+    const row = skillRowWithFileCount(ctx, created.skillId);
+    return json(ctx.res, 201, row === null ? { skill: null, files: [] } : skillDetailResponse(ctx, row));
+  } catch (error) {
+    return json(ctx.res, 400, { error: "local_skill_import_failed", message: errorMessage(error) });
+  }
+}
+
+function localSkillProviderForRuntime(runtime: Record<string, unknown>): string {
+  const kind = stringField(runtime.kind) ?? "custom-acp";
+  if (kind === "claude-code") return "claude";
+  return kind;
+}
+
+function rewriteSkillFrontmatter(content: string, name: string, description: string): string {
+  const lines = content.split(/\r?\n/u);
+  const sanitizedName = frontmatterScalar(name);
+  const sanitizedDescription = frontmatterScalar(description);
+  if (lines[0] !== "---") return `---\nname: ${sanitizedName}\ndescription: ${sanitizedDescription}\n---\n\n${content}`;
+  const end = lines.findIndex((line, index) => index > 0 && line === "---");
+  if (end < 0) return `---\nname: ${sanitizedName}\ndescription: ${sanitizedDescription}\n---\n\n${content}`;
+  const extras = lines.slice(1, end).filter((line) => {
+    const key = line.split(":", 1)[0]?.trim().toLowerCase();
+    return key !== "name" && key !== "description";
+  });
+  const bodyLines = lines.slice(end + 1);
+  return ["---", `name: ${sanitizedName}`, `description: ${sanitizedDescription}`, ...extras, "---", ...bodyLines].join("\n");
+}
+
+function frontmatterScalar(value: string): string {
+  return value.replace(/\r?\n/gu, " ").trim();
+}
+
+function roomSkills(ctx: RouteContext, roomId: string): void {
+  const room = roomForSkillAssignment(ctx, roomId);
+  if (room === undefined) return;
+  const rows = all(
+    ctx.database,
+    `SELECT s.*, rs.enabled
+     FROM room_skills rs
+     INNER JOIN skills s ON s.id = rs.skill_id
+     WHERE rs.room_id = ?
+     ORDER BY s.name ASC`,
+    roomId
+  ) as Array<Record<string, unknown>>;
+  json(ctx.res, 200, { roomId, skills: rows.map((row) => ({ ...normalizeSkillRow(row), enabled: Number(row.enabled) === 1 })) });
+}
+
+function assignRoomSkill(ctx: RouteContext, roomId: string, input: Record<string, unknown>): void {
+  const room = roomForSkillAssignment(ctx, roomId);
+  if (room === undefined) return;
+  const skillId = stringField(input.skillId);
+  if (skillId === undefined) return json(ctx.res, 400, { error: "validation_failed", message: "skillId is required" });
+  if (!skillExists(ctx, skillId, room.workspace_id)) return;
+  const enabled = input.enabled !== false;
+  if (enabled) ctx.skillRegistry.activateForRoom({ workspaceId: room.workspace_id, roomId, skillId });
+  else ctx.skillRegistry.deactivateForRoom({ workspaceId: room.workspace_id, roomId, skillId });
+  json(ctx.res, 200, { assignment: { roomId, skillId, enabled } });
+}
+
+function participantSkills(ctx: RouteContext, roomId: string, participantId: string): void {
+  const room = roomForSkillAssignment(ctx, roomId);
+  if (room === undefined || !participantForSkillAssignment(ctx, roomId, participantId)) return;
+  const rows = all(
+    ctx.database,
+    `SELECT s.*, ask.mode
+     FROM agent_skills ask
+     INNER JOIN skills s ON s.id = ask.skill_id
+     WHERE ask.room_participant_id = ?
+     ORDER BY s.name ASC`,
+    `${roomId}:${participantId}`
+  ) as Array<Record<string, unknown>>;
+  const effectiveSkills = ctx.skillRegistry.resolveSkills(roomId, participantId).map((row) => normalizeSkillRow(row as unknown as Record<string, unknown>));
+  json(ctx.res, 200, { roomId, participantId, skills: rows.map((row) => ({ ...normalizeSkillRow(row), mode: row.mode })), effectiveSkills });
+}
+
+function assignParticipantSkill(ctx: RouteContext, roomId: string, participantId: string, input: Record<string, unknown>): void {
+  const room = roomForSkillAssignment(ctx, roomId);
+  if (room === undefined || !participantForSkillAssignment(ctx, roomId, participantId)) return;
+  const skillId = stringField(input.skillId);
+  const mode = stringField(input.mode);
+  if (skillId === undefined || (mode !== "add" && mode !== "restrict")) return json(ctx.res, 400, { error: "validation_failed", message: "skillId and mode add|restrict are required" });
+  if (!skillExists(ctx, skillId, room.workspace_id)) return;
+  ctx.skillRegistry.activateForParticipant({ workspaceId: room.workspace_id, roomId, participantId, skillId, mode });
+  json(ctx.res, 200, { override: { roomId, participantId, skillId, mode } });
+}
+
+function removeParticipantSkill(ctx: RouteContext, roomId: string, participantId: string, skillId: string): void {
+  const room = roomForSkillAssignment(ctx, roomId);
+  if (room === undefined || !participantForSkillAssignment(ctx, roomId, participantId)) return;
+  if (!skillExists(ctx, skillId, room.workspace_id)) return;
+  ctx.skillRegistry.deactivateForParticipant({ workspaceId: room.workspace_id, roomId, participantId, skillId });
+  json(ctx.res, 200, { ok: true, roomId, participantId, skillId });
+}
+
+function roomForSkillAssignment(ctx: RouteContext, roomId: string): { readonly workspace_id: string } | undefined {
+  const room = get(ctx.database, "SELECT workspace_id FROM rooms WHERE id = ? AND archived_at IS NULL", roomId) as { readonly workspace_id: string } | null;
+  if (room === null) {
+    json(ctx.res, 404, { error: "room_not_found" });
+    return undefined;
+  }
+  return room;
+}
+
+function participantForSkillAssignment(ctx: RouteContext, roomId: string, participantId: string): boolean {
+  const participant = get(ctx.database, "SELECT 1 FROM room_participants WHERE room_id = ? AND participant_id = ? AND participant_type = 'agent'", roomId, participantId);
+  if (participant === null) {
+    json(ctx.res, 404, { error: "participant_not_found" });
+    return false;
+  }
+  return true;
+}
+
+function skillExists(ctx: RouteContext, skillId: string, workspaceId: string): boolean {
+  const skill = get(ctx.database, "SELECT 1 FROM skills WHERE id = ? AND workspace_id = ?", skillId, workspaceId);
+  if (skill === null) {
+    json(ctx.res, 404, { error: "skill_not_found" });
+    return false;
+  }
+  return true;
 }
 
 function interventions(ctx: RouteContext, url: URL): void {
@@ -2033,6 +2389,264 @@ function get(database: AgentHubDatabase, sql: string, ...params: unknown[]): unk
 function scalar(database: AgentHubDatabase, sql: string, ...params: unknown[]): number { const row = database.sqlite.prepare(sql).get(...params) as { readonly count: number } | undefined; return row?.count ?? 0; }
 function json(res: ServerResponse, status: number, value: unknown): void { res.writeHead(status, { "content-type": "application/json" }); res.end(redactAndTruncate(JSON.stringify(value), 64 * 1024)); }
 async function body(ctx: RouteContext): Promise<Record<string, unknown>> { const chunks: Buffer[] = []; for await (const chunk of ctx.req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)); if (chunks.length === 0) return {}; return JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>; }
+
+function defaultWorkspaceId(database: AgentHubDatabase): string {
+  const row = database.sqlite.prepare("SELECT id FROM workspaces ORDER BY created_at ASC LIMIT 1").get() as { readonly id: string } | undefined;
+  return row?.id ?? "default-workspace";
+}
+
+function normalizeSkillRow(row: Record<string, unknown>): Record<string, unknown> {
+  const fileCount = typeof row.file_count === "number" ? row.file_count : typeof row.fileCount === "number" ? row.fileCount : undefined;
+  return {
+    id: row.id,
+    workspace_id: row.workspace_id,
+    workspaceId: row.workspace_id,
+    name: row.name,
+    description: row.description,
+    content: row.content,
+    origin: row.origin,
+    source_url: row.source_url,
+    sourceUrl: row.source_url,
+    created_at: row.created_at,
+    createdAt: row.created_at,
+    updated_at: row.updated_at,
+    updatedAt: row.updated_at,
+    ...(fileCount !== undefined ? { file_count: fileCount, fileCount } : {})
+  };
+}
+
+function skillRowWithFileCount(ctx: RouteContext, skillId: string): Record<string, unknown> | null {
+  return get(ctx.database, "SELECT s.*, (SELECT COUNT(*) FROM skill_files sf WHERE sf.skill_id = s.id) AS file_count FROM skills s WHERE s.id = ?", skillId) as Record<string, unknown> | null;
+}
+
+function skillDetailResponse(ctx: RouteContext, row: Record<string, unknown>): { readonly skill: Record<string, unknown>; readonly files: readonly Record<string, unknown>[] } {
+  return {
+    skill: normalizeSkillRow(row),
+    files: all(ctx.database, "SELECT * FROM skill_files WHERE skill_id = ? ORDER BY path ASC", row.id).map((file) => normalizeSkillFileRow(file as Record<string, unknown>))
+  };
+}
+
+function normalizeSkillFileRow(row: Record<string, unknown>): Record<string, unknown> {
+  return {
+    id: row.id,
+    skill_id: row.skill_id,
+    skillId: row.skill_id,
+    path: row.path,
+    content: row.content
+  };
+}
+
+function skillFilesFromInput(value: unknown): ReadonlyArray<{ readonly path: string; readonly content: string }> {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const record = item as Record<string, unknown>;
+    return typeof record.path === "string" && typeof record.content === "string"
+      ? [{ path: record.path, content: record.content }]
+      : [];
+  });
+}
+
+type ImportedSkillPackage = {
+  readonly content: string;
+  readonly files: ReadonlyArray<{ readonly path: string; readonly content: string }>;
+};
+
+type GitHubSkillUrl = {
+  readonly owner: string;
+  readonly repo: string;
+  readonly kind: "root" | "tree" | "blob";
+  readonly refAndPathSegments: readonly string[];
+};
+
+type GitHubContentsEntry = {
+  readonly type?: unknown;
+  readonly name?: unknown;
+  readonly path?: unknown;
+  readonly download_url?: unknown;
+};
+
+const SKILL_IMPORT_MAX_FILES = 128;
+const SKILL_IMPORT_MAX_FILE_BYTES = 1024 * 1024;
+const SKILL_IMPORT_MAX_TOTAL_BYTES = 8 * 1024 * 1024;
+
+async function fetchSkillPackage(ctx: RouteContext, sourceUrl: string): Promise<ImportedSkillPackage> {
+  const github = parseGitHubSkillUrl(sourceUrl);
+  if (github !== undefined) return fetchGitHubSkillPackage(ctx, github);
+  const content = await fetchSkillText(ctx, sourceUrl);
+  return { content, files: [] };
+}
+
+function parseGitHubSkillUrl(sourceUrl: string): GitHubSkillUrl | undefined {
+  let parsed: URL;
+  try {
+    parsed = new URL(sourceUrl);
+  } catch {
+    return undefined;
+  }
+  if (parsed.hostname.toLowerCase() !== "github.com") return undefined;
+  const parts = parsed.pathname.split("/").filter((part) => part.length > 0).map((part) => decodeURIComponent(part));
+  if (parts.length < 2) throw new Error("expected GitHub URL format github.com/{owner}/{repo}");
+  const owner = parts[0];
+  const repoPart = parts[1];
+  if (owner === undefined || repoPart === undefined) throw new Error("expected GitHub URL format github.com/{owner}/{repo}");
+  const repo = repoPart.replace(/\.git$/iu, "");
+  const marker = parts[2];
+  if (marker === undefined) return { owner, repo, kind: "root", refAndPathSegments: [] };
+  if (marker !== "tree" && marker !== "blob") throw new Error(`unsupported GitHub skill URL form '${marker}'`);
+  const rest = parts.slice(3);
+  if (rest.length === 0) throw new Error(`missing ref after /${marker}/`);
+  if (marker === "blob") {
+    const last = rest[rest.length - 1];
+    if (last?.toLowerCase() !== "skill.md") throw new Error("GitHub blob URL must point to a SKILL.md file");
+    return { owner, repo, kind: "blob", refAndPathSegments: rest.slice(0, -1) };
+  }
+  return { owner, repo, kind: "tree", refAndPathSegments: rest };
+}
+
+async function fetchGitHubSkillPackage(ctx: RouteContext, spec: GitHubSkillUrl): Promise<ImportedSkillPackage> {
+  const resolved = await resolveGitHubSkillDirectory(ctx, spec);
+  const state = { totalBytes: 0, fileCount: 0 };
+  return collectGitHubSkillDirectory(ctx, spec.owner, spec.repo, resolved.ref, resolved.dirPath, resolved.dirPath, state);
+}
+
+async function resolveGitHubSkillDirectory(ctx: RouteContext, spec: GitHubSkillUrl): Promise<{ readonly ref: string; readonly dirPath: string }> {
+  if (spec.kind === "root") return { ref: "main", dirPath: "" };
+  for (let refLength = spec.refAndPathSegments.length; refLength >= 1; refLength -= 1) {
+    const ref = spec.refAndPathSegments.slice(0, refLength).join("/");
+    const dirPath = spec.refAndPathSegments.slice(refLength).join("/");
+    const response = await fetchGitHubContentsResponse(ctx, spec.owner, spec.repo, dirPath, ref);
+    if (response.ok) return { ref, dirPath };
+  }
+  return { ref: spec.refAndPathSegments[0] ?? "main", dirPath: spec.refAndPathSegments.slice(1).join("/") };
+}
+
+async function collectGitHubSkillDirectory(
+  ctx: RouteContext,
+  owner: string,
+  repo: string,
+  ref: string,
+  apiPath: string,
+  packageRoot: string,
+  state: { totalBytes: number; fileCount: number }
+): Promise<ImportedSkillPackage> {
+  const entries = await fetchGitHubContents(ctx, owner, repo, apiPath, ref);
+  const list = Array.isArray(entries) ? entries : [entries];
+  const files: Array<{ readonly path: string; readonly content: string }> = [];
+  let skillContent: string | undefined;
+  for (const rawEntry of list) {
+    const entry = githubEntry(rawEntry);
+    if (entry === undefined) continue;
+    if (entry.type === "dir") {
+      files.push(...await collectGitHubSupportingFiles(ctx, owner, repo, ref, entry.path, packageRoot, state));
+      continue;
+    }
+    if (entry.type !== "file") continue;
+    const relativePath = relativeGitHubPackagePath(packageRoot, entry.path);
+    if (relativePath.toLowerCase() === "skill.md") {
+      skillContent = await fetchSkillText(ctx, entry.downloadUrl, state);
+      continue;
+    }
+    if (relativePath.split("/").some((segment) => segment.toLowerCase() === "skill.md")) continue;
+    if (state.fileCount >= SKILL_IMPORT_MAX_FILES) throw new Error(`skill package exceeds ${SKILL_IMPORT_MAX_FILES} files`);
+    const content = await fetchSkillText(ctx, entry.downloadUrl, state);
+    state.fileCount += 1;
+    files.push({ path: relativePath, content });
+  }
+  if (skillContent === undefined) throw new Error(`SKILL.md not found in GitHub package '${owner}/${repo}/${apiPath}'`);
+  return { content: skillContent, files: files.sort((a, b) => a.path.localeCompare(b.path)) };
+}
+
+async function collectGitHubSupportingFiles(
+  ctx: RouteContext,
+  owner: string,
+  repo: string,
+  ref: string,
+  apiPath: string,
+  packageRoot: string,
+  state: { totalBytes: number; fileCount: number }
+): Promise<ReadonlyArray<{ readonly path: string; readonly content: string }>> {
+  const entries = await fetchGitHubContents(ctx, owner, repo, apiPath, ref);
+  const list = Array.isArray(entries) ? entries : [entries];
+  const files: Array<{ readonly path: string; readonly content: string }> = [];
+  for (const rawEntry of list) {
+    const entry = githubEntry(rawEntry);
+    if (entry === undefined) continue;
+    if (entry.type === "dir") {
+      files.push(...await collectGitHubSupportingFiles(ctx, owner, repo, ref, entry.path, packageRoot, state));
+      continue;
+    }
+    if (entry.type !== "file") continue;
+    const relativePath = relativeGitHubPackagePath(packageRoot, entry.path);
+    if (relativePath.toLowerCase() === "skill.md") continue;
+    if (relativePath.split("/").some((segment) => segment.toLowerCase() === "skill.md")) continue;
+    if (state.fileCount >= SKILL_IMPORT_MAX_FILES) throw new Error(`skill package exceeds ${SKILL_IMPORT_MAX_FILES} files`);
+    const content = await fetchSkillText(ctx, entry.downloadUrl, state);
+    state.fileCount += 1;
+    files.push({ path: relativePath, content });
+  }
+  return files.sort((a, b) => a.path.localeCompare(b.path));
+}
+
+async function fetchGitHubContents(ctx: RouteContext, owner: string, repo: string, path: string, ref: string): Promise<unknown> {
+  const response = await fetchGitHubContentsResponse(ctx, owner, repo, path, ref);
+  if (!response.ok) throw new Error(`GitHub contents fetch failed (${response.status})`);
+  return response.json();
+}
+
+function fetchGitHubContentsResponse(ctx: RouteContext, owner: string, repo: string, path: string, ref: string): Promise<Response> {
+  const encodedPath = path.split("/").filter((part) => part.length > 0).map(encodeURIComponent).join("/");
+  const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents${encodedPath.length > 0 ? `/${encodedPath}` : ""}?ref=${encodeURIComponent(ref)}`;
+  return ctx.modelTestFetch(url, { headers: { accept: "application/vnd.github+json" } });
+}
+
+async function fetchSkillText(ctx: RouteContext, url: string, state?: { totalBytes: number }): Promise<string> {
+  const response = await ctx.modelTestFetch(url, { headers: { accept: "text/plain,text/markdown,*/*" } });
+  if (!response.ok) throw new Error(`skill import fetch failed (${response.status})`);
+  const content = await response.text();
+  const bytes = Buffer.byteLength(content, "utf8");
+  if (bytes > SKILL_IMPORT_MAX_FILE_BYTES) throw new Error(`skill file exceeds ${SKILL_IMPORT_MAX_FILE_BYTES} bytes`);
+  if (state !== undefined) {
+    state.totalBytes += bytes;
+    if (state.totalBytes > SKILL_IMPORT_MAX_TOTAL_BYTES) throw new Error(`skill package exceeds ${SKILL_IMPORT_MAX_TOTAL_BYTES} bytes`);
+  }
+  return content;
+}
+
+function githubEntry(value: unknown): { readonly type: string; readonly path: string; readonly downloadUrl: string } | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const entry = value as GitHubContentsEntry;
+  if (typeof entry.type !== "string" || typeof entry.path !== "string") return undefined;
+  if (entry.type === "dir") return { type: "dir", path: entry.path, downloadUrl: "" };
+  if (entry.type !== "file" || typeof entry.download_url !== "string" || entry.download_url.length === 0) return undefined;
+  return { type: "file", path: entry.path, downloadUrl: entry.download_url };
+}
+
+function relativeGitHubPackagePath(packageRoot: string, entryPath: string): string {
+  if (packageRoot.length === 0) return entryPath;
+  return entryPath === packageRoot ? "" : entryPath.startsWith(`${packageRoot}/`) ? entryPath.slice(packageRoot.length + 1) : entryPath;
+}
+
+function skillFrontmatter(content: string): { readonly name: string; readonly description: string } | undefined {
+  const lines = content.split(/\r?\n/u);
+  if (lines[0] !== "---") return undefined;
+  const values: Record<string, string> = {};
+  for (let index = 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line === "---") break;
+    if (line === undefined) return undefined;
+    const separator = line.indexOf(":");
+    if (separator <= 0) continue;
+    const key = line.slice(0, separator).trim();
+    const value = line.slice(separator + 1).trim();
+    if (key === "name" || key === "description") values[key] = value;
+  }
+  return values.name && values.description ? { name: values.name, description: values.description } : undefined;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 type CostRow = { readonly key: string | null; readonly inputTokens: number | null; readonly outputTokens: number | null; readonly cachedTokens: number | null; readonly costUsd: number | null; readonly runCount: number };
 type CostGroup = { readonly key: string; readonly inputTokens: number; readonly outputTokens: number; readonly cachedTokens: number; readonly costUsd: number; readonly runCount: number };

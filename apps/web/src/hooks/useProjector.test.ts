@@ -313,6 +313,32 @@ describe("useProjector replay handling", () => {
     });
   });
 
+  it("projects agent.joined V1.1 member metadata for the Members panel", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "team" }));
+    projector.apply(makeAgentEvent("agent.joined", roomId, "binding-builder", {
+      agentId: "binding-builder",
+      agentName: "Builder",
+      role: "teammate",
+      adapterId: "native",
+      agentBindingId: "binding-builder",
+      roleId: "role-builder",
+      capabilities: ["code.edit", "file.write"]
+    }));
+
+    const participant = emittedState.rooms.get(roomId)?.participants.find((item) => item.id === "binding-builder");
+    expect(participant).toMatchObject({
+      id: "binding-builder",
+      name: "Builder",
+      role: "teammate",
+      adapterId: "native",
+      agentBindingId: "binding-builder",
+      roleId: "role-builder",
+      capabilities: ["code.edit", "file.write"]
+    });
+  });
+
   it("normalizes permission decisions from backend action words to view statuses", () => {
     const roomId = `room-${randomUUID()}`;
     const projector = getProjector();

@@ -54,7 +54,7 @@ export function SidePanel({ room, csrfFetch, initialTab = "context", onOpenArtif
         <ScrollShadow className="flex-1 min-h-0 overflow-auto" orientation="vertical">
           <Tabs.Panel id="context"><ContextPanel items={room.contextItems} /></Tabs.Panel>
           <Tabs.Panel id="tasks"><TasksPanel roomId={room.id} tasks={room.tasks} executionPlan={room.executionPlan} csrfFetch={csrfFetch} onOpenArtifact={onOpenArtifact} /></Tabs.Panel>
-          <Tabs.Panel id="members"><MembersPanel members={room.participants} /></Tabs.Panel>
+          <Tabs.Panel id="members"><MembersPanel roomId={room.id} members={room.participants} tasks={room.tasks} csrfFetch={csrfFetch} /></Tabs.Panel>
           <Tabs.Panel id="debug"><DebugPanel room={room} /></Tabs.Panel>
           <Tabs.Panel id="cost"><CostPanel csrfFetch={csrfFetch} /></Tabs.Panel>
         </ScrollShadow>

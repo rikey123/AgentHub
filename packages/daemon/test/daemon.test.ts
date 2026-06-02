@@ -420,6 +420,16 @@ describe("daemon M1.4 composition", () => {
     expect(native).toMatchObject({ id: "native-default", kind: "native", name: "AgentHub Native" });
     expect(native?.supported_caps).toBe("[]");
     expect(JSON.parse(native?.manifest_json ?? "{}") as { readonly runtimeKind?: string }).toMatchObject({ runtimeKind: "native" });
+    const seededCatalog = daemon.database.sqlite.prepare("SELECT id, kind, command, args, status, manifest_json FROM runtimes WHERE id IN ('runtime-codex', 'runtime-qwen', 'runtime-goose', 'runtime-kimi', 'runtime-kiro', 'runtime-hermes') ORDER BY id ASC").all() as Array<{ readonly id: string; readonly kind: string; readonly command: string | null; readonly args: string | null; readonly status: string | null; readonly manifest_json: string }>;
+    expect(seededCatalog.map((runtime) => runtime.kind).sort()).toEqual(["codex", "goose", "hermes", "kimi", "kiro", "qwen"]);
+    const seededCodex = seededCatalog.find((runtime) => runtime.id === "runtime-codex");
+    expect(seededCodex).toMatchObject({
+      kind: "codex",
+      command: "npx",
+      args: JSON.stringify(["-y", "@zed-industries/codex-acp@0.9.5"])
+    });
+    expect(["missing", "connected"]).toContain(seededCodex?.status);
+    expect(JSON.parse(seededCodex?.manifest_json ?? "{}")).toMatchObject({ runtimeKind: "codex", detectCommand: "codex", skillDir: ".codex/skills" });
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'runtime.detected' AND json_extract(payload, '$.runtimeId') = 'native-default'").get()).toMatchObject({ count: 1 });
     expectDetailOnlyEvent(daemon, "runtime.detected", "runtimeId", "native-default");
   
@@ -433,6 +443,15 @@ describe("daemon M1.4 composition", () => {
     expect(createdPayload.runtime).toMatchObject({ id: "runtime-custom-1", name: "Custom Runtime", kind: "custom-acp" });
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'runtime.detected' AND json_extract(payload, '$.runtimeId') = 'runtime-custom-1'").get()).toMatchObject({ count: 1 });
     expectDetailOnlyEvent(daemon, "runtime.detected", "runtimeId", "runtime-custom-1");
+
+    const createdKnownRuntime = await fetch(`${baseUrl}/runtimes`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id: "runtime-codex-manual", kind: "codex", name: "Codex Manual", command: "npx", args: ["-y", "@zed-industries/codex-acp@0.9.5"], supportedCaps: ["chat"], manifestJson: JSON.stringify({ runtimeKind: "codex", detectCommand: "codex" }) })
+    });
+    const createdKnownPayload = await createdKnownRuntime.json() as { readonly runtime?: { readonly id: string; readonly kind: string; readonly name: string } | null };
+    expect(createdKnownRuntime.status).toBe(201);
+    expect(createdKnownPayload.runtime).toMatchObject({ id: "runtime-codex-manual", kind: "codex", name: "Codex Manual" });
 
     const patched = await fetch(`${baseUrl}/runtimes/runtime-custom-1`, {
       method: "PATCH",
@@ -1235,6 +1254,63 @@ describe("daemon M1.4 composition", () => {
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE room_id = ? AND type = 'room.created'").get(roomId)).toMatchObject({ count: 1 });
   });
 
+  it("adds a teammate to a running room from an existing agent binding", async () => {
+    const workspaceId = `ws_add_participant_${Date.now()}`;
+    const leaderRoleId = `role_add_leader_${Date.now()}`;
+    const teammateRoleId = `role_add_builder_${Date.now()}`;
+    const runtimeId = `runtime_add_participant_${Date.now()}`;
+    const leaderBindingId = `binding_add_leader_${Date.now()}`;
+    const teammateBindingId = `binding_add_builder_${Date.now()}`;
+    const roomId = `room_add_participant_${Date.now()}`;
+    daemon.database.sqlite.transaction(() => {
+      daemon.database.sqlite.prepare("INSERT OR IGNORE INTO workspaces (id, name, root_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run(workspaceId, "Add Participant", ".", Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO roles (id, workspace_id, name, avatar, description, prompt, capabilities, default_permission_profile_id, tags, is_builtin, source_path, version, created_at, updated_at) VALUES (?, ?, ?, NULL, NULL, ?, ?, NULL, NULL, 0, NULL, NULL, ?, ?)").run(leaderRoleId, workspaceId, "Lead", "Lead prompt", JSON.stringify(["task.delegate"]), Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO roles (id, workspace_id, name, avatar, description, prompt, capabilities, default_permission_profile_id, tags, is_builtin, source_path, version, created_at, updated_at) VALUES (?, ?, ?, NULL, NULL, ?, ?, NULL, NULL, 0, NULL, NULL, ?, ?)").run(teammateRoleId, workspaceId, "Builder", "Builder prompt", JSON.stringify(["code.edit"]), Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO runtimes (id, workspace_id, kind, name, command, args, env, detected_at, detected_path, detected_version, supported_caps, version, status, manifest_json, created_at, updated_at) VALUES (?, ?, 'native', ?, NULL, NULL, NULL, NULL, NULL, 'native', '[]', NULL, NULL, ?, ?, ?)").run(runtimeId, workspaceId, "Native", JSON.stringify({ runtimeKind: "native" }), Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, NULL, ?, ?)").run(leaderBindingId, workspaceId, leaderRoleId, runtimeId, Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, NULL, ?, ?)").run(teammateBindingId, workspaceId, teammateRoleId, runtimeId, Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, leader_role_id, archived_at, created_at, updated_at) VALUES (?, ?, ?, 'squad', 'conversation', ?, ?, NULL, ?, ?)").run(roomId, workspaceId, "Expandable Squad", leaderBindingId, leaderRoleId, Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES (?, ?, 'agent', 'primary', 'native', NULL, ?, 'active', ?)").run(roomId, leaderBindingId, leaderBindingId, Date.now());
+      daemon.database.sqlite.prepare("INSERT OR REPLACE INTO agent_presence (room_id, agent_id, state, reason, status_line, updated_at) VALUES (?, ?, 'active', NULL, NULL, ?)").run(roomId, leaderBindingId, Date.now());
+    })();
+
+    const response = await fetch(`${baseUrl}/rooms/${roomId}/participants`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agentBindingId: teammateBindingId })
+    });
+    const payload = await response.json() as { readonly data?: { readonly participantId: string; readonly agentBindingId: string; readonly capabilities: string[] } };
+
+    expect(response.status).toBe(201);
+    expect(payload.data).toMatchObject({ participantId: teammateBindingId, agentBindingId: teammateBindingId, capabilities: ["code.edit"] });
+    expect(daemon.database.sqlite.prepare("SELECT participant_id, role, agent_binding_id, default_presence FROM room_participants WHERE room_id = ? AND participant_id = ?").get(roomId, teammateBindingId)).toMatchObject({ participant_id: teammateBindingId, role: "teammate", agent_binding_id: teammateBindingId, default_presence: "active" });
+    expect(daemon.database.sqlite.prepare("SELECT state FROM agent_presence WHERE room_id = ? AND agent_id = ?").get(roomId, teammateBindingId)).toMatchObject({ state: "active" });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE room_id = ? AND type = 'agent.joined' AND agent_id = ?").get(roomId, teammateBindingId)).toMatchObject({ count: 1 });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE room_id = ? AND type = 'agent.state.changed' AND agent_id = ?").get(roomId, teammateBindingId)).toMatchObject({ count: 1 });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM mailbox_messages WHERE room_id = ? AND to_agent_id = ?").get(roomId, leaderBindingId)).toMatchObject({ count: 1 });
+  });
+
+  it("assigns selected skills when creating a room", async () => {
+    const skillContent = "---\nname: creation-skill\ndescription: Available on create.\n---\n\nUse this skill.";
+    const createdSkill = await fetch(`${baseUrl}/skills`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "creation-skill", description: "Available on create.", content: skillContent })
+    });
+    const skillPayload = await createdSkill.json() as { readonly skill: { readonly id: string } };
+
+    const response = await fetch(`${baseUrl}/rooms`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Skill Room Create", mode: "solo", primaryAgentId: "mock-builder", skillIds: [skillPayload.skill.id] })
+    });
+    const payload = await response.json() as { readonly data?: { readonly roomId: string } };
+
+    expect(response.status).toBe(201);
+    expect(daemon.database.sqlite.prepare("SELECT enabled FROM room_skills WHERE room_id = ? AND skill_id = ?").get(payload.data?.roomId ?? "", skillPayload.skill.id)).toMatchObject({ enabled: 1 });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE room_id = ? AND type = 'skill.activated'").get(payload.data?.roomId ?? "")).toMatchObject({ count: 1 });
+  });
+
   it("keeps solo rooms compatible without leaderRoleId", async () => {
     const response = await fetch(`${baseUrl}/rooms`, {
       method: "POST",
@@ -1833,6 +1909,197 @@ describe("daemon M1.4 composition", () => {
     const activitiesAfterComment = await fetch(`${baseUrl}/tasks/${createdPayload.data.taskId}/activities`);
     const activitiesAfterCommentPayload = await activitiesAfterComment.json() as { readonly activities: readonly { readonly kind: string; readonly payload: string }[] };
     expect(activitiesAfterCommentPayload.activities[0]).toMatchObject({ kind: "comment", payload: JSON.stringify({ text: "Looks good" }) });
+  });
+
+  it("serves V1.1 skill CRUD routes and protects builtin skills", async () => {
+    const listed = await fetch(`${baseUrl}/skills`);
+    const listedPayload = await listed.json() as { readonly skills: readonly { readonly id: string; readonly name: string; readonly origin: string }[] };
+    expect(listed.status).toBe(200);
+    expect(listedPayload.skills.map((skill) => skill.name).sort()).toEqual(["skill-creator", "task-planner"]);
+
+    const builtinId = listedPayload.skills.find((skill) => skill.name === "task-planner")?.id ?? "";
+    const deleteBuiltin = await fetch(`${baseUrl}/skills/${builtinId}`, { method: "DELETE" });
+    expect(deleteBuiltin.status).toBe(403);
+
+    const content = "---\nname: review-helper\ndescription: Helps review patches.\n---\n\nReview changes carefully.";
+    const created = await fetch(`${baseUrl}/skills`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "review-helper",
+        description: "Helps review patches.",
+        content,
+        files: [{ path: "references/checklist.md", content: "- Check behavior\n- Check tests" }]
+      })
+    });
+    const createdPayload = await created.json() as { readonly skill: { readonly id: string; readonly name: string; readonly origin: string; readonly fileCount?: number }; readonly files?: readonly { readonly path: string; readonly content: string }[] };
+    expect(created.status).toBe(201);
+    expect(createdPayload.skill).toMatchObject({ name: "review-helper", origin: "workspace", fileCount: 1 });
+    expect(createdPayload.files).toMatchObject([{ path: "references/checklist.md", content: "- Check behavior\n- Check tests" }]);
+    expect(daemon.database.sqlite.prepare("SELECT type FROM events WHERE type = 'skill.created' AND json_extract(payload, '$.skillId') = ?").get(createdPayload.skill.id)).toBeDefined();
+
+    const fetched = await fetch(`${baseUrl}/skills/${createdPayload.skill.id}`);
+    await expect(fetched.json()).resolves.toMatchObject({ skill: { id: createdPayload.skill.id, name: "review-helper", fileCount: 1 }, files: [{ path: "references/checklist.md", content: "- Check behavior\n- Check tests" }] });
+
+    const updatedContent = "---\nname: review-assistant\ndescription: Reviews patches with a checklist.\n---\n\nUse a concise checklist.";
+    const updated = await fetch(`${baseUrl}/skills/${createdPayload.skill.id}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "review-assistant",
+        description: "Reviews patches with a checklist.",
+        content: updatedContent,
+        files: [{ path: "scripts/review.sh", content: "echo review" }]
+      })
+    });
+    expect(updated.status).toBe(200);
+    await expect(updated.json()).resolves.toMatchObject({ skill: { id: createdPayload.skill.id, name: "review-assistant", fileCount: 1 }, files: [{ path: "scripts/review.sh", content: "echo review" }] });
+    expect(daemon.database.sqlite.prepare("SELECT type FROM events WHERE type = 'skill.updated' AND json_extract(payload, '$.skillId') = ?").get(createdPayload.skill.id)).toBeDefined();
+
+    const deleted = await fetch(`${baseUrl}/skills/${createdPayload.skill.id}`, { method: "DELETE" });
+    expect(deleted.status).toBe(200);
+    expect(daemon.database.sqlite.prepare("SELECT * FROM skills WHERE id = ?").get(createdPayload.skill.id)).toBeUndefined();
+    expect(daemon.database.sqlite.prepare("SELECT type FROM events WHERE type = 'skill.deleted' AND json_extract(payload, '$.skillId') = ?").get(createdPayload.skill.id)).toBeDefined();
+  });
+
+  it("imports GitHub skill package trees with supporting files", async () => {
+    modelTestFetchMock.mockImplementation(async (request: RequestInfo | URL) => {
+      const url = typeof request === "string" ? request : request instanceof URL ? request.toString() : request.url;
+      if (url === "https://api.github.com/repos/rikey123/skill-pack/contents/review-helper?ref=main") {
+        return new Response(JSON.stringify([
+          { type: "file", name: "SKILL.md", path: "review-helper/SKILL.md", download_url: "https://raw.githubusercontent.com/rikey123/skill-pack/main/review-helper/SKILL.md" },
+          { type: "dir", name: "scripts", path: "review-helper/scripts" },
+          { type: "file", name: "README.md", path: "review-helper/README.md", download_url: "https://raw.githubusercontent.com/rikey123/skill-pack/main/review-helper/README.md" }
+        ]), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (url === "https://api.github.com/repos/rikey123/skill-pack/contents/review-helper/scripts?ref=main") {
+        return new Response(JSON.stringify([
+          { type: "file", name: "run.sh", path: "review-helper/scripts/run.sh", download_url: "https://raw.githubusercontent.com/rikey123/skill-pack/main/review-helper/scripts/run.sh" }
+        ]), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (url.endsWith("/review-helper/SKILL.md")) {
+        return new Response("---\nname: review-helper\ndescription: Imported package.\n---\n\nUse the script and read the reference.", { status: 200, headers: { "content-type": "text/markdown" } });
+      }
+      if (url.endsWith("/review-helper/scripts/run.sh")) {
+        return new Response("echo imported", { status: 200, headers: { "content-type": "text/plain" } });
+      }
+      if (url.endsWith("/review-helper/README.md")) {
+        return new Response("# Reference", { status: 200, headers: { "content-type": "text/markdown" } });
+      }
+      return new Response("not found", { status: 404 });
+    });
+
+    const imported = await fetch(`${baseUrl}/skills/import`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ url: "https://github.com/rikey123/skill-pack/tree/main/review-helper" })
+    });
+    const payload = await imported.json() as { readonly skill: { readonly id: string; readonly name: string; readonly origin: string; readonly sourceUrl: string; readonly fileCount: number }; readonly files: readonly { readonly path: string; readonly content: string }[] };
+
+    expect(imported.status).toBe(201);
+    expect(payload.skill).toMatchObject({ name: "review-helper", origin: "imported", sourceUrl: "https://github.com/rikey123/skill-pack/tree/main/review-helper", fileCount: 2 });
+    expect(payload.files.map((file) => file.path)).toEqual(["README.md", "scripts/run.sh"]);
+    expect(payload.files.find((file) => file.path === "scripts/run.sh")?.content).toBe("echo imported");
+    expect(daemon.database.sqlite.prepare("SELECT type FROM events WHERE type = 'skill.imported' AND json_extract(payload, '$.skillId') = ?").get(payload.skill.id)).toBeDefined();
+  });
+
+  it("lists and imports local runtime skill packages with supporting files", async () => {
+    const originalUserProfile = process.env.USERPROFILE;
+    const originalHome = process.env.HOME;
+    const home = mkdtempSync(join(tmpdir(), "agenthub-local-skills-home-"));
+    const skillDir = join(home, ".config", "opencode", "skills", "release", "reporter");
+    mkdirSync(join(skillDir, "references"), { recursive: true });
+    writeFileSync(join(skillDir, "SKILL.md"), "---\nname: release-reporter\ndescription: Writes release reports.\n---\n\nUse the references and scripts in this package.", "utf8");
+    writeFileSync(join(skillDir, "references", "guide.md"), "# Guide\nUse concise notes.", "utf8");
+    process.env.USERPROFILE = home;
+    process.env.HOME = home;
+    try {
+      const listed = await fetch(`${baseUrl}/runtimes/runtime-opencode/local-skills`);
+      const listedPayload = await listed.json() as { readonly supported?: boolean; readonly provider?: string; readonly skills?: readonly { readonly key: string; readonly name: string; readonly fileCount?: number; readonly file_count?: number; readonly sourcePath?: string; readonly source_path?: string }[] };
+
+      expect(listed.status).toBe(200);
+      expect(listedPayload).toMatchObject({ supported: true, provider: "opencode" });
+      expect(listedPayload.skills).toEqual([
+        expect.objectContaining({ key: "release/reporter", name: "release-reporter", fileCount: 2 })
+      ]);
+
+      const imported = await fetch(`${baseUrl}/runtimes/runtime-opencode/local-skills/import`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ skillKey: "release/reporter", name: "release-reporter-imported", description: "Imported with local edits." })
+      });
+      const payload = await imported.json() as { readonly skill: { readonly id: string; readonly name: string; readonly description: string; readonly origin: string; readonly sourceUrl: string; readonly fileCount: number }; readonly files: readonly { readonly path: string; readonly content: string }[] };
+
+      expect(imported.status).toBe(201);
+      expect(payload.skill).toMatchObject({ name: "release-reporter-imported", description: "Imported with local edits.", origin: "imported", sourceUrl: "local://opencode/release/reporter", fileCount: 1 });
+      expect(payload.files).toEqual([expect.objectContaining({ path: "references/guide.md", content: "# Guide\nUse concise notes." })]);
+      expect(daemon.database.sqlite.prepare("SELECT content FROM skills WHERE id = ?").get(payload.skill.id)).toMatchObject({ content: expect.stringContaining("name: release-reporter-imported") });
+      expect(daemon.database.sqlite.prepare("SELECT type FROM events WHERE type = 'skill.imported' AND json_extract(payload, '$.skillId') = ?").get(payload.skill.id)).toBeDefined();
+    } finally {
+      if (originalUserProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = originalUserProfile;
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+    }
+  });
+
+  it("assigns skills to rooms and participant overrides over REST", async () => {
+    const roomId = `room_skill_assign_${Date.now()}`;
+    const participantId = `agent_skill_assign_${Date.now()}`;
+    daemon.database.sqlite.transaction(() => {
+      daemon.database.sqlite.prepare("INSERT OR IGNORE INTO workspaces (id, name, root_path, created_at, updated_at) VALUES ('default-workspace', 'Default', '.', ?, ?)").run(Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES (?, 'default-workspace', 'Skill Room', 'squad', 'conversation', ?, NULL, ?, ?)").run(roomId, participantId, Date.now(), Date.now());
+      daemon.database.sqlite.prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES (?, ?, 'agent', 'primary', 'mock', NULL, ?, 'active', ?)").run(roomId, participantId, participantId, Date.now());
+    })();
+    const created = await fetch(`${baseUrl}/skills`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "room-skill",
+        description: "Assigned to a room.",
+        content: "---\nname: room-skill\ndescription: Assigned to a room.\n---\n\nUse this in the room."
+      })
+    });
+    const createdPayload = await created.json() as { readonly skill: { readonly id: string } };
+    const skillId = createdPayload.skill.id;
+
+    const enabled = await fetch(`${baseUrl}/rooms/${roomId}/skills`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ skillId, enabled: true })
+    });
+    expect(enabled.status).toBe(200);
+    await expect(enabled.json()).resolves.toMatchObject({ assignment: { roomId, skillId, enabled: true } });
+
+    const roomSkills = await fetch(`${baseUrl}/rooms/${roomId}/skills`);
+    await expect(roomSkills.json()).resolves.toMatchObject({ skills: [expect.objectContaining({ id: skillId, enabled: true })] });
+    expect(daemon.database.sqlite.prepare("SELECT enabled FROM room_skills WHERE room_id = ? AND skill_id = ?").get(roomId, skillId)).toMatchObject({ enabled: 1 });
+
+    const override = await fetch(`${baseUrl}/rooms/${roomId}/participants/${participantId}/skills`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ skillId, mode: "restrict" })
+    });
+    expect(override.status).toBe(200);
+    await expect(override.json()).resolves.toMatchObject({ override: { participantId, skillId, mode: "restrict" } });
+
+    const participantSkills = await fetch(`${baseUrl}/rooms/${roomId}/participants/${participantId}/skills`);
+    await expect(participantSkills.json()).resolves.toMatchObject({ skills: [expect.objectContaining({ id: skillId, mode: "restrict" })] });
+    expect(daemon.database.sqlite.prepare("SELECT mode FROM agent_skills WHERE room_participant_id = ? AND skill_id = ?").get(`${roomId}:${participantId}`, skillId)).toMatchObject({ mode: "restrict" });
+
+    const deletedOverride = await fetch(`${baseUrl}/rooms/${roomId}/participants/${participantId}/skills/${skillId}`, { method: "DELETE" });
+    expect(deletedOverride.status).toBe(200);
+    expect(daemon.database.sqlite.prepare("SELECT * FROM agent_skills WHERE room_participant_id = ? AND skill_id = ?").get(`${roomId}:${participantId}`, skillId)).toBeUndefined();
+
+    const disabled = await fetch(`${baseUrl}/rooms/${roomId}/skills`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ skillId, enabled: false })
+    });
+    expect(disabled.status).toBe(200);
+    expect(daemon.database.sqlite.prepare("SELECT * FROM room_skills WHERE room_id = ? AND skill_id = ?").get(roomId, skillId)).toBeUndefined();
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE room_id = ? AND type = 'skill.activated'").get(roomId)).toMatchObject({ count: 2 });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE room_id = ? AND type = 'skill.deactivated'").get(roomId)).toMatchObject({ count: 2 });
   });
 
   it("aggregates workspace cost by agent, model, and day with empty totals", async () => {

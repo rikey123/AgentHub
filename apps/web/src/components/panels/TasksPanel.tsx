@@ -1,4 +1,4 @@
-import { Avatar, Button, Card, Chip, Drawer, ScrollShadow } from "@heroui/react";
+import { Avatar, Button, Card, Chip, Drawer, Modal, ScrollShadow } from "@heroui/react";
 import {
   DndContext,
   PointerSensor,
@@ -235,6 +235,7 @@ export async function taskBoardResponseError(response: Response, fallback: strin
 
 export function TasksPanel({ roomId, tasks, csrfFetch, executionPlan, onOpenArtifact }: { roomId: string; tasks: ReadonlyArray<TaskViewModel>; csrfFetch: typeof fetch; executionPlan?: RoomExecutionPlanViewModel | undefined; onOpenArtifact?: ((input: { artifactId: string; runId: string; path: string }) => void) | undefined }) {
   const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>(undefined);
+  const [kanbanOpen, setKanbanOpen] = useState(false);
   const [actionError, setActionError] = useState<string | undefined>(undefined);
   const [hydratedPlan, setHydratedPlan] = useState<RoomExecutionPlanViewModel | undefined>(undefined);
   const [layoutVersion, setLayoutVersion] = useState(0);
@@ -298,15 +299,36 @@ export function TasksPanel({ roomId, tasks, csrfFetch, executionPlan, onOpenArti
 
   return (
     <>
-      <div className="flex min-h-[480px] flex-col gap-3 p-3" data-testid="tasks-panel-kanban">
+      <div className="flex min-h-[480px] flex-col gap-3 p-3" data-testid="tasks-panel-list">
         {actionError ? (
           <div className="rounded-lg border border-danger-200 bg-danger-50 px-3 py-2 text-xs text-danger-900 dark:border-danger-800 dark:bg-danger-950/40 dark:text-danger-100">
             {actionError}
           </div>
         ) : null}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-semibold">Tasks</h2>
+            <p className="text-xs text-muted">{visibleTasks.length} active task{visibleTasks.length === 1 ? "" : "s"}</p>
+          </div>
+          <Button size="sm" variant="secondary" onPress={() => setKanbanOpen(true)}>Open Kanban</Button>
+        </div>
         {plan ? <ExecutionPlanCard plan={plan} /> : null}
+        <TaskList groups={groups} allTasks={tasks} onOpenTask={setSelectedTaskId} />
+      </div>
+      <Modal.Backdrop isOpen={kanbanOpen} onOpenChange={setKanbanOpen}>
+        <Modal.Container size="cover" className="items-center justify-center p-3">
+          <Modal.Dialog className="flex h-[min(88vh,820px)] w-[min(96vw,1280px)] max-w-[1280px] overflow-hidden p-0" aria-label="Task Kanban board">
+            <Modal.CloseTrigger aria-label="Close Kanban board" />
+            <Modal.Header className="border-b border-border px-4 py-3">
+              <div className="min-w-0">
+                <Modal.Heading>Task Board</Modal.Heading>
+                <p className="mt-1 text-xs text-muted">{visibleTasks.length} active task{visibleTasks.length === 1 ? "" : "s"}</p>
+              </div>
+            </Modal.Header>
+            <Modal.Body className="min-h-0 p-0">
+              <div className="flex h-full min-h-[480px] flex-col gap-3 p-3" data-testid="tasks-panel-kanban">
         <DndContext sensors={sensors} collisionDetection={collisionDetection} onDragEnd={handleDragEnd}>
-          <div ref={boardRef} className="relative min-h-[420px] overflow-x-auto pb-2">
+          <div ref={boardRef} className="relative min-h-[420px] flex-1 overflow-x-auto pb-2">
             <DependencyArrowOverlay lines={dependencyLines(visibleTasks)} layoutVersion={layoutVersion} scrollElementRef={boardRef} />
             <div className="relative z-10 grid min-w-[760px] grid-cols-5 gap-2">
               {groups.map((group) => (
@@ -316,6 +338,10 @@ export function TasksPanel({ roomId, tasks, csrfFetch, executionPlan, onOpenArti
           </div>
         </DndContext>
       </div>
+            </Modal.Body>
+          </Modal.Dialog>
+        </Modal.Container>
+      </Modal.Backdrop>
       <TaskDetailDrawer
         roomId={roomId}
         detail={detail}
@@ -328,6 +354,67 @@ export function TasksPanel({ roomId, tasks, csrfFetch, executionPlan, onOpenArti
         }}
       />
     </>
+  );
+}
+
+function TaskList({ groups, allTasks, onOpenTask }: { groups: readonly TaskStatusGroup[]; allTasks: ReadonlyArray<TaskViewModel>; onOpenTask: (taskId: string) => void }) {
+  const nonEmptyGroups = groups.filter((group) => group.items.length > 0);
+  if (nonEmptyGroups.length === 0) {
+    return <div className="rounded-xl border border-dashed border-border bg-surface p-4 text-center text-sm text-muted">No active tasks.</div>;
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      {nonEmptyGroups.map((group) => (
+        <section key={group.key} className="rounded-xl border border-border bg-surface-secondary/60">
+          <header className="flex items-center gap-2 border-b border-border px-3 py-2">
+            <h3 className="min-w-0 flex-1 truncate text-xs font-semibold uppercase text-muted">{group.label}</h3>
+            <Chip size="sm" variant="soft" color="default">{group.items.length}</Chip>
+          </header>
+          <div className="flex flex-col divide-y divide-border">
+            {group.items.map((task) => (
+              <TaskListRow key={task.id} task={task} allTasks={allTasks} onOpen={() => onOpenTask(task.id)} />
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function TaskListRow({ task, allTasks, onOpen }: { task: TaskViewModel; allTasks: ReadonlyArray<TaskViewModel>; onOpen: () => void }) {
+  const updatedAt = taskUpdatedAt(task);
+  const assignee = task.assigneeRoleId ?? task.assigneeAgentId ?? "Unassigned";
+  const unresolved = unresolvedDependencyCount(task, allTasks);
+  const fileCount = aggregateFileChanges(task);
+  const worktree = latestWorktreeReview(task);
+  const turnCount = task.delegations?.filter((delegation) => delegation.runId !== undefined).length ?? 0;
+
+  return (
+    <button type="button" className="grid w-full gap-2 px-3 py-3 text-left hover:bg-surface sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center" onClick={onOpen} aria-label={`Open task ${task.title}`}>
+      <div className="min-w-0">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <span className="min-w-0 truncate text-sm font-semibold">{task.title}</span>
+          <Chip size="sm" variant="soft" color={taskStatusColor(task.status)}>{task.status}</Chip>
+          <Chip size="sm" variant="soft" color={priorityColor(task.priority)}>{priorityLabel(task.priority)}</Chip>
+        </div>
+        <p className="mt-1 line-clamp-2 text-xs text-muted">{task.description?.trim() || "No description"}</p>
+        {task.blockerReason ? <p className="mt-1 line-clamp-2 text-xs text-danger-700 dark:text-danger-200">{humanizeReason(task.blockerReason)}</p> : null}
+      </div>
+      <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted sm:justify-end">
+        {task.blockerReason ? <Chip size="sm" variant="soft" color="danger">Blocked</Chip> : null}
+        {fileCount > 0 ? <Chip size="sm" variant="soft" color="accent">{fileCount} files</Chip> : null}
+        {unresolved > 0 ? <Chip size="sm" variant="soft" color="warning">Waiting on {unresolved}</Chip> : null}
+        {task.maxTurns !== undefined ? <Chip size="sm" variant="soft" color="default">{turnCount}/{task.maxTurns} turns</Chip> : null}
+        {worktree?.status === "ready_for_review" ? <Chip size="sm" variant="soft" color="success">Ready</Chip> : null}
+        {worktree?.status === "conflict" ? <Chip size="sm" variant="soft" color="danger">Conflict</Chip> : null}
+        <span className="inline-flex min-w-0 items-center gap-1">
+          <Avatar className="h-5 w-5 text-[10px]"><Avatar.Fallback>{initials(assignee)}</Avatar.Fallback></Avatar>
+          <span className="max-w-28 truncate">{assignee}</span>
+        </span>
+        <span className="shrink-0">{updatedAt ? formatRelativeTime(updatedAt) : "-"}</span>
+      </div>
+    </button>
   );
 }
 

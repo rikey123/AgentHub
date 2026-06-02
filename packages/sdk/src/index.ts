@@ -6,6 +6,7 @@ export type CreateRoomInput = {
   readonly primaryAgentId?: string;
   readonly leaderRoleId?: string;
   readonly agentBindingId?: string;
+  readonly skillIds?: readonly string[];
   readonly participants?: readonly unknown[];
 };
 

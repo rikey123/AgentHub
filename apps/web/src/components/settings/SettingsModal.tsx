@@ -3,9 +3,10 @@ import { Button, Card, Chip, Input, Label, Modal, ScrollShadow, Skeleton, Tabs, 
 import { ModelsTab, type ModelConfig } from "./ModelsTab.tsx";
 import { RolesTab, type RoleConfig } from "./RolesTab.tsx";
 import { RuntimesTab, type RuntimeConfig } from "./RuntimesTab.tsx";
+import { SkillsTab, type SkillConfig } from "./SkillsTab.tsx";
 import { formatBytes } from "../../lib/format.ts";
 
-export type SettingsTabId = "roles" | "runtimes" | "models" | "permissions" | "workspace" | "mcp";
+export type SettingsTabId = "roles" | "runtimes" | "models" | "skills" | "permissions" | "workspace" | "mcp";
 
 export const ROOM_MCP_TOOLS = [
   "room.delegate",
@@ -24,12 +25,13 @@ export const SETTINGS_TABS: Array<{ id: SettingsTabId; label: string; endpoint?:
   { id: "roles", label: "Roles", endpoint: "roles" },
   { id: "runtimes", label: "Runtimes", endpoint: "runtimes" },
   { id: "models", label: "Models", endpoint: "modelConfigs" },
+  { id: "skills", label: "Skills", endpoint: "skills" },
   { id: "permissions", label: "Permissions", endpoint: "permissionProfiles" },
   { id: "workspace", label: "Workspace" },
   { id: "mcp", label: "MCP" }
 ];
 
-type SettingsEndpoint = "roles" | "runtimes" | "modelConfigs" | "agentBindings" | "permissionProfiles" | "permissionRules";
+type SettingsEndpoint = "roles" | "runtimes" | "modelConfigs" | "skills" | "agentBindings" | "permissionProfiles" | "permissionRules";
 
 type SettingsData = Record<SettingsEndpoint, unknown> & {
   workspace: unknown;
@@ -50,6 +52,7 @@ const endpointPaths: Record<SettingsEndpoint, string> = {
   roles: "/roles",
   runtimes: "/runtimes",
   modelConfigs: "/model-configs",
+  skills: "/skills",
   agentBindings: "/agent-bindings",
   permissionProfiles: "/permissions/profiles",
   permissionRules: "/permissions/rules"
@@ -59,6 +62,7 @@ const emptySettingsData = (): SettingsData => ({
   roles: undefined,
   runtimes: undefined,
   modelConfigs: undefined,
+  skills: undefined,
   agentBindings: undefined,
   permissionProfiles: undefined,
   permissionRules: undefined,
@@ -152,10 +156,8 @@ export function SettingsModal({ isOpen, selectedTab, onTabChange, onOpenChange, 
   }, [fetchImpl, isOpen, resetLocalState]);
 
   const loading = status === "loading";
-  const loadedCount = useMemo(
-    () => Object.values(data).filter((value) => value !== undefined).length,
-    [data]
-  );
+  const loadedCount = useMemo(() => settingsLoadedCount(data), [data]);
+  const expectedLoadedCount = Object.keys(endpointPaths).length + 1;
   const errorCount = Object.keys(data.errors).length;
   const allDataEndpointsFailed = errorCount >= Object.keys(endpointPaths).length && loadedCount === 0;
 
@@ -176,7 +178,7 @@ export function SettingsModal({ isOpen, selectedTab, onTabChange, onOpenChange, 
                 </p>
               </div>
                 <Chip className="ml-auto" size="sm" variant="soft" color={status === "error" ? "danger" : loading ? "warning" : "success"}>
-                {loading ? "Loading" : status === "error" ? `${errorCount} REST error${errorCount === 1 ? "" : "s"}` : `${loadedCount}/7 loaded`}
+                {loading ? "Loading" : status === "error" ? `${errorCount} REST error${errorCount === 1 ? "" : "s"}` : `${loadedCount}/${expectedLoadedCount} loaded`}
                 </Chip>
             </div>
           </Modal.Header>
@@ -213,6 +215,7 @@ export function SettingsModal({ isOpen, selectedTab, onTabChange, onOpenChange, 
                       onRolesChange={(roles) => setData((current) => ({ ...current, roles }))}
                       onRuntimesChange={(runtimes) => setData((current) => ({ ...current, runtimes }))}
                       onModelConfigsChange={(configs) => setData((current) => ({ ...current, modelConfigs: configs }))}
+                      onSkillsChange={(skills) => setData((current) => ({ ...current, skills: { skills } }))}
                       onPermissionProfilesChange={(permissionProfiles) => setData((current) => ({ ...current, permissionProfiles }))}
                       onPermissionRulesChange={(permissionRules) => setData((current) => ({ ...current, permissionRules }))}
                     />
@@ -237,6 +240,7 @@ export function SettingsPanel({
   onRolesChange,
   onRuntimesChange,
   onModelConfigsChange,
+  onSkillsChange,
   onPermissionProfilesChange,
   onPermissionRulesChange
 }: {
@@ -249,6 +253,7 @@ export function SettingsPanel({
   onRolesChange: (roles: RoleConfig[]) => void;
   onRuntimesChange: (runtimes: RuntimeConfig[]) => void;
   onModelConfigsChange: (configs: ModelConfig[]) => void;
+  onSkillsChange: (skills: SkillConfig[]) => void;
   onPermissionProfilesChange: (permissionProfiles: unknown) => void;
   onPermissionRulesChange: (permissionRules: unknown) => void;
 }) {
@@ -262,6 +267,10 @@ export function SettingsPanel({
 
   if (tab.id === "models" && data !== undefined) {
     return <ModelsTab modelConfigs={data} fetchImpl={fetchImpl} onModelConfigsChange={onModelConfigsChange} />;
+  }
+
+  if (tab.id === "skills" && data !== undefined) {
+    return <SkillsTab skills={data} runtimes={allData.runtimes} fetchImpl={fetchImpl} onSkillsChange={onSkillsChange} />;
   }
 
   if (tab.id === "permissions" && data !== undefined) {
@@ -310,6 +319,11 @@ function errorMessage(error: unknown): string {
 
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
+}
+
+function settingsLoadedCount(data: SettingsData): number {
+  const endpointCount = (Object.keys(endpointPaths) as SettingsEndpoint[]).filter((key) => data[key] !== undefined).length;
+  return endpointCount + (data.workspace !== undefined ? 1 : 0);
 }
 
 function SettingsSkeleton() {
@@ -672,6 +686,8 @@ function panelDescription(tab: SettingsTabId): string {
       return "Local runtime detection and command configuration.";
     case "models":
       return "Provider, model, keychain, and test-call configuration.";
+    case "skills":
+      return "Standard SKILL.md packages for room and agent capability guidance.";
     case "permissions":
       return "Agent binding and permission-profile assignments.";
     case "workspace":

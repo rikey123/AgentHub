@@ -2,10 +2,10 @@
 
 ### Requirement: V1.1 Task Board 占位（task-board）
 
-The V1.1 task-board capability SHALL be considered fulfilled. The Kanban board view replaces the V1.0 flat task list. The system SHALL expose the Kanban board at the Side Panel Tasks tab and SHALL NOT return 404 for board-related operations.
+The V1.1 task-board capability SHALL be considered fulfilled. The Side Panel Tasks tab SHALL keep a clear default task list and expose the Kanban board from an "Open Kanban" control/modal. The system SHALL NOT return 404 for board-related operations.
 
 **What V1.1 delivers:**
-- Kanban board view replacing the V1.0 flat task list
+- Clear default task list plus Kanban board modal
 - Drag-to-move columns with `task.column.moved` event
 - Priority badge UI (priority changes use existing `task.activity.added { kind: "priority_change" }` — no new `task.priority.changed` event)
 - Dependency arrows (visualization only; auto-dispatch is V1.2)
@@ -21,7 +21,7 @@ The V1.1 task-board capability SHALL be considered fulfilled. The Kanban board v
 #### Scenario: V1.1 Kanban board is accessible
 
 - **WHEN** the user opens the Side Panel Tasks tab in V1.1
-- **THEN** the Kanban board is displayed; the 404 from the V1.0 placeholder is no longer returned
+- **THEN** the task list is displayed with an "Open Kanban" control; opening the board no longer returns the V1.0 placeholder 404
 
 #### Scenario: V1.1 drag-to-move works
 

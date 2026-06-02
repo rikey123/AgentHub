@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { dirname, relative, resolve, sep } from "node:path";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 
 import type { EventBus } from "@agenthub/bus";
 import type { AgentHubDatabase } from "@agenthub/db";
@@ -41,6 +41,7 @@ export type UpdateSkillInput = {
   readonly name?: string;
   readonly description?: string;
   readonly content?: string;
+  readonly files?: ReadonlyArray<{ readonly path: string; readonly content: string }>;
 };
 
 export type RoomSkillAssignmentInput = {
@@ -58,6 +59,26 @@ export type ParticipantSkillAssignmentInput = {
 };
 
 type SkillFrontmatter = { readonly name: string; readonly description: string };
+type SkillDirent = { readonly name: string; isDirectory(): boolean; isFile(): boolean };
+
+export type RuntimeLocalSkillSummary = {
+  readonly key: string;
+  readonly name: string;
+  readonly description?: string;
+  readonly sourcePath: string;
+  readonly provider: string;
+  readonly fileCount: number;
+};
+
+export type RuntimeLocalSkillBundle = RuntimeLocalSkillSummary & {
+  readonly content: string;
+  readonly files: ReadonlyArray<{ readonly path: string; readonly content: string }>;
+};
+
+export type RuntimeLocalSkillOptions = {
+  readonly homeDir?: string;
+  readonly env?: NodeJS.ProcessEnv;
+};
 
 export class SkillMaterializationError extends Error {
   constructor(
@@ -80,9 +101,17 @@ const RUNTIME_SKILL_DIRS: Record<string, string> = {
   opencode: ".opencode/skills",
   qwen: ".qwen/skills",
   cursor: ".cursor/skills",
+  goose: ".goose/skills",
+  kimi: ".kimi/skills",
+  kiro: ".kiro/skills",
   native: ".agenthub/skills",
   mock: ".agenthub/skills"
 };
+
+const LOCAL_SKILL_MAX_FILE_BYTES = 1024 * 1024;
+const LOCAL_SKILL_MAX_TOTAL_BYTES = 8 * 1024 * 1024;
+const LOCAL_SKILL_MAX_FILE_COUNT = 128;
+const LOCAL_SKILL_MAX_DIR_DEPTH = 4;
 
 export class SkillRegistry {
   private readonly now: () => number;
@@ -113,9 +142,14 @@ export class SkillRegistry {
     const description = input.description ?? skill.description;
     const content = input.content ?? skill.content;
     validateSkillPackage(name, description, content);
+    const files = input.files === undefined ? undefined : normalizeFiles(input.files);
     const now = this.now();
     this.options.database.sqlite.transaction(() => {
       this.options.database.sqlite.prepare("UPDATE skills SET name = ?, description = ?, content = ?, updated_at = ? WHERE id = ?").run(name, description, content, now, input.skillId);
+      if (files !== undefined) {
+        this.options.database.sqlite.prepare("DELETE FROM skill_files WHERE skill_id = ?").run(input.skillId);
+        for (const file of files) this.options.database.sqlite.prepare("INSERT INTO skill_files (id, skill_id, path, content) VALUES (?, ?, ?, ?)").run(randomUUID(), input.skillId, file.path, file.content);
+      }
       this.options.eventBus.publish({ id: randomUUID(), type: "skill.updated", schemaVersion: 1, workspaceId: skill.workspace_id, payload: { skillId: input.skillId, workspaceId: skill.workspace_id }, createdAt: now });
     })();
   }
@@ -248,6 +282,13 @@ export class SkillRegistry {
     for (const skill of skills) {
       lines.push(`\n## Skill: ${skill.name}`);
       lines.push(`Description: ${skill.description}`);
+      const files = this.skillFiles(skill.id);
+      if (files.length > 0) {
+        lines.push("<skill_files>");
+        lines.push("<!-- Supporting files are relative to this skill package. Native runtimes can read them from the materialized skill directory. -->");
+        for (const file of files) lines.push(`<file>${file.path}</file>`);
+        lines.push("</skill_files>");
+      }
       lines.push("```");
       lines.push(skill.content);
       lines.push("```");
@@ -284,7 +325,16 @@ export class SkillRegistry {
 }
 
 function normalizeFiles(files: ReadonlyArray<{ readonly path: string; readonly content: string }>): ReadonlyArray<{ readonly path: string; readonly content: string }> {
-  return files.filter((file) => file.path.length > 0);
+  const normalizedFiles: Array<{ readonly path: string; readonly content: string }> = [];
+  const seen = new Set<string>();
+  for (const file of files) {
+    const normalizedPath = normalizeSkillFilePath(file.path);
+    if (normalizedPath.length === 0) continue;
+    if (seen.has(normalizedPath)) throw new Error(`duplicate skill file path '${normalizedPath}'`);
+    seen.add(normalizedPath);
+    normalizedFiles.push({ path: normalizedPath, content: file.content });
+  }
+  return normalizedFiles;
 }
 
 function validateSkillPackage(name: string, description: string, content: string): void {
@@ -319,12 +369,252 @@ function parseFrontmatter(content: string): SkillFrontmatter | undefined {
 }
 
 function resolveWithinRoot(root: string, path: string): string {
-  const resolved = resolve(root, path);
+  const normalizedPath = normalizeSkillFilePath(path);
+  const resolved = resolve(root, normalizedPath);
   const rel = relative(root, resolved);
   if (rel.startsWith("..") || rel.split(sep).includes("..")) throw new Error("skill file path escapes skill package");
   return resolved;
 }
 
+function normalizeSkillFilePath(path: string): string {
+  const normalized = path.trim().replace(/\\/g, "/").replace(/\/+/g, "/");
+  if (normalized.length === 0) return "";
+  if (isAbsolute(normalized) || /^[A-Za-z]:\//.test(normalized) || normalized.startsWith("/")) throw new Error("skill file path escapes skill package");
+  const segments = normalized.split("/");
+  if (segments.includes("..")) throw new Error("skill file path escapes skill package");
+  if (segments.some((segment) => segment.length === 0 || segment === ".")) throw new Error(`invalid skill file path '${path}'`);
+  if (normalized.toLowerCase() === "skill.md") throw new Error("skill file path 'SKILL.md' is reserved");
+  return normalized;
+}
+
 function compositeRoomParticipantId(roomId: string, participantId: string): string {
   return `${roomId}:${participantId}`;
+}
+
+export function listRuntimeLocalSkills(provider: string, options: RuntimeLocalSkillOptions = {}): { readonly supported: boolean; readonly provider: string; readonly roots: readonly string[]; readonly skills: readonly RuntimeLocalSkillSummary[] } {
+  const normalizedProvider = normalizeRuntimeProvider(provider);
+  const roots = localSkillRootsForProvider(normalizedProvider, options);
+  if (roots.length === 0) return { supported: false, provider: normalizedProvider, roots: [], skills: [] };
+
+  const skillsByKey = new Map<string, RuntimeLocalSkillSummary>();
+  for (const root of roots) {
+    if (!existsSync(root.path)) continue;
+    const visited = new Set<string>();
+    const skills: RuntimeLocalSkillSummary[] = [];
+    enumerateLocalSkillDirs(normalizedProvider, root.path, root.path, root.keyPrefix, 0, visited, options.homeDir, skills);
+    for (const skill of skills) if (!skillsByKey.has(skill.key)) skillsByKey.set(skill.key, skill);
+  }
+  return {
+    supported: true,
+    provider: normalizedProvider,
+    roots: roots.map((root) => root.path),
+    skills: Array.from(skillsByKey.values()).sort((a, b) => a.key.localeCompare(b.key))
+  };
+}
+
+export function loadRuntimeLocalSkillBundle(provider: string, skillKey: string, options: RuntimeLocalSkillOptions = {}): { readonly supported: boolean; readonly provider: string; readonly skill: RuntimeLocalSkillBundle | null } {
+  const normalizedProvider = normalizeRuntimeProvider(provider);
+  const roots = localSkillRootsForProvider(normalizedProvider, options);
+  if (roots.length === 0) return { supported: false, provider: normalizedProvider, skill: null };
+
+  const key = normalizeLocalSkillKey(skillKey);
+  for (const root of roots) {
+    const rel = root.keyPrefix.length > 0 && key.startsWith(`${root.keyPrefix}/`)
+      ? key.slice(root.keyPrefix.length + 1)
+      : root.keyPrefix.length === 0
+        ? key
+        : undefined;
+    if (rel === undefined) continue;
+    const skillDir = resolveWithinLocalRoot(root.path, rel);
+    if (!existsSync(skillDir) || !statSync(skillDir).isDirectory()) continue;
+    const content = readLocalSkillMainFile(skillDir);
+    const frontmatter = parseLocalSkillFrontmatter(content);
+    const files = collectLocalSkillFiles(skillDir, true);
+    return {
+      supported: true,
+      provider: normalizedProvider,
+      skill: {
+        key,
+        name: frontmatter.name || basename(skillDir),
+        ...(frontmatter.description.length > 0 ? { description: frontmatter.description } : {}),
+        sourcePath: relativizeHomePath(skillDir, options.homeDir),
+        provider: normalizedProvider,
+        fileCount: files.length + 1,
+        content,
+        files
+      }
+    };
+  }
+  return { supported: true, provider: normalizedProvider, skill: null };
+}
+
+function localSkillRootsForProvider(provider: string, options: RuntimeLocalSkillOptions): ReadonlyArray<{ readonly path: string; readonly keyPrefix: string }> {
+  const home = options.homeDir ?? process.env.USERPROFILE ?? process.env.HOME ?? "";
+  if (home.length === 0) return [];
+  const env = options.env ?? process.env;
+  if (provider === "claude") return [{ path: join(home, ".claude", "skills"), keyPrefix: "" }];
+  if (provider === "codex") return [{ path: join((env.CODEX_HOME?.trim() || join(home, ".codex")), "skills"), keyPrefix: "" }];
+  if (provider === "opencode") return [
+    { path: join(home, ".config", "opencode", "skills"), keyPrefix: "" },
+    { path: join(home, ".opencode", "skills"), keyPrefix: "opencode" },
+    { path: join(home, ".opencode", "skill"), keyPrefix: "opencode-legacy" }
+  ];
+  if (provider === "qwen") return [{ path: join(home, ".qwen", "skills"), keyPrefix: "" }];
+  if (provider === "goose") return [{ path: join(home, ".goose", "skills"), keyPrefix: "" }];
+  if (provider === "cursor") return [{ path: join(home, ".cursor", "skills"), keyPrefix: "" }];
+  if (provider === "kiro") return [{ path: join(home, ".kiro", "skills"), keyPrefix: "" }];
+  return [];
+}
+
+function normalizeRuntimeProvider(provider: string): string {
+  if (provider === "claude-code") return "claude";
+  return provider;
+}
+
+function enumerateLocalSkillDirs(provider: string, walkRoot: string, currentDir: string, keyPrefix: string, depth: number, visited: Set<string>, homeDir: string | undefined, skills: RuntimeLocalSkillSummary[]): void {
+  if (depth > LOCAL_SKILL_MAX_DIR_DEPTH) return;
+  let resolved: string;
+  try {
+    resolved = realpathSync(currentDir);
+  } catch {
+    return;
+  }
+  if (visited.has(resolved)) return;
+  visited.add(resolved);
+
+  let entries: SkillDirent[];
+  try {
+    entries = readdirSync(currentDir, { withFileTypes: true }) as SkillDirent[];
+  } catch {
+    return;
+  }
+
+  for (const entry of entries) {
+    if (isIgnoredLocalSkillEntry(entry.name)) continue;
+    const entryPath = join(currentDir, entry.name);
+    let stats: ReturnType<typeof statSync>;
+    try {
+      stats = statSync(entryPath);
+    } catch {
+      continue;
+    }
+    if (!stats.isDirectory()) continue;
+    const mainPath = join(entryPath, "SKILL.md");
+    if (existsSync(mainPath)) {
+      try {
+        const rel = normalizeLocalSkillKey(relative(walkRoot, entryPath));
+        const key = keyPrefix.length > 0 ? `${keyPrefix}/${rel}` : rel;
+        const content = readLocalSkillMainFile(entryPath);
+        const frontmatter = parseLocalSkillFrontmatter(content);
+        const files = collectLocalSkillFiles(entryPath, false);
+        skills.push({
+          key,
+          name: frontmatter.name || basename(entryPath),
+          ...(frontmatter.description.length > 0 ? { description: frontmatter.description } : {}),
+          sourcePath: relativizeHomePath(entryPath, homeDir),
+          provider,
+          fileCount: files.length + 1
+        });
+      } catch {
+        // Ignore malformed or oversized local skills; the runtime may have stricter rules too.
+      }
+      continue;
+    }
+    enumerateLocalSkillDirs(provider, walkRoot, entryPath, keyPrefix, depth + 1, visited, homeDir, skills);
+  }
+}
+
+function collectLocalSkillFiles(skillDir: string, includeContent: boolean): ReadonlyArray<{ readonly path: string; readonly content: string }> {
+  const files: Array<{ readonly path: string; readonly content: string }> = [];
+  const state = { totalBytes: 0 };
+  const walkRoot = safeRealpath(skillDir) ?? skillDir;
+  collectLocalSkillFilesInto(walkRoot, walkRoot, includeContent, state, files);
+  return files.sort((a, b) => a.path.localeCompare(b.path));
+}
+
+function collectLocalSkillFilesInto(walkRoot: string, currentDir: string, includeContent: boolean, state: { totalBytes: number }, files: Array<{ readonly path: string; readonly content: string }>): void {
+  const entries = readdirSync(currentDir, { withFileTypes: true }) as SkillDirent[];
+  for (const entry of entries) {
+    if (isIgnoredLocalSkillEntry(entry.name) || entry.name.toLowerCase() === "skill.md") continue;
+    const entryPath = join(currentDir, entry.name);
+    const linkStats = lstatSync(entryPath);
+    if (linkStats.isSymbolicLink()) continue;
+    if (entry.isDirectory()) {
+      collectLocalSkillFilesInto(walkRoot, entryPath, includeContent, state, files);
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    const stats = statSync(entryPath);
+    if (stats.size > LOCAL_SKILL_MAX_FILE_BYTES) continue;
+    if (files.length >= LOCAL_SKILL_MAX_FILE_COUNT) throw new Error(`local skill exceeds ${LOCAL_SKILL_MAX_FILE_COUNT} files`);
+    state.totalBytes += stats.size;
+    if (state.totalBytes > LOCAL_SKILL_MAX_TOTAL_BYTES) throw new Error(`local skill exceeds ${LOCAL_SKILL_MAX_TOTAL_BYTES} bytes in total`);
+    const rel = normalizeSkillFilePath(toPosix(relative(walkRoot, entryPath)));
+    files.push({ path: rel, content: includeContent ? readFileSync(entryPath, "utf8") : "" });
+  }
+}
+
+function readLocalSkillMainFile(skillDir: string): string {
+  const mainPath = join(skillDir, "SKILL.md");
+  const stats = statSync(mainPath);
+  if (stats.size > LOCAL_SKILL_MAX_FILE_BYTES) throw new Error(`SKILL.md exceeds ${LOCAL_SKILL_MAX_FILE_BYTES} bytes`);
+  return readFileSync(mainPath, "utf8");
+}
+
+function parseLocalSkillFrontmatter(content: string): { readonly name: string; readonly description: string } {
+  const lines = content.split(/\r?\n/u);
+  if (lines[0] !== "---") return { name: "", description: "" };
+  const values: { name?: string; description?: string } = {};
+  for (let index = 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (line === undefined || line === "---") break;
+    const separator = line.indexOf(":");
+    if (separator <= 0) continue;
+    const key = line.slice(0, separator).trim();
+    const value = line.slice(separator + 1).trim().replace(/^['"]|['"]$/gu, "");
+    if (key === "name") values.name = value;
+    if (key === "description") values.description = value;
+  }
+  return { name: values.name ?? "", description: values.description ?? "" };
+}
+
+function resolveWithinLocalRoot(root: string, path: string): string {
+  const normalizedPath = normalizeLocalSkillKey(path);
+  const resolved = resolve(root, normalizedPath);
+  const rel = relative(root, resolved);
+  if (rel.startsWith("..") || rel.split(sep).includes("..")) throw new Error("local skill key escapes runtime skill root");
+  return resolved;
+}
+
+function normalizeLocalSkillKey(key: string): string {
+  const normalized = toPosix(key.trim()).replace(/\/+/gu, "/");
+  if (normalized.length === 0 || normalized === ".") throw new Error("skill key is required");
+  if (isAbsolute(normalized) || /^[A-Za-z]:\//u.test(normalized) || normalized.startsWith("/") || normalized.startsWith("..")) throw new Error("invalid skill key");
+  if (normalized.split("/").some((segment) => segment.length === 0 || segment === "." || segment === "..")) throw new Error("invalid skill key");
+  return normalized;
+}
+
+function isIgnoredLocalSkillEntry(name: string): boolean {
+  if (name.length === 0 || name.startsWith(".")) return true;
+  return ["license", "license.md", "license.txt"].includes(name.toLowerCase());
+}
+
+function relativizeHomePath(path: string, homeDir: string | undefined): string {
+  const home = homeDir ?? process.env.USERPROFILE ?? process.env.HOME;
+  if (home === undefined || home.length === 0) return toPosix(path);
+  const rel = relative(home, path);
+  if (!rel.startsWith("..") && !rel.split(sep).includes("..")) return `~/${toPosix(rel)}`;
+  return toPosix(path);
+}
+
+function safeRealpath(path: string): string | undefined {
+  try {
+    return realpathSync(path);
+  } catch {
+    return undefined;
+  }
+}
+
+function toPosix(path: string): string {
+  return path.replace(/\\/gu, "/");
 }

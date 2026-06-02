@@ -53,24 +53,25 @@ CREATE INDEX idx_run_file_changes_run  ON run_file_changes(run_id);
 - **WHEN** the daemon starts with a V1.0 database and runs `0015_v11.sql`
 - **THEN** all new columns and tables are created; existing rows are unaffected; the daemon starts normally
 
-### Requirement: Kanban board replaces flat task list (kanban-replaces-list)
+### Requirement: Kanban board supplements clear task list (kanban-modal)
 
-The system SHALL replace the V1.0 flat task list in the Side Panel Tasks tab with the Kanban board view defined in the `task-board` capability. The flat list view is removed.
+The system SHALL keep a clear flat/grouped task list as the default Side Panel Tasks tab view and provide the Kanban board view defined in the `task-board` capability behind an "Open Kanban" button/modal.
 
 **Reference:** Hermes-Kanban column-based state machine. Multica `@dnd-kit` drag-and-drop. The V1.0 list view was explicitly marked as "V1.1 做 Kanban" in the V1.0 spec.
 
-The Kanban board is the primary task view. The task detail slide-over (activity timeline, run links) is retained and accessible by clicking a card.
+The flat/grouped list is the primary glanceable task view. The Kanban board is the dense drag/drop view. The task detail slide-over (activity timeline, run links) is retained and accessible by clicking either a list row or a Kanban card.
 
-#### Scenario: Tasks tab shows Kanban board
+#### Scenario: Tasks tab shows list and opens Kanban board
 
 - **WHEN** the user opens the Side Panel Tasks tab in a room with tasks
-- **THEN** the Kanban board is displayed with tasks organized into columns; the flat list view is no longer shown
+- **THEN** the clear task list is displayed by default with an "Open Kanban" control
+- **AND** clicking "Open Kanban" displays the Kanban board with tasks organized into columns
 
 ## MODIFIED Requirements
 
 ### Requirement: Task Workflow UI（Side Panel Tasks tab）
 
-The Web UI SHALL provide a Tasks tab in the Side Panel showing the current Room's tasks as a Kanban board (V1.1). The V1.0 flat list view is replaced.
+The Web UI SHALL provide a Tasks tab in the Side Panel showing the current Room's tasks as a clear list by default, with the Kanban board (V1.1) available from an "Open Kanban" modal.
 
 **布局**（参考 Hermes-Kanban `KanbanBoard` + Multica `@dnd-kit` 拖拽）：
 

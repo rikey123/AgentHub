@@ -1,6 +1,6 @@
 import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   csrfFetch: vi.fn<typeof fetch>(),
@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
     createRoom: vi.fn(),
     sendMessage: vi.fn()
   },
+  newRoomDialog: vi.fn(() => null),
   settingsModal: vi.fn(() => null)
 }));
 
@@ -48,11 +49,19 @@ vi.mock("./components/panels/SidePanel.tsx", () => ({ SidePanel: () => null }));
 vi.mock("./components/run/RunDetailDrawer.tsx", () => ({ RunDetailDrawer: () => null }));
 vi.mock("./components/CommandPalette.tsx", () => ({ CommandPalette: () => null }));
 vi.mock("./components/KeymapModal.tsx", () => ({ KeymapModal: () => null }));
-vi.mock("./components/NewRoomDialog.tsx", () => ({ NewRoomDialog: () => null }));
+vi.mock("./components/NewRoomDialog.tsx", () => ({ NewRoomDialog: mocks.newRoomDialog }));
 
 import App, { ChatRoomLayout } from "./App.tsx";
 
 describe("App integration wiring", () => {
+  beforeEach(() => {
+    mocks.csrfFetch.mockReset();
+    mocks.sdk.createRoom.mockReset();
+    mocks.sdk.sendMessage.mockReset();
+    mocks.newRoomDialog.mockClear();
+    mocks.settingsModal.mockClear();
+  });
+
   it("passes csrfFetch into SettingsModal so settings writes use browser CSRF", () => {
     renderToStaticMarkup(createElement(App));
 
@@ -60,6 +69,35 @@ describe("App integration wiring", () => {
     const [props] = mocks.settingsModal.mock.calls[0] as unknown as [Record<string, unknown>];
     expect(props).toEqual(expect.objectContaining({
       fetchImpl: mocks.csrfFetch
+    }));
+  });
+
+  it("forwards selected room skills when creating a room", async () => {
+    mocks.sdk.createRoom.mockResolvedValue({ data: { roomId: "room_skilled" } });
+    renderToStaticMarkup(createElement(App));
+
+    expect(mocks.newRoomDialog).toHaveBeenCalled();
+    const [props] = mocks.newRoomDialog.mock.calls[0] as unknown as [{
+      readonly onCreate: (input: {
+        readonly title: string;
+        readonly mode: "team";
+        readonly primaryAgentId: string;
+        readonly leaderRoleId: string;
+        readonly skillIds: readonly string[];
+        readonly participants: readonly unknown[];
+      }) => Promise<void>;
+    }];
+    await props.onCreate({
+      title: "Skilled room",
+      mode: "team",
+      primaryAgentId: "binding_leader",
+      leaderRoleId: "role_leader",
+      skillIds: ["skill_task_planner"],
+      participants: []
+    });
+
+    expect(mocks.sdk.createRoom).toHaveBeenCalledWith(expect.objectContaining({
+      skillIds: ["skill_task_planner"]
     }));
   });
 

@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@agenthub/adapter-claude-code": "workspace:*",
+    "@agenthub/adapter-acp-base": "workspace:*",
     "@agenthub/adapter-mock": "workspace:*",
     "@agenthub/adapter-opencode": "workspace:*",
     "@agenthub/native-agent-runtime": "workspace:*",

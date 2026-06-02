@@ -658,6 +658,26 @@ describe("TaskService and RoomMcpServer", () => {
     expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE room_id = 'room_delegate_denied' AND type LIKE 'task.%'").get()).toMatchObject({ count: 0 });
   });
 
+  test("room.add_participant wraps AddParticipant for leaders and rejects observers", async () => {
+    seedDelegatedRoom("room_add_participant_mcp", "agent_leader", "role_leader", "role_builder", "binding_leader", "binding_builder", "agent_builder");
+    const dispatched: Array<{ readonly type: string; readonly roomId?: string; readonly agentBindingId?: string; readonly displayNameOverride?: string }> = [];
+    const commandBus = {
+      dispatch: (command: { readonly type: string; readonly roomId?: string; readonly agentBindingId?: string; readonly displayNameOverride?: string }) => {
+        dispatched.push(command);
+        return { ok: true, data: { participantId: "binding_reviewer", agentBindingId: "binding_reviewer", agentId: "binding_reviewer", name: "Reviewer", role: "teammate", capabilities: ["code.review"] }, emittedEvents: [] };
+      }
+    } as unknown as CommandBus;
+    const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const mcp = new RoomMcpServer({ commandBus, taskService: service, database: currentDatabase(), eventBus: currentBus(), now: () => now });
+
+    const result = await mcp.callTool("room.add_participant", { agentBindingId: "binding_reviewer", displayNameOverride: "Reviewer" }, { roomId: "room_add_participant_mcp", runId: "run_add_participant", agentId: "agent_leader" });
+    const denied = await mcp.callTool("room.add_participant", { agentBindingId: "binding_reviewer" }, { roomId: "room_add_participant_mcp", runId: "run_add_participant_observer", agentId: "agent_builder" });
+
+    expect(result).toMatchObject({ ok: true, data: { participantId: "binding_reviewer", capabilities: ["code.review"] } });
+    expect(dispatched).toEqual([expect.objectContaining({ type: "AddParticipant", roomId: "room_add_participant_mcp", agentBindingId: "binding_reviewer", displayNameOverride: "Reviewer" })]);
+    expect(denied).toMatchObject({ ok: false, error: { code: "tool_not_permitted" } });
+  });
+
   test("room.list_members returns role ids for delegate targets", async () => {
     seedDelegatedRoom("room_list_member_roles", "agent_leader", "role_leader", "role_builder", "binding_leader", "binding_builder", "agent_builder");
     const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });

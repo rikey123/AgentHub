@@ -6,6 +6,9 @@ export type ParticipantViewModel = {
   readonly role: string;
   readonly presence: string;
   readonly adapterId: string;
+  readonly agentBindingId?: string | undefined;
+  readonly roleId?: string | undefined;
+  readonly capabilities?: readonly string[] | undefined;
 };
 
 export type MessageViewModel = {

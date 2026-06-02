@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it, vi } from "vitest";
 import type { TaskViewModel } from "../../types.ts";
 import {
+  TasksPanel,
   aggregateFileChanges,
   dependencyLines,
   fileArtifactTarget,
@@ -18,6 +21,24 @@ import {
 } from "./TasksPanel.tsx";
 
 describe("TasksPanel V1.1 Kanban task view contract", () => {
+  it("renders a clear task list by default and keeps the Kanban board behind a modal trigger", () => {
+    const html = renderToStaticMarkup(createElement(TasksPanel, {
+      roomId: "room_1",
+      tasks: [
+        task({ id: "t-plan", title: "Prepare plan", status: "pending", assigneeRoleId: "planner" }),
+        task({ id: "t-build", title: "Build panel", status: "in_progress", assigneeRoleId: "builder" })
+      ],
+      csrfFetch: vi.fn<typeof fetch>(),
+      executionPlan: undefined
+    }));
+
+    expect(html).toContain("data-testid=\"tasks-panel-list\"");
+    expect(html).toContain("Open Kanban");
+    expect(html).toContain("Prepare plan");
+    expect(html).toContain("Build panel");
+    expect(html).not.toContain("data-testid=\"tasks-panel-kanban\"");
+  });
+
   it("groups tasks into Kanban columns, applies board overrides, and hides cancelled tasks", () => {
     const tasks = [
       task({ id: "t-backlog", title: "Prepare plan", status: "pending" }),

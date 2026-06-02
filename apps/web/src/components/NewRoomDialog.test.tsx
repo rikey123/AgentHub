@@ -70,6 +70,7 @@ describe("NewRoomDialog create-room contract", () => {
       mode: "team",
       primaryAgentId: "binding_leader",
       leaderRoleId: "role_lead",
+      skillIds: ["skill_task_planner", "skill_review_guide"],
       legacyAgentParticipants: [],
       v1Participants: [
         {
@@ -93,6 +94,7 @@ describe("NewRoomDialog create-room contract", () => {
       mode: "team",
       primaryAgentId: "binding_leader",
       leaderRoleId: "role_lead",
+      skillIds: ["skill_task_planner", "skill_review_guide"],
       participants: [
         {
           roleId: "role_lead",

@@ -7,8 +7,10 @@ import type { CommandBus, EventBus } from "@agenthub/bus";
 import type { PermissionEngine } from "@agenthub/permissions";
 import type { KeychainBridge } from "@agenthub/security";
 import { SkillMaterializationError, type SkillRegistry } from "@agenthub/skills";
+import { runtimeDefinitionForKind } from "../runtime-catalog.ts";
+import { GenericACPAdapter, type GenericAcpAdapterConfig } from "./generic-acp.ts";
 
-export type RuntimeAdapterId = "mock" | "claude-code" | "opencode" | "native";
+export type RuntimeAdapterId = "mock" | "claude-code" | "opencode" | "native" | "custom-acp" | "codex" | "qwen" | "goose" | "kimi" | "cursor" | "kiro" | "hermes";
 
 export type AdapterRegistryOptions = {
   readonly database: AgentHubDatabase;
@@ -28,6 +30,7 @@ export type AdapterRegistryOptions = {
   readonly claudeAdapter?: WarmableManagedAdapter;
   readonly opencodeAdapter?: WarmableManagedAdapter;
   readonly nativeAdapter?: NativeManagedAdapter;
+  readonly genericAcpAdapterFactory?: (config: GenericAcpAdapterConfig) => WarmableManagedAdapter;
   readonly adapterCommands?: {
     readonly claude?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv };
     readonly opencode?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv };
@@ -55,6 +58,17 @@ type ModelConfigRow = {
   readonly api_key_ref?: string | null;
 };
 
+type RuntimeConfigRow = {
+  readonly id: string;
+  readonly kind: string;
+  readonly name: string;
+  readonly command: string | null;
+  readonly args: string | null;
+  readonly env: string | null;
+};
+
+const GENERIC_ACP_RUNTIME_KINDS = new Set(["custom-acp", "codex", "qwen", "goose", "kimi", "cursor", "kiro", "hermes"]);
+
 export class AdapterRegistry {
   readonly mockAdapter: MockAdapterManager;
   private readonly runAdapters = new Map<string, RuntimeAdapterId>();
@@ -63,6 +77,7 @@ export class AdapterRegistry {
   private claudeAdapter: WarmableManagedAdapter | undefined;
   private opencodeAdapter: WarmableManagedAdapter | undefined;
   private nativeAdapter: NativeManagedAdapter | undefined;
+  private readonly genericAdapters = new Map<string, WarmableManagedAdapter>();
 
   constructor(private readonly options: AdapterRegistryOptions) {
     this.mockAdapter = options.mockAdapter ?? new MockAdapterManager({
@@ -111,6 +126,10 @@ export class AdapterRegistry {
         await this.native().then((adapter) => adapter.runManaged(run));
         return;
       }
+      if (this.isGenericAcpAdapter(adapterId)) {
+        await this.generic(adapterId, this.runtimeConfigForRun(run, adapterId)).runManaged(run);
+        return;
+      }
       await this.mockAdapter.runAgent(run);
     } finally {
       this.options.skillRegistry?.cleanupRun(run.id);
@@ -145,7 +164,9 @@ export class AdapterRegistry {
           .run(sessionId, roomId, row.agent_id);
         const createdSessionId = adapterId === "claude-code"
           ? this.claude().warmRoomAgent({ roomId, agentId: row.agent_id, workDir })
-          : this.opencode().warmRoomAgent({ roomId, agentId: row.agent_id, workDir });
+          : adapterId === "opencode"
+            ? this.opencode().warmRoomAgent({ roomId, agentId: row.agent_id, workDir })
+            : this.generic(adapterId, this.runtimeConfigForParticipant(roomId, row.agent_id, adapterId)).warmRoomAgent({ roomId, agentId: row.agent_id, workDir });
         if (createdSessionId !== sessionId) {
           this.options.database.sqlite
             .prepare("UPDATE room_participants SET adapter_session_id = ? WHERE room_id = ? AND participant_id = ? AND participant_type = 'agent' AND adapter_session_id = ?")
@@ -173,6 +194,10 @@ export class AdapterRegistry {
       await this.native().then((adapter) => adapter.cancelManagedRun(runId));
       return;
     }
+    if (this.isGenericAcpAdapter(adapterId)) {
+      await this.generic(adapterId, this.runtimeConfigForPersistedRun(runId, adapterId)).cancelManagedRun(runId);
+      return;
+    }
     this.mockAdapter.cancelRun(runId);
   }
 
@@ -182,6 +207,7 @@ export class AdapterRegistry {
       .all(roomId) as { readonly adapter_session_id: string }[];
     this.claudeAdapter?.disposeRoomWarmSessions(roomId);
     this.opencodeAdapter?.disposeRoomWarmSessions(roomId);
+    for (const adapter of this.genericAdapters.values()) adapter.disposeRoomWarmSessions(roomId);
     const roomMcpServer = this.options.getRoomMcpServer?.();
     for (const row of rows) roomMcpServer?.unregisterSession(row.adapter_session_id);
     this.options.database.sqlite.prepare("UPDATE room_participants SET adapter_session_id = NULL WHERE room_id = ?").run(roomId);
@@ -190,6 +216,8 @@ export class AdapterRegistry {
   disposeAll(): void {
     this.claudeAdapter?.disposeAllSessions();
     this.opencodeAdapter?.disposeAllSessions();
+    for (const adapter of this.genericAdapters.values()) adapter.disposeAllSessions();
+    this.genericAdapters.clear();
     this.nativeAdapter?.disposeAllRuns?.();
     this.nativeAdapter = undefined;
     this.options.database.sqlite.prepare("UPDATE room_participants SET adapter_session_id = NULL WHERE adapter_session_id IS NOT NULL").run();
@@ -242,6 +270,27 @@ export class AdapterRegistry {
       ...(this.options.now !== undefined ? { now: this.options.now } : {})
     });
     return this.opencodeAdapter;
+  }
+
+  private generic(adapterId: RuntimeAdapterId, runtimeConfig: GenericAcpAdapterConfig): WarmableManagedAdapter {
+    const key = `${runtimeConfig.id}:${runtimeConfig.command}:${runtimeConfig.args.join("\u0000")}`;
+    const existing = this.genericAdapters.get(key);
+    if (existing !== undefined) return existing;
+    const adapter = this.options.genericAcpAdapterFactory?.(runtimeConfig) ?? new GenericACPAdapter({
+      ...runtimeConfig,
+      services: { database: this.options.database, eventBus: this.options.eventBus, ...(this.options.getCommandBus !== undefined ? { getCommandBus: this.options.getCommandBus } : {}), ...(this.options.permissionEngine !== undefined ? { permissionEngine: this.options.permissionEngine } : {}), ...(this.options.artifactFs !== undefined ? { artifactFs: this.options.artifactFs } : {}), ...(this.options.briefResolver !== undefined ? { briefResolver: this.options.briefResolver } : {}) },
+      lifecycle: this.options.lifecycle,
+      workspaceId: "default-workspace",
+      ...(this.options.onSessionEndedWithoutCompletion !== undefined ? { onSessionEndedWithoutCompletion: this.options.onSessionEndedWithoutCompletion } : {}),
+      ...(this.options.onPlanPhaseEnded !== undefined ? { onPlanPhaseEnded: this.options.onPlanPhaseEnded } : {}),
+      getSkillsBlock: (runId) => this.getSkillsBlock(runId),
+      ...(this.options.getRoomMcpServer !== undefined ? { mcpServer: this.options.getRoomMcpServer() } : {}),
+      onWarmSessionFailed: (input) => this.clearWarmSession(input),
+      ...(this.options.now !== undefined ? { now: this.options.now } : {})
+    });
+    void adapterId;
+    this.genericAdapters.set(key, adapter);
+    return adapter;
   }
 
   private async native(): Promise<NativeManagedAdapter> {
@@ -361,6 +410,7 @@ export class AdapterRegistry {
       if (adapterId === "opencode" || adapterId.startsWith("opencode-")) return "opencode";
       if (adapterId === "native" || adapterId.startsWith("native-")) return "native";
       if (adapterId === "mock" || adapterId.startsWith("mock-")) return "mock";
+      if (GENERIC_ACP_RUNTIME_KINDS.has(adapterId)) return adapterId as RuntimeAdapterId;
     }
     // Fall back to agent_profiles lookup if we were given a run.adapter_id that didn't match.
     const row = this.options.database.sqlite.prepare("SELECT adapter_id FROM agent_profiles WHERE id = ?").get(agentId) as { readonly adapter_id: string | null } | undefined;
@@ -369,7 +419,90 @@ export class AdapterRegistry {
       if (profileId === "claude-code" || profileId.startsWith("claude-code-")) return "claude-code";
       if (profileId === "opencode" || profileId.startsWith("opencode-")) return "opencode";
       if (profileId === "native" || profileId.startsWith("native-")) return "native";
+      if (GENERIC_ACP_RUNTIME_KINDS.has(profileId)) return profileId as RuntimeAdapterId;
     }
     return "mock";
+  }
+
+  private isGenericAcpAdapter(adapterId: RuntimeAdapterId): boolean {
+    return GENERIC_ACP_RUNTIME_KINDS.has(adapterId);
+  }
+
+  private runtimeConfigForRun(run: RunRow, adapterId: RuntimeAdapterId): GenericAcpAdapterConfig {
+    const row = run.room_id === null
+      ? undefined
+      : this.options.database.sqlite
+          .prepare(
+            `SELECT rt.id AS id, rt.kind AS kind, rt.name AS name, rt.command AS command, rt.args AS args, rt.env AS env
+             FROM room_participants rp
+             JOIN agent_bindings ab ON ab.id = rp.agent_binding_id
+             JOIN runtimes rt ON rt.id = ab.runtime_id
+             WHERE rp.room_id = ? AND rp.participant_id = ? AND rp.participant_type = 'agent'
+             LIMIT 1`
+          )
+          .get(run.room_id, run.agent_id) as RuntimeConfigRow | undefined;
+    return this.genericRuntimeConfig(row, adapterId);
+  }
+
+  private runtimeConfigForPersistedRun(runId: string, adapterId: RuntimeAdapterId): GenericAcpAdapterConfig {
+    const row = this.options.database.sqlite
+      .prepare(
+        `SELECT rt.id AS id, rt.kind AS kind, rt.name AS name, rt.command AS command, rt.args AS args, rt.env AS env
+         FROM runs r
+         JOIN room_participants rp ON rp.room_id = r.room_id AND rp.participant_id = r.agent_id AND rp.participant_type = 'agent'
+         JOIN agent_bindings ab ON ab.id = rp.agent_binding_id
+         JOIN runtimes rt ON rt.id = ab.runtime_id
+         WHERE r.id = ?
+         LIMIT 1`
+      )
+      .get(runId) as RuntimeConfigRow | undefined;
+    return this.genericRuntimeConfig(row, adapterId);
+  }
+
+  private runtimeConfigForParticipant(roomId: string, participantId: string, adapterId: RuntimeAdapterId): GenericAcpAdapterConfig {
+    const row = this.options.database.sqlite
+      .prepare(
+        `SELECT rt.id AS id, rt.kind AS kind, rt.name AS name, rt.command AS command, rt.args AS args, rt.env AS env
+         FROM room_participants rp
+         JOIN agent_bindings ab ON ab.id = rp.agent_binding_id
+         JOIN runtimes rt ON rt.id = ab.runtime_id
+         WHERE rp.room_id = ? AND rp.participant_id = ? AND rp.participant_type = 'agent'
+         LIMIT 1`
+      )
+      .get(roomId, participantId) as RuntimeConfigRow | undefined;
+    return this.genericRuntimeConfig(row, adapterId);
+  }
+
+  private genericRuntimeConfig(row: RuntimeConfigRow | undefined, adapterId: RuntimeAdapterId): GenericAcpAdapterConfig {
+    const definition = runtimeDefinitionForKind(row?.kind ?? adapterId);
+    const runtimeKind = row?.kind ?? definition?.kind ?? adapterId;
+    const command = row?.command ?? definition?.command ?? "";
+    return {
+      id: row?.id ?? `runtime-${runtimeKind}`,
+      runtimeKind,
+      name: row?.name ?? definition?.name ?? runtimeKind,
+      command,
+      args: parseStringArray(row?.args).length > 0 ? parseStringArray(row?.args) : definition?.args ?? [],
+      env: parseEnv(row?.env)
+    };
+  }
+}
+
+function parseStringArray(value: unknown): readonly string[] {
+  const parsed = typeof value === "string" ? safeJson(value, []) : value;
+  return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+}
+
+function parseEnv(value: unknown): NodeJS.ProcessEnv {
+  const parsed = typeof value === "string" ? safeJson(value, {}) : value;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+  return Object.fromEntries(Object.entries(parsed as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+}
+
+function safeJson(value: string, fallback: unknown): unknown {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return fallback;
   }
 }

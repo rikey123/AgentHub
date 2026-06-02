@@ -1,9 +1,14 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import {
   BUILTIN_ROLE_WARNING,
+  RolesTab,
+  WELL_KNOWN_CAPABILITY_TOKENS,
   createRole,
   deleteRole,
   normalizeRoles,
+  toggleCapabilityToken,
   updateRole,
   upsertRole,
   type RoleConfig
@@ -103,6 +108,38 @@ describe("RolesTab REST integration contract", () => {
 
     await expect(deleteRole(fetchImpl, "role_bound")).rejects.toThrow("Role has 2 agent bindings; remove bindings before deleting.");
     expect(roles).toEqual([expect.objectContaining({ id: "role_bound", name: "Bound Role" })]);
+  });
+
+  it("exposes the V1.1 well-known capability tokens for the Roles editor", () => {
+    expect(WELL_KNOWN_CAPABILITY_TOKENS).toEqual([
+      "chat",
+      "code.edit",
+      "code.review",
+      "file.read",
+      "file.write",
+      "terminal.run",
+      "context.read",
+      "context.write",
+      "intervention.knock",
+      "task.delegate"
+    ]);
+    expect(toggleCapabilityToken(["chat"], "code.edit")).toEqual(["chat", "code.edit"]);
+    expect(toggleCapabilityToken(["chat", "code.edit"], "chat")).toEqual(["code.edit"]);
+  });
+
+  it("renders visible checkbox controls for capability tokens", () => {
+    const html = renderToStaticMarkup(createElement(RolesTab, {
+      roles: [
+        role({
+          id: "role_builder",
+          name: "Builder",
+          capabilities: ["chat", "code.edit"]
+        })
+      ]
+    }));
+
+    expect(html.match(/checkbox__control/g)?.length).toBe(WELL_KNOWN_CAPABILITY_TOKENS.length);
+    expect(html.match(/checkbox__indicator/g)?.length).toBe(WELL_KNOWN_CAPABILITY_TOKENS.length);
   });
 });
 

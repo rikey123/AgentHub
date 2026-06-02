@@ -11,13 +11,15 @@ import {
   WorkspaceTab,
   fetchSettingsBootstrap
 } from "./SettingsModal.tsx";
+import { SkillsTab, createSkill, fetchRuntimeLocalSkills, fetchSkillDetail, importRuntimeLocalSkill, normalizeRuntimeLocalSkillList, normalizeSkills, updateSkill } from "./SkillsTab.tsx";
 
 describe("SettingsModal integration contract", () => {
-  it("defines the six top-level tabs with Roles first", () => {
+  it("defines the V1.1 top-level tabs with Roles first and Skills included", () => {
     expect(SETTINGS_TABS.map((tab) => tab.label)).toEqual([
       "Roles",
       "Runtimes",
       "Models",
+      "Skills",
       "Permissions",
       "Workspace",
       "MCP"
@@ -51,7 +53,7 @@ describe("SettingsModal integration contract", () => {
     expect(html).not.toContain("v0.5");
   });
 
-  it("bootstraps settings with six parallel REST requests including permission rules, then workspace metadata, and no EventSource", async () => {
+  it("bootstraps settings with seven parallel REST requests including skills and permission rules, then workspace metadata, and no EventSource", async () => {
     const previousEventSource = globalThis.EventSource;
     const eventSourceSpy = vi.fn();
     Object.defineProperty(globalThis, "EventSource", {
@@ -73,6 +75,8 @@ describe("SettingsModal integration contract", () => {
               ? { profiles: [{ id: "profile_1", name: "Default Policy", description: "Shared defaults", rules: [] }] }
             : path === "/permissions/rules"
               ? { rules: [{ id: "rule_1", workspace_id: "ws_1", resource_type: "file", resource_match: "src/**", action: "allow" }] }
+            : path === "/skills"
+              ? { skills: [{ id: "skill_1", name: "task-planner", description: "Plans tasks", origin: "builtin" }] }
             : path === "/workspaces/ws_1"
               ? { workspace: { id: "ws_1", name: "Workspace", root_path: "." } }
               : { path };
@@ -87,14 +91,15 @@ describe("SettingsModal integration contract", () => {
     const controller = new AbortController();
     const resultPromise = fetchSettingsBootstrap(fetchImpl, controller.signal);
 
-    // First 6 requests fire in parallel immediately
+    // First 7 requests fire in parallel immediately
     expect(calls.map((call) => call.path).sort()).toEqual([
       "/agent-bindings",
       "/model-configs",
       "/permissions/profiles",
       "/permissions/rules",
       "/roles",
-      "/runtimes"
+      "/runtimes",
+      "/skills"
     ]);
     expect(calls.every((call) => call.signal === controller.signal)).toBe(true);
     expect(eventSourceSpy).not.toHaveBeenCalled();
@@ -115,6 +120,7 @@ describe("SettingsModal integration contract", () => {
       "/permissions/rules",
       "/roles",
       "/runtimes",
+      "/skills",
       "/workspaces/ws_1"
     ]);
     await expect(resultPromise).resolves.toEqual({
@@ -124,6 +130,7 @@ describe("SettingsModal integration contract", () => {
       agentBindings: { agentBindings: [{ id: "binding_1", workspaceId: "ws_1", role: { name: "Reviewer" }, runtime: { kind: "native", name: "Native", detectedVersion: "native" }, modelConfig: { id: "model_1", name: "OpenAI", provider: "openai", model: "gpt-4o" } }] },
       permissionProfiles: { profiles: [{ id: "profile_1", name: "Default Policy", description: "Shared defaults", rules: [] }] },
       permissionRules: { rules: [{ id: "rule_1", workspace_id: "ws_1", resource_type: "file", resource_match: "src/**", action: "allow" }] },
+      skills: { skills: [{ id: "skill_1", name: "task-planner", description: "Plans tasks", origin: "builtin" }] },
       workspace: { workspace: { id: "ws_1", name: "Workspace", root_path: "." } },
       errors: {}
     });
@@ -148,7 +155,7 @@ describe("SettingsModal integration contract", () => {
     const resultPromise = fetchSettingsBootstrap(fetchImpl, controller.signal);
     controller.abort();
 
-    expect(signals).toHaveLength(6);
+    expect(signals).toHaveLength(7);
     expect(signals.every((signal) => signal.aborted)).toBe(true);
     await expect(resultPromise).rejects.toMatchObject({ name: "AbortError" });
   });
@@ -172,6 +179,7 @@ describe("SettingsModal integration contract", () => {
 
     expect(data.roles).toEqual({ path: "/roles" });
     expect(data.runtimes).toEqual({ path: "/runtimes" });
+    expect(data.skills).toEqual({ path: "/skills" });
     expect(data.permissionRules).toBeUndefined();
     expect(data.workspace).toEqual({ workspace: { id: "ws_1", name: "Workspace" } });
     expect(data.errors).toMatchObject({ permissionRules: "Failed to fetch" });
@@ -187,6 +195,7 @@ describe("SettingsModal integration contract", () => {
         roles: [{ id: "builder", name: "Builder", prompt: "Build things.", capabilities: [] }],
         runtimes: undefined,
         modelConfigs: [],
+        skills: undefined,
         agentBindings: undefined,
         permissionProfiles: undefined,
         permissionRules: undefined,
@@ -197,6 +206,7 @@ describe("SettingsModal integration contract", () => {
       onRolesChange: vi.fn(),
       onRuntimesChange: vi.fn(),
       onModelConfigsChange: vi.fn(),
+      onSkillsChange: vi.fn(),
       onPermissionProfilesChange: vi.fn(),
       onPermissionRulesChange: vi.fn()
     }));
@@ -273,3 +283,144 @@ function jsonResponse(status: number, payload: unknown): Response {
     headers: { "content-type": "application/json" }
   });
 }
+
+describe("Skills settings tab contract", () => {
+  it("renders Skills settings with builtin badges and workspace skill actions", () => {
+    const html = renderToStaticMarkup(createElement(SkillsTab, {
+      skills: {
+        skills: [
+          { id: "builtin_1", name: "task-planner", description: "Break work into tasks.", content: "---\nname: task-planner\ndescription: Break work into tasks.\n---\n", origin: "builtin" },
+          { id: "workspace_1", name: "review-helper", description: "Review patches.", content: "---\nname: review-helper\ndescription: Review patches.\n---\n", origin: "workspace" }
+        ]
+      },
+      fetchImpl: vi.fn<typeof fetch>(),
+      onSkillsChange: vi.fn()
+    }));
+
+    expect(html).toContain("task-planner");
+    expect(html).toContain("Built-in");
+    expect(html).toContain("review-helper");
+    expect(html).toContain("Workspace");
+    expect(html).toContain("New Skill");
+    expect(html).toContain("Import");
+    expect(html).toContain("View");
+    expect(html).toContain("Edit");
+    expect(html).toContain("Delete");
+  });
+
+  it("renders skill package file counts from REST data", () => {
+    const normalized = normalizeSkills({
+      skills: [{
+        id: "workspace_1",
+        name: "review-helper",
+        description: "Review patches.",
+        content: "---\nname: review-helper\ndescription: Review patches.\n---\n",
+        origin: "workspace",
+        fileCount: 2,
+        files: [
+          { path: "references/checklist.md", content: "- Check" },
+          { path: "scripts/run.sh", content: "echo ok" }
+        ]
+      }]
+    });
+
+    expect(normalized[0]).toMatchObject({ fileCount: 2, files: [{ path: "references/checklist.md" }, { path: "scripts/run.sh" }] });
+
+    const html = renderToStaticMarkup(createElement(SkillsTab, {
+      skills: { skills: normalized },
+      fetchImpl: vi.fn<typeof fetch>(),
+      onSkillsChange: vi.fn()
+    }));
+
+    expect(html).toContain("2 files");
+  });
+
+  it("renders runtime-local skill import controls when runtimes are available", () => {
+    const html = renderToStaticMarkup(createElement(SkillsTab, {
+      skills: { skills: [] },
+      runtimes: [
+        { id: "runtime-opencode", name: "OpenCode", kind: "opencode", status: "missing" },
+        { id: "runtime-codex", name: "Codex", kind: "codex", status: "missing" }
+      ],
+      fetchImpl: vi.fn<typeof fetch>(),
+      onSkillsChange: vi.fn()
+    }));
+
+    expect(html).toContain("Import from local runtime");
+    expect(html).toContain("OpenCode");
+    expect(html).toContain("Load local skills");
+    expect(html).toContain("Select all");
+  });
+
+  it("normalizes and imports runtime-local skill packages through runtime endpoints", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+      if (String(input) === "/runtimes/runtime-opencode/local-skills") {
+        return jsonResponse(200, {
+          provider: "opencode",
+          supported: true,
+          roots: ["~/.config/opencode/skills"],
+          skills: [{ key: "release/reporter", name: "release-reporter", description: "Writes reports", source_path: "~/.config/opencode/skills/release/reporter", file_count: 2 }]
+        });
+      }
+      if (String(input) === "/runtimes/runtime-opencode/local-skills/import") {
+        expect(JSON.parse(String(init?.body))).toEqual({ skillKey: "release/reporter", name: "release-reporter", description: "Writes reports" });
+        return jsonResponse(201, {
+          skill: { id: "skill_imported", name: "release-reporter", description: "Writes reports", content: "---\nname: release-reporter\ndescription: Writes reports\n---\n", origin: "imported", fileCount: 1 },
+          files: [{ path: "references/guide.md", content: "Guide" }]
+        });
+      }
+      return jsonResponse(404, { error: "not_found" });
+    });
+
+    await expect(fetchRuntimeLocalSkills(fetchImpl, "runtime-opencode")).resolves.toMatchObject({
+      provider: "opencode",
+      supported: true,
+      skills: [{ key: "release/reporter", name: "release-reporter", fileCount: 2 }]
+    });
+    expect(normalizeRuntimeLocalSkillList({ skills: [{ key: "shared/reviewer", name: "reviewer", source_path: "~/shared", file_count: 1 }] })).toEqual([
+      expect.objectContaining({ key: "shared/reviewer", sourcePath: "~/shared", fileCount: 1 })
+    ]);
+    await expect(importRuntimeLocalSkill(fetchImpl, "runtime-opencode", { skillKey: "release/reporter", name: "release-reporter", description: "Writes reports" })).resolves.toMatchObject({
+      id: "skill_imported",
+      files: [{ path: "references/guide.md", content: "Guide" }]
+    });
+  });
+
+  it("fetches skill package detail before editing", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      expect(String(input)).toBe("/skills/skill_1");
+      return jsonResponse(200, {
+        skill: { id: "skill_1", name: "review-helper", description: "Review patches.", content: "---\nname: review-helper\ndescription: Review patches.\n---\n", origin: "workspace", fileCount: 1 },
+        files: [{ path: "scripts/run.sh", content: "echo ok" }]
+      });
+    });
+
+    await expect(fetchSkillDetail(fetchImpl, "skill_1")).resolves.toMatchObject({
+      id: "skill_1",
+      fileCount: 1,
+      files: [{ path: "scripts/run.sh", content: "echo ok" }]
+    });
+  });
+
+  it("sends supporting files when creating and updating skills", async () => {
+    const calls: unknown[] = [];
+    const fetchImpl = vi.fn<typeof fetch>(async (_input, init) => {
+      calls.push(JSON.parse(String(init?.body)));
+      return jsonResponse(200, {
+        skill: { id: "skill_1", name: "review-helper", description: "Review patches.", content: "---\nname: review-helper\ndescription: Review patches.\n---\n", origin: "workspace", fileCount: 1 },
+        files: [{ path: "scripts/run.sh", content: "echo ok" }]
+      });
+    });
+    const input = {
+      name: "review-helper",
+      description: "Review patches.",
+      content: "---\nname: review-helper\ndescription: Review patches.\n---\n",
+      files: [{ path: "scripts/run.sh", content: "echo ok" }]
+    };
+
+    await createSkill(fetchImpl, input);
+    await updateSkill(fetchImpl, "skill_1", input);
+
+    expect(calls).toEqual([input, input]);
+  });
+});

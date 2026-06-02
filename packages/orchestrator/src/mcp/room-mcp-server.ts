@@ -235,7 +235,7 @@ export class RoomMcpServer {
     if (name === "room.spawn_agent") return this.handleSpawnAgent(input, session, context);
     if (name === "room.complete_task") return this.handleCompleteTask(input, session, context);
     // V1.1 stub: room.add_participant — implementation lands in feat/v11-C (D10)
-    if (name === "room.add_participant") return failure("not_implemented", "room.add_participant is not yet implemented (V1.1 feat/v11-C)");
+    if (name === "room.add_participant") return await this.handleAddParticipant(input, session, context);
     if (name === "room.apply_worktree") return await this.handleApplyWorktree(input, session, context);
     if (name === "room.discard_worktree") return await this.handleDiscardWorktree(input, session, context);
     return toolNotFound(name);
@@ -870,7 +870,23 @@ export class RoomMcpServer {
     return { ok: true, data: { agentId: newAgentId, name: agentName, slug, adapterId, role: room.mode === "team" || room.mode === "squad" ? "teammate" : "observer" } };
   }
 
+  private async handleAddParticipant(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): Promise<RoomMcpToolResult> {
+    if (!isRecord(input)) return failure("validation_failed", "input must be an object");
+    const agentBindingId = typeof input.agentBindingId === "string" && input.agentBindingId.trim().length > 0 ? input.agentBindingId.trim() : undefined;
+    if (agentBindingId === undefined) return failure("validation_failed", "agentBindingId is required");
+    const displayNameOverride = typeof input.displayNameOverride === "string" && input.displayNameOverride.trim().length > 0 ? input.displayNameOverride.trim() : undefined;
+    const result = await this.dispatch({
+      type: "AddParticipant",
+      roomId: session.roomId,
+      agentBindingId,
+      ...(displayNameOverride !== undefined ? { displayNameOverride } : {}),
+      idempotencyKey: `mcp:add-participant:${this.requireRunId(session, context)}:${agentBindingId}`
+    }, session, context);
+    return result.ok ? { ok: true, data: result.data } : { ok: false, error: result.error };
+  }
+
   async handleApplyWorktree(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): Promise<RoomMcpToolResult> {
+    void context;
     if (!isRecord(input) || typeof input.runId !== "string") return failure("validation_failed", "runId is required");
     const runId = input.runId;
 
@@ -967,6 +983,7 @@ export class RoomMcpServer {
   }
 
   async handleDiscardWorktree(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): Promise<RoomMcpToolResult> {
+    void context;
     if (!isRecord(input) || typeof input.runId !== "string") return failure("validation_failed", "runId is required");
     const runId = input.runId;
 

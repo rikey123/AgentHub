@@ -17,6 +17,7 @@ export type DaemonCommandHandlersOptions = {
 export function createDaemonCommandHandlers(options: DaemonCommandHandlersOptions): Partial<Record<Command["type"], CommandHandler>> {
   return {
     CreateRoom: (command, meta) => createRoom(options, command, meta),
+    AddParticipant: (command, meta) => addParticipant(options, command, meta),
     ArchiveRoom: (command) => setRoomArchived(options, command, true),
     UnarchiveRoom: (command) => setRoomArchived(options, command, false),
     SendMessage: (command, meta) => sendMessage(options, command, meta),
@@ -40,12 +41,20 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
   const leaderRoleId = stringField(command, "leaderRoleId");
   const legacyAgentProfileId = stringField(command, "agentProfileId");
   const participants = Array.isArray(command.participants) ? command.participants : [];
+  const skillIds = [...new Set(stringArrayField(command, "skillIds"))];
   const isTeamMode = mode === "team" || mode === "squad";
   if (isTeamMode && leaderRoleId === undefined) {
     return failed("validation_failed", "squad_mode_requires_leader_role_id");
   }
   if (mode === "solo" && participants.filter((item) => isObject(item) && (item.type === "agent" || (typeof item.roleId === "string" && typeof item.runtimeId === "string"))).length > 1) {
     return failed("validation_failed", "Solo rooms cannot contain multiple agents");
+  }
+  if (skillIds.length > 0) {
+    const placeholders = skillIds.map(() => "?").join(", ");
+    const rows = options.database.sqlite.prepare(`SELECT id FROM skills WHERE workspace_id = ? AND id IN (${placeholders})`).all(workspaceId, ...skillIds) as { readonly id: string }[];
+    const found = new Set(rows.map((row) => row.id));
+    const missing = skillIds.find((skillId) => !found.has(skillId));
+    if (missing !== undefined) return failed("not_found", `skill_not_found:${missing}`);
   }
 
   const roomId = randomUUID();
@@ -150,6 +159,10 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
       }
     }
     options.eventBus.publish(roomEvent("room.created", workspaceId, roomId, { roomId, title, mode, primaryAgentId, ...leaderPayload }, now));
+    for (const skillId of skillIds) {
+      options.database.sqlite.prepare("INSERT INTO room_skills (room_id, skill_id, enabled) VALUES (?, ?, 1) ON CONFLICT(room_id, skill_id) DO UPDATE SET enabled = 1").run(roomId, skillId);
+      options.eventBus.publish({ id: randomUUID(), type: "skill.activated", schemaVersion: 1, workspaceId, roomId, payload: { skillId, roomId }, createdAt: now });
+    }
     // Emit agent.joined + agent.state.changed for each participant so SSE consumers (and SSE
     // replay after a refresh) can rebuild the member roster without needing a separate API.
     // Without these events, refreshing the page lost all members until the daemon happened to
@@ -170,6 +183,78 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
   void Promise.resolve().then(() => options.prewarmRoomAgents?.(roomId)).catch(() => undefined);
   void meta;
   return { ok: true, data: { roomId, agentBindingId: primaryAgentId, ...(leaderRoleId !== undefined ? { leaderRoleId } : {}), ...(legacyAgentProfileId !== undefined ? { agentProfileId: legacyAgentProfileId } : {}) }, emittedEvents };
+}
+
+function addParticipant(options: DaemonCommandHandlersOptions, command: Command, meta: CommandMeta): CommandResult {
+  const roomId = stringField(command, "roomId");
+  const agentBindingId = stringField(command, "agentBindingId");
+  const displayNameOverride = stringField(command, "displayNameOverride");
+  if (roomId === undefined || agentBindingId === undefined) return failed("validation_failed", "roomId and agentBindingId are required");
+
+  const room = options.database.sqlite
+    .prepare("SELECT id, workspace_id, mode, primary_agent_id FROM rooms WHERE id = ? AND archived_at IS NULL")
+    .get(roomId) as { readonly id: string; readonly workspace_id: string; readonly mode: string; readonly primary_agent_id: string | null } | undefined;
+  if (room === undefined) return failed("not_found", `Room '${roomId}' not found`);
+  if (room.mode === "war_room") return failed("not_implemented", "war_room mode is V1.5");
+
+  const binding = options.database.sqlite
+    .prepare(
+      `SELECT
+        agent_bindings.id AS binding_id,
+        agent_bindings.workspace_id AS workspace_id,
+        roles.id AS role_id,
+        roles.name AS role_name,
+        roles.capabilities AS role_capabilities,
+        runtimes.kind AS runtime_kind
+       FROM agent_bindings
+       LEFT JOIN roles ON roles.id = agent_bindings.role_id
+       LEFT JOIN runtimes ON runtimes.id = agent_bindings.runtime_id
+       WHERE agent_bindings.id = ?
+       LIMIT 1`
+    )
+    .get(agentBindingId) as
+    | { readonly binding_id: string; readonly workspace_id: string; readonly role_id: string | null; readonly role_name: string | null; readonly role_capabilities: string | null; readonly runtime_kind: string | null }
+    | undefined;
+  if (binding === undefined) return failed("not_found", "agent_binding_not_found");
+  if (binding.workspace_id !== room.workspace_id) return failed("validation_failed", "agent_binding_workspace_mismatch");
+
+  const duplicate = options.database.sqlite
+    .prepare("SELECT 1 FROM room_participants WHERE room_id = ? AND (participant_id = ? OR agent_binding_id = ?) LIMIT 1")
+    .get(roomId, agentBindingId, agentBindingId);
+  if (duplicate !== undefined) return failed("conflict", "participant_already_in_room");
+
+  const now = options.now?.() ?? Date.now();
+  const role = room.mode === "team" || room.mode === "squad" ? "teammate" : "observer";
+  const presence = room.mode === "team" || room.mode === "squad" ? "active" : "observing";
+  const adapterId = binding.runtime_kind ?? "mock";
+  const name = displayNameOverride ?? binding.role_name ?? binding.binding_id;
+  const capabilities = parseCapabilities(binding.role_capabilities);
+  const mailboxMessageId = randomUUID();
+
+  options.database.sqlite.transaction(() => {
+    options.database.sqlite
+      .prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES (?, ?, 'agent', ?, ?, NULL, ?, ?, ?)")
+      .run(roomId, agentBindingId, role, adapterId, agentBindingId, presence, now);
+    options.database.sqlite
+      .prepare("INSERT OR REPLACE INTO agent_presence (room_id, agent_id, state, reason, status_line, updated_at) VALUES (?, ?, ?, NULL, NULL, ?)")
+      .run(roomId, agentBindingId, presence, now);
+    options.eventBus.publish({ id: randomUUID(), type: "agent.joined", schemaVersion: 1, workspaceId: room.workspace_id, roomId, agentId: agentBindingId, payload: { agentId: agentBindingId, agentName: name, role, adapterId, agentBindingId, roleId: binding.role_id, capabilities }, createdAt: now });
+    options.eventBus.publish({ id: randomUUID(), type: "agent.state.changed", schemaVersion: 1, workspaceId: room.workspace_id, roomId, agentId: agentBindingId, payload: { agentId: agentBindingId, state: presence }, createdAt: now });
+
+    if (room.primary_agent_id !== null) {
+      options.database.sqlite
+        .prepare("INSERT INTO mailbox_messages (id, workspace_id, room_id, from_type, from_id, to_agent_id, kind, content, files, read, claimed_run_id, claimed_at, delivery_batch_id, delivery_failure_reason, attempt_count, created_at, consumed_at) VALUES (?, ?, ?, 'system', 'room.add_participant', ?, 'message', ?, '[]', 0, NULL, NULL, NULL, NULL, 0, ?, NULL)")
+        .run(mailboxMessageId, room.workspace_id, roomId, room.primary_agent_id, JSON.stringify({ text: `${name} joined this room as ${role}.`, agentBindingId, participantId: agentBindingId }), now);
+      options.eventBus.publish({ id: randomUUID(), type: "mailbox.message.created", schemaVersion: 1, workspaceId: room.workspace_id, roomId, agentId: room.primary_agent_id, payload: { mailboxMessageId, roomId, fromAgentId: "room.add_participant", targetAgentId: room.primary_agent_id, reason: "participant_added", participantId: agentBindingId, agentBindingId }, createdAt: now });
+    }
+  })();
+
+  void meta;
+  return {
+    ok: true,
+    data: { participantId: agentBindingId, agentBindingId, agentId: agentBindingId, name, role, capabilities },
+    emittedEvents: latestEvents(options.database, roomId)
+  };
 }
 
 function setRoomArchived(options: DaemonCommandHandlersOptions, command: Command, archived: boolean): CommandResult {
@@ -497,6 +582,16 @@ function stringArrayField(command: Record<string, unknown>, ...keys: readonly st
       .filter((item): item is string => item !== undefined && item.length > 0);
   }
   return [];
+}
+
+function parseCapabilities(value: string | null): string[] {
+  if (value === null || value.length === 0) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

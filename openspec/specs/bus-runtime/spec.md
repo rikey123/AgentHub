@@ -33,6 +33,9 @@ type Command =
   | { type: "UpdateTask"; taskId: string; status: "pending" | "in_progress" | "blocked" | "review" | "completed" | "cancelled" | "open" | "done"; reason?: string; idempotencyKey?: string }
   | { type: "CompleteTask"; taskId: string; idempotencyKey?: string }
   | { type: "CreateRoom"; mode: RoomMode; title: string; primaryAgentId?: string; observerAgentIds?: string[] }
+  | { type: "AddParticipant"; roomId: string; agentBindingId: string; displayNameOverride?: string; idempotencyKey?: string }
+  | { type: "ApplyWorktree"; roomId: string; runId: string; idempotencyKey?: string }
+  | { type: "DiscardWorktree"; roomId: string; runId: string; idempotencyKey?: string }
   | { type: "ArchiveRoom"; roomId: string }
   | { type: "UnarchiveRoom"; roomId: string }
   | { type: "ReloadAgentProfile"; agentId: string }
@@ -112,6 +115,9 @@ type CommandMeta = {
 | `POST /context/:id/deprecate` | `DeprecateContextItem` |
 | `POST /runs/:id/cancel` | `CancelRun` |
 | `POST /rooms` | `CreateRoom` |
+| `POST /rooms/:id/participants` | `AddParticipant` |
+| `POST /rooms/:id/worktrees/:runId/apply` | `ApplyWorktree` |
+| `POST /rooms/:id/worktrees/:runId/discard` | `DiscardWorktree` |
 | `POST /rooms/:id/archive` | `ArchiveRoom` |
 | `POST /rooms/:id/unarchive` | `UnarchiveRoom` |
 | `POST /agents/:id/reload` | `ReloadAgentProfile` |
@@ -1080,4 +1086,3 @@ interface RunLifecycleService {
 
 - **WHEN** updateSessionState 被调用
 - **THEN** events 表不增行；订阅 `agent.run.*` 的 handler 不触发；保持 mid-flight metadata 与终结类 event 在事件流上的清晰分离
-

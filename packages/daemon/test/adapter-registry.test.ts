@@ -6,16 +6,32 @@ import type { AgentHubDatabase } from "@agenthub/db";
 import { AdapterRegistry } from "../src/adapters/registry.ts";
 
 describe("AdapterRegistry skill materialization failures", () => {
+  it("routes Tier 2 ACP runtime kinds through the generic ACP adapter instead of mock", async () => {
+    const genericAdapter = {
+      runManaged: vi.fn(async () => undefined),
+      cancelManagedRun: vi.fn(async () => undefined),
+      warmRoomAgent: vi.fn(() => "generic-warm"),
+      disposeRoomWarmSessions: vi.fn(),
+      disposeAllSessions: vi.fn()
+    };
+    const mockAdapter = { runAgent: vi.fn(), cancelRun: vi.fn() };
+    const registry = new AdapterRegistry({
+      database: createDatabaseStub(),
+      eventBus: { publish: vi.fn() } as unknown as EventBus,
+      lifecycle: lifecycleStub() as never,
+      mockAdapter: mockAdapter as never,
+      genericAcpAdapterFactory: vi.fn(() => genericAdapter)
+    } as never);
+
+    await registry.runAgent(runRow({ adapter_id: "codex" }));
+
+    expect(genericAdapter.runManaged).toHaveBeenCalledWith(expect.objectContaining({ adapter_id: "codex" }));
+    expect(mockAdapter.runAgent).not.toHaveBeenCalled();
+  });
+
   it("emits callback for non-task runs and fails the run", async () => {
     const callback = vi.fn();
-    const lifecycle = {
-      fail: vi.fn(),
-      markRunning: vi.fn(),
-      updateSessionState: vi.fn(),
-      markCancelling: vi.fn(),
-      complete: vi.fn(),
-      cancelFinalized: vi.fn()
-    };
+    const lifecycle = lifecycleStub();
     const database = createDatabaseStub();
     const eventBus = { publish: vi.fn() } as unknown as EventBus;
     const { SkillMaterializationError } = await import("@agenthub/skills");
@@ -54,32 +70,9 @@ describe("AdapterRegistry skill materialization failures", () => {
 
   it("passes structured failure details to callback for task-associated runs", async () => {
     const callback = vi.fn();
-    const lifecycle = {
-      fail: vi.fn(),
-      markRunning: vi.fn(),
-      updateSessionState: vi.fn(),
-      markCancelling: vi.fn(),
-      complete: vi.fn(),
-      cancelFinalized: vi.fn()
-    };
+    const lifecycle = lifecycleStub();
     const database = createDatabaseStub();
     const eventBus = { publish: vi.fn() } as unknown as EventBus;
-
-    const registry = new AdapterRegistry({
-      database,
-      eventBus,
-      lifecycle: lifecycle as never,
-      onSkillMaterializationFailed: callback,
-      skillRegistry: {
-        materializeForRun: vi.fn(() => {
-          const error = new Error("disk full");
-          (error as Error & { name: string; details?: unknown }).name = "SkillMaterializationError";
-          throw error;
-        }),
-        cleanupRun: vi.fn(),
-        buildSkillsPromptBlock: vi.fn(() => undefined)
-      } as never
-    });
 
     // Use a real SkillMaterializationError-like object by importing the class dynamically.
     const { SkillMaterializationError } = await import("@agenthub/skills");
@@ -116,6 +109,17 @@ describe("AdapterRegistry skill materialization failures", () => {
     expect(lifecycle.fail).toHaveBeenCalledWith(null, "run-1", "skill_materialization_failed", "fatal", "disk full", "");
   });
 });
+
+function lifecycleStub() {
+  return {
+    fail: vi.fn(),
+    markRunning: vi.fn(),
+    updateSessionState: vi.fn(),
+    markCancelling: vi.fn(),
+    complete: vi.fn(),
+    cancelFinalized: vi.fn()
+  };
+}
 
 function createDatabaseStub(): AgentHubDatabase {
   return {

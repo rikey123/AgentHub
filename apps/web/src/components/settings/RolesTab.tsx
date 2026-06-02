@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Button, Card, Chip, Input, Label, Modal, TextArea, TextField } from "@heroui/react";
+import { Button, Card, Checkbox, Chip, Input, Label, Modal, TextArea, TextField } from "@heroui/react";
 import { RoleGeneratorModal } from "./RoleGeneratorModal.tsx";
 
 export interface RoleConfig {
@@ -33,6 +33,19 @@ interface RoleDraft {
 }
 
 export const BUILTIN_ROLE_WARNING = "内置模板，修改后不再自动更新；运行 `agenthub roles reset --id=<id>` 可恢复";
+
+export const WELL_KNOWN_CAPABILITY_TOKENS = [
+  "chat",
+  "code.edit",
+  "code.review",
+  "file.read",
+  "file.write",
+  "terminal.run",
+  "context.read",
+  "context.write",
+  "intervention.knock",
+  "task.delegate"
+] as const;
 
 export class RoleApiError extends Error {
   constructor(message: string, readonly status: number, readonly payload: unknown) {
@@ -222,10 +235,32 @@ export function RolesTab({ roles: initialRoles, modelConfigs, fetchImpl = fetch,
               <TextArea className="min-h-44" placeholder="Describe the role behavior and responsibilities" data-testid="roles-prompt-input" />
             </TextField>
 
-            <TextField value={draft.capabilitiesText} onChange={(value) => setDraft((current) => ({ ...current, capabilitiesText: value }))}>
+            <div className="grid gap-2">
               <Label className="text-sm font-semibold">Capabilities</Label>
-              <Input placeholder="code.edit, code.review, task.delegate" data-testid="roles-capabilities-input" />
-            </TextField>
+              <div className="grid gap-2 rounded-2xl border border-border bg-surface p-3 sm:grid-cols-2" data-testid="roles-capabilities-input">
+                {WELL_KNOWN_CAPABILITY_TOKENS.map((token) => {
+                  const selected = parseCapabilities(draft.capabilitiesText).includes(token);
+                  return (
+                    <Checkbox
+                      key={token}
+                      isSelected={selected}
+                      onChange={(selected) => setDraft((current) => ({
+                        ...current,
+                        capabilitiesText: setCapabilityToken(parseCapabilities(current.capabilitiesText), token, selected).join(", ")
+                      }))}
+                      className="rounded-xl border border-border bg-overlay px-3 py-2"
+                    >
+                      <Checkbox.Control>
+                        <Checkbox.Indicator />
+                      </Checkbox.Control>
+                      <Checkbox.Content>
+                        <Label className="text-sm ah-mono">{token}</Label>
+                      </Checkbox.Content>
+                    </Checkbox>
+                  );
+                })}
+              </div>
+            </div>
 
             <div className="flex flex-wrap gap-1">
               {parseCapabilities(draft.capabilitiesText).length === 0 ? (
@@ -317,6 +352,17 @@ export function upsertRole(roles: ReadonlyArray<RoleConfig>, role: RoleConfig): 
 
 export function parseCapabilities(value: string): string[] {
   return Array.from(new Set(value.split(/[\n,]/).map((item) => item.trim()).filter(Boolean)));
+}
+
+export function toggleCapabilityToken(current: readonly string[], token: string): string[] {
+  return current.includes(token)
+    ? current.filter((candidate) => candidate !== token)
+    : [...current, token];
+}
+
+export function setCapabilityToken(current: readonly string[], token: string, selected: boolean): string[] {
+  const withoutToken = current.filter((candidate) => candidate !== token);
+  return selected ? [...withoutToken, token] : withoutToken;
 }
 
 function emptyDraft(): RoleDraft {

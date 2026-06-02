@@ -780,19 +780,30 @@ class Projector {
       case "agent.joined": {
         if (payload && typeof payload.agentId === "string") {
           const name = typeof payload.agentName === "string" ? payload.agentName : payload.agentId;
-          if (!room.participants.find((p) => p.id === payload.agentId)) {
+          const nextParticipant = {
+            id: payload.agentId,
+            name,
+            role: typeof payload.role === "string" ? payload.role : "observer",
+            presence: "observing",
+            adapterId: typeof payload.adapterId === "string" ? payload.adapterId : "mock",
+            agentBindingId: typeof payload.agentBindingId === "string" ? payload.agentBindingId : undefined,
+            roleId: typeof payload.roleId === "string" ? payload.roleId : undefined,
+            capabilities: parseStringArray(payload.capabilities) ?? []
+          };
+          const existing = room.participants.find((p) => p.id === payload.agentId);
+          if (!existing) {
             room = {
               ...room,
-              participants: [
-                ...room.participants,
-                {
-                  id: payload.agentId,
-                  name,
-                  role: typeof payload.role === "string" ? payload.role : "observer",
-                  presence: "observing",
-                  adapterId: typeof payload.adapterId === "string" ? payload.adapterId : "mock"
-                }
-              ]
+              participants: [...room.participants, nextParticipant]
+            };
+            this.rooms.set(roomId, room);
+            changed = true;
+          } else {
+            room = {
+              ...room,
+              participants: room.participants.map((participant) =>
+                participant.id === payload.agentId ? { ...participant, ...nextParticipant, presence: participant.presence } : participant
+              )
             };
             this.rooms.set(roomId, room);
             changed = true;

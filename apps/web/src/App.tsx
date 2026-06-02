@@ -83,6 +83,7 @@ export default function App() {
         mode: input.mode,
         primaryAgentId: input.primaryAgentId,
         ...(input.leaderRoleId !== undefined ? { leaderRoleId: input.leaderRoleId } : {}),
+        ...(input.skillIds !== undefined ? { skillIds: input.skillIds } : {}),
         participants: input.participants
       }) as { data?: { roomId?: string }; id?: string; roomId?: string };
       const roomId = res?.data?.roomId ?? res?.roomId ?? res?.id;

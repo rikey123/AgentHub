@@ -321,6 +321,9 @@ importers:
 
   packages/daemon:
     dependencies:
+      '@agenthub/adapter-acp-base':
+        specifier: workspace:*
+        version: link:../adapters/acp-base
       '@agenthub/adapter-claude-code':
         specifier: workspace:*
         version: link:../adapters/claude-code

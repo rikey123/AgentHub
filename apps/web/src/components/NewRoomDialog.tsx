@@ -40,6 +40,7 @@ export type CreateRoomInput = {
   mode: RoomMode;
   primaryAgentId: string;
   leaderRoleId?: string;
+  skillIds?: string[];
   participants: Array<LegacyAgentParticipant | V1RoomParticipant>;
 };
 
@@ -62,20 +63,30 @@ type SelectOption = {
   tone?: "default" | "accent" | "success" | "warning" | "danger" | undefined;
 };
 
+type WorkspaceSkillSummary = {
+  id: string;
+  name: string;
+  description: string;
+  origin: string;
+};
+
 export function buildCreateRoomInput(input: {
   title: string;
   mode: RoomMode;
   primaryAgentId: string;
   leaderRoleId?: string;
+  skillIds?: string[];
   legacyAgentParticipants: LegacyAgentParticipant[];
   v1Participants: BuildV1ParticipantInput[];
 }): CreateRoomInput {
   const title = input.title.trim() || "New room";
+  const skillIds = Array.from(new Set(input.skillIds ?? [])).filter((id) => id.length > 0);
+  const selectedSkills = skillIds.length > 0 ? { skillIds } : {};
   if (input.mode === "solo") {
-    return { title, mode: "solo", primaryAgentId: input.primaryAgentId, participants: [] };
+    return { title, mode: "solo", primaryAgentId: input.primaryAgentId, participants: [], ...selectedSkills };
   }
   if (input.mode === "assisted") {
-    return { title, mode: "assisted", primaryAgentId: input.primaryAgentId, participants: input.legacyAgentParticipants };
+    return { title, mode: "assisted", primaryAgentId: input.primaryAgentId, participants: input.legacyAgentParticipants, ...selectedSkills };
   }
   if (!input.leaderRoleId) {
     throw new Error("Pick a leader role.");
@@ -104,7 +115,8 @@ export function buildCreateRoomInput(input: {
     mode: input.mode,
     primaryAgentId: input.primaryAgentId,
     leaderRoleId: input.leaderRoleId,
-    participants
+    participants,
+    ...selectedSkills
   };
 }
 
@@ -495,6 +507,34 @@ function errorMessage(payload: unknown, status: number): string {
   return `HTTP ${status}`;
 }
 
+function normalizeWorkspaceSkills(payload: unknown): WorkspaceSkillSummary[] {
+  const rows = Array.isArray(payload)
+    ? payload
+    : payload && typeof payload === "object" && Array.isArray((payload as { readonly skills?: unknown }).skills)
+      ? (payload as { readonly skills: unknown[] }).skills
+      : [];
+  return rows.flatMap((row) => {
+    if (!row || typeof row !== "object") return [];
+    const record = row as Record<string, unknown>;
+    const id = stringValue(record.id);
+    const name = stringValue(record.name);
+    if (!id || !name) return [];
+    return [{
+      id,
+      name,
+      description: typeof record.description === "string" ? record.description : "",
+      origin: typeof record.origin === "string" ? record.origin : "workspace"
+    }];
+  }).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function skillOriginColor(origin: string): "default" | "accent" | "success" | "warning" | "danger" {
+  if (origin === "builtin") return "accent";
+  if (origin === "workspace") return "success";
+  if (origin === "imported") return "warning";
+  return "default";
+}
+
 export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetch }: NewRoomDialogProps) {
   const { agents, loading, error: agentsError } = useAgents();
   const {
@@ -513,6 +553,10 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
   const [leaderBinding, setLeaderBinding] = useState<V1ParticipantDraft | undefined>(undefined);
   const [v1Participants, setV1Participants] = useState<V1ParticipantDraft[]>([]);
   const [extraIds, setExtraIds] = useState<Set<string>>(new Set());
+  const [skills, setSkills] = useState<WorkspaceSkillSummary[]>([]);
+  const [selectedSkillIds, setSelectedSkillIds] = useState<Set<string>>(new Set());
+  const [skillsLoading, setSkillsLoading] = useState(false);
+  const [skillsError, setSkillsError] = useState<string | undefined>(undefined);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
 
@@ -526,8 +570,42 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
       setLeaderBinding(undefined);
       setV1Participants([]);
       setCreatedAgentBindings([]);
+      setSelectedSkillIds(new Set());
+      setSkillsError(undefined);
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    const controller = new AbortController();
+    setSkillsLoading(true);
+    setSkillsError(undefined);
+    void csrfFetch("/skills", {
+      credentials: "same-origin",
+      headers: { accept: "application/json" },
+      signal: controller.signal
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`Load skills failed: ${response.status}`);
+        return response.json() as Promise<unknown>;
+      })
+      .then((payload) => {
+        if (!cancelled) setSkills(normalizeWorkspaceSkills(payload));
+      })
+      .catch((err: unknown) => {
+        if (!cancelled && !(err instanceof DOMException && err.name === "AbortError")) {
+          setSkillsError(err instanceof Error ? err.message : String(err));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setSkillsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [csrfFetch, isOpen]);
 
   useEffect(() => {
     if (!primaryId && agents.length > 0) {
@@ -566,10 +644,10 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
   const selectedLeader = roles.find((role) => role.id === (leaderBinding?.roleId ?? leaderRoleId));
   const teamMode = mode === "squad" || mode === "team";
 
-  const toggleExtra = (id: string) => {
+  const setExtraSelected = (id: string, selected: boolean) => {
     setExtraIds((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+      if (selected) next.add(id); else next.delete(id);
       return next;
     });
   };
@@ -579,6 +657,14 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
       if (participant.id !== id) return participant;
       return patchParticipantRuntime(participant, patch, runtimes, modelConfigs);
     }));
+  };
+
+  const setSkillSelected = (id: string, selected: boolean) => {
+    setSelectedSkillIds((current) => {
+      const next = new Set(current);
+      if (selected) next.add(id); else next.delete(id);
+      return next;
+    });
   };
 
   const updateLeaderBinding = (patch: Partial<V1ParticipantDraft>) => {
@@ -664,6 +750,7 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
         title,
         mode,
         primaryAgentId,
+        skillIds: Array.from(selectedSkillIds),
         legacyAgentParticipants,
         v1Participants: v1ParticipantInput
       };
@@ -873,28 +960,71 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
                             <Checkbox
                               key={agent.id}
                               isSelected={checked}
-                              onChange={() => toggleExtra(agent.id)}
+                              onChange={(selected) => setExtraSelected(agent.id, selected)}
                               className={[
                                 "rounded-2xl border bg-surface px-3 py-2 transition-colors",
                                 checked ? "border-accent bg-accent-soft" : "border-border hover:bg-surface-secondary"
                               ].join(" ")}
                             >
-                              <Checkbox.Control><Checkbox.Indicator /></Checkbox.Control>
-                              <Checkbox.Content>
-                                <span className="flex min-w-0 items-center gap-2 text-sm">
-                                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-secondary text-xs font-semibold">
-                                    {agent.avatar ?? initials(agent.name)}
-                                  </span>
-                                  <span className="min-w-0 flex-1 truncate font-medium">{agent.name}</span>
-                                  <Chip size="sm" variant="soft" color={providerColor[agent.provider] ?? "default"}>{agent.provider}</Chip>
+                              <span className="flex min-w-0 items-center gap-2 text-sm">
+                                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-secondary text-xs font-semibold">
+                                  {agent.avatar ?? initials(agent.name)}
                                 </span>
-                              </Checkbox.Content>
+                                <span className="min-w-0 flex-1 truncate font-medium">{agent.name}</span>
+                                <Chip size="sm" variant="soft" color={providerColor[agent.provider] ?? "default"}>{agent.provider}</Chip>
+                              </span>
                             </Checkbox>
                           );
                         })}
                     </div>
                   </section>
                 ) : null}
+
+                <section className="rounded-2xl border border-border bg-overlay p-4 shadow-sm">
+                  <div className="mb-3 flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-semibold">Skills</h3>
+                      <p className="text-xs text-muted">Selected SKILL.md packages are available to this room on the next run.</p>
+                    </div>
+                    <Chip size="sm" variant="soft" color={selectedSkillIds.size > 0 ? "accent" : "default"}>
+                      {selectedSkillIds.size} selected
+                    </Chip>
+                  </div>
+
+                  {skillsError ? <p className="mb-2 text-xs text-danger">{skillsError}</p> : null}
+                  {skillsLoading ? <p className="mb-2 text-xs text-muted">Loading skills...</p> : null}
+
+                  {skills.length === 0 && !skillsLoading ? (
+                    <div className="rounded-xl border border-dashed border-border bg-surface p-3 text-sm text-muted">
+                      No workspace skills found. Create or import skills from Settings.
+                    </div>
+                  ) : (
+                    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                      {skills.map((skill) => {
+                        const selected = selectedSkillIds.has(skill.id);
+                        return (
+                          <Checkbox
+                            key={skill.id}
+                            isSelected={selected}
+                            onChange={(selected) => setSkillSelected(skill.id, selected)}
+                            className={[
+                              "rounded-2xl border bg-surface px-3 py-2 transition-colors",
+                              selected ? "border-accent bg-accent-soft" : "border-border hover:bg-surface-secondary"
+                            ].join(" ")}
+                          >
+                            <span className="flex min-w-0 items-center gap-2 text-sm">
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate font-medium">{skill.name}</span>
+                                <span className="block truncate text-xs text-muted">{skill.description || "No description"}</span>
+                              </span>
+                              <Chip size="sm" variant="soft" color={skillOriginColor(skill.origin)}>{skill.origin}</Chip>
+                            </span>
+                          </Checkbox>
+                        );
+                      })}
+                    </div>
+                  )}
+                </section>
 
                 {error ? <p className="text-xs text-danger" role="alert">{error}</p> : null}
               </div>
