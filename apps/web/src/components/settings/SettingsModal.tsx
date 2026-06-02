@@ -31,7 +31,10 @@ export const SETTINGS_TABS: Array<{ id: SettingsTabId; label: string; endpoint?:
 
 type SettingsEndpoint = "roles" | "runtimes" | "modelConfigs" | "agentBindings" | "permissionProfiles" | "permissionRules";
 
-type SettingsData = Record<SettingsEndpoint, unknown> & { workspace: unknown };
+type SettingsData = Record<SettingsEndpoint, unknown> & {
+  workspace: unknown;
+  errors: Partial<Record<SettingsEndpoint | "workspace", string>>;
+};
 
 type SettingsStatus = "idle" | "loading" | "ready" | "error";
 
@@ -59,30 +62,49 @@ const emptySettingsData = (): SettingsData => ({
   agentBindings: undefined,
   permissionProfiles: undefined,
   permissionRules: undefined,
-  workspace: undefined
+  workspace: undefined,
+  errors: {}
 });
 
 export async function fetchSettingsBootstrap(fetchImpl: typeof fetch, signal: AbortSignal): Promise<SettingsData> {
-  const entries = await Promise.all(
+  const results = await Promise.all(
     (Object.entries(endpointPaths) as Array<[SettingsEndpoint, string]>).map(async ([key, path]) => {
-      const response = await fetchImpl(path, {
-        credentials: "same-origin",
-        headers: { accept: "application/json" },
-        signal
-      });
-      if (!response.ok) throw new Error(`Settings bootstrap ${path} failed: ${response.status}`);
-      return [key, await response.json()] as const;
+      try {
+        const response = await fetchImpl(path, {
+          credentials: "same-origin",
+          headers: { accept: "application/json" },
+          signal
+        });
+        if (!response.ok) throw new Error(`Settings bootstrap ${path} failed: ${response.status}`);
+        return { key, value: await response.json() } as const;
+      } catch (error) {
+        if (isAbortError(error)) throw error;
+        return { key, error: errorMessage(error) } as const;
+      }
     })
   );
-  const data = Object.fromEntries(entries) as Omit<SettingsData, "workspace">;
+  const data = emptySettingsData();
+  for (const result of results) {
+    if ("error" in result) {
+      data.errors[result.key] = result.error;
+    } else {
+      data[result.key] = result.value;
+    }
+  }
   const workspaceId = extractWorkspaceId(data.agentBindings) ?? "default-workspace";
-  const workspaceResponse = await fetchImpl(`/workspaces/${encodeURIComponent(workspaceId)}`, {
-    credentials: "same-origin",
-    headers: { accept: "application/json" },
-    signal
-  });
-  if (!workspaceResponse.ok) throw new Error(`Settings bootstrap /workspaces/${workspaceId} failed: ${workspaceResponse.status}`);
-  return { ...data, workspace: await workspaceResponse.json() };
+  try {
+    const workspaceResponse = await fetchImpl(`/workspaces/${encodeURIComponent(workspaceId)}`, {
+      credentials: "same-origin",
+      headers: { accept: "application/json" },
+      signal
+    });
+    if (!workspaceResponse.ok) throw new Error(`Settings bootstrap /workspaces/${workspaceId} failed: ${workspaceResponse.status}`);
+    data.workspace = await workspaceResponse.json();
+  } catch (error) {
+    if (isAbortError(error)) throw error;
+    data.errors.workspace = errorMessage(error);
+  }
+  return data;
 }
 
 export function SettingsModal({ isOpen, selectedTab, onTabChange, onOpenChange, fetchImpl = fetch }: SettingsModalProps) {
@@ -115,7 +137,7 @@ export function SettingsModal({ isOpen, selectedTab, onTabChange, onOpenChange, 
       .then((nextData) => {
         if (controller.signal.aborted) return;
         setData(nextData);
-        setStatus("ready");
+        setStatus(Object.keys(nextData.errors).length > 0 ? "error" : "ready");
       })
       .catch((err) => {
         if (controller.signal.aborted) return;
@@ -134,6 +156,8 @@ export function SettingsModal({ isOpen, selectedTab, onTabChange, onOpenChange, 
     () => Object.values(data).filter((value) => value !== undefined).length,
     [data]
   );
+  const errorCount = Object.keys(data.errors).length;
+  const allDataEndpointsFailed = errorCount >= Object.keys(endpointPaths).length && loadedCount === 0;
 
   return (
     <Modal.Backdrop isOpen={isOpen} onOpenChange={onOpenChange}>
@@ -152,7 +176,7 @@ export function SettingsModal({ isOpen, selectedTab, onTabChange, onOpenChange, 
                 </p>
               </div>
                 <Chip className="ml-auto" size="sm" variant="soft" color={status === "error" ? "danger" : loading ? "warning" : "success"}>
-                {loading ? "Loading" : status === "error" ? "REST error" : `${loadedCount}/7 loaded`}
+                {loading ? "Loading" : status === "error" ? `${errorCount} REST error${errorCount === 1 ? "" : "s"}` : `${loadedCount}/7 loaded`}
                 </Chip>
             </div>
           </Modal.Header>
@@ -182,7 +206,7 @@ export function SettingsModal({ isOpen, selectedTab, onTabChange, onOpenChange, 
                     <SettingsPanel
                       tab={tab}
                       loading={loading}
-                      error={error}
+                      error={tab.endpoint ? data.errors[tab.endpoint] : tab.id === "workspace" ? data.errors.workspace : allDataEndpointsFailed ? error : undefined}
                       data={tab.endpoint ? data[tab.endpoint] : undefined}
                       allData={data}
                       fetchImpl={fetchImpl}
@@ -203,7 +227,7 @@ export function SettingsModal({ isOpen, selectedTab, onTabChange, onOpenChange, 
   );
 }
 
-function SettingsPanel({
+export function SettingsPanel({
   tab,
   loading,
   error,
@@ -228,19 +252,19 @@ function SettingsPanel({
   onPermissionProfilesChange: (permissionProfiles: unknown) => void;
   onPermissionRulesChange: (permissionRules: unknown) => void;
 }) {
-  if (tab.id === "roles" && !loading && !error && data !== undefined) {
+  if (tab.id === "roles" && data !== undefined) {
     return <RolesTab roles={data} modelConfigs={allData.modelConfigs} fetchImpl={fetchImpl} onRolesChange={onRolesChange} />;
   }
 
-  if (tab.id === "runtimes" && !loading && !error && data !== undefined) {
+  if (tab.id === "runtimes" && data !== undefined) {
     return <RuntimesTab data={data} fetchImpl={fetchImpl} onChange={onRuntimesChange} />;
   }
 
-  if (tab.id === "models" && !loading && !error && data !== undefined) {
+  if (tab.id === "models" && data !== undefined) {
     return <ModelsTab modelConfigs={data} fetchImpl={fetchImpl} onModelConfigsChange={onModelConfigsChange} />;
   }
 
-  if (tab.id === "permissions" && !loading && !error && data !== undefined) {
+  if (tab.id === "permissions" && data !== undefined) {
     return (
       <PermissionsSettingsTab
         permissionProfiles={data}
@@ -252,11 +276,11 @@ function SettingsPanel({
     );
   }
 
-  if (tab.id === "workspace" && !loading && !error && allData.workspace !== undefined) {
+  if (tab.id === "workspace" && allData.workspace !== undefined) {
     return <WorkspaceTab workspace={allData.workspace} />;
   }
 
-  if (tab.id === "mcp" && !loading && !error) {
+  if (tab.id === "mcp" && !loading) {
     return <McpPlaceholder />;
   }
 
@@ -278,6 +302,14 @@ function SettingsPanel({
       </div>
     </section>
   );
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
 }
 
 function SettingsSkeleton() {

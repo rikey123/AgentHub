@@ -7,6 +7,7 @@ import {
   PermissionsSettingsTab,
   ROOM_MCP_TOOLS,
   SETTINGS_TABS,
+  SettingsPanel,
   WorkspaceTab,
   fetchSettingsBootstrap
 } from "./SettingsModal.tsx";
@@ -123,7 +124,8 @@ describe("SettingsModal integration contract", () => {
       agentBindings: { agentBindings: [{ id: "binding_1", workspaceId: "ws_1", role: { name: "Reviewer" }, runtime: { kind: "native", name: "Native", detectedVersion: "native" }, modelConfig: { id: "model_1", name: "OpenAI", provider: "openai", model: "gpt-4o" } }] },
       permissionProfiles: { profiles: [{ id: "profile_1", name: "Default Policy", description: "Shared defaults", rules: [] }] },
       permissionRules: { rules: [{ id: "rule_1", workspace_id: "ws_1", resource_type: "file", resource_match: "src/**", action: "allow" }] },
-      workspace: { workspace: { id: "ws_1", name: "Workspace", root_path: "." } }
+      workspace: { workspace: { id: "ws_1", name: "Workspace", root_path: "." } },
+      errors: {}
     });
 
     Object.defineProperty(globalThis, "EventSource", {
@@ -149,6 +151,58 @@ describe("SettingsModal integration contract", () => {
     expect(signals).toHaveLength(6);
     expect(signals.every((signal) => signal.aborted)).toBe(true);
     await expect(resultPromise).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("keeps successful settings endpoint data when another endpoint fails", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      const path = String(input);
+      if (path === "/permissions/rules") throw new TypeError("Failed to fetch");
+      if (path === "/agent-bindings") {
+        return jsonResponse(200, {
+          agentBindings: [{ id: "binding_1", workspaceId: "ws_1" }]
+        });
+      }
+      if (path === "/workspaces/ws_1") {
+        return jsonResponse(200, { workspace: { id: "ws_1", name: "Workspace" } });
+      }
+      return jsonResponse(200, { path });
+    });
+
+    const data = await fetchSettingsBootstrap(fetchImpl, new AbortController().signal);
+
+    expect(data.roles).toEqual({ path: "/roles" });
+    expect(data.runtimes).toEqual({ path: "/runtimes" });
+    expect(data.permissionRules).toBeUndefined();
+    expect(data.workspace).toEqual({ workspace: { id: "ws_1", name: "Workspace" } });
+    expect(data.errors).toMatchObject({ permissionRules: "Failed to fetch" });
+  });
+
+  it("renders loaded role data even when a different settings endpoint has an error", () => {
+    const html = renderToStaticMarkup(createElement(SettingsPanel, {
+      tab: SETTINGS_TABS[0]!,
+      loading: false,
+      error: undefined,
+      data: [{ id: "builder", name: "Builder", prompt: "Build things.", capabilities: [] }],
+      allData: {
+        roles: [{ id: "builder", name: "Builder", prompt: "Build things.", capabilities: [] }],
+        runtimes: undefined,
+        modelConfigs: [],
+        agentBindings: undefined,
+        permissionProfiles: undefined,
+        permissionRules: undefined,
+        workspace: undefined,
+        errors: { permissionRules: "Failed to fetch" }
+      },
+      fetchImpl: vi.fn<typeof fetch>(),
+      onRolesChange: vi.fn(),
+      onRuntimesChange: vi.fn(),
+      onModelConfigsChange: vi.fn(),
+      onPermissionProfilesChange: vi.fn(),
+      onPermissionRulesChange: vi.fn()
+    }));
+
+    expect(html).toContain("Builder");
+    expect(html).not.toContain("Failed to fetch");
   });
 
   it("renders permission profiles and deletable permission rules from REST data", () => {
@@ -211,4 +265,11 @@ function findElementByProp(element: unknown, prop: string, value: unknown): { pr
     if (found) return found;
   }
   return undefined;
+}
+
+function jsonResponse(status: number, payload: unknown): Response {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { "content-type": "application/json" }
+  });
 }
