@@ -716,6 +716,28 @@ describe("TaskService and RoomMcpServer", () => {
     expect(currentDatabase().sqlite.prepare("SELECT type FROM events WHERE type = 'task.status.changed' AND task_id = ? AND json_extract(payload, '$.nextStatus') = 'in_progress'").get(created.data.taskId)).toBeDefined();
   });
 
+  test("agent task update is idempotent when delegated run already marked the task in progress", async () => {
+    seedDelegatedRoom("room_delegate_idempotent", "agent_leader_idem", "role_leader_idem", "role_builder_idem", "binding_leader_idem", "binding_builder_idem", "agent_builder_idem");
+    createRun("run_delegate_idempotent", { roomId: "room_delegate_idempotent", agentId: "agent_builder_idem" });
+    const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const commandBus = new CommandBus({ database: currentDatabase(), handlers: { UpdateTask: createUpdateTaskHandler(service) } });
+    const mcp = new RoomMcpServer({ commandBus, taskService: service, database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const created = service.create({ roomId: "room_delegate_idempotent", title: "Idempotent progress", assigneeRoleId: "role_builder_idem", expectsReview: true, sourceRunId: "run_leader_idem", createdBy: "agent_leader_idem" });
+    if (!created.ok) throw new Error("expected review task");
+    service.startDelegatedRun(created.data.taskId, "run_delegate_idempotent");
+    const rejectedEvents: unknown[] = [];
+    const unsubscribe = currentBus().subscribe("task.status.changed.rejected", (event) => {
+      rejectedEvents.push(event);
+    });
+
+    const result = await mcp.callTool("room.update_task", { taskId: created.data.taskId, status: "in_progress", reason: "starting work" }, { roomId: "room_delegate_idempotent", runId: "run_delegate_idempotent", agentId: "agent_builder_idem" });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(rejectedEvents).toHaveLength(0);
+    expect(currentDatabase().sqlite.prepare("SELECT status FROM tasks WHERE id = ?").get(created.data.taskId)).toMatchObject({ status: "in_progress" });
+    unsubscribe();
+  });
+
   test("delegated run failure blocks squad task and emits blocked wake mail", () => {
     seedDelegatedRoom("room_delegate_failed", "agent_leader_fail", "role_leader_fail", "role_builder_fail", "binding_leader_fail", "binding_builder_fail", "agent_builder_fail");
     createRun("run_delegate_failed", { roomId: "room_delegate_failed", agentId: "agent_builder_fail" });

@@ -211,6 +211,9 @@ export class TaskService {
     if (nextStatus === undefined) return failed("validation_failed", "invalid task status");
     const existing = this.task(input.taskId);
     if (!existing) return failed("not_found", `Task '${input.taskId}' not found`);
+    if (existing.status === nextStatus) {
+      return { ok: true, data: { task: taskView(existing), taskId: input.taskId }, emittedEvents: latestTaskEvents(this.options.database, input.taskId) };
+    }
     if (!canTransition(existing.status, nextStatus)) return this.rejectTransition(existing, nextStatus, input.reason);
     const now = this.options.now?.() ?? Date.now();
     const clearsBoardOverride = isTerminalStatus(nextStatus);
