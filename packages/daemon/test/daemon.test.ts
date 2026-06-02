@@ -581,7 +581,6 @@ describe("daemon M1.4 composition", () => {
     const runId = "run-native-plan-hidden";
     const roomId = "room-native-plan-hidden";
     const agentId = "native-agent-plan-hidden";
-    const planText = "```json\n{\"goal\":\"ship\",\"tasks\":[{\"title\":\"Build\",\"description\":\"Implement it\",\"assigneeRole\":\"Builder\"}]}\n```";
 
     daemon.database.sqlite.transaction(() => {
       daemon.database.sqlite.prepare("INSERT INTO model_configs (id, workspace_id, name, provider, model, base_url, api_key_ref, api_key_fingerprint, temperature, max_tokens, reasoning, extra, profile, created_at, updated_at) VALUES ('model-plan-hidden', 'default-workspace', 'Plan Model', 'ollama', 'plan-model', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1, 1)").run();
@@ -602,7 +601,10 @@ describe("daemon M1.4 composition", () => {
     expect(latestPlanBody.plan).toMatchObject({ roomId, runId, plan: { goal: "ship", tasks: [expect.objectContaining({ title: "Build" })] } });
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE run_id = ? AND type = 'task.plan.created'").get(runId)).toMatchObject({ count: 1 });
     const planEvent = daemon.database.sqlite.prepare("SELECT payload FROM events WHERE run_id = ? AND type = 'task.plan.created' ORDER BY seq DESC LIMIT 1").get(runId) as { readonly payload: string };
-    expect(JSON.parse(planEvent.payload)).toMatchObject({ planId: expect.any(String), plan: { goal: "ship", tasks: [expect.objectContaining({ title: "Build" })] } });
+    const planPayload = JSON.parse(planEvent.payload) as Record<string, unknown>;
+    expect(planPayload).toMatchObject({ planId: expect.any(String), taskCount: 1 });
+    expect(planPayload).not.toHaveProperty("plan");
+    expect(planPayload).not.toHaveProperty("planJson");
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM messages WHERE run_id = ?").get(runId)).toMatchObject({ count: 0 });
     await waitFor(
       () => daemon.database.sqlite.prepare("SELECT id, status FROM runs WHERE room_id = ? AND wake_reason = 'execute' ORDER BY created_at DESC LIMIT 1").get(roomId) as { readonly id: string; readonly status: string } | undefined,

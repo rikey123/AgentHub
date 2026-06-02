@@ -44,6 +44,7 @@ type ExecutionPlan = {
   readonly id: string;
   readonly runId: string;
   readonly plan: unknown;
+  readonly taskCount?: number | undefined;
   readonly createdAt: number;
 };
 
@@ -190,7 +191,21 @@ export function roomExecutionPlan(plan: RoomExecutionPlanViewModel | undefined):
     id: plan.planId,
     runId: plan.runId,
     plan: plan.planJson,
+    ...(plan.taskCount !== undefined ? { taskCount: plan.taskCount } : {}),
     createdAt: plan.createdAt
+  };
+}
+
+export function hydrateExecutionPlanFromLatest(current: RoomExecutionPlanViewModel, payload: unknown): RoomExecutionPlanViewModel {
+  const planPayload = isRecord(payload) ? payload.plan : undefined;
+  if (!isRecord(planPayload)) return current;
+  const planId = typeof planPayload.id === "string" ? planPayload.id : undefined;
+  if (planId !== current.planId) return current;
+  return {
+    ...current,
+    runId: typeof planPayload.runId === "string" ? planPayload.runId : current.runId,
+    planJson: "plan" in planPayload ? planPayload.plan : current.planJson,
+    createdAt: typeof planPayload.createdAt === "number" ? planPayload.createdAt : current.createdAt
   };
 }
 
@@ -203,18 +218,61 @@ export function fileArtifactTarget(run: TaskFileChangeRunViewModel, file: TaskFi
   };
 }
 
+export async function taskBoardResponseError(response: Response, fallback: string): Promise<string> {
+  try {
+    const payload = await response.clone().json() as unknown;
+    if (isRecord(payload)) {
+      const error = payload.error;
+      const message = payload.message;
+      if (typeof error === "string" && error.trim().length > 0) return error;
+      if (typeof message === "string" && message.trim().length > 0) return message;
+    }
+  } catch {
+    // Failed board actions can return plain text or empty bodies; keep a useful fallback.
+  }
+  return `${fallback} (${response.status})`;
+}
+
 export function TasksPanel({ roomId, tasks, csrfFetch, executionPlan, onOpenArtifact }: { roomId: string; tasks: ReadonlyArray<TaskViewModel>; csrfFetch: typeof fetch; executionPlan?: RoomExecutionPlanViewModel | undefined; onOpenArtifact?: ((input: { artifactId: string; runId: string; path: string }) => void) | undefined }) {
   const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>(undefined);
   const [actionError, setActionError] = useState<string | undefined>(undefined);
+  const [hydratedPlan, setHydratedPlan] = useState<RoomExecutionPlanViewModel | undefined>(undefined);
   const [layoutVersion, setLayoutVersion] = useState(0);
   const boardRef = useRef<HTMLDivElement | null>(null);
+  const effectiveExecutionPlan = hydratedPlan?.planId === executionPlan?.planId ? hydratedPlan : executionPlan;
   const groups = useMemo(() => groupTasksByKanbanColumn(tasks), [tasks]);
   const visibleTasks = useMemo(() => groups.flatMap((group) => group.items), [groups]);
   const detail = useMemo(() => getTaskDetail(tasks, selectedTaskId), [tasks, selectedTaskId]);
-  const plan = useMemo(() => roomExecutionPlan(executionPlan), [executionPlan]);
+  const plan = useMemo(() => roomExecutionPlan(effectiveExecutionPlan), [effectiveExecutionPlan]);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
   const columnIds = useMemo(() => new Set(KANBAN_COLUMNS.map((column) => column.label)), []);
   const collisionDetection = useMemo(() => makeKanbanCollision(columnIds), [columnIds]);
+
+  useEffect(() => {
+    if (!executionPlan) {
+      setHydratedPlan(undefined);
+      return;
+    }
+    if (executionPlan.planJson !== null && executionPlan.planJson !== undefined) {
+      setHydratedPlan(undefined);
+      return;
+    }
+    let cancelled = false;
+    void csrfFetch(`/rooms/${encodeURIComponent(roomId)}/task-plans/latest`)
+      .then(async (response) => {
+        if (!response.ok) throw new Error(await taskBoardResponseError(response, "Load execution plan failed"));
+        return response.json() as Promise<unknown>;
+      })
+      .then((payload) => {
+        if (!cancelled) setHydratedPlan(hydrateExecutionPlanFromLatest(executionPlan, payload));
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setActionError(error instanceof Error ? error.message : String(error));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [csrfFetch, executionPlan, roomId]);
 
   const handleDragEnd = (event: DragEndEvent) => {
     const taskId = String(event.active.id);
@@ -227,7 +285,11 @@ export function TasksPanel({ roomId, tasks, csrfFetch, executionPlan, onOpenArti
     void csrfFetch(`/rooms/${encodeURIComponent(roomId)}/tasks/${encodeURIComponent(taskId)}/column`, {
       method: "POST",
       body: JSON.stringify({ column: targetColumn })
-    }).catch((error: unknown) => setActionError(error instanceof Error ? error.message : String(error)));
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(await taskBoardResponseError(response, "Move task failed"));
+      })
+      .catch((error: unknown) => setActionError(error instanceof Error ? error.message : String(error)));
   };
 
   if (tasks.length === 0) {
@@ -510,6 +572,7 @@ function TaskDetailDrawer({ roomId, detail, plan, csrfFetch, onOpenArtifact, isO
 function ExecutionPlanCard({ plan, compact = false }: { plan: ExecutionPlan; compact?: boolean }) {
   const parsed = isRecord(plan.plan) ? plan.plan : {};
   const tasks = Array.isArray(parsed.tasks) ? parsed.tasks : [];
+  const displayedTaskCount = tasks.length > 0 ? tasks.length : plan.taskCount;
   return (
     <Card variant="transparent" className="border border-border">
       <Card.Header>
@@ -517,9 +580,12 @@ function ExecutionPlanCard({ plan, compact = false }: { plan: ExecutionPlan; com
       </Card.Header>
       <Card.Content>
         <details open={!compact}>
-          <summary className="cursor-pointer text-xs text-muted">{typeof parsed.goal === "string" ? parsed.goal : `Plan ${plan.id}`}</summary>
-          <ul className="mt-2 flex flex-col gap-1.5">
-            {tasks.slice(0, compact ? 5 : 8).map((item, index) => {
+          <summary className="cursor-pointer text-xs text-muted">{typeof parsed.goal === "string" ? parsed.goal : displayedTaskCount !== undefined ? `${displayedTaskCount} planned task${displayedTaskCount === 1 ? "" : "s"}` : `Plan ${plan.id}`}</summary>
+          {tasks.length === 0 ? (
+            <p className="mt-2 text-xs text-muted">Loading plan details...</p>
+          ) : (
+            <ul className="mt-2 flex flex-col gap-1.5">
+              {tasks.slice(0, compact ? 5 : 8).map((item, index) => {
               const record = isRecord(item) ? item : {};
               return (
                 <li key={`${plan.id}:${index}`} className="rounded-md border border-border bg-surface-secondary px-2 py-1 text-xs">
@@ -527,8 +593,9 @@ function ExecutionPlanCard({ plan, compact = false }: { plan: ExecutionPlan; com
                   {typeof record.assigneeRole === "string" ? <div className="text-muted">{record.assigneeRole}</div> : null}
                 </li>
               );
-            })}
-          </ul>
+              })}
+            </ul>
+          )}
         </details>
       </Card.Content>
     </Card>

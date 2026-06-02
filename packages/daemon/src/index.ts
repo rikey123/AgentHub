@@ -373,7 +373,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
           const planId = randomUUID();
           database.sqlite.transaction(() => {
             database.sqlite.prepare("INSERT INTO task_plans (id, room_id, run_id, plan_json, created_at) VALUES (?, ?, ?, ?, ?)").run(planId, run.room_id, runId, JSON.stringify(plan), now);
-            eventBus.publish({ id: randomUUID(), type: "task.plan.created", schemaVersion: 1, workspaceId: run.workspace_id, roomId: run.room_id, runId, agentId: run.agent_id, payload: { roomId: run.room_id, runId, planId, plan, taskCount: plan.tasks.length }, createdAt: now });
+            eventBus.publish({ id: randomUUID(), type: "task.plan.created", schemaVersion: 1, workspaceId: run.workspace_id, roomId: run.room_id, runId, agentId: run.agent_id, payload: { roomId: run.room_id, runId, planId, taskCount: plan.tasks.length }, createdAt: now });
           })();
         } else {
           recordPlanParseFailure(database, eventBus, run.room_id, runId, now);

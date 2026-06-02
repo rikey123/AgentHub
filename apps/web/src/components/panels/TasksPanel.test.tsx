@@ -6,8 +6,10 @@ import {
   fileArtifactTarget,
   getTaskDetail,
   groupTasksByKanbanColumn,
+  hydrateExecutionPlanFromLatest,
   latestWorktreeReview,
   positionDependencyLines,
+  taskBoardResponseError,
   roomExecutionPlan,
   summarizeTaskActivityPayload,
   taskColumn,
@@ -137,6 +139,34 @@ describe("TasksPanel V1.1 Kanban task view contract", () => {
       artifactId: "artifact-run",
       href: "#artifact:artifact-run:src%2Fa.ts"
     });
+  });
+
+  it("hydrates minimized execution plans from the latest task plan REST response", () => {
+    const current = { planId: "plan-1", runId: "run-plan", planJson: null, taskCount: 1, createdAt: 100 };
+    const fullPlan = { goal: "ship", tasks: [{ title: "Build" }] };
+
+    expect(hydrateExecutionPlanFromLatest(current, {
+      plan: { id: "plan-1", runId: "run-plan", plan: fullPlan, createdAt: 123 }
+    })).toEqual({
+      planId: "plan-1",
+      runId: "run-plan",
+      planJson: fullPlan,
+      taskCount: 1,
+      createdAt: 123
+    });
+
+    expect(hydrateExecutionPlanFromLatest(current, {
+      plan: { id: "other-plan", runId: "run-other", plan: fullPlan, createdAt: 123 }
+    })).toBe(current);
+  });
+
+  it("surfaces non-2xx Kanban action error messages from response bodies", async () => {
+    const response = new Response(JSON.stringify({ error: "invalid board column" }), {
+      status: 400,
+      headers: { "content-type": "application/json" }
+    });
+
+    await expect(taskBoardResponseError(response, "Move task failed")).resolves.toBe("invalid board column");
   });
 });
 

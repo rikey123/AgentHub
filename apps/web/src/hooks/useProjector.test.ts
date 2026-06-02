@@ -179,7 +179,7 @@ describe("useProjector replay handling", () => {
     expect(task?.fileChangeRuns?.[0]).toMatchObject({ runId: "run-files", artifactId: "artifact-worktree" });
   });
 
-  it("projects task.plan.created into room-level execution plan state", () => {
+  it("projects minimized task.plan.created into room-level execution plan state", () => {
     const roomId = `room-${randomUUID()}`;
     const projector = getProjector();
     projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "team" }));
@@ -187,14 +187,14 @@ describe("useProjector replay handling", () => {
       roomId,
       runId: "run-plan",
       planId: "plan-1",
-      plan: { goal: "ship", tasks: [{ title: "Build" }] },
       taskCount: 1
     }, 321));
 
     expect(emittedState.rooms.get(roomId)?.executionPlan).toEqual({
       planId: "plan-1",
       runId: "run-plan",
-      planJson: { goal: "ship", tasks: [{ title: "Build" }] },
+      planJson: null,
+      taskCount: 1,
       createdAt: 321
     });
   });

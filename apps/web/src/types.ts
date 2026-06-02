@@ -119,6 +119,7 @@ export type RoomExecutionPlanViewModel = {
   readonly planId: string;
   readonly runId: string;
   readonly planJson: unknown;
+  readonly taskCount?: number | undefined;
   readonly createdAt: number;
 };
 

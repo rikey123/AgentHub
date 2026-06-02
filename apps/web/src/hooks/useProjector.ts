@@ -933,6 +933,7 @@ class Projector {
             planId: payload.planId,
             runId: runId ?? "",
             planJson: payload.plan ?? payload.planJson ?? null,
+            ...(typeof payload.taskCount === "number" ? { taskCount: payload.taskCount } : {}),
             createdAt: typeof payload.createdAt === "number" ? payload.createdAt : event.createdAt
           };
           room = { ...room, executionPlan: plan };
