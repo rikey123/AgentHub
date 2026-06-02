@@ -46,15 +46,15 @@ export function DiffCard({ card, csrfFetch }: DiffCardProps) {
         </Card.Description>
       </Card.Header>
       <Card.Content>
-        <DisclosureGroup>
-          <Disclosure>
+        <DisclosureGroup defaultExpandedKeys={["files"]}>
+          <Disclosure id="files">
             <Disclosure.Trigger>
               <span className="text-sm font-medium">Files</span>
             </Disclosure.Trigger>
             <Disclosure.Body>
               <ul className="flex flex-col gap-1 py-1 text-sm">
                 {card.files.map((file) => (
-                  <li key={file.path} className="flex items-center gap-2">
+                  <li key={file.path} id={`artifact-file-${encodeURIComponent(card.artifactId)}-${encodeURIComponent(file.path)}`} className="flex items-center gap-2">
                     <Chip size="sm" variant="soft" color={
                       file.status === "added" ? "success" :
                       file.status === "deleted" ? "danger" : "warning"
