@@ -40,6 +40,8 @@ export type TaskRow = {
   readonly description: string | null;
   readonly status: TaskStatus;
   readonly blocker_reason: string | null;
+  readonly max_turns: number | null;
+  readonly board_column: string | null;
   readonly assignee_agent_id: string | null;
   readonly assignee_role_id: string | null;
   readonly assignee_binding_id: string | null;
@@ -72,6 +74,8 @@ export type TaskView = {
   readonly dependencies: readonly string[];
   readonly priority?: string;
   readonly expectsReview: boolean;
+  readonly maxTurns?: number;
+  readonly boardColumn?: string;
   readonly dueAt?: number;
   readonly createdBy?: string;
   readonly createdAt: number;
@@ -101,6 +105,12 @@ export type UpdateTaskStatusInput = {
   readonly status: TaskStatus;
   readonly reason?: string;
   readonly blockerReason?: string;
+};
+
+export type MoveTaskColumnInput = {
+  readonly taskId: string;
+  readonly roomId?: string;
+  readonly column: string;
 };
 
 export type CompleteTaskInput = {
@@ -187,7 +197,7 @@ export class TaskService {
         now,
         now
       );
-    this.options.eventBus.publish(taskEvent("task.created", room.workspace_id, input.roomId, taskId, { taskId, roomId: input.roomId, title: input.title, parentTaskId: input.parentTaskId, assigneeRoleId: input.assigneeRoleId, assigneeBindingId: assigneeBinding?.id ?? input.assigneeBindingId, assigneeAgentId, expectsReview, sourceRunId: input.sourceRunId, createdBy: input.createdBy }, now));
+    this.options.eventBus.publish(taskEvent("task.created", room.workspace_id, input.roomId, taskId, { taskId, roomId: input.roomId, title: input.title, status: "pending", description: input.description, parentTaskId: input.parentTaskId, assigneeRoleId: input.assigneeRoleId, assigneeBindingId: assigneeBinding?.id ?? input.assigneeBindingId, assigneeAgentId, expectsReview, sourceRunId: input.sourceRunId, dependencies: input.dependencies ?? [], priority: input.priority, createdBy: input.createdBy }, now));
     if (assigneeAgentId !== null) {
       this.options.eventBus.publish(taskEvent("task.assigned", room.workspace_id, input.roomId, taskId, { taskId, prevAssignee: null, newAssignee: assigneeAgentId }, now));
     }
@@ -203,21 +213,48 @@ export class TaskService {
     if (!existing) return failed("not_found", `Task '${input.taskId}' not found`);
     if (!canTransition(existing.status, nextStatus)) return this.rejectTransition(existing, nextStatus, input.reason);
     const now = this.options.now?.() ?? Date.now();
+    const clearsBoardOverride = isTerminalStatus(nextStatus);
     this.options.database.sqlite.transaction(() => {
       if (nextStatus === "blocked") {
         this.options.database.sqlite.prepare("UPDATE tasks SET status = 'blocked', blocker_reason = ?, updated_at = ? WHERE id = ?").run(input.blockerReason ?? null, now, input.taskId);
       } else if (nextStatus === "review" && input.blockerReason !== undefined) {
         // Allow setting blocker_reason on review transitions (e.g. missing_completion_report)
         this.options.database.sqlite.prepare("UPDATE tasks SET status = 'review', blocker_reason = ?, updated_at = ? WHERE id = ?").run(input.blockerReason, now, input.taskId);
+      } else if (clearsBoardOverride) {
+        this.options.database.sqlite.prepare("UPDATE tasks SET status = ?, blocker_reason = NULL, board_column = NULL, updated_at = ? WHERE id = ?").run(nextStatus, now, input.taskId);
       } else {
         this.options.database.sqlite.prepare("UPDATE tasks SET status = ?, blocker_reason = NULL, updated_at = ? WHERE id = ?").run(nextStatus, now, input.taskId);
       }
-      this.options.eventBus.publish(taskEvent("task.status.changed", existing.workspace_id, existing.room_id ?? "", input.taskId, { taskId: input.taskId, prevStatus: existing.status, nextStatus, ...(input.reason !== undefined ? { reason: input.reason } : {}), ...(input.blockerReason !== undefined ? { blockerReason: input.blockerReason } : {}) }, now));
+      this.options.eventBus.publish(taskEvent("task.status.changed", existing.workspace_id, existing.room_id ?? "", input.taskId, { taskId: input.taskId, prevStatus: existing.status, nextStatus, ...(input.reason !== undefined ? { reason: input.reason } : {}), ...(input.blockerReason !== undefined ? { blockerReason: input.blockerReason } : {}), ...(clearsBoardOverride ? { boardColumn: null } : {}) }, now));
     })();
     if (nextStatus === "completed") {
       const completedTask = this.task(input.taskId);
       if (completedTask) this.options.onTaskCompleted?.(completedTask);
     }
+    const task = this.task(input.taskId);
+    if (!task) return failed("internal_error", `Task '${input.taskId}' was not persisted`);
+    return { ok: true, data: { task: taskView(task), taskId: input.taskId }, emittedEvents: latestTaskEvents(this.options.database, input.taskId) };
+  }
+
+  moveColumn(input: MoveTaskColumnInput): CommandResult<{ readonly task: TaskView; readonly taskId: string }> {
+    const column = normalizeBoardColumn(input.column);
+    if (column === undefined) return failed("validation_failed", "invalid board column");
+    const existing = this.task(input.taskId);
+    if (!existing) return failed("not_found", `Task '${input.taskId}' not found`);
+    if (input.roomId !== undefined && existing.room_id !== input.roomId) return failed("not_found", `Task '${input.taskId}' not found`);
+    if (existing.status === "cancelled") return failed("conflict", "cancelled tasks are hidden from the board");
+    const roomId = existing.room_id ?? input.roomId ?? "";
+    const fromColumn = existing.board_column ?? defaultBoardColumn(existing.status);
+    if (fromColumn === column && existing.board_column === column) {
+      return { ok: true, data: { task: taskView(existing), taskId: input.taskId }, emittedEvents: latestTaskEvents(this.options.database, input.taskId) };
+    }
+
+    const now = this.options.now?.() ?? Date.now();
+    this.options.database.sqlite.transaction(() => {
+      this.options.database.sqlite.prepare("UPDATE tasks SET board_column = ?, updated_at = ? WHERE id = ?").run(column, now, input.taskId);
+      this.options.eventBus.publish(taskEvent("task.column.moved", existing.workspace_id, roomId, input.taskId, { taskId: input.taskId, roomId, fromColumn, toColumn: column }, now));
+    })();
+
     const task = this.task(input.taskId);
     if (!task) return failed("internal_error", `Task '${input.taskId}' was not persisted`);
     return { ok: true, data: { task: taskView(task), taskId: input.taskId }, emittedEvents: latestTaskEvents(this.options.database, input.taskId) };
@@ -242,6 +279,8 @@ export class TaskService {
     this.options.database.sqlite.transaction(() => {
       if (nextStatus === "blocked") {
         this.options.database.sqlite.prepare("UPDATE tasks SET status = 'blocked', blocker_reason = ?, updated_at = ? WHERE id = ?").run(input.blockerReason ?? null, now, input.taskId);
+      } else if (isTerminalStatus(nextStatus)) {
+        this.options.database.sqlite.prepare("UPDATE tasks SET status = ?, blocker_reason = NULL, board_column = NULL, updated_at = ? WHERE id = ?").run(nextStatus, now, input.taskId);
       } else {
         this.options.database.sqlite.prepare("UPDATE tasks SET status = ?, blocker_reason = NULL, updated_at = ? WHERE id = ?").run(nextStatus, now, input.taskId);
       }
@@ -262,7 +301,7 @@ export class TaskService {
           }),
           now
         );
-      this.options.eventBus.publish(taskEvent("task.status.changed", existing.workspace_id, existing.room_id ?? "", input.taskId, { taskId: input.taskId, prevStatus: existing.status, nextStatus, ...(input.blockerReason !== undefined ? { blockerReason: input.blockerReason } : {}) }, now));
+      this.options.eventBus.publish(taskEvent("task.status.changed", existing.workspace_id, existing.room_id ?? "", input.taskId, { taskId: input.taskId, prevStatus: existing.status, nextStatus, ...(input.blockerReason !== undefined ? { blockerReason: input.blockerReason } : {}), ...(isTerminalStatus(nextStatus) ? { boardColumn: null } : {}) }, now));
       this.options.eventBus.publish(taskEvent("task.activity.added", existing.workspace_id, existing.room_id ?? "", input.taskId, {
         taskId: input.taskId,
         activityId,
@@ -325,8 +364,8 @@ export class TaskService {
         this.options.database.sqlite.prepare("UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?").run("in_progress", now, taskId);
         this.options.eventBus.publish(taskEvent("task.status.changed", existing.workspace_id, existing.room_id ?? "", taskId, { taskId, prevStatus: "pending", nextStatus: "in_progress", reason: "delegated_run_started", byRunId }, now));
       }
-      this.options.database.sqlite.prepare("UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?").run("completed", now, taskId);
-      this.options.eventBus.publish(taskEvent("task.status.changed", existing.workspace_id, existing.room_id ?? "", taskId, { taskId, prevStatus: existing.status === "pending" ? "in_progress" : existing.status, nextStatus: "completed", reason: "delegated_run_completed" }, now));
+      this.options.database.sqlite.prepare("UPDATE tasks SET status = ?, board_column = NULL, updated_at = ? WHERE id = ?").run("completed", now, taskId);
+      this.options.eventBus.publish(taskEvent("task.status.changed", existing.workspace_id, existing.room_id ?? "", taskId, { taskId, prevStatus: existing.status === "pending" ? "in_progress" : existing.status, nextStatus: "completed", reason: "delegated_run_completed", boardColumn: null }, now));
       this.options.eventBus.publish(taskEvent("task.delegation.completed", existing.workspace_id, existing.room_id ?? "", taskId, { taskId, delegationId: taskId, byTeammateRunId: byRunId }, now));
     })();
 
@@ -449,9 +488,13 @@ export class TaskService {
       if (nextStatus === "blocked") {
         this.options.database.sqlite.prepare("UPDATE tasks SET status = 'blocked', blocker_reason = ?, updated_at = ? WHERE id = ?").run(input.blockerReason ?? null, now, taskId);
       } else {
-        this.options.database.sqlite.prepare("UPDATE tasks SET status = ?, blocker_reason = NULL, updated_at = ? WHERE id = ?").run(nextStatus, now, taskId);
+        if (isTerminalStatus(nextStatus)) {
+          this.options.database.sqlite.prepare("UPDATE tasks SET status = ?, blocker_reason = NULL, board_column = NULL, updated_at = ? WHERE id = ?").run(nextStatus, now, taskId);
+        } else {
+          this.options.database.sqlite.prepare("UPDATE tasks SET status = ?, blocker_reason = NULL, updated_at = ? WHERE id = ?").run(nextStatus, now, taskId);
+        }
       }
-      this.options.eventBus.publish(taskEvent("task.status.changed", existing.workspace_id, existing.room_id ?? "", taskId, { taskId, prevStatus: existing.status, nextStatus, reason: input.reason, ...(input.blockerReason !== undefined ? { blockerReason: input.blockerReason } : {}) }, now));
+      this.options.eventBus.publish(taskEvent("task.status.changed", existing.workspace_id, existing.room_id ?? "", taskId, { taskId, prevStatus: existing.status, nextStatus, reason: input.reason, ...(input.blockerReason !== undefined ? { blockerReason: input.blockerReason } : {}), ...(isTerminalStatus(nextStatus) ? { boardColumn: null } : {}) }, now));
     })();
 
     const task = this.task(taskId);
@@ -498,8 +541,13 @@ export function createCreateTaskHandler(service: TaskService): CommandHandler {
 export function createUpdateTaskHandler(service: TaskService): CommandHandler {
   return (command: Command) => {
     const taskId = stringField(command, "taskId");
+    if (!taskId) return failed("validation_failed", "taskId is required");
+    const boardColumn = stringField(command, "boardColumn");
+    if (boardColumn !== undefined) {
+      return service.moveColumn({ taskId, column: boardColumn, ...(stringField(command, "roomId") !== undefined ? { roomId: stringField(command, "roomId") as string } : {}) });
+    }
     const status = normalizeStatus(stringField(command, "status"));
-    if (!taskId || status === undefined) return failed("validation_failed", "taskId and valid status are required");
+    if (status === undefined) return failed("validation_failed", "taskId and valid status are required");
     return service.updateStatus({ taskId, status, ...(stringField(command, "reason") !== undefined ? { reason: stringField(command, "reason") as string } : {}), ...(stringField(command, "blockerReason") !== undefined ? { blockerReason: stringField(command, "blockerReason") as string } : {}) });
   };
 }
@@ -539,6 +587,31 @@ function canTransition(from: TaskStatus, to: TaskStatus): boolean {
   return allowed[from].includes(to);
 }
 
+function isTerminalStatus(status: TaskStatus): boolean {
+  return status === "completed" || status === "cancelled";
+}
+
+function normalizeBoardColumn(column: string): string | undefined {
+  return KANBAN_COLUMNS.includes(column as (typeof KANBAN_COLUMNS)[number]) ? column : undefined;
+}
+
+function defaultBoardColumn(status: TaskStatus): string {
+  switch (status) {
+    case "pending":
+      return "Backlog";
+    case "in_progress":
+      return "In Progress";
+    case "blocked":
+      return "Waiting";
+    case "review":
+      return "Review";
+    case "completed":
+      return "Done";
+    case "cancelled":
+      return "Done";
+  }
+}
+
 function taskView(row: TaskRow): TaskView {
   return {
     id: row.id,
@@ -558,6 +631,8 @@ function taskView(row: TaskRow): TaskView {
     ...(row.priority !== null ? { priority: row.priority } : {}),
     expectsReview: row.expects_review !== 0,
     ...(row.blocker_reason !== null ? { blockerReason: row.blocker_reason } : {}),
+    ...(row.max_turns !== null ? { maxTurns: row.max_turns } : {}),
+    ...(row.board_column !== null ? { boardColumn: row.board_column } : {}),
     ...(row.due_at !== null ? { dueAt: row.due_at } : {}),
     ...(row.created_by !== null ? { createdBy: row.created_by } : {}),
     createdAt: row.created_at,
@@ -565,9 +640,11 @@ function taskView(row: TaskRow): TaskView {
   };
 }
 
-function taskEvent(type: "task.created" | "task.assigned" | "task.status.changed" | "task.status.changed.rejected" | "task.activity.added" | "task.delegation.completed", workspaceId: string, roomId: string, taskId: string, payload: Record<string, unknown>, createdAt: number): PublishInput {
+function taskEvent(type: "task.created" | "task.assigned" | "task.status.changed" | "task.status.changed.rejected" | "task.activity.added" | "task.delegation.completed" | "task.column.moved", workspaceId: string, roomId: string, taskId: string, payload: Record<string, unknown>, createdAt: number): PublishInput {
   return { id: randomUUID(), type, schemaVersion: 1, workspaceId, roomId, taskId, payload: withoutUndefined(payload), createdAt };
 }
+
+const KANBAN_COLUMNS = ["Backlog", "In Progress", "Waiting", "Review", "Done"] as const;
 
 function ensureTaskTimeoutMailbox(database: AgentHubDatabase, eventBus: EventBus, workspaceId: string, roomId: string, agentId: string, taskId: string, now: number): string {
   const existing = database.sqlite.prepare("SELECT id FROM mailbox_messages WHERE room_id = ? AND to_agent_id = ? AND kind = 'task_timeout' AND from_type = 'system' AND from_id = ? LIMIT 1").get(roomId, agentId, taskId) as { readonly id: string } | undefined;
