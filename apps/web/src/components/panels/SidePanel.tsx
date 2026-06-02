@@ -10,9 +10,10 @@ interface SidePanelProps {
   room: RoomViewModel;
   csrfFetch: typeof fetch;
   initialTab?: "context" | "tasks" | "members" | "debug" | "cost";
+  onOpenArtifact?: ((input: { artifactId: string; runId: string; path: string }) => void) | undefined;
 }
 
-export function SidePanel({ room, csrfFetch, initialTab = "context" }: SidePanelProps) {
+export function SidePanel({ room, csrfFetch, initialTab = "context", onOpenArtifact }: SidePanelProps) {
   return (
     <div className="flex h-full flex-col">
       <header className="border-b border-border px-3 py-2">
@@ -52,7 +53,7 @@ export function SidePanel({ room, csrfFetch, initialTab = "context" }: SidePanel
         </Tabs.ListContainer>
         <ScrollShadow className="flex-1 min-h-0 overflow-auto" orientation="vertical">
           <Tabs.Panel id="context"><ContextPanel items={room.contextItems} /></Tabs.Panel>
-          <Tabs.Panel id="tasks"><TasksPanel tasks={room.tasks} /></Tabs.Panel>
+          <Tabs.Panel id="tasks"><TasksPanel roomId={room.id} tasks={room.tasks} executionPlan={room.executionPlan} csrfFetch={csrfFetch} onOpenArtifact={onOpenArtifact} /></Tabs.Panel>
           <Tabs.Panel id="members"><MembersPanel members={room.participants} /></Tabs.Panel>
           <Tabs.Panel id="debug"><DebugPanel room={room} /></Tabs.Panel>
           <Tabs.Panel id="cost"><CostPanel csrfFetch={csrfFetch} /></Tabs.Panel>
