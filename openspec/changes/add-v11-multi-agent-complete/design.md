@@ -265,6 +265,8 @@ Dev A owns: `task-service.ts`, `commands.ts`, `team-dispatch.ts`, `adapter-bridg
 Dev B owns: `prompts/`, `mailbox-service.ts`, `mcp/room-mcp-server.ts`, `packages/skills/`.
 Dev C owns: `apps/web/`, `daemon/routes/kanban.ts`, `daemon/routes/participants.ts`, `daemon/routes/skills.ts`.
 
+Dev C's Kanban projector requires `task.created` replay payloads to include the task fields used for first-paint board rendering: `{ taskId, roomId, title, status, description?, parentTaskId?, assigneeRoleId?, assigneeBindingId?, assigneeAgentId?, expectsReview?, sourceRunId?, dependencies?, priority?, createdBy? }`. This expands a Dev A-owned publisher in `task-service.ts`; the PR must cross-tag Dev A for review.
+
 ## Risks / Trade-offs
 
 **[Risk] Worktree apply conflicts require user action, adding friction** → Mitigation: the apply/discard UI is surfaced prominently in the task detail drawer; the Kanban card shows a "Conflict" badge. For non-conflicting applies, the operation is one click.
@@ -298,8 +300,8 @@ All V1.1 new events MUST be registered in `packages/protocol/src/events/registry
 | Event | Category | Durability | Visibility | Payload | Projector Consumer |
 |-------|----------|-----------|-----------|---------|-------------------|
 | `task.column.moved` | `task` | durable | `both` | `{ taskId, roomId, fromColumn, toColumn }` | update `boardColumns` map |
-| `task.plan.created` | `task` | durable | `main` | `{ roomId, runId, planId, taskCount }` | add "Execution Plan" card to side panel |
-| `run.file_changes.recorded` | `run` | durable | `both` | `{ runId, taskId?, filesChangedCount, filesChanged }` | update file-change badge on task card |
+| `task.plan.created` | `task` | durable | `main` | `{ roomId, runId, planId, plan?, taskCount }` | add room-level "Execution Plan" card to side panel |
+| `run.file_changes.recorded` | `run` | durable | `both` | `{ runId, taskId?, artifactId?, filesChangedCount, filesChanged }` | update file-change badge and file diff entry on task card |
 | `worktree.diff.ready` | `worktree` | durable | `both` | `{ runId, taskId?, artifactId, filesChanged }` | show "Ready to apply" badge on task card |
 | `worktree.applied` | `worktree` | durable | `both` | `{ runId, taskId?, artifactId }` | clear "Ready to apply" badge on task card |
 | `worktree.discarded` | `worktree` | durable | `both` | `{ runId, taskId?, artifactId }` | clear "Ready to apply" badge on task card |
@@ -320,6 +322,7 @@ All V1.1 new events MUST be registered in `packages/protocol/src/events/registry
 |-------|-------------------|-----------|
 | `agent.joined` | `both` | add-participant flow |
 | `agent.state.changed` | `both` | add-participant flow, presence updates |
+| `task.created` | `both` | Kanban first-paint replay; V1.1 payload includes `{ taskId, roomId, title, status, description?, parentTaskId?, assigneeRoleId?, assigneeBindingId?, assigneeAgentId?, expectsReview?, sourceRunId?, dependencies?, priority?, createdBy? }` |
 | `task.status.changed` | `both` | complete_task, turn limit, worktree conflict |
 | `task.activity.added` | `both` | plan_parse_failed, priority_change |
 | `task.delegation.completed` | `both` | complete_task → team-dispatch |
