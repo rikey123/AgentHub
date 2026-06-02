@@ -107,6 +107,12 @@ html, body, #root {
   animation: ah-blink 1s steps(2) infinite;
 }
 
+.ah-artifact-file-highlight {
+  border-radius: 6px;
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 2px var(--accent-soft-hover);
+}
+
 @keyframes ah-blink {
   0%, 50% { opacity: 1; }
   51%, 100% { opacity: 0; }

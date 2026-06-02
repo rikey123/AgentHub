@@ -87,6 +87,23 @@ describe("useProjector replay handling", () => {
     expect(tasks[0]).toMatchObject({ status: "review" });
   });
 
+  it("projects task column moves and clears board overrides on terminal status changes", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "solo" }));
+    projector.apply(makeEvent("task.created", roomId, { taskId: "task-kanban", title: "Kanban", status: "blocked" }));
+    projector.apply(makeEvent("task.column.moved", roomId, { taskId: "task-kanban", roomId, fromColumn: "Waiting", toColumn: "Review" }));
+
+    let task = emittedState.rooms.get(roomId)?.tasks.find((item) => item.id === "task-kanban");
+    expect(task).toMatchObject({ status: "blocked", boardColumn: "Review" });
+
+    projector.apply(makeEvent("task.status.changed", roomId, { taskId: "task-kanban", prevStatus: "blocked", nextStatus: "completed", boardColumn: null }));
+
+    task = emittedState.rooms.get(roomId)?.tasks.find((item) => item.id === "task-kanban");
+    expect(task).toMatchObject({ status: "completed" });
+    expect(task?.boardColumn).toBeUndefined();
+  });
+
   it("dedupes task.activity.added replay events", () => {
     const roomId = `room-${randomUUID()}`;
     const projector = getProjector();
@@ -106,6 +123,129 @@ describe("useProjector replay handling", () => {
     const task = emittedState.rooms.get(roomId)?.tasks.find((item) => item.id === "task-3");
     expect(task?.activities).toHaveLength(1);
     expect(task?.activities?.[0]).toMatchObject({ id: "activity-1", kind: "comment", byKind: "user", by: "user-1" });
+  });
+
+  it("aggregates task file changes per run and preserves artifact ids", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "solo" }));
+    projector.apply(makeEvent("task.created", roomId, { taskId: "task-files", title: "Files", status: "in_progress" }));
+    projector.apply(makeEvent("run.file_changes.recorded", roomId, {
+      taskId: "task-files",
+      runId: "run-files-1",
+      artifactId: "artifact-files-1",
+      filesChangedCount: 2,
+      filesChanged: [
+        { path: "src/a.ts", change: "modified", linesAdded: 4, linesRemoved: 1, artifactId: "artifact-file-a" },
+        { path: "src/b.ts", change: "added", additions: 8, deletions: 0 }
+      ]
+    }, 100));
+    projector.apply(makeEvent("run.file_changes.recorded", roomId, {
+      taskId: "task-files",
+      runId: "run-files-2",
+      filesChangedCount: 1,
+      filesChanged: [{ path: "src/c.ts", change: "deleted" }]
+    }, 200));
+
+    const task = emittedState.rooms.get(roomId)?.tasks.find((item) => item.id === "task-files");
+    expect(task?.fileChangesCount).toBe(3);
+    expect(task?.fileChangeRuns?.map((run) => [run.runId, run.files.length])).toEqual([
+      ["run-files-1", 2],
+      ["run-files-2", 1]
+    ]);
+    expect(task?.fileChangeRuns?.[0]).toMatchObject({ artifactId: "artifact-files-1" });
+    expect(task?.fileChangeRuns?.[0]?.files[0]).toMatchObject({ artifactId: "artifact-file-a" });
+  });
+
+  it("uses worktree.diff.ready artifact id as the file-change run fallback", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "solo" }));
+    projector.apply(makeEvent("task.created", roomId, { taskId: "task-files", title: "Files", status: "in_progress" }));
+    projector.apply(makeEvent("run.file_changes.recorded", roomId, {
+      taskId: "task-files",
+      runId: "run-files",
+      filesChangedCount: 1,
+      filesChanged: [{ path: "src/a.ts", change: "modified" }]
+    }, 100));
+    projector.apply(makeEvent("worktree.diff.ready", roomId, {
+      taskId: "task-files",
+      runId: "run-files",
+      artifactId: "artifact-worktree",
+      filesChanged: ["src/a.ts"]
+    }, 200));
+
+    const task = emittedState.rooms.get(roomId)?.tasks.find((item) => item.id === "task-files");
+    expect(task?.fileChangeRuns?.[0]).toMatchObject({ runId: "run-files", artifactId: "artifact-worktree" });
+  });
+
+  it("projects task.plan.created into room-level execution plan state", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "team" }));
+    projector.apply(makeEvent("task.plan.created", roomId, {
+      roomId,
+      runId: "run-plan",
+      planId: "plan-1",
+      plan: { goal: "ship", tasks: [{ title: "Build" }] },
+      taskCount: 1
+    }, 321));
+
+    expect(emittedState.rooms.get(roomId)?.executionPlan).toEqual({
+      planId: "plan-1",
+      runId: "run-plan",
+      planJson: { goal: "ship", tasks: [{ title: "Build" }] },
+      createdAt: 321
+    });
+  });
+
+  it("stores worktree review state and conflicts for task cards", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "solo" }));
+    projector.apply(makeEvent("task.created", roomId, { taskId: "task-worktree", title: "Worktree", status: "review" }));
+    projector.apply(makeEvent("worktree.diff.ready", roomId, {
+      taskId: "task-worktree",
+      runId: "run-worktree",
+      artifactId: "artifact-worktree",
+      filesChanged: ["src/a.ts"]
+    }, 100));
+
+    let task = emittedState.rooms.get(roomId)?.tasks.find((item) => item.id === "task-worktree");
+    expect(task).toMatchObject({
+      worktreeStatus: "ready_for_review",
+      worktreeArtifactId: "artifact-worktree",
+      worktreeRunId: "run-worktree"
+    });
+    expect(task?.worktreeReviews?.[0]).toMatchObject({ runId: "run-worktree", status: "ready_for_review", filesChanged: ["src/a.ts"] });
+
+    projector.apply(makeEvent("worktree.conflict_detected", roomId, {
+      taskId: "task-worktree",
+      runId: "run-worktree",
+      artifactId: "artifact-worktree",
+      conflictDiff: "merge conflict"
+    }, 200));
+
+    task = emittedState.rooms.get(roomId)?.tasks.find((item) => item.id === "task-worktree");
+    expect(task).toMatchObject({ worktreeStatus: "conflict", blockerReason: "worktree_apply_conflict" });
+    expect(task?.worktreeReviews?.[0]).toMatchObject({ runId: "run-worktree", status: "conflict", conflictDiff: "merge conflict" });
+  });
+
+  it("projects room stalled and unstalled events", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "solo" }));
+    projector.apply(makeEvent("room.stalled", roomId, { roomId, stalledTaskIds: ["task-1"], reason: "leader_unavailable" }, 123));
+
+    let room = emittedState.rooms.get(roomId);
+    expect(room).toMatchObject({ stalledAt: 123, stalledTaskIds: ["task-1"], stalledReason: "leader_unavailable" });
+
+    projector.apply(makeEvent("room.unstalled", roomId, { roomId }, 456));
+
+    room = emittedState.rooms.get(roomId);
+    expect(room?.stalledAt).toBeUndefined();
+    expect(room?.stalledTaskIds).toBeUndefined();
+    expect(room?.stalledReason).toBeUndefined();
   });
 
   it("applies delegation, dispatch, and run collaboration payload ids", () => {

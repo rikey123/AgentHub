@@ -596,7 +596,13 @@ describe("daemon M1.4 composition", () => {
     await daemon.adapterRegistry.runAgent(daemon.lifecycle.read(runId));
 
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM task_plans WHERE run_id = ?").get(runId)).toMatchObject({ count: 1 });
+    const latestPlan = await fetch(`${baseUrl}/rooms/${roomId}/task-plans/latest`);
+    const latestPlanBody = await latestPlan.json() as { readonly plan?: { readonly roomId: string; readonly runId: string; readonly plan: { readonly goal?: string; readonly tasks?: readonly { readonly title?: string }[] } } | null };
+    expect(latestPlan.status).toBe(200);
+    expect(latestPlanBody.plan).toMatchObject({ roomId, runId, plan: { goal: "ship", tasks: [expect.objectContaining({ title: "Build" })] } });
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE run_id = ? AND type = 'task.plan.created'").get(runId)).toMatchObject({ count: 1 });
+    const planEvent = daemon.database.sqlite.prepare("SELECT payload FROM events WHERE run_id = ? AND type = 'task.plan.created' ORDER BY seq DESC LIMIT 1").get(runId) as { readonly payload: string };
+    expect(JSON.parse(planEvent.payload)).toMatchObject({ planId: expect.any(String), plan: { goal: "ship", tasks: [expect.objectContaining({ title: "Build" })] } });
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM messages WHERE run_id = ?").get(runId)).toMatchObject({ count: 0 });
     await waitFor(
       () => daemon.database.sqlite.prepare("SELECT id, status FROM runs WHERE room_id = ? AND wake_reason = 'execute' ORDER BY created_at DESC LIMIT 1").get(roomId) as { readonly id: string; readonly status: string } | undefined,
@@ -1765,12 +1771,21 @@ describe("daemon M1.4 composition", () => {
     expect(created.status).toBe(201);
     expect(payload).toMatchObject({ ok: true, data: { task: { status: "pending" } } });
 
+    const moved = await fetch(`${baseUrl}/rooms/${room.data.roomId}/tasks/${payload.data.taskId}/column`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ column: "Review" }) });
+    const movedPayload = await moved.json() as { readonly ok: boolean; readonly data?: { readonly task?: { readonly boardColumn?: string } } };
+    expect(moved.status).toBe(200);
+    expect(movedPayload).toMatchObject({ ok: true, data: { task: { boardColumn: "Review" } } });
+    expect(daemon.database.sqlite.prepare("SELECT board_column FROM tasks WHERE id = ?").get(payload.data.taskId)).toMatchObject({ board_column: "Review" });
+    expect(daemon.database.sqlite.prepare("SELECT type FROM events WHERE task_id = ? AND type = 'task.column.moved' AND json_extract(payload, '$.toColumn') = 'Review'").get(payload.data.taskId)).toMatchObject({ type: "task.column.moved" });
+
     const pendingConflict = await fetch(`${baseUrl}/tasks/${payload.data.taskId}/complete`, { method: "POST" });
     expect(pendingConflict.status).toBe(409);
 
     daemon.database.sqlite.prepare("UPDATE tasks SET status = 'in_progress' WHERE id = ?").run(payload.data.taskId);
     const completed = await fetch(`${baseUrl}/tasks/${payload.data.taskId}/complete`, { method: "POST" });
     expect(completed.status).toBe(200);
+    expect(daemon.database.sqlite.prepare("SELECT status, board_column FROM tasks WHERE id = ?").get(payload.data.taskId)).toMatchObject({ status: "completed", board_column: null });
+    expect(daemon.database.sqlite.prepare("SELECT type FROM events WHERE task_id = ? AND type = 'task.status.changed' AND json_type(payload, '$.boardColumn') = 'null' ORDER BY seq DESC LIMIT 1").get(payload.data.taskId)).toMatchObject({ type: "task.status.changed" });
     const doneConflict = await fetch(`${baseUrl}/tasks/${payload.data.taskId}/complete`, { method: "POST" });
     expect(doneConflict.status).toBe(409);
 

@@ -92,13 +92,15 @@ run_file_changes (
 
 `adapter-bridge.ts` writes a `run_file_changes` row on `session.ended` using the accumulated `fs.writeTextFile` / `fs.deleteFile` events from the run, then publishes `run.file_changes.recorded` (durable, visibility: `both`) inside the same transaction.
 
-**Event:** `run.file_changes.recorded` — durable, visibility: `both`, payload: `{ runId, taskId?, filesChangedCount: number, filesChanged: [{path, change, linesAdded, linesRemoved}] }`
+**Event:** `run.file_changes.recorded` — durable, visibility: `both`, payload: `{ runId, taskId?, artifactId?, filesChangedCount: number, filesChanged: [{path, change, linesAdded, linesRemoved, artifactId?}] }`
+
+`artifactId` is optional because the Dev A publisher may emit file-change metadata before the diff artifact is fully associated; when present it lets the Kanban file diff entry open the existing artifact diff viewer directly.
 
 **Frontend:**
 - Kanban card badge: "3 files changed" (aggregate count across all runs for the task)
 - Task detail drawer: expandable file list with per-file change type (added/modified/deleted) and line counts
 - Clicking a file opens the existing artifact diff viewer (already implemented in V0.5)
-- Badge updates in real-time when `run.file_changes.recorded` (durable, visibility: `both`, payload: `{ runId, taskId?, filesChangedCount, filesChanged }`) is received via SSE projector
+- Badge updates in real-time when `run.file_changes.recorded` (durable, visibility: `both`, payload: `{ runId, taskId?, artifactId?, filesChangedCount, filesChanged }`) is received via SSE projector
 
 #### Scenario: File change badge appears after run completes
 
@@ -114,18 +116,18 @@ run_file_changes (
 
 The system SHALL provide UI controls for applying or discarding a worktree diff artifact. These controls appear in the task detail drawer when a `worktree_diff` artifact is in `ready_for_review` or `conflict` state.
 
-**Reference:** AionUi `WorkspaceSnapshotService.ts` lines 125/135/145 — `stageFile()`, `unstageFile()`, `discardFile()` as explicit user actions. OpenCode worktree model: create → agent works → show diff → user explicitly applies. The pattern: no automatic merge; user or leader decides.
+**Reference:** AionUi `WorkspaceSnapshotService.ts` lines 125/135/145 — `stageFile()`, `unstageFile()`, `discardFile()` as explicit user actions. OpenCode worktree model: create — agent works — show diff — user explicitly applies. The pattern: no automatic merge; user or leader decides.
 
 **Frontend:**
 - Task detail drawer shows a "Changes ready to apply" section when `worktree_diff` artifact is `ready_for_review`
-- "Apply changes" button → calls `POST /rooms/:id/worktrees/:runId/apply`
-- "Discard changes" button → calls `POST /rooms/:id/worktrees/:runId/discard` (with confirmation dialog)
+- "Apply changes" button — calls `POST /rooms/:id/worktrees/:runId/apply`
+- "Discard changes" button — calls `POST /rooms/:id/worktrees/:runId/discard` (with confirmation dialog)
 - If artifact is `conflict`: shows "Merge conflict" warning with the conflict diff; "Discard" button only
 - Kanban card shows a "Ready to apply" badge (green) or "Conflict" badge (red)
 
 **Backend:**
-- `POST /rooms/:id/worktrees/:runId/apply` → runs `git apply`; on success publishes `worktree.applied`; on conflict publishes `worktree.conflict_detected` and transitions task to `blocked`
-- `POST /rooms/:id/worktrees/:runId/discard` → deletes worktree directory; publishes `worktree.discarded`
+- `POST /rooms/:id/worktrees/:runId/apply` — runs `git apply`; on success publishes `worktree.applied`; on conflict publishes `worktree.conflict_detected` and transitions task to `blocked`
+- `POST /rooms/:id/worktrees/:runId/discard` — deletes worktree directory; publishes `worktree.discarded`
 
 #### Scenario: User applies worktree changes
 

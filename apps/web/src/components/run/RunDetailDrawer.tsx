@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Drawer, Tabs, Chip, ScrollShadow, Skeleton } from "@heroui/react";
 import type { RoomViewModel, TaskViewModel } from "../../types.ts";
 import { TranscriptTab } from "./tabs/TranscriptTab.tsx";
@@ -23,6 +23,7 @@ interface RunDetailDrawerProps {
 export function RunDetailDrawer(props: RunDetailDrawerProps) {
   const { room, runId } = props;
   const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>();
+  const [selectedTab, setSelectedTab] = useState(() => initialRunDetailTab());
   const run = room && runId ? room.runs.find((r) => r.id === runId) : undefined;
   const selectedTask = room && selectedTaskId ? room.tasks.find((task) => task.id === selectedTaskId) : undefined;
   const transcriptCount = room && runId ? room.messages.filter((m) => m.runId === runId).length : 0;
@@ -34,6 +35,22 @@ export function RunDetailDrawer(props: RunDetailDrawerProps) {
     setSelectedTaskId(undefined);
     props.onOpenRun?.(nextRunId);
   };
+
+  useEffect(() => {
+    const syncFromHash = () => {
+      if (artifactHashTarget()) {
+        setSelectedTab("artifacts");
+      }
+    };
+    syncFromHash();
+    window.addEventListener("hashchange", syncFromHash);
+    return () => window.removeEventListener("hashchange", syncFromHash);
+  }, []);
+
+  useEffect(() => {
+    if (selectedTab !== "artifacts") return;
+    return scrollArtifactHashTarget();
+  }, [room, runId, selectedTab]);
 
   return (
     <>
@@ -62,7 +79,7 @@ export function RunDetailDrawer(props: RunDetailDrawerProps) {
               </div>
             ) : (
               <div data-testid="run-detail-tabs" className="flex h-full min-h-0 flex-col">
-                <Tabs defaultSelectedKey="transcript" className="flex h-full min-h-0 flex-col">
+                <Tabs selectedKey={selectedTab} onSelectionChange={(key) => setSelectedTab(String(key))} className="flex h-full min-h-0 flex-col">
                   <Tabs.ListContainer>
                     <Tabs.List aria-label="Run detail">
                       <Tabs.Tab id="transcript" data-testid="run-detail-tab-transcript">Transcript<Chip className="ml-1" size="sm" variant="soft" color="default">{transcriptCount}</Chip><Tabs.Indicator /></Tabs.Tab>
@@ -93,6 +110,60 @@ export function RunDetailDrawer(props: RunDetailDrawerProps) {
     <TaskDetailDrawer task={selectedTask} isOpen={!!selectedTask} onOpenChange={(open) => { if (!open) setSelectedTaskId(undefined); }} />
     </>
   );
+}
+
+function initialRunDetailTab(): string {
+  return artifactHashTarget() ? "artifacts" : "transcript";
+}
+
+export function artifactHashTarget(hash = typeof window !== "undefined" ? window.location.hash : ""): { artifactId: string; path: string; elementId: string } | undefined {
+  if (!hash.startsWith("#artifact:")) return undefined;
+  const [, artifactIdPart, ...pathParts] = hash.split(":");
+  const pathPart = pathParts.join(":");
+  if (!artifactIdPart || !pathPart) return undefined;
+  try {
+    const artifactId = decodeURIComponent(artifactIdPart);
+    const path = decodeURIComponent(pathPart);
+    return {
+      artifactId,
+      path,
+      elementId: `artifact-file-${encodeURIComponent(artifactId)}-${encodeURIComponent(path)}`
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+export function scrollArtifactHashTarget(hash = typeof window !== "undefined" ? window.location.hash : ""): () => void {
+  const target = artifactHashTarget(hash);
+  if (!target || typeof document === "undefined") return () => {};
+  let cancelled = false;
+  let found = false;
+  let highlightTimer: ReturnType<typeof setTimeout> | undefined;
+  const timers: Array<ReturnType<typeof setTimeout>> = [];
+
+  const attempt = () => {
+    if (cancelled || found) return;
+    const element = document.getElementById(target.elementId);
+    if (!element) return;
+    found = true;
+    element.scrollIntoView({ block: "center" });
+    element.classList.add("ah-artifact-file-highlight");
+    highlightTimer = setTimeout(() => {
+      element.classList.remove("ah-artifact-file-highlight");
+    }, 800);
+  };
+
+  attempt();
+  for (const delay of [50, 150, 300]) {
+    timers.push(setTimeout(attempt, delay));
+  }
+
+  return () => {
+    cancelled = true;
+    for (const timer of timers) clearTimeout(timer);
+    if (highlightTimer) clearTimeout(highlightTimer);
+  };
 }
 
 function TaskDetailDrawer({ task, isOpen, onOpenChange }: { task?: TaskViewModel | undefined; isOpen: boolean; onOpenChange: (open: boolean) => void }) {

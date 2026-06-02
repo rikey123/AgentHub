@@ -373,7 +373,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
           const planId = randomUUID();
           database.sqlite.transaction(() => {
             database.sqlite.prepare("INSERT INTO task_plans (id, room_id, run_id, plan_json, created_at) VALUES (?, ?, ?, ?, ?)").run(planId, run.room_id, runId, JSON.stringify(plan), now);
-            eventBus.publish({ id: randomUUID(), type: "task.plan.created", schemaVersion: 1, workspaceId: run.workspace_id, roomId: run.room_id, runId, agentId: run.agent_id, payload: { roomId: run.room_id, runId, planId, taskCount: plan.tasks.length }, createdAt: now });
+            eventBus.publish({ id: randomUUID(), type: "task.plan.created", schemaVersion: 1, workspaceId: run.workspace_id, roomId: run.room_id, runId, agentId: run.agent_id, payload: { roomId: run.room_id, runId, planId, plan, taskCount: plan.tasks.length }, createdAt: now });
           })();
         } else {
           recordPlanParseFailure(database, eventBus, run.room_id, runId, now);
@@ -936,13 +936,17 @@ async function route(ctx: RouteContext): Promise<void> {
   if (ctx.req.method === "POST" && url.pathname === "/roles") return createRole(ctx, await body(ctx));
   if (ctx.req.method === "DELETE" && parts[0] === "auth" && parts[1] === "tokens" && parts[2]) { if (!requireScope(auth, "write", ctx.res)) return; return revokeToken(ctx, parts[2]); }
   if (ctx.req.method === "GET" && parts[0] === "rooms" && parts.length === 1) return json(ctx.res, 200, { rooms: all(ctx.database, "SELECT * FROM rooms ORDER BY created_at ASC") });
+  if (ctx.req.method === "GET" && parts[0] === "rooms" && parts[2] === "task-plans" && parts[3] === "latest") return latestTaskPlan(ctx, parts[1] as string);
   if (ctx.req.method === "GET" && parts[0] === "rooms" && parts.length === 2) return json(ctx.res, 200, { room: get(ctx.database, "SELECT * FROM rooms WHERE id = ?", parts[1]) });
   if (ctx.req.method === "GET" && parts[0] === "rooms" && parts[2] === "tasks") return tasks(ctx, parts[1] as string, url);
   if (ctx.req.method === "GET" && parts[0] === "tasks" && parts[1] && parts[2] === "activities") return taskActivities(ctx, parts[1] as string);
   // V1.1: POST /rooms/:id/tasks/:taskId/column MUST come before the generic POST /rooms/:id/tasks
   // to avoid route shadowing (both match parts[2]==="tasks").
-  // Returns 501 stub — full implementation (UpdateTask with boardColumn field) lands in feat/v11-C.
-  if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "tasks" && parts[4] === "column") return json(ctx.res, 501, { error: "not_implemented", capability: "v1.1-kanban-column" });
+  if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "tasks" && parts[4] === "column") {
+    const input = await body(ctx);
+    const column = typeof input.column === "string" ? input.column : undefined;
+    return dispatch(ctx, { roomId: parts[1], taskId: parts[3], boardColumn: column }, "UpdateTask");
+  }
   if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "tasks") return dispatchCreated(ctx, { ...(await body(ctx)), roomId: parts[1] }, "CreateTask");
   if (ctx.req.method === "POST" && parts[0] === "tasks" && parts[2] === "complete") return dispatch(ctx, { taskId: parts[1] }, "CompleteTask");
   if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "archive") return dispatch(ctx, { roomId: parts[1] }, "ArchiveRoom");
@@ -1226,6 +1230,22 @@ function artifacts(ctx: RouteContext, url: URL): void {
 function tasks(ctx: RouteContext, roomId: string, url: URL): void {
   const runId = url.searchParams.get("runId") ?? undefined;
   json(ctx.res, 200, { tasks: ctx.taskService.list({ roomId, ...(runId !== undefined ? { runId } : {}) }) });
+}
+
+function latestTaskPlan(ctx: RouteContext, roomId: string): void {
+  const room = get(ctx.database, "SELECT id FROM rooms WHERE id = ? AND archived_at IS NULL", roomId);
+  if (room === null) return json(ctx.res, 404, { error: "room_not_found" });
+  const row = get(ctx.database, "SELECT id, room_id, run_id, plan_json, created_at FROM task_plans WHERE room_id = ? ORDER BY created_at DESC, id DESC LIMIT 1", roomId) as { readonly id: string; readonly room_id: string; readonly run_id: string; readonly plan_json: string; readonly created_at: number } | null;
+  if (row === null) return json(ctx.res, 200, { plan: null });
+  return json(ctx.res, 200, {
+    plan: {
+      id: row.id,
+      roomId: row.room_id,
+      runId: row.run_id,
+      plan: parseJsonField(row.plan_json, null),
+      createdAt: row.created_at
+    }
+  });
 }
 
 function taskActivities(ctx: RouteContext, taskId: string): void {

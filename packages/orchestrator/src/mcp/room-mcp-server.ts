@@ -735,6 +735,17 @@ export class RoomMcpServer {
   private async updateTask(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): Promise<RoomMcpToolResult> {
     if (!isRecord(input) || typeof input.taskId !== "string") return failure("validation_failed", "taskId is required");
     const runId = this.requireRunId(session, context);
+    if (typeof input.boardColumn === "string") {
+      const result = await this.dispatch({
+        type: "UpdateTask",
+        roomId: session.roomId,
+        taskId: input.taskId,
+        boardColumn: input.boardColumn,
+        idempotencyKey: typeof input.idempotencyKey === "string" ? input.idempotencyKey : `mcp:update-task-column:${runId}:${input.taskId}:${input.boardColumn}:${randomUUID()}`
+      }, session, context);
+      return commandResult(result);
+    }
+
     if (typeof input.status === "string") {
       if (normalizeStatus(input.status) === undefined) return failure("validation_failed", "taskId and valid status are required");
       const result = input.status === "completed"

@@ -1,25 +1,42 @@
 import { describe, expect, it } from "vitest";
 import type { TaskViewModel } from "../../types.ts";
-import { getTaskDetail, groupTasksByV10Status, summarizeTaskActivityPayload, taskUpdatedAt } from "./TasksPanel.tsx";
+import {
+  aggregateFileChanges,
+  dependencyLines,
+  fileArtifactTarget,
+  getTaskDetail,
+  groupTasksByKanbanColumn,
+  latestWorktreeReview,
+  positionDependencyLines,
+  roomExecutionPlan,
+  summarizeTaskActivityPayload,
+  taskColumn,
+  taskUpdatedAt,
+  unresolvedDependencyCount
+} from "./TasksPanel.tsx";
 
-describe("TasksPanel V1.0 task view contract", () => {
-  it("groups projector tasks into V1.0 status lanes", () => {
-    const groups = groupTasksByV10Status([
+describe("TasksPanel V1.1 Kanban task view contract", () => {
+  it("groups tasks into Kanban columns, applies board overrides, and hides cancelled tasks", () => {
+    const tasks = [
       task({ id: "t-backlog", title: "Prepare plan", status: "pending" }),
       task({ id: "t-progress", title: "Implement worker", status: "in_progress" }),
       task({ id: "t-blocked", title: "Wait on approval", status: "blocked" }),
       task({ id: "t-review", title: "Review patch", status: "review" }),
       task({ id: "t-complete", title: "Ship evidence", status: "completed" }),
+      task({ id: "t-override", title: "Dragged blocked card", status: "blocked", boardColumn: "Review" }),
       task({ id: "t-cancelled", title: "Drop duplicate", status: "cancelled" })
-    ]);
+    ];
+    const groups = groupTasksByKanbanColumn(tasks);
 
     expect(groups.map((group) => [group.label, group.items.map((item) => item.id)])).toEqual([
       ["Backlog", ["t-backlog"]],
       ["In Progress", ["t-progress"]],
-      ["Blocked", ["t-blocked"]],
-      ["Review", ["t-review"]],
-      ["Done", ["t-complete", "t-cancelled"]]
+      ["Waiting", ["t-blocked"]],
+      ["Review", ["t-review", "t-override"]],
+      ["Done", ["t-complete"]]
     ]);
+    expect(taskColumn(tasks[5]!)).toBe("Review");
+    expect(taskColumn(tasks[6]!)).toBeUndefined();
   });
 
   it("opens task detail data with assignee, parent, children, and newest-first activity timeline", () => {
@@ -60,6 +77,67 @@ describe("TasksPanel V1.0 task view contract", () => {
       delegations: [{ id: "d1", createdAt: 200, completedAt: 400 }]
     }))).toBe(400);
   });
+
+  it("summarizes dependencies, file changes, and latest worktree review", () => {
+    const tasks = [
+      task({ id: "dep-done", title: "Done dep", status: "completed" }),
+      task({ id: "dep-open", title: "Open dep", status: "in_progress" }),
+      task({
+        id: "dependent",
+        title: "Dependent",
+        status: "pending",
+        dependencies: ["dep-done", "dep-open"],
+        fileChangeRuns: [
+          { runId: "run-old", createdAt: 10, files: [{ path: "old.ts", change: "modified" }] },
+          { runId: "run-new", createdAt: 20, files: [{ path: "new-a.ts", change: "added" }, { path: "new-b.ts", change: "modified" }] }
+        ],
+        worktreeReviews: [
+          { runId: "run-old", artifactId: "artifact-old", status: "ready_for_review", updatedAt: 10 },
+          { runId: "run-new", artifactId: "artifact-new", status: "conflict", conflictDiff: "patch conflict", updatedAt: 30 }
+        ]
+      }),
+      task({ id: "hidden-cancelled", title: "Hidden", status: "cancelled", dependencies: ["dep-open"] })
+    ];
+
+    expect(unresolvedDependencyCount(tasks[2]!, tasks)).toBe(1);
+    expect(dependencyLines(tasks)).toEqual([
+      { fromTaskId: "dep-done", toTaskId: "dependent" },
+      { fromTaskId: "dep-open", toTaskId: "dependent" }
+    ]);
+    expect(aggregateFileChanges(tasks[2]!)).toBe(3);
+    expect(latestWorktreeReview(tasks[2]!)).toMatchObject({ runId: "run-new", status: "conflict", artifactId: "artifact-new" });
+  });
+
+  it("positions dependency arrows from real task card rectangles", () => {
+    const positioned = positionDependencyLines(
+      [{ fromTaskId: "task-a", toTaskId: "task-b" }],
+      rect({ left: 10, top: 20, width: 500, height: 300 }),
+      new Map([
+        ["task-a", rect({ left: 30, top: 60, width: 100, height: 40 })],
+        ["task-b", rect({ left: 260, top: 150, width: 120, height: 60 })]
+      ])
+    );
+
+    expect(positioned).toEqual([
+      { fromTaskId: "task-a", toTaskId: "task-b", x1: 120, y1: 60, x2: 250, y2: 160 }
+    ]);
+  });
+
+  it("derives execution plan and file diff artifact targets for the panel", () => {
+    expect(roomExecutionPlan({ planId: "plan-1", runId: "run-plan", planJson: { goal: "ship" }, createdAt: 123 })).toEqual({
+      id: "plan-1",
+      runId: "run-plan",
+      plan: { goal: "ship" },
+      createdAt: 123
+    });
+    expect(fileArtifactTarget(
+      { runId: "run-files", artifactId: "artifact-run", createdAt: 10, files: [] },
+      { path: "src/a.ts", change: "modified" }
+    )).toEqual({
+      artifactId: "artifact-run",
+      href: "#artifact:artifact-run:src%2Fa.ts"
+    });
+  });
 });
 
 function task(patch: Partial<TaskViewModel>): TaskViewModel {
@@ -68,6 +146,17 @@ function task(patch: Partial<TaskViewModel>): TaskViewModel {
     title: "Task",
     status: "pending",
     ...patch
+  };
+}
+
+function rect(input: { left: number; top: number; width: number; height: number }) {
+  return {
+    left: input.left,
+    top: input.top,
+    width: input.width,
+    height: input.height,
+    right: input.left + input.width,
+    bottom: input.top + input.height
   };
 }
 
