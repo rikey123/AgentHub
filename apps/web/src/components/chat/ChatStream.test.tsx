@@ -95,6 +95,25 @@ describe("ChatStream task notification feed", () => {
 
     expect(buildChatFeedItems(room)).toEqual([]);
   });
+
+  it("includes permission requests as chat-level actionable feed items", () => {
+    const room = roomFixture({
+      pendingPermissions: [
+        {
+          id: "perm-1",
+          agentId: "agent-builder",
+          agentName: "Builder",
+          resource: { type: "file", path: "multi-agent-collaboration-report.md", operation: "write" },
+          reason: "file.write",
+          status: "pending"
+        }
+      ]
+    });
+
+    expect(buildChatFeedItems(room)).toMatchObject([
+      { kind: "permission", id: "perm-1" }
+    ]);
+  });
 });
 
 function roomFixture(patch: Partial<RoomViewModel>): RoomViewModel {

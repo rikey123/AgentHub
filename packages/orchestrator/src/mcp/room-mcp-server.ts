@@ -443,10 +443,10 @@ export class RoomMcpServer {
     const text = input.text;
     const now = this.options.now?.() ?? Date.now();
 
-    // In assisted mode, an agent calling room.send_message routes the message
-    // directly to the mentioned agents via mailbox + WakeAgent, bypassing the
-    // user-message path. This is the agent-to-agent coordination channel.
-    if (room.mode === "assisted") {
+    // In multi-agent modes, an agent calling room.send_message routes the
+    // message directly to mentioned agents via mailbox + WakeAgent, bypassing
+    // the user-message path. This is the agent-to-agent coordination channel.
+    if (room.mode === "assisted" || room.mode === "team" || room.mode === "squad") {
       return this.handleAgentSendMessage(text, room.workspace_id, room.primary_agent_id, session, context, now);
     }
 

@@ -15,7 +15,7 @@ export async function startTestServer(daemon: DaemonApp): Promise<{ server: Serv
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
 
-    const apiPrefixes = ["/auth/session", "/event", "/rooms", "/roles", "/runtimes", "/model-configs", "/agent-bindings", "/settings", "/workspaces", "/agents", "/runs", "/context", "/permissions", "/interventions", "/artifacts", "/debug", "/pending-turns", "/messages", "/healthz", "/openapi.json"];
+    const apiPrefixes = ["/auth/session", "/event", "/rooms", "/roles", "/runtimes", "/model-configs", "/agent-bindings", "/settings", "/workspaces", "/agents", "/runs", "/context", "/permissions", "/interventions", "/artifacts", "/debug", "/pending-turns", "/messages", "/tasks", "/mailbox", "/skills", "/board", "/timeline", "/scheduler", "/cron", "/recurring-tasks", "/healthz", "/openapi.json"];
     const isApi = apiPrefixes.some((prefix) => url.pathname.startsWith(prefix));
 
     if (isApi) {

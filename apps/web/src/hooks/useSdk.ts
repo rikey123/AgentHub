@@ -31,10 +31,13 @@ export function createCsrfFetch(fetchImpl: typeof fetch = fetch): typeof fetch {
   return async (input, init = {}) => {
     const method = (init.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
     const mutating = method === "POST" || method === "PATCH" || method === "DELETE";
-    if (!mutating || isAuthSessionRequest(input)) {
+    if (isAuthSessionRequest(input)) {
       return fetchImpl(input, { ...init, credentials: init.credentials ?? "same-origin" });
     }
     const token = await ensureAuthSession(fetchImpl);
+    if (!mutating) {
+      return fetchImpl(input, { ...init, credentials: init.credentials ?? "same-origin" });
+    }
     const headers = new Headers(init.headers ?? (input instanceof Request ? input.headers : undefined));
     headers.set("x-agenthub-csrf", token);
     if (!headers.has("content-type")) headers.set("content-type", "application/json");

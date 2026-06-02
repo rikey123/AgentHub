@@ -8,6 +8,7 @@ import { TypingIndicator } from "./TypingIndicator.tsx";
 import { ConnectionBanner } from "./ConnectionBanner.tsx";
 import { RunBriefToasts } from "./RunBriefToasts.tsx";
 import { MailboxFailureCard } from "../cards/MailboxFailureCard.tsx";
+import { PermissionCard } from "../cards/PermissionCard.tsx";
 
 interface ChatStreamProps {
   room: RoomViewModel;
@@ -29,7 +30,8 @@ interface ChatStreamProps {
 
 type FeedItem =
   | { kind: "message"; id: string; data: ChatStreamProps["room"]["messages"][number] }
-  | { kind: "brief"; id: string; data: ChatStreamProps["room"]["briefs"][number] };
+  | { kind: "brief"; id: string; data: ChatStreamProps["room"]["briefs"][number] }
+  | { kind: "permission"; id: string; data: ChatStreamProps["room"]["pendingPermissions"][number] };
 
 const taskNotificationBriefKinds = new Set<RoomViewModel["briefs"][number]["kind"]>([
   "dispatch_started",
@@ -39,6 +41,9 @@ const taskNotificationBriefKinds = new Set<RoomViewModel["briefs"][number]["kind
 export function buildChatFeedItems(room: RoomViewModel): FeedItem[] {
   return [
     ...room.messages.map((m) => ({ kind: "message" as const, id: m.id, data: m })),
+    ...room.pendingPermissions
+      .filter((p) => p.status === "pending")
+      .map((p) => ({ kind: "permission" as const, id: p.id, data: p })),
     ...room.briefs
       .filter((b) => !taskNotificationBriefKinds.has(b.kind))
       .map((b, i) => ({ kind: "brief" as const, id: `${b.runId}-${i}`, data: b }))
@@ -50,7 +55,7 @@ export function ChatStream(props: ChatStreamProps) {
 
   const items = useMemo<FeedItem[]>(() => {
     return buildChatFeedItems(room);
-  }, [room.messages, room.briefs]);
+  }, [room.messages, room.pendingPermissions, room.briefs]);
 
   const parentRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
@@ -170,6 +175,20 @@ export function ChatStream(props: ChatStreamProps) {
                         onEditPending={() => props.onEditPending(item.id)}
                         csrfFetch={props.csrfFetch}
                       />
+                    ) : item.kind === "permission" ? (
+                      <div className="mx-auto my-2 w-full max-w-[760px] px-4">
+                        <PermissionCard
+                          card={{
+                            type: "permission",
+                            permissionId: item.data.id,
+                            agentId: item.data.agentId,
+                            resource: item.data.resource,
+                            reason: item.data.reason,
+                            status: item.data.status
+                          }}
+                          csrfFetch={props.csrfFetch}
+                        />
+                      </div>
                     ) : (
                       <BriefItem brief={item.data} onOpenRun={props.onOpenRun} />
                     )}

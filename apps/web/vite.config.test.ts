@@ -14,4 +14,20 @@ describe("Vite daemon proxy", () => {
       "/settings"
     ]));
   });
+
+  it("proxies V1.1 task, skill, and roadmap endpoints to the daemon", () => {
+    const config = viteConfig as { server?: { proxy?: Record<string, unknown> } };
+    const proxyPrefixes = Object.keys(config.server?.proxy ?? {});
+
+    expect(proxyPrefixes).toEqual(expect.arrayContaining([
+      "/tasks",
+      "/mailbox",
+      "/skills",
+      "/board",
+      "/timeline",
+      "/scheduler",
+      "/cron",
+      "/recurring-tasks"
+    ]));
+  });
 });

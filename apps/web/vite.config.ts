@@ -28,7 +28,15 @@ export default defineConfig({
       "/healthz": "http://127.0.0.1:6677",
       "/openapi.json": "http://127.0.0.1:6677",
       "/pending-turns": "http://127.0.0.1:6677",
-      "/messages": "http://127.0.0.1:6677"
+      "/messages": "http://127.0.0.1:6677",
+      "/tasks": "http://127.0.0.1:6677",
+      "/mailbox": "http://127.0.0.1:6677",
+      "/skills": "http://127.0.0.1:6677",
+      "/board": "http://127.0.0.1:6677",
+      "/timeline": "http://127.0.0.1:6677",
+      "/scheduler": "http://127.0.0.1:6677",
+      "/cron": "http://127.0.0.1:6677",
+      "/recurring-tasks": "http://127.0.0.1:6677"
     }
   },
   build: {

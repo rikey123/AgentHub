@@ -19,6 +19,13 @@ function makeEvent<T extends EventType>(type: T, roomId: string, payload: Record
   };
 }
 
+function makeAgentEvent<T extends EventType>(type: T, roomId: string, agentId: string, payload: Record<string, unknown>, createdAt = Date.now()) {
+  return {
+    ...makeEvent(type, roomId, payload, createdAt),
+    agentId
+  };
+}
+
 describe("useProjector replay handling", () => {
   let emittedState: ProjectorState;
   let unsubscribe: (() => void) | undefined;
@@ -142,6 +149,47 @@ describe("useProjector replay handling", () => {
     expect(room?.skillErrors).toEqual([
       expect.objectContaining({ skillId: "skill-1", skillName: "task-planner", runId: "run-skill-1", error: "disk full" })
     ]);
+  });
+
+  it("recognizes agent-authored message payloads even when replay lacks envelope agentId", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "team" }));
+    projector.apply(makeAgentEvent("agent.joined", roomId, "agent-builder", { agentId: "agent-builder", agentName: "Builder", role: "teammate" }));
+    projector.apply(makeEvent("message.created", roomId, {
+      messageId: "agent-msg-1",
+      senderId: "agent-builder",
+      role: "user",
+      text: "Done"
+    }));
+
+    const message = emittedState.rooms.get(roomId)?.messages.find((item) => item.id === "agent-msg-1");
+    expect(message).toMatchObject({
+      senderType: "agent",
+      senderId: "agent-builder",
+      senderName: "Builder",
+      role: "user",
+      text: "Done"
+    });
+  });
+
+  it("normalizes permission decisions from backend action words to view statuses", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "team" }));
+    projector.apply(makeAgentEvent("permission.requested", roomId, "agent-builder", {
+      requestId: "perm-1",
+      resource: { type: "file", path: "report.md", operation: "write" },
+      reason: "file.write"
+    }));
+    projector.apply(makeAgentEvent("permission.resolved", roomId, "agent-builder", {
+      requestId: "perm-1",
+      decision: "deny",
+      reason: "timeout"
+    }));
+
+    const permission = emittedState.rooms.get(roomId)?.pendingPermissions.find((item) => item.id === "perm-1");
+    expect(permission?.status).toBe("expired");
   });
 
   it("infers failed brief kind from run state when replaying legacy brief payloads", () => {

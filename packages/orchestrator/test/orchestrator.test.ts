@@ -967,6 +967,33 @@ describe("TaskService and RoomMcpServer", () => {
     expect(runCount()).toBe(0);
   });
 
+  test("team agent send_message is mailbox-only and never creates a user chat message", async () => {
+    seedDelegatedRoom("room_team_send", "agent_leader", "role_leader", "role_builder", "binding_leader", "binding_builder", "agent_builder");
+    createRun("run_team_sender", { roomId: "room_team_send", agentId: "agent_builder" });
+    const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const sendMessage = vi.fn<CommandHandler>(() => ({ ok: true, data: { messageId: "bad_user_msg" }, emittedEvents: [] }));
+    const commandBus = new CommandBus({
+      database: currentDatabase(),
+      handlers: {
+        SendMessage: sendMessage,
+        WakeAgent: createWakeAgentHandler({ database: currentDatabase(), activeWakes: currentActiveWakes(), mailbox: currentMailbox(), lifecycle: currentLifecycle() }) as CommandHandler
+      }
+    });
+    const mcp = new RoomMcpServer({ commandBus, taskService: service, database: currentDatabase(), eventBus: currentBus(), now: () => now });
+
+    const result = await mcp.callTool("room.send_message", { text: "@leader ready for review" }, { roomId: "room_team_send", runId: "run_team_sender", agentId: "agent_builder" });
+
+    expect(result).toMatchObject({ ok: true, data: { delivered: 1 } });
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(currentDatabase().sqlite.prepare("SELECT from_type, from_id, to_agent_id FROM mailbox_messages WHERE room_id = 'room_team_send'").get()).toMatchObject({
+      from_type: "agent",
+      from_id: "agent_builder",
+      to_agent_id: "agent_leader"
+    });
+    expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM messages WHERE room_id = 'room_team_send' AND sender_type = 'user' AND sender_id = 'agent_builder'").get()).toMatchObject({ count: 0 });
+    expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE room_id = 'room_team_send' AND type = 'message.created'").get()).toMatchObject({ count: 0 });
+  });
+
   test("mention parser validates membership and dedupes in first order", () => {
     expect(parseMentions("hi @agent-1 and @missing and @agent-2 then @agent-1", [{ agentId: "agent-1" }, { agentId: "agent-2" }])).toEqual(["agent-1", "agent-2"]);
   });

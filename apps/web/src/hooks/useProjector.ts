@@ -241,12 +241,17 @@ class Projector {
           if (room.messages.some((m) => m.id === messageId)) {
             break; // dedupe — projector replays may re-emit
           }
+          const explicitSenderType = payload.senderType === "agent" || payload.senderType === "system" || payload.senderType === "user"
+            ? payload.senderType
+            : undefined;
+          const senderId = event.agentId ?? (typeof payload.senderId === "string" ? payload.senderId : explicitSenderType ?? "user");
+          const senderType = explicitSenderType ?? (event.agentId || this.agentName(room, senderId) ? "agent" : senderId === "system" ? "system" : "user");
           const message: MessageViewModel = {
             id: messageId,
             roomId,
-            senderType: event.agentId ? "agent" : "user",
-            senderId: event.agentId ?? (typeof payload.senderId === "string" ? payload.senderId : "user"),
-            senderName: event.agentId ? (this.agentName(room, event.agentId) ?? "Agent") : "You",
+            senderType,
+            senderId,
+            senderName: this.senderName(room, senderType, senderId),
             role: typeof payload.role === "string" ? payload.role : "user",
             status: "streaming",
             text: typeof payload.text === "string" ? payload.text : "",
@@ -448,11 +453,15 @@ class Projector {
       }
       case "permission.resolved": {
         if (payload && typeof payload.requestId === "string") {
+          const status = normalizePermissionStatus(
+            typeof payload.decision === "string" ? payload.decision : undefined,
+            typeof payload.reason === "string" ? payload.reason : undefined
+          );
           room = {
             ...room,
             pendingPermissions: room.pendingPermissions.map((p) =>
               p.id === payload.requestId
-                ? { ...p, status: (typeof payload.decision === "string" ? payload.decision : "denied") as "pending" | "allowed" | "denied" | "expired" }
+                ? { ...p, status }
                 : p
             )
           };
@@ -1072,6 +1081,20 @@ class Projector {
   private agentName(room: RoomViewModel, agentId: string): string | undefined {
     return room.participants.find((p) => p.id === agentId)?.name;
   }
+
+  private senderName(room: RoomViewModel, senderType: MessageViewModel["senderType"], senderId: string): string {
+    if (senderType === "agent") return this.agentName(room, senderId) ?? "Agent";
+    if (senderType === "system") return "System";
+    return "You";
+  }
+}
+
+function normalizePermissionStatus(decision: string | undefined, reason: string | undefined): PermissionViewModel["status"] {
+  if (reason === "timeout" || reason === "expired_max_wait") return "expired";
+  if (decision === "allowed" || decision === "allow") return "allowed";
+  if (decision === "expired") return "expired";
+  if (decision === "denied" || decision === "deny") return "denied";
+  return "denied";
 }
 
 const globalProjector = new Projector();
