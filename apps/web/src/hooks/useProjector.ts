@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { EventEnvelope } from "@agenthub/protocol/events";
 import { EVENT_REGISTRY } from "@agenthub/protocol/events";
-import type { RoomViewModel, ProjectorState, MessageViewModel, BriefViewModel, RunViewModel, PermissionViewModel, InterventionViewModel, TaskActivityViewModel, TaskDelegationViewModel, TaskViewModel, SkillErrorViewModel } from "../types.ts";
+import type { RoomViewModel, ProjectorState, MessageViewModel, BriefViewModel, RunViewModel, PermissionViewModel, InterventionViewModel, TaskActivityViewModel, TaskDelegationViewModel, TaskViewModel, SkillErrorViewModel, TaskFileChangeViewModel, WorktreeReviewViewModel, RoomExecutionPlanViewModel } from "../types.ts";
 import { ensureAuthSession } from "./useSdk.ts";
 
 type ProjectorListener = (state: ProjectorState) => void;
@@ -239,7 +239,7 @@ class Projector {
         if (payload && typeof payload.messageId === "string") {
           const messageId = payload.messageId;
           if (room.messages.some((m) => m.id === messageId)) {
-            break; // dedupe — projector replays may re-emit
+            break; // dedupe - projector replays may re-emit
           }
           const message: MessageViewModel = {
             id: messageId,
@@ -545,11 +545,15 @@ class Projector {
             status: typeof payload.status === "string" ? payload.status : "pending",
             description: typeof payload.description === "string" ? payload.description : undefined,
             priority: typeof payload.priority === "string" ? payload.priority : undefined,
+            blockerReason: typeof payload.blockerReason === "string" ? payload.blockerReason : undefined,
+            maxTurns: typeof payload.maxTurns === "number" ? payload.maxTurns : undefined,
+            boardColumn: typeof payload.boardColumn === "string" ? payload.boardColumn : undefined,
             assigneeRoleId: typeof payload.assigneeRoleId === "string" ? payload.assigneeRoleId : undefined,
             assigneeBindingId: typeof payload.assigneeBindingId === "string" ? payload.assigneeBindingId : undefined,
             assigneeAgentId: typeof payload.assigneeAgentId === "string" ? payload.assigneeAgentId : undefined,
             expectsReview: typeof payload.expectsReview === "boolean" ? payload.expectsReview : undefined,
             parentTaskId: typeof payload.parentTaskId === "string" ? payload.parentTaskId : undefined,
+            dependencies: parseStringArray(payload.dependencies),
             delegationChain: Array.isArray(payload.delegationChain) ? payload.delegationChain : undefined,
             sourceRunId: typeof payload.sourceRunId === "string" ? payload.sourceRunId : undefined,
             activities: Array.isArray(payload.activities)
@@ -590,17 +594,32 @@ class Projector {
       case "task.status.changed": {
         if (payload && typeof payload.taskId === "string") {
           const existing = room.tasks.find((t) => t.id === payload.taskId);
+          const nextBoardColumn = payload.boardColumn === null
+            ? undefined
+            : typeof payload.boardColumn === "string"
+              ? payload.boardColumn
+              : existing?.boardColumn;
+          const nextStatus = typeof payload.nextStatus === "string" ? payload.nextStatus : (typeof payload.status === "string" ? payload.status : existing?.status);
+          const nextBlockerReason = typeof payload.blockerReason === "string"
+            ? payload.blockerReason
+            : payload.blockerReason === null || (nextStatus !== undefined && nextStatus !== "blocked" && nextStatus !== "review")
+              ? undefined
+              : existing?.blockerReason;
           const task = existing
             ? {
                 ...existing,
-                status: typeof payload.nextStatus === "string" ? payload.nextStatus : (typeof payload.status === "string" ? payload.status : existing.status),
+                status: nextStatus ?? existing.status,
+                blockerReason: nextBlockerReason,
+                boardColumn: nextBoardColumn,
+                maxTurns: typeof payload.maxTurns === "number" ? payload.maxTurns : existing.maxTurns,
                 assigneeAgentId: typeof payload.assigneeAgentId === "string" ? payload.assigneeAgentId : existing.assigneeAgentId,
                 assigneeRoleId: typeof payload.assigneeRoleId === "string" ? payload.assigneeRoleId : existing.assigneeRoleId,
                 assigneeBindingId: typeof payload.assigneeBindingId === "string" ? payload.assigneeBindingId : existing.assigneeBindingId,
                 expectsReview: typeof payload.expectsReview === "boolean" ? payload.expectsReview : existing.expectsReview,
                 priority: typeof payload.priority === "string" ? payload.priority : existing.priority,
                 parentTaskId: typeof payload.parentTaskId === "string" ? payload.parentTaskId : existing.parentTaskId,
-                sourceRunId: typeof payload.sourceRunId === "string" ? payload.sourceRunId : existing.sourceRunId
+                sourceRunId: typeof payload.sourceRunId === "string" ? payload.sourceRunId : existing.sourceRunId,
+                dependencies: parseStringArray(payload.dependencies) ?? existing.dependencies
               }
             : {
                 id: payload.taskId,
@@ -608,11 +627,15 @@ class Projector {
                 status: typeof payload.nextStatus === "string" ? payload.nextStatus : (typeof payload.status === "string" ? payload.status : "pending"),
                 description: typeof payload.description === "string" ? payload.description : undefined,
                 priority: typeof payload.priority === "string" ? payload.priority : undefined,
+                blockerReason: typeof payload.blockerReason === "string" ? payload.blockerReason : undefined,
+                boardColumn: typeof payload.boardColumn === "string" ? payload.boardColumn : undefined,
+                maxTurns: typeof payload.maxTurns === "number" ? payload.maxTurns : undefined,
                 assigneeRoleId: typeof payload.assigneeRoleId === "string" ? payload.assigneeRoleId : undefined,
                 assigneeBindingId: typeof payload.assigneeBindingId === "string" ? payload.assigneeBindingId : undefined,
                 assigneeAgentId: typeof payload.assigneeAgentId === "string" ? payload.assigneeAgentId : undefined,
                 expectsReview: typeof payload.expectsReview === "boolean" ? payload.expectsReview : undefined,
                 parentTaskId: typeof payload.parentTaskId === "string" ? payload.parentTaskId : undefined,
+                dependencies: parseStringArray(payload.dependencies),
                 delegationChain: Array.isArray(payload.delegationChain) ? payload.delegationChain : undefined,
                 sourceRunId: typeof payload.sourceRunId === "string" ? payload.sourceRunId : undefined,
                 activities: undefined,
@@ -875,7 +898,7 @@ class Projector {
         break;
       }
       // -----------------------------------------------------------------------
-      // V1.1 projector handlers (contract week stubs — full UI in feat/v11-C)
+      // V1.1 projector handlers (contract week stubs - full UI in feat/v11-C)
       // -----------------------------------------------------------------------
       case "task.column.moved": {
         // D11: update boardColumn on the task so Kanban renders the correct column
@@ -893,25 +916,19 @@ class Projector {
         break;
       }
       case "task.plan.created": {
-        // D8: store execution plan on the room's task (identified by runId → taskId lookup)
-        // The plan is surfaced in the side panel as a collapsible "Execution Plan" card.
-        // For now we store the planId on the room so the UI can fetch it via REST.
+        // D8: store execution plan at room level so the Tasks panel updates from projector state.
         if (payload && typeof payload.planId === "string") {
           // Attach plan to the run's associated task if known
           const runId = typeof payload.runId === "string" ? payload.runId : undefined;
-          const run = runId !== undefined ? room.runs.find((r) => r.id === runId) : undefined;
-          const taskId = run?.taskId;
-          if (taskId) {
-            const existing = room.tasks.find((t) => t.id === taskId);
-            if (existing) {
-              room = this.upsertTask(room, {
-                ...existing,
-                executionPlan: typeof payload.planId === "string" ? payload.planId : existing.executionPlan
-              });
-              this.rooms.set(roomId, room);
-              changed = true;
-            }
-          }
+          const plan: RoomExecutionPlanViewModel = {
+            planId: payload.planId,
+            runId: runId ?? "",
+            planJson: payload.plan ?? payload.planJson ?? null,
+            createdAt: typeof payload.createdAt === "number" ? payload.createdAt : event.createdAt
+          };
+          room = { ...room, executionPlan: plan };
+          this.rooms.set(roomId, room);
+          changed = true;
         }
         break;
       }
@@ -919,12 +936,23 @@ class Projector {
         // D12: update file-change badge count on the associated task card
         if (payload && typeof payload.filesChangedCount === "number") {
           const taskId = typeof payload.taskId === "string" ? payload.taskId : undefined;
+          const runId = typeof payload.runId === "string" ? payload.runId : event.runId;
           if (taskId) {
             const existing = room.tasks.find((t) => t.id === taskId);
             if (existing) {
+              const files = parseFileChanges(payload.filesChanged);
+              const artifactId = typeof payload.artifactId === "string" ? payload.artifactId : undefined;
+              const existingRuns = existing.fileChangeRuns ?? [];
+              const fileChangeRuns = runId !== undefined
+                ? [
+                    ...existingRuns.filter((item) => item.runId !== runId),
+                    { runId, ...(artifactId !== undefined ? { artifactId } : {}), files, createdAt: event.createdAt }
+                  ]
+                : existingRuns;
               room = this.upsertTask(room, {
                 ...existing,
-                fileChangesCount: (existing.fileChangesCount ?? 0) + payload.filesChangedCount
+                fileChangesCount: aggregateFileChangeCount(fileChangeRuns, (existing.fileChangesCount ?? 0) + payload.filesChangedCount),
+                fileChangeRuns
               });
               this.rooms.set(roomId, room);
               changed = true;
@@ -937,13 +965,25 @@ class Projector {
         // D3: show "Ready to apply" badge on the task card
         if (payload) {
           const taskId = typeof payload.taskId === "string" ? payload.taskId : undefined;
+          const runId = typeof payload.runId === "string" ? payload.runId : event.runId;
           if (taskId) {
             const existing = room.tasks.find((t) => t.id === taskId);
             if (existing) {
+              const review = worktreeReview(existing.worktreeReviews, {
+                runId: runId ?? "",
+                artifactId: typeof payload.artifactId === "string" ? payload.artifactId : existing.worktreeArtifactId,
+                status: "ready_for_review",
+                filesChanged: parseStringArray(payload.filesChanged),
+                updatedAt: event.createdAt
+              });
+              const artifactId = typeof payload.artifactId === "string" ? payload.artifactId : existing.worktreeArtifactId;
               room = this.upsertTask(room, {
                 ...existing,
                 worktreeStatus: "ready_for_review",
-                worktreeArtifactId: typeof payload.artifactId === "string" ? payload.artifactId : existing.worktreeArtifactId
+                worktreeArtifactId: artifactId,
+                worktreeRunId: runId ?? existing.worktreeRunId,
+                worktreeReviews: review,
+                fileChangeRuns: syncFileChangeRunArtifactId(existing.fileChangeRuns, runId, artifactId)
               });
               this.rooms.set(roomId, room);
               changed = true;
@@ -956,10 +996,22 @@ class Projector {
         // D3: clear "Ready to apply" badge after successful apply
         if (payload) {
           const taskId = typeof payload.taskId === "string" ? payload.taskId : undefined;
+          const runId = typeof payload.runId === "string" ? payload.runId : event.runId;
           if (taskId) {
             const existing = room.tasks.find((t) => t.id === taskId);
             if (existing) {
-              room = this.upsertTask(room, { ...existing, worktreeStatus: "applied" });
+              room = this.upsertTask(room, {
+                ...existing,
+                worktreeStatus: "applied",
+                worktreeRunId: runId ?? existing.worktreeRunId,
+                worktreeArtifactId: typeof payload.artifactId === "string" ? payload.artifactId : existing.worktreeArtifactId,
+                worktreeReviews: worktreeReview(existing.worktreeReviews, {
+                  runId: runId ?? "",
+                  artifactId: typeof payload.artifactId === "string" ? payload.artifactId : existing.worktreeArtifactId,
+                  status: "applied",
+                  updatedAt: event.createdAt
+                })
+              });
               this.rooms.set(roomId, room);
               changed = true;
             }
@@ -971,10 +1023,22 @@ class Projector {
         // D3: clear badge after discard
         if (payload) {
           const taskId = typeof payload.taskId === "string" ? payload.taskId : undefined;
+          const runId = typeof payload.runId === "string" ? payload.runId : event.runId;
           if (taskId) {
             const existing = room.tasks.find((t) => t.id === taskId);
             if (existing) {
-              room = this.upsertTask(room, { ...existing, worktreeStatus: "discarded" });
+              room = this.upsertTask(room, {
+                ...existing,
+                worktreeStatus: "discarded",
+                worktreeRunId: runId ?? existing.worktreeRunId,
+                worktreeArtifactId: typeof payload.artifactId === "string" ? payload.artifactId : existing.worktreeArtifactId,
+                worktreeReviews: worktreeReview(existing.worktreeReviews, {
+                  runId: runId ?? "",
+                  artifactId: typeof payload.artifactId === "string" ? payload.artifactId : existing.worktreeArtifactId,
+                  status: "discarded",
+                  updatedAt: event.createdAt
+                })
+              });
               this.rooms.set(roomId, room);
               changed = true;
             }
@@ -986,13 +1050,23 @@ class Projector {
         // D3: show "Conflict" badge on the task card
         if (payload) {
           const taskId = typeof payload.taskId === "string" ? payload.taskId : undefined;
+          const runId = typeof payload.runId === "string" ? payload.runId : event.runId;
           if (taskId) {
             const existing = room.tasks.find((t) => t.id === taskId);
             if (existing) {
               room = this.upsertTask(room, {
                 ...existing,
                 worktreeStatus: "conflict",
-                worktreeArtifactId: typeof payload.artifactId === "string" ? payload.artifactId : existing.worktreeArtifactId
+                blockerReason: existing.blockerReason ?? "worktree_apply_conflict",
+                worktreeArtifactId: typeof payload.artifactId === "string" ? payload.artifactId : existing.worktreeArtifactId,
+                worktreeRunId: runId ?? existing.worktreeRunId,
+                worktreeReviews: worktreeReview(existing.worktreeReviews, {
+                  runId: runId ?? "",
+                  artifactId: typeof payload.artifactId === "string" ? payload.artifactId : existing.worktreeArtifactId,
+                  status: "conflict",
+                  conflictDiff: typeof payload.conflictDiff === "string" ? payload.conflictDiff : undefined,
+                  updatedAt: event.createdAt
+                })
               });
               this.rooms.set(roomId, room);
               changed = true;
@@ -1074,6 +1148,43 @@ class Projector {
   }
 }
 
+function parseStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.filter((item): item is string => typeof item === "string");
+}
+
+function parseFileChanges(value: unknown): TaskFileChangeViewModel[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null && !Array.isArray(item))
+    .map((item) => ({
+      path: typeof item.path === "string" ? item.path : "unknown",
+      change: typeof item.change === "string" ? item.change : typeof item.status === "string" ? item.status : "modified",
+      linesAdded: typeof item.linesAdded === "number" ? item.linesAdded : typeof item.additions === "number" ? item.additions : undefined,
+      linesRemoved: typeof item.linesRemoved === "number" ? item.linesRemoved : typeof item.deletions === "number" ? item.deletions : undefined,
+      artifactId: typeof item.artifactId === "string" ? item.artifactId : undefined
+    }));
+}
+
+function aggregateFileChangeCount(runs: NonNullable<TaskViewModel["fileChangeRuns"]>, fallback: number): number {
+  return runs.length > 0 ? runs.reduce((total, run) => total + run.files.length, 0) : fallback;
+}
+
+function syncFileChangeRunArtifactId(
+  runs: TaskViewModel["fileChangeRuns"],
+  runId: string | undefined,
+  artifactId: string | undefined
+): TaskViewModel["fileChangeRuns"] {
+  if (!runs || !runId || !artifactId) return runs;
+  return runs.map((run) => run.runId === runId && run.artifactId === undefined ? { ...run, artifactId } : run);
+}
+
+function worktreeReview(existing: TaskViewModel["worktreeReviews"], review: WorktreeReviewViewModel): WorktreeReviewViewModel[] {
+  const runId = review.runId.length > 0 ? review.runId : `worktree:${review.artifactId ?? review.updatedAt}`;
+  const nextReview = { ...review, runId };
+  return [...(existing ?? []).filter((item) => item.runId !== runId), nextReview].sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
 const globalProjector = new Projector();
 
 if (typeof window !== "undefined") {
@@ -1094,7 +1205,7 @@ export function useProjector(view: "main" | "detail", roomId?: string, runId?: s
   // streams every event, so switching the active room never tears down the
   // stream and never drops live deltas. Only the run-detail view scopes to a
   // specific (room, run). Without this, every `activeRoomId` change closed the
-  // EventSource and re-opened it with a server-side roomId filter — racing with
+  // EventSource and re-opened it with a server-side roomId filter - racing with
   // any in-flight `agent.run.*` / `message.*` events for the new room.
   const sseRoomId = view === "main" ? undefined : roomId;
   const sseRunId = view === "main" ? undefined : runId;
