@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Button } from "@heroui/react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { AppShell } from "./components/shell/AppShell.tsx";
 import { TopBar } from "./components/shell/TopBar.tsx";
@@ -55,6 +56,7 @@ export default function App() {
   const [sidePanelTab, setSidePanelTab] = useState<"context" | "tasks" | "members" | "debug" | "cost">("context");
   const [rail, setRail] = useState<RailItem>("chat");
   const [bannerError, setBannerError] = useState<string | undefined>();
+  const [unstallPending, setUnstallPending] = useState(false);
 
   const projector = useProjector("main", activeRoomId);
   const sdk = useSdk();
@@ -165,6 +167,27 @@ export default function App() {
     openTasksPanel();
   }, [openTasksPanel]);
 
+  const handleOpenArtifact = useCallback((input: { artifactId: string; runId: string; path: string }) => {
+    setActiveRunId(input.runId);
+    if (typeof window !== "undefined") {
+      window.history.replaceState(window.history.state, "", `#artifact:${encodeURIComponent(input.artifactId)}:${encodeURIComponent(input.path)}`);
+      window.dispatchEvent(new Event("hashchange"));
+    }
+  }, []);
+
+  const handleUnstallRoom = useCallback(async (roomId: string) => {
+    setUnstallPending(true);
+    setBannerError(undefined);
+    try {
+      const response = await csrfFetch(`/rooms/${encodeURIComponent(roomId)}/unstall`, { method: "POST" });
+      if (!response.ok) throw new Error(`Unstall failed with ${response.status}`);
+    } catch (err) {
+      setBannerError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUnstallPending(false);
+    }
+  }, [csrfFetch]);
+
   const handleEditPending = useCallback((messageId: string) => {
     setEditingTurnId(messageId);
     if (!activeRoomId) return;
@@ -260,6 +283,15 @@ export default function App() {
           </div>
         </div>
       ) : null}
+      {activeRoom.stalledAt ? (
+        <StalledRoomBanner
+          reason={activeRoom.stalledReason}
+          taskIds={activeRoom.stalledTaskIds ?? []}
+          tasks={activeRoom.tasks}
+          pending={unstallPending}
+          onDismiss={() => void handleUnstallRoom(activeRoom.id)}
+        />
+      ) : null}
       <div className="min-h-0 flex-1 overflow-hidden">
         <ChatRoomLayout
           chat={
@@ -338,7 +370,7 @@ export default function App() {
           />
         }
         center={center}
-        panel={activeRoom ? <SidePanel key={`${activeRoom.id}:${sidePanelTab}`} room={activeRoom} csrfFetch={csrfFetch} initialTab={sidePanelTab} /> : null}
+        panel={activeRoom ? <SidePanel key={`${activeRoom.id}:${sidePanelTab}`} room={activeRoom} csrfFetch={csrfFetch} initialTab={sidePanelTab} onOpenArtifact={handleOpenArtifact} /> : null}
         roomsCollapsed={leftCollapsed}
         panelCollapsed={rightCollapsed || !activeRoom}
       />
@@ -361,5 +393,26 @@ export default function App() {
         csrfFetch={csrfFetch}
       />
     </>
+  );
+}
+
+function StalledRoomBanner({ reason, taskIds, tasks, pending, onDismiss }: { reason?: string | undefined; taskIds: readonly string[]; tasks: ReadonlyArray<{ readonly id: string; readonly title: string }>; pending: boolean; onDismiss: () => void }) {
+  const taskById = new Map(tasks.map((task) => [task.id, task.title]));
+  const labels = taskIds.map((taskId) => taskById.has(taskId) ? `${taskById.get(taskId)} (${taskId})` : taskId);
+
+  return (
+    <div className="shrink-0 border-b border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-950 dark:border-warning-800 dark:bg-warning-950/35 dark:text-warning-100" role="status">
+      <div className="flex flex-wrap items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="font-semibold">Room stalled{reason ? `: ${reason.replace(/_/gu, " ")}` : ""}</div>
+          <div className="mt-1 text-xs opacity-85">
+            {labels.length > 0 ? `Tasks: ${labels.join(", ")}` : "No task ids were reported."}
+          </div>
+        </div>
+        <Button size="sm" variant="secondary" isPending={pending} onPress={onDismiss}>
+          Dismiss
+        </Button>
+      </div>
+    </div>
   );
 }
