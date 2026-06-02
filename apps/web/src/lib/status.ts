@@ -81,6 +81,7 @@ export function contextStatusColor(status: string): ChipColor {
 
 export function taskStatusColor(status: string): ChipColor {
   switch (status) {
+    case "completed":
     case "done":
       return "success";
     case "failed":
@@ -88,11 +89,13 @@ export function taskStatusColor(status: string): ChipColor {
       return "danger";
     case "cancelled":
       return "default";
+    case "in_progress":
     case "running":
     case "waiting_approval":
       return "warning";
     case "review":
       return "accent";
+    case "pending":
     case "queued":
     case "todo":
     default:
