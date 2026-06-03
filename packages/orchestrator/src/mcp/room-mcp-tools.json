@@ -1,0 +1,460 @@
+[
+  {
+    "name": "room.list_members",
+    "description": "List all agents currently in this room with their role, roleId, bindingId, presence, and @slug.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "room.send_message",
+    "description": "Send a message into the current room. In multi-agent rooms, use @slug mentions from room.list_members to route directly to teammates.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "text": { "type": "string", "description": "Message text. Use @slug to mention teammate agents." },
+        "idempotencyKey": { "type": "string", "description": "Optional idempotency key." }
+      },
+      "required": ["text"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "room.read_mailbox",
+    "description": "Read mailbox messages and queued next-turn inputs delivered to this run.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deliveryBatchId": { "type": "string", "description": "Optional idempotency key. Reusing it returns the same batch." }
+      },
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "room.spawn_agent",
+    "description": "Leader-only: create a new teammate agent in this room.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "adapterId": { "type": "string" },
+        "model": { "type": "string" },
+        "rolePrompt": { "type": "string" },
+        "capabilities": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["name"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "room.add_participant",
+    "description": "Leader-only: add an existing agent binding as a room participant.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "agentBindingId": { "type": "string" },
+        "displayNameOverride": { "type": "string" }
+      },
+      "required": ["agentBindingId"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "room.create_task",
+    "description": "Create a task in the current room.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "parentTaskId": { "type": "string" },
+        "description": { "type": "string" },
+        "assigneeAgentId": { "type": "string" },
+        "assigneeRoleId": { "type": "string" },
+        "dependencies": { "type": "array", "items": { "type": "string" } },
+        "priority": { "type": "string" },
+        "dueAt": { "type": "number" },
+        "idempotencyKey": { "type": "string" }
+      },
+      "required": ["title"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "room.update_task",
+    "description": "Update a task status, board column, comment, blocker, artifact link, or priority.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "taskId": { "type": "string" },
+        "status": { "type": "string" },
+        "boardColumn": { "type": "string" },
+        "reason": { "type": "string" },
+        "addComment": { "type": "string" },
+        "setBlocker": { "type": "string" },
+        "linkArtifact": { "type": "string" },
+        "priority": { "type": "string" },
+        "idempotencyKey": { "type": "string" }
+      },
+      "required": ["taskId"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "room.list_tasks",
+    "description": "List tasks in the current room.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "status": { "type": "string" },
+        "assigneeAgentId": { "type": "string" },
+        "assigneeRoleId": { "type": "string" },
+        "runId": { "type": "string" }
+      },
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "room.query_tasks",
+    "description": "Search and filter room tasks by text, status, assignee, priority, or blocked state.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": { "type": "string" },
+        "status": { "type": "string" },
+        "assigneeAgentId": { "type": "string" },
+        "assigneeRoleId": { "type": "string" },
+        "priority": { "type": "string" },
+        "blocked": { "type": "boolean" },
+        "limit": { "type": "number" }
+      },
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "room.get_board",
+    "description": "Return the room task board grouped into Backlog, In Progress, Waiting, Review, and Done columns.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "room.move_task",
+    "description": "Move a task to a Kanban board column.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "taskId": { "type": "string" },
+        "column": { "type": "string" }
+      },
+      "required": ["taskId", "column"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "room.set_blocker",
+    "description": "Mark a task as blocked with a blocker reason.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "taskId": { "type": "string" },
+        "blockerReason": { "type": "string" },
+        "reason": { "type": "string" }
+      },
+      "required": ["taskId", "blockerReason"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "room.clear_blocker",
+    "description": "Clear a task blocker and move it back to pending or in_progress.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "taskId": { "type": "string" },
+        "nextStatus": { "type": "string" },
+        "reason": { "type": "string" }
+      },
+      "required": ["taskId"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "room.list_blockers",
+    "description": "List blocked tasks in the current room.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "room.standup",
+    "description": "Summarize current room task progress, blockers, review items, and recently completed work.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "room.review",
+    "description": "Move a task into review, complete a review item, or list review tasks.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "taskId": { "type": "string" },
+        "decision": { "type": "string", "description": "Optional: approve, reject, or request_changes." },
+        "reason": { "type": "string" }
+      },
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "room.delegate",
+    "description": "Leader-only: delegate work to a teammate role. To dispatch an existing pending backlog task, pass taskId. To create and wake a new task, pass toRoleId and title.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "taskId": { "type": "string", "description": "Existing pending task to dispatch from the backlog." },
+        "toRoleId": { "type": "string", "description": "Target teammate role id from room.list_members." },
+        "title": { "type": "string", "description": "Task title when creating a new delegated task." },
+        "description": { "type": "string" },
+        "parentTaskId": { "type": "string" },
+        "expectsReview": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "room.complete_task",
+    "description": "Teammate-only: submit a structured completion report for an assigned delegated task.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "taskId": { "type": "string" },
+        "status": { "type": "string" },
+        "summary": { "type": "string" },
+        "blockerReason": { "type": "string" },
+        "artifactIds": { "type": "array", "items": { "type": "string" } },
+        "filesChanged": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["taskId", "status", "summary"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "room.apply_worktree",
+    "description": "Leader-only: apply the latest ready_for_review worktree diff artifact for a run.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "runId": { "type": "string" }
+      },
+      "required": ["runId"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "room.discard_worktree",
+    "description": "Leader-only: discard the worktree diff artifact and temporary worktree for a run.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "runId": { "type": "string" }
+      },
+      "required": ["runId"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "room.list_runtimes",
+    "description": "List configured runtimes in the current workspace without exposing secrets.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "room.list_models",
+    "description": "List configured model profiles in the current workspace without exposing API keys.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "room.describe_role",
+    "description": "Describe a role, either by roleId or by an agent participant in this room.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "roleId": { "type": "string" },
+        "agentId": { "type": "string" }
+      },
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "room.list_skills",
+    "description": "List skills active for this agent plus room-level skill assignments.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "scope": { "type": "string", "description": "effective, room, workspace, or all." }
+      },
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "room.load_skill",
+    "description": "Load a skill package's SKILL.md content and supporting files.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "skillId": { "type": "string" },
+        "name": { "type": "string" },
+        "includeFiles": { "type": "boolean" }
+      },
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "file.read",
+    "description": "Read the contents of a file in the workspace.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string", "description": "Relative path to the file within the workspace." }
+      },
+      "required": ["path"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "file.write",
+    "description": "Write content to a file in the workspace.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string", "description": "Relative path to the file within the workspace." },
+        "content": { "type": "string", "description": "Content to write to the file." }
+      },
+      "required": ["path", "content"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "file.list",
+    "description": "List files and directories under a workspace path.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string" },
+        "recursive": { "type": "boolean" },
+        "limit": { "type": "number" }
+      },
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "file.glob",
+    "description": "Find workspace files by a glob pattern.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "pattern": { "type": "string" },
+        "limit": { "type": "number" }
+      },
+      "required": ["pattern"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "file.grep",
+    "description": "Search workspace files for a text or regular expression pattern.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "pattern": { "type": "string" },
+        "path": { "type": "string" },
+        "regex": { "type": "boolean" },
+        "caseSensitive": { "type": "boolean" },
+        "limit": { "type": "number" }
+      },
+      "required": ["pattern"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "file.edit",
+    "description": "Replace an exact string in a workspace file.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string" },
+        "oldText": { "type": "string" },
+        "newText": { "type": "string" },
+        "replaceAll": { "type": "boolean" }
+      },
+      "required": ["path", "oldText", "newText"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "file.apply_patch",
+    "description": "Apply a unified diff patch within the workspace using git apply.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "patch": { "type": "string" },
+        "checkOnly": { "type": "boolean" }
+      },
+      "required": ["patch"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "shell",
+    "description": "Execute a shell command in the workspace.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "command": { "type": "string", "description": "Shell command to execute." },
+        "cwd": { "type": "string", "description": "Optional workspace-relative working directory." }
+      },
+      "required": ["command"],
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "todo.write",
+    "description": "Record a lightweight todo/checklist as a task activity for the current run or a task.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "taskId": { "type": "string" },
+        "todos": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "content": { "type": "string" },
+              "status": { "type": "string" }
+            },
+            "additionalProperties": true
+          }
+        },
+        "summary": { "type": "string" }
+      },
+      "required": ["todos"],
+      "additionalProperties": true
+    }
+  }
+]
