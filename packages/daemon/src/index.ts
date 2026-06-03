@@ -92,7 +92,7 @@ export type DaemonStartupPhase =
   | "CommandBus open"
   | "HTTP server bind + SSE accept";
 export type RoleDraftGenerator = (input: RoleDraftGenerationInput) => Promise<RoleDraft>;
-export type DaemonOptions = { readonly databasePath: string; readonly host?: string; readonly port?: number; readonly token?: string; readonly allowRemote?: boolean; readonly allowedOrigins?: readonly string[]; readonly adapterCommands?: { readonly claude?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv }; readonly opencode?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv } }; readonly now?: () => number; readonly modelTestFetch?: typeof fetch; readonly roleDraftGenerator?: RoleDraftGenerator; readonly onLifecyclePhase?: (event: { readonly direction: "startup" | "shutdown"; readonly phase: DaemonStartupPhase }) => void };
+export type DaemonOptions = { readonly databasePath: string; readonly workspaceRoot?: string; readonly host?: string; readonly port?: number; readonly token?: string; readonly allowRemote?: boolean; readonly allowedOrigins?: readonly string[]; readonly adapterCommands?: { readonly claude?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv }; readonly opencode?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv } }; readonly now?: () => number; readonly modelTestFetch?: typeof fetch; readonly roleDraftGenerator?: RoleDraftGenerator; readonly onLifecyclePhase?: (event: { readonly direction: "startup" | "shutdown"; readonly phase: DaemonStartupPhase }) => void };
 export type DaemonCloseOptions = { readonly forceCancelAfterMs?: number };
 export type DaemonCloseResult = { readonly forced: boolean; readonly cancelledRunIds: readonly string[] };
 export type DaemonApp = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly lifecycle: RunLifecycleService; readonly roomMcpServer: RoomMcpServer; readonly adapterRegistry: AdapterRegistry; readonly mockAdapter: MockAdapterManager; readonly handle: (req: IncomingMessage, res: ServerResponse) => void; readonly inFlightRunIds: () => readonly string[]; start(): Promise<Server>; close(options?: DaemonCloseOptions): Promise<DaemonCloseResult> };
@@ -192,7 +192,8 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     emitPhase("startup", PHASE_SQLITE);
     const database = createDatabase({ path: options.databasePath, applyMigrations: true });
     migrateAgentProfilesToV10(database, options.now?.() ?? Date.now());
-    seedDefaultData(database, options.now?.() ?? Date.now());
+    const workspaceRoot = resolvePath(options.workspaceRoot ?? process.cwd());
+    seedDefaultData(database, options.now?.() ?? Date.now(), workspaceRoot);
     seedBuiltInPermissionProfiles(database, options.now?.() ?? Date.now());
     cleanExpiredRoleDrafts(database, options.now?.() ?? Date.now());
     bootstrapBuiltInAgents();
@@ -468,7 +469,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     const commandBus = createCommandBus({
       database,
       handlers: {
-        ...createDaemonCommandHandlers({ database, eventBus, getCommandBus: () => commandBus, pendingTurns, prewarmRoomAgents: (roomId) => adapterRegistry.prewarmRoomAgents(roomId), disposeRoomAgents: (roomId) => adapterRegistry.disposeRoomAgents(roomId), ...(options.now !== undefined ? { now: options.now } : {}) }),
+        ...createDaemonCommandHandlers({ database, eventBus, getCommandBus: () => commandBus, pendingTurns, workspaceRoot, prewarmRoomAgents: (roomId) => adapterRegistry.prewarmRoomAgents(roomId), disposeRoomAgents: (roomId) => adapterRegistry.disposeRoomAgents(roomId), ...(options.now !== undefined ? { now: options.now } : {}) }),
         ...createContextCommandHandlers(contextLedger, options.now),
         ...createArtifactCommandHandlers(artifactService),
         ...createPermissionCommandHandlers(permissionEngine, database, eventBus, options.now),

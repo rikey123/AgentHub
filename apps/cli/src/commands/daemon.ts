@@ -20,9 +20,10 @@ export async function runDaemonCommand(argv: readonly string[]): Promise<number 
 async function start(argv: readonly string[]): Promise<number> {
   const configPath = valueArg(argv, "--config");
   const port = numericArg(argv, "--port");
+  const workspaceRoot = valueArg(argv, "--workspace-root") ?? process.cwd();
   const config = loadAgentHubConfig({ ...(configPath !== undefined ? { configPath } : {}), ...(port !== undefined ? { port } : {}) });
   ensureAgentHubHome();
-  const daemon = createDaemon({ databasePath: config.databasePath, host: config.server.bind, port: config.server.port, allowRemote: config.server.remote.enabled, ...(config.auth.token !== undefined ? { token: config.auth.token } : {}), ...(config.auth.allowedOrigins !== undefined ? { allowedOrigins: config.auth.allowedOrigins } : {}) });
+  const daemon = createDaemon({ databasePath: config.databasePath, workspaceRoot, host: config.server.bind, port: config.server.port, allowRemote: config.server.remote.enabled, ...(config.auth.token !== undefined ? { token: config.auth.token } : {}), ...(config.auth.allowedOrigins !== undefined ? { allowedOrigins: config.auth.allowedOrigins } : {}) });
   const server = await daemon.start();
   writePidFile({ pid: process.pid, host: config.server.bind, port: boundPort(server), startedAt: Date.now() });
   process.stdout.write(`${JSON.stringify(redactConfig(config), null, 2)}\n`);

@@ -9,6 +9,7 @@ export type DaemonCommandHandlersOptions = {
   readonly eventBus: EventBus;
   readonly getCommandBus: () => CommandBus;
   readonly pendingTurns: PendingTurnService;
+  readonly workspaceRoot?: string;
   readonly prewarmRoomAgents?: (roomId: string) => void | Promise<void>;
   readonly disposeRoomAgents?: (roomId: string) => void;
   readonly now?: () => number;
@@ -134,7 +135,7 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
   const leaderPayload = leaderRoleId !== undefined ? { leaderRoleId } : {};
 
   options.database.sqlite.transaction(() => {
-    ensureWorkspace(options.database, workspaceId, now);
+    ensureWorkspace(options.database, workspaceId, now, options.workspaceRoot);
     options.database.sqlite
       .prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, leader_role_id, archived_at, created_at, updated_at) VALUES (?, ?, ?, ?, 'conversation', ?, ?, NULL, ?, ?)")
       .run(roomId, workspaceId, title, mode, primaryAgentId, leaderRoleId ?? null, now, now);
@@ -427,9 +428,9 @@ function deleteMessage(options: DaemonCommandHandlersOptions, command: Command):
   return { ok: true, data: { messageId }, emittedEvents: latestEvents(options.database, row.room_id) };
 }
 
-export function seedDefaultData(database: AgentHubDatabase, now = Date.now()): void {
+export function seedDefaultData(database: AgentHubDatabase, now = Date.now(), workspaceRoot = process.cwd()): void {
   database.sqlite.transaction(() => {
-    ensureWorkspace(database, "default-workspace", now);
+    ensureDefaultWorkspace(database, now, workspaceRoot);
     const insert = database.sqlite.prepare(
       `INSERT OR IGNORE INTO agent_profiles (
         id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at
@@ -496,8 +497,22 @@ When delegating, always specify: what needs to be done, what the expected output
   })();
 }
 
-function ensureWorkspace(database: AgentHubDatabase, workspaceId: string, now: number): void {
-  database.sqlite.prepare("INSERT OR IGNORE INTO workspaces (id, name, root_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run(workspaceId, "Default Workspace", process.cwd(), now, now);
+function ensureWorkspace(database: AgentHubDatabase, workspaceId: string, now: number, workspaceRoot = process.cwd()): void {
+  if (workspaceId === "default-workspace") {
+    ensureDefaultWorkspace(database, now, workspaceRoot);
+    return;
+  }
+  database.sqlite.prepare("INSERT OR IGNORE INTO workspaces (id, name, root_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run(workspaceId, "Workspace", workspaceRoot, now, now);
+}
+
+function ensureDefaultWorkspace(database: AgentHubDatabase, now: number, workspaceRoot: string): void {
+  database.sqlite
+    .prepare(
+      `INSERT INTO workspaces (id, name, root_path, created_at, updated_at)
+       VALUES ('default-workspace', 'Default Workspace', ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET root_path = excluded.root_path, updated_at = excluded.updated_at`
+    )
+    .run(workspaceRoot, now, now);
 }
 
 type RoomRow = { readonly id: string; readonly workspace_id: string; readonly primary_agent_id: string | null; readonly mode: string };

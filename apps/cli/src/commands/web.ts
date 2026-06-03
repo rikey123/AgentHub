@@ -25,7 +25,7 @@ export async function runWebCommand(argv: readonly string[]): Promise<number | u
 
   try {
     if (!(await probeHealth(daemonUrl))) {
-      const daemon = await spawnManaged("pnpm.cmd", ["exec", "tsx", "apps/cli/src/index.ts", "start"], true);
+      const daemon = await spawnManaged("pnpm.cmd", ["exec", "tsx", "apps/cli/src/index.ts", "start", "--workspace-root", process.cwd()], true);
       managedChildren.push(daemon);
       await waitForHealth(`${daemonUrl}/healthz`, daemon, () => stopState.requested, "daemon");
     }

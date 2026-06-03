@@ -162,6 +162,53 @@ describe("daemon M1.4 composition", () => {
     expect(await response.json()).toMatchObject({ error: "squad_mode_requires_leader_role_id" });
   });
 
+  it("syncs default workspace root to daemon launch workspace on startup", async () => {
+    await daemon.close();
+    currentDaemon = undefined;
+    const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-workspace-root-"));
+    const databasePath = join(dir, "agenthub.sqlite");
+    const firstRoot = join(dir, "first");
+    const secondRoot = join(dir, "second");
+    mkdirSync(firstRoot, { recursive: true });
+    mkdirSync(secondRoot, { recursive: true });
+
+    const firstDaemon = createDaemon({ databasePath, port: 0, workspaceRoot: firstRoot, modelTestFetch: modelTestFetchMock });
+    await firstDaemon.start();
+    await firstDaemon.close();
+
+    const secondDaemon = createDaemon({ databasePath, port: 0, workspaceRoot: secondRoot, modelTestFetch: modelTestFetchMock });
+    await secondDaemon.start();
+
+    expect(secondDaemon.database.sqlite.prepare("SELECT root_path FROM workspaces WHERE id = 'default-workspace'").get()).toMatchObject({ root_path: secondRoot });
+
+    await secondDaemon.close();
+  });
+
+  it("does not rewrite non-default workspace roots during daemon startup", async () => {
+    await daemon.close();
+    currentDaemon = undefined;
+    const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-workspace-preserve-"));
+    const databasePath = join(dir, "agenthub.sqlite");
+    const launchRoot = join(dir, "launch");
+    const customRoot = join(dir, "custom");
+    mkdirSync(launchRoot, { recursive: true });
+    mkdirSync(customRoot, { recursive: true });
+    const seeded = createDatabase({ path: databasePath, applyMigrations: true });
+    try {
+      seeded.sqlite.prepare("INSERT INTO workspaces (id, name, root_path, created_at, updated_at) VALUES ('custom-workspace', 'Custom', ?, 1, 1)").run(customRoot);
+    } finally {
+      seeded.sqlite.close();
+    }
+
+    const seededDaemon = createDaemon({ databasePath, port: 0, workspaceRoot: launchRoot, modelTestFetch: modelTestFetchMock });
+    await seededDaemon.start();
+
+    expect(seededDaemon.database.sqlite.prepare("SELECT root_path FROM workspaces WHERE id = 'default-workspace'").get()).toMatchObject({ root_path: launchRoot });
+    expect(seededDaemon.database.sqlite.prepare("SELECT root_path FROM workspaces WHERE id = 'custom-workspace'").get()).toMatchObject({ root_path: customRoot });
+
+    await seededDaemon.close();
+  });
+
   it("creates team rooms with leaderRoleId and resolves V1.0 participants", async () => {
     const workspaceId = "default-workspace";
     const now = Date.now();
