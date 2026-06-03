@@ -64,4 +64,37 @@ describe("convertMcpToolsToAiSdkTools", () => {
     }));
     expect(toolSet.room_delegate?.inputSchema).not.toHaveProperty("jsonSchema.anyOf");
   });
+
+  it("exposes every mature room MCP tool needed by native agents", () => {
+    const names = new Set(roomMcpTools.map((tool) => tool.name));
+
+    expect([...names].sort()).toEqual(expect.arrayContaining([
+      "file.apply_patch",
+      "file.edit",
+      "file.glob",
+      "file.grep",
+      "file.list",
+      "file.read",
+      "file.write",
+      "room.add_participant",
+      "room.apply_worktree",
+      "room.clear_blocker",
+      "room.complete_task",
+      "room.describe_role",
+      "room.discard_worktree",
+      "room.get_board",
+      "room.list_blockers",
+      "room.list_models",
+      "room.list_runtimes",
+      "room.list_skills",
+      "room.load_skill",
+      "room.move_task",
+      "room.query_tasks",
+      "room.review",
+      "room.set_blocker",
+      "room.standup",
+      "shell",
+      "todo.write"
+    ]));
+  });
 });

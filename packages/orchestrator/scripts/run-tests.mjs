@@ -9,6 +9,8 @@ const vitestArgs = [
   "run",
   "packages/orchestrator/test/orchestrator.test.ts",
   "packages/orchestrator/test/run-prompt-source.test.ts",
+  "packages/orchestrator/test/room-mcp-tools.test.ts",
+  "packages/orchestrator/test/room-mcp-mature-tools.test.ts",
   "packages/orchestrator/test/room-mcp-file-shell.test.ts",
   "packages/orchestrator/test/room-mcp-symlink.test.ts",
   "packages/orchestrator/test/complete-task.test.ts",
