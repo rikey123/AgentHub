@@ -5,13 +5,16 @@ import type { TaskViewModel } from "../../types.ts";
 import {
   TasksPanel,
   aggregateFileChanges,
+  buildTaskBoardSummary,
   dependencyLines,
   fileArtifactTarget,
+  filterTasksForBoard,
   getTaskDetail,
   groupTasksByKanbanColumn,
   hydrateExecutionPlanFromLatest,
   latestWorktreeReview,
   positionDependencyLines,
+  taskBoardBrief,
   taskBoardResponseError,
   roomExecutionPlan,
   summarizeTaskActivityPayload,
@@ -36,6 +39,9 @@ describe("TasksPanel V1.1 Kanban task view contract", () => {
     expect(html).toContain("Open Kanban");
     expect(html).toContain("Prepare plan");
     expect(html).toContain("Build panel");
+    expect(html).toContain("Board health");
+    expect(html).toContain("Standup brief");
+    expect(html).toContain("Blockers first");
     expect(html).not.toContain("data-testid=\"tasks-panel-kanban\"");
   });
 
@@ -60,6 +66,65 @@ describe("TasksPanel V1.1 Kanban task view contract", () => {
     ]);
     expect(taskColumn(tasks[5]!)).toBe("Review");
     expect(taskColumn(tasks[6]!)).toBeUndefined();
+  });
+
+  it("builds a mature board health summary from task, dependency, file, and worktree state", () => {
+    const tasks = [
+      task({ id: "active", title: "Build runtime", status: "in_progress", delegations: [{ id: "d-active", createdAt: 100, runId: "run-active" }] }),
+      task({ id: "blocked", title: "Resolve keychain", status: "blocked", blockerReason: "Missing API key" }),
+      task({ id: "review", title: "Review patch", status: "review" }),
+      task({ id: "ready", title: "Apply worktree", status: "in_progress", worktreeReviews: [{ runId: "run-ready", artifactId: "artifact-ready", status: "ready_for_review", updatedAt: 300 }] }),
+      task({ id: "conflict", title: "Fix merge", status: "blocked", worktreeReviews: [{ runId: "run-conflict", status: "conflict", updatedAt: 400 }] }),
+      task({ id: "files", title: "Edit UI", status: "in_progress", fileChangeRuns: [{ runId: "run-files", createdAt: 500, files: [{ path: "apps/web/src/App.tsx", change: "modified" }] }] }),
+      task({ id: "waiting", title: "Wait for active", status: "pending", dependencies: ["active"] }),
+      task({ id: "done", title: "Shipped", status: "completed" })
+    ];
+
+    expect(buildTaskBoardSummary(tasks)).toMatchObject({
+      total: 8,
+      visible: 8,
+      active: 3,
+      blocked: 2,
+      review: 1,
+      done: 1,
+      readyToApply: 1,
+      conflicts: 1,
+      filesChanged: 1,
+      waitingDependencies: 1,
+      runningRuns: 1
+    });
+  });
+
+  it("filters the board with Hermes-style query lenses", () => {
+    const tasks = [
+      task({ id: "blocked", status: "blocked", blockerReason: "Need approval" }),
+      task({ id: "review", status: "review" }),
+      task({ id: "ready", status: "in_progress", worktreeReviews: [{ runId: "run-ready", status: "ready_for_review", updatedAt: 10 }] }),
+      task({ id: "files", status: "in_progress", fileChangeRuns: [{ runId: "run-files", createdAt: 20, files: [{ path: "a.ts", change: "modified" }] }] }),
+      task({ id: "cancelled", status: "cancelled" })
+    ];
+
+    expect(filterTasksForBoard(tasks, "all").map((item) => item.id)).toEqual(["blocked", "review", "ready", "files"]);
+    expect(filterTasksForBoard(tasks, "blocked").map((item) => item.id)).toEqual(["blocked"]);
+    expect(filterTasksForBoard(tasks, "review").map((item) => item.id)).toEqual(["review"]);
+    expect(filterTasksForBoard(tasks, "ready").map((item) => item.id)).toEqual(["ready"]);
+    expect(filterTasksForBoard(tasks, "files").map((item) => item.id)).toEqual(["files"]);
+  });
+
+  it("creates blockers-first standup and review briefs like the reference Kanban rituals", () => {
+    const tasks = [
+      task({ id: "active", title: "Build runtime", status: "in_progress", priority: "2" }),
+      task({ id: "blocked", title: "Resolve keychain", status: "blocked", blockerReason: "Missing API key" }),
+      task({ id: "waiting", title: "Wait for active", status: "pending", dependencies: ["active"] }),
+      task({ id: "review", title: "Review patch", status: "review" }),
+      task({ id: "done", title: "Shipped", status: "completed" })
+    ];
+
+    expect(taskBoardBrief(tasks)).toEqual({
+      standup: "1 active, 1 blocked, 1 waiting on dependencies",
+      review: "Completed: 1. Carry-over: 4. Blocked: 1.",
+      blockers: [{ id: "blocked", title: "Resolve keychain", reason: "Missing API key" }]
+    });
   });
 
   it("opens task detail data with assignee, parent, children, and newest-first activity timeline", () => {

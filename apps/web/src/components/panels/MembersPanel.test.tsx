@@ -40,6 +40,7 @@ describe("MembersPanel team management contract", () => {
     expect(html).toContain("code.edit");
     expect(html).toContain("file.write");
     expect(html).toContain("Build member management UI");
+    expect(html).toContain("Working");
     expect(html).toContain("Skills");
   });
 });

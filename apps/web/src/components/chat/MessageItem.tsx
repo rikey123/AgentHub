@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Avatar, Button, Card, Chip, Dropdown } from "@heroui/react";
 import type { MessageViewModel } from "../../types.ts";
 import { formatTime, initials } from "../../lib/format.ts";
@@ -20,6 +21,7 @@ interface MessageItemProps {
 
 export function MessageItem(props: MessageItemProps) {
   const { message, isSelected, onSelect, onOpenRun, onQuote, onPin, onRegenerate, onDelete, onCancelPending, onEditPending, csrfFetch } = props;
+  const [expanded, setExpanded] = useState(false);
 
   const isUser = message.senderType === "user";
   const isSystem = message.senderType === "system";
@@ -27,6 +29,8 @@ export function MessageItem(props: MessageItemProps) {
   const isStreaming = message.status === "streaming";
   const isPending = !!message.pendingTurnId && (message.pendingTurnStatus === "queued" || message.pendingTurnStatus === "scheduled");
   const testId = `message-bubble-${isUser ? "user" : isSystem ? "system" : "agent"}`;
+  const textPreview = publicAgentTextPreview(message.text, message.senderType, isStreaming);
+  const visibleText = textPreview.collapsed && !expanded ? textPreview.preview : message.text;
 
   return (
     <div
@@ -114,8 +118,22 @@ export function MessageItem(props: MessageItemProps) {
 
             {message.text ? (
               <p className={["whitespace-pre-wrap break-words", isStreaming ? "ah-streaming-caret" : ""].join(" ")}>
-                {message.text}
+                {visibleText}
               </p>
+            ) : null}
+
+            {textPreview.collapsed ? (
+              <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border/70 pt-2">
+                <Chip size="sm" variant="soft" color="default">Long agent reply</Chip>
+                <Button size="sm" variant="tertiary" onPress={() => setExpanded((value) => !value)}>
+                  {expanded ? "Show less" : "Show full"}
+                </Button>
+                {message.runId && onOpenRun ? (
+                  <Button size="sm" variant="secondary" onPress={() => onOpenRun(message.runId!)}>
+                    Open run
+                  </Button>
+                ) : null}
+              </div>
             ) : null}
 
             {message.parts.length > 0 ? (
@@ -147,6 +165,27 @@ export function MessageItem(props: MessageItemProps) {
       </div>
     </div>
   );
+}
+
+function publicAgentTextPreview(text: string, senderType: MessageViewModel["senderType"], isStreaming: boolean): { collapsed: boolean; preview: string } {
+  if (senderType !== "agent" || isStreaming) return { collapsed: false, preview: text };
+  const contentLines = text.split(/\r?\n/).filter((line) => line.trim().length > 0);
+  const shouldCollapse = text.length > 640 || contentLines.length > 4;
+  if (!shouldCollapse) return { collapsed: false, preview: text };
+
+  if (text.length > 640 && contentLines.length <= 4) {
+    return { collapsed: true, preview: `${text.slice(0, 520).trimEnd()}...` };
+  }
+
+  const lines = text.split(/\r?\n/);
+  let contentCount = 0;
+  const previewLines: string[] = [];
+  for (const line of lines) {
+    if (line.trim().length > 0) contentCount += 1;
+    if (contentCount > 4) break;
+    previewLines.push(line);
+  }
+  return { collapsed: true, preview: `${previewLines.join("\n").trimEnd()}...` };
 }
 
 function PartView({ part, csrfFetch }: { part: MessageViewModel["parts"][number]; csrfFetch: typeof fetch }) {

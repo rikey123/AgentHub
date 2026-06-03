@@ -306,7 +306,15 @@ function MemberRow({
                 <Chip size="sm" variant="soft" color={presenceColor(member.presence)}>{member.presence}</Chip>
               </div>
               <Card.Description className="mt-1 text-xs">{member.role} / {member.adapterId}</Card.Description>
-              {task ? <p className="mt-2 truncate text-xs text-muted">Current task: {task.title}</p> : null}
+              {task ? (
+                <div className="mt-2 rounded-lg border border-border bg-surface-secondary px-2 py-1.5">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <Chip size="sm" variant="soft" color={taskStatusColor(task.status)}>{taskStatusLabel(task.status)}</Chip>
+                    <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">{task.title}</span>
+                  </div>
+                  {task.blockerReason ? <p className="mt-1 truncate text-xs text-danger">{task.blockerReason}</p> : null}
+                </div>
+              ) : null}
               <div className="mt-2 flex flex-wrap gap-1">
                 {capabilities.length === 0 ? (
                   <Chip size="sm" variant="soft" color="default">no capabilities</Chip>
@@ -447,6 +455,46 @@ function currentTaskForMember(member: ParticipantViewModel, tasks: ReadonlyArray
       || (member.roleId !== undefined && task.assigneeRoleId === member.roleId)
     )
   );
+}
+
+function taskStatusLabel(status: string): string {
+  switch (status) {
+    case "in_progress":
+    case "running":
+      return "Working";
+    case "queued":
+    case "assigned":
+      return "Queued";
+    case "review":
+    case "waiting_review":
+      return "Review";
+    case "blocked":
+      return "Blocked";
+    case "failed":
+      return "Failed";
+    default:
+      return status;
+  }
+}
+
+function taskStatusColor(status: string): "default" | "success" | "warning" | "danger" | "accent" {
+  switch (status) {
+    case "in_progress":
+    case "running":
+      return "success";
+    case "queued":
+    case "assigned":
+      return "default";
+    case "review":
+    case "waiting_review":
+      return "accent";
+    case "blocked":
+      return "warning";
+    case "failed":
+      return "danger";
+    default:
+      return "default";
+  }
 }
 
 function normalizeAgentBindings(payload: unknown): AgentBindingOption[] {

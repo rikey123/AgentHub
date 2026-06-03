@@ -33,6 +33,37 @@ export type TaskStatusGroup = (typeof KANBAN_COLUMNS)[number] & {
   readonly items: TaskViewModel[];
 };
 
+export const TASK_BOARD_FILTERS = [
+  { key: "all", label: "All" },
+  { key: "blocked", label: "Blocked" },
+  { key: "review", label: "Review" },
+  { key: "waiting", label: "Waiting" },
+  { key: "ready", label: "Ready" },
+  { key: "files", label: "Changed files" }
+] as const;
+
+export type TaskBoardFilter = (typeof TASK_BOARD_FILTERS)[number]["key"];
+
+export type TaskBoardSummary = {
+  readonly total: number;
+  readonly visible: number;
+  readonly active: number;
+  readonly blocked: number;
+  readonly review: number;
+  readonly done: number;
+  readonly readyToApply: number;
+  readonly conflicts: number;
+  readonly filesChanged: number;
+  readonly waitingDependencies: number;
+  readonly runningRuns: number;
+};
+
+export type TaskBoardBrief = {
+  readonly standup: string;
+  readonly review: string;
+  readonly blockers: readonly { readonly id: string; readonly title: string; readonly reason: string }[];
+};
+
 type TaskDetail = {
   readonly task: TaskViewModel;
   readonly parent?: TaskViewModel | undefined;
@@ -98,6 +129,59 @@ export function groupTasksByKanbanColumn(tasks: ReadonlyArray<TaskViewModel>): T
     ...column,
     items: tasks.filter((task) => taskColumn(task) === column.label)
   }));
+}
+
+export function buildTaskBoardSummary(tasks: ReadonlyArray<TaskViewModel>): TaskBoardSummary {
+  const visible = tasks.filter((task) => taskColumn(task) !== undefined);
+  return {
+    total: tasks.length,
+    visible: visible.length,
+    active: visible.filter(isActiveTask).length,
+    blocked: visible.filter(isBlockedTask).length,
+    review: visible.filter((task) => task.status === "review").length,
+    done: visible.filter((task) => task.status === "completed").length,
+    readyToApply: visible.filter(hasReadyWorktree).length,
+    conflicts: visible.filter(hasWorktreeConflict).length,
+    filesChanged: visible.filter((task) => aggregateFileChanges(task) > 0).length,
+    waitingDependencies: visible.filter((task) => unresolvedDependencyCount(task, tasks) > 0).length,
+    runningRuns: visible.reduce((total, task) => total + activeRunCount(task), 0)
+  };
+}
+
+export function filterTasksForBoard(tasks: ReadonlyArray<TaskViewModel>, filter: TaskBoardFilter): TaskViewModel[] {
+  const visible = tasks.filter((task) => taskColumn(task) !== undefined);
+  switch (filter) {
+    case "blocked":
+      return visible.filter(isBlockedTask);
+    case "review":
+      return visible.filter((task) => task.status === "review");
+    case "waiting":
+      return visible.filter((task) => unresolvedDependencyCount(task, tasks) > 0);
+    case "ready":
+      return visible.filter(hasReadyWorktree);
+    case "files":
+      return visible.filter((task) => aggregateFileChanges(task) > 0);
+    case "all":
+    default:
+      return visible;
+  }
+}
+
+export function taskBoardBrief(tasks: ReadonlyArray<TaskViewModel>): TaskBoardBrief {
+  const summary = buildTaskBoardSummary(tasks);
+  const visible = tasks.filter((task) => taskColumn(task) !== undefined);
+  const carryOver = visible.filter((task) => task.status !== "completed").length;
+  return {
+    standup: `${summary.active} active, ${summary.blocked} blocked, ${summary.waitingDependencies} waiting on dependencies`,
+    review: `Completed: ${summary.done}. Carry-over: ${carryOver}. Blocked: ${summary.blocked}.`,
+    blockers: attentionTasks(visible, tasks)
+      .filter(isBlockedTask)
+      .map((task) => ({
+        id: task.id,
+        title: task.title,
+        reason: blockerText(task)
+      }))
+  };
 }
 
 export function getTaskDetail(tasks: ReadonlyArray<TaskViewModel>, taskId: string | undefined): TaskDetail | undefined {
@@ -236,13 +320,20 @@ export async function taskBoardResponseError(response: Response, fallback: strin
 export function TasksPanel({ roomId, tasks, csrfFetch, executionPlan, onOpenArtifact }: { roomId: string; tasks: ReadonlyArray<TaskViewModel>; csrfFetch: typeof fetch; executionPlan?: RoomExecutionPlanViewModel | undefined; onOpenArtifact?: ((input: { artifactId: string; runId: string; path: string }) => void) | undefined }) {
   const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>(undefined);
   const [kanbanOpen, setKanbanOpen] = useState(false);
+  const [boardFilter, setBoardFilter] = useState<TaskBoardFilter>("all");
   const [actionError, setActionError] = useState<string | undefined>(undefined);
   const [hydratedPlan, setHydratedPlan] = useState<RoomExecutionPlanViewModel | undefined>(undefined);
   const [layoutVersion, setLayoutVersion] = useState(0);
   const boardRef = useRef<HTMLDivElement | null>(null);
   const effectiveExecutionPlan = hydratedPlan?.planId === executionPlan?.planId ? hydratedPlan : executionPlan;
+  const summary = useMemo(() => buildTaskBoardSummary(tasks), [tasks]);
+  const brief = useMemo(() => taskBoardBrief(tasks), [tasks]);
+  const boardTasks = useMemo(() => filterTasksForBoard(tasks, boardFilter), [tasks, boardFilter]);
   const groups = useMemo(() => groupTasksByKanbanColumn(tasks), [tasks]);
+  const boardGroups = useMemo(() => groupTasksByKanbanColumn(boardTasks), [boardTasks]);
   const visibleTasks = useMemo(() => groups.flatMap((group) => group.items), [groups]);
+  const boardVisibleTasks = useMemo(() => boardGroups.flatMap((group) => group.items), [boardGroups]);
+  const attention = useMemo(() => attentionTasks(visibleTasks, tasks), [visibleTasks, tasks]);
   const detail = useMemo(() => getTaskDetail(tasks, selectedTaskId), [tasks, selectedTaskId]);
   const plan = useMemo(() => roomExecutionPlan(effectiveExecutionPlan), [effectiveExecutionPlan]);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
@@ -312,32 +403,52 @@ export function TasksPanel({ roomId, tasks, csrfFetch, executionPlan, onOpenArti
           </div>
           <Button size="sm" variant="secondary" onPress={() => setKanbanOpen(true)}>Open Kanban</Button>
         </div>
+        <BoardHealthStrip summary={summary} compact />
+        <BoardBriefCard brief={brief} attention={attention} allTasks={tasks} onOpenTask={setSelectedTaskId} compact />
         {plan ? <ExecutionPlanCard plan={plan} /> : null}
         <TaskList groups={groups} allTasks={tasks} onOpenTask={setSelectedTaskId} />
       </div>
       <Modal.Backdrop isOpen={kanbanOpen} onOpenChange={setKanbanOpen}>
         <Modal.Container size="cover" className="items-center justify-center p-3">
-          <Modal.Dialog className="flex h-[min(88vh,820px)] w-[min(96vw,1280px)] max-w-[1280px] overflow-hidden p-0" aria-label="Task Kanban board">
+          <Modal.Dialog className="flex h-[min(92vh,920px)] w-[min(98vw,1480px)] max-w-[1480px] overflow-hidden p-0" aria-label="Task Kanban board">
             <Modal.CloseTrigger aria-label="Close Kanban board" />
             <Modal.Header className="border-b border-border px-4 py-3">
-              <div className="min-w-0">
-                <Modal.Heading>Task Board</Modal.Heading>
-                <p className="mt-1 text-xs text-muted">{visibleTasks.length} active task{visibleTasks.length === 1 ? "" : "s"}</p>
+              <div className="flex w-full min-w-0 flex-wrap items-start justify-between gap-3 pr-8">
+                <div className="min-w-0">
+                  <Modal.Heading>Task Board</Modal.Heading>
+                  <p className="mt-1 text-xs text-muted">{boardVisibleTasks.length} shown from {visibleTasks.length} active task{visibleTasks.length === 1 ? "" : "s"}</p>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {TASK_BOARD_FILTERS.map((filter) => (
+                    <Button
+                      key={filter.key}
+                      size="sm"
+                      variant={boardFilter === filter.key ? "primary" : "secondary"}
+                      onPress={() => setBoardFilter(filter.key)}
+                    >
+                      {filter.label}
+                    </Button>
+                  ))}
+                </div>
               </div>
             </Modal.Header>
             <Modal.Body className="min-h-0 p-0">
               <div className="flex h-full min-h-[480px] flex-col gap-3 p-3" data-testid="tasks-panel-kanban">
-        <DndContext sensors={sensors} collisionDetection={collisionDetection} onDragEnd={handleDragEnd}>
-          <div ref={boardRef} className="relative min-h-[420px] flex-1 overflow-x-auto pb-2">
-            <DependencyArrowOverlay lines={dependencyLines(visibleTasks)} layoutVersion={layoutVersion} scrollElementRef={boardRef} />
-            <div className="relative z-10 grid min-w-[760px] grid-cols-5 gap-2">
-              {groups.map((group) => (
-                <TaskColumn key={group.key} group={group} allTasks={tasks} onOpenTask={setSelectedTaskId} />
-              ))}
-            </div>
-          </div>
-        </DndContext>
-      </div>
+                <BoardHealthStrip summary={summary} />
+                <div className="grid min-h-0 flex-1 gap-3 xl:grid-cols-[minmax(0,1fr)_320px]">
+                  <DndContext sensors={sensors} collisionDetection={collisionDetection} onDragEnd={handleDragEnd}>
+                    <div ref={boardRef} className="relative min-h-[420px] flex-1 overflow-x-auto pb-2">
+                      <DependencyArrowOverlay lines={dependencyLines(boardVisibleTasks)} layoutVersion={layoutVersion} scrollElementRef={boardRef} />
+                      <div className="relative z-10 grid min-w-[940px] grid-cols-5 gap-2">
+                        {boardGroups.map((group) => (
+                          <TaskColumn key={group.key} group={group} allTasks={tasks} onOpenTask={setSelectedTaskId} />
+                        ))}
+                      </div>
+                    </div>
+                  </DndContext>
+                  <BoardBriefCard brief={brief} attention={attention} allTasks={tasks} onOpenTask={setSelectedTaskId} />
+                </div>
+              </div>
             </Modal.Body>
           </Modal.Dialog>
         </Modal.Container>
@@ -354,6 +465,111 @@ export function TasksPanel({ roomId, tasks, csrfFetch, executionPlan, onOpenArti
         }}
       />
     </>
+  );
+}
+
+function BoardHealthStrip({ summary, compact = false }: { summary: TaskBoardSummary; compact?: boolean | undefined }) {
+  const metrics = [
+    { key: "active", label: "Active", value: summary.active, detail: `${summary.runningRuns} running run${summary.runningRuns === 1 ? "" : "s"}`, color: "accent" as ChipColor },
+    { key: "blocked", label: "Blocked", value: summary.blocked, detail: "Needs attention", color: "danger" as ChipColor },
+    { key: "review", label: "Review", value: summary.review, detail: "Awaiting decision", color: "warning" as ChipColor },
+    { key: "ready", label: "Ready", value: summary.readyToApply, detail: "Worktree apply", color: "success" as ChipColor },
+    { key: "conflicts", label: "Conflicts", value: summary.conflicts, detail: "Merge pressure", color: "danger" as ChipColor },
+    { key: "files", label: "Files", value: summary.filesChanged, detail: "Changed tasks", color: "default" as ChipColor },
+    { key: "waiting", label: "Waiting", value: summary.waitingDependencies, detail: "Dependency waits", color: "warning" as ChipColor }
+  ];
+  const shown = compact ? metrics.slice(0, 5) : metrics;
+
+  return (
+    <section className="rounded-xl border border-border bg-surface-secondary/70 px-3 py-3" aria-label="Board health">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div>
+          <h3 className="text-xs font-semibold uppercase text-muted">Board health</h3>
+          <p className="text-xs text-muted">{summary.visible} visible / {summary.total} total</p>
+        </div>
+        <Chip size="sm" variant="soft" color={summary.blocked > 0 || summary.conflicts > 0 ? "danger" : summary.review > 0 ? "warning" : "success"}>
+          {summary.blocked > 0 || summary.conflicts > 0 ? "Attention" : summary.review > 0 ? "Review" : "Healthy"}
+        </Chip>
+      </div>
+      <div className={`grid gap-2 ${compact ? "grid-cols-2 sm:grid-cols-5" : "grid-cols-2 md:grid-cols-4 xl:grid-cols-7"}`}>
+        {shown.map((metric) => (
+          <div key={metric.key} className="min-w-0 rounded-lg border border-border bg-surface px-2.5 py-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate text-[11px] font-semibold uppercase text-muted">{metric.label}</span>
+              <Chip size="sm" variant="soft" color={metric.color}>{metric.value}</Chip>
+            </div>
+            <p className="mt-1 truncate text-[11px] text-muted">{metric.detail}</p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function BoardBriefCard({ brief, attention, allTasks, onOpenTask, compact = false }: { brief: TaskBoardBrief; attention: readonly TaskViewModel[]; allTasks: ReadonlyArray<TaskViewModel>; onOpenTask: (taskId: string) => void; compact?: boolean | undefined }) {
+  const shownAttention = attention.slice(0, compact ? 3 : 8);
+
+  return (
+    <Card variant="transparent" className="border border-border bg-surface">
+      <Card.Header className="gap-1">
+        <Card.Title className="text-sm">Standup brief</Card.Title>
+        <Card.Description className="text-xs">{brief.standup}</Card.Description>
+      </Card.Header>
+      <Card.Content className="flex flex-col gap-3">
+        <div className="rounded-lg border border-border bg-surface-secondary px-3 py-2">
+          <div className="mb-1 text-xs font-semibold uppercase text-muted">Weekly review</div>
+          <p className="text-sm">{brief.review}</p>
+        </div>
+        <div>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h3 className="text-xs font-semibold uppercase text-muted">Blockers first</h3>
+            <Chip size="sm" variant="soft" color={brief.blockers.length > 0 ? "danger" : "success"}>{brief.blockers.length}</Chip>
+          </div>
+          {shownAttention.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-border bg-surface-secondary px-3 py-4 text-center text-xs text-muted">No blocked or high-pressure tasks.</p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {shownAttention.map((task) => (
+                <BoardAttentionItem key={task.id} task={task} allTasks={allTasks} onOpenTask={onOpenTask} />
+              ))}
+            </ul>
+          )}
+        </div>
+      </Card.Content>
+    </Card>
+  );
+}
+
+function BoardAttentionItem({ task, allTasks, onOpenTask }: { task: TaskViewModel; allTasks: ReadonlyArray<TaskViewModel>; onOpenTask: (taskId: string) => void }) {
+  const unresolved = unresolvedDependencyCount(task, allTasks);
+  const fileCount = aggregateFileChanges(task);
+  const worktree = latestWorktreeReview(task);
+  const updatedAt = taskUpdatedAt(task);
+
+  return (
+    <li>
+      <button
+        type="button"
+        className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-left transition-colors hover:bg-surface"
+        onClick={() => onOpenTask(task.id)}
+        aria-label={`Open task ${task.title}`}
+      >
+        <div className="flex min-w-0 items-start gap-2">
+          <Chip size="sm" variant="soft" color={attentionColor(task)}>{attentionLabel(task)}</Chip>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-medium">{task.title}</div>
+            <p className="mt-1 line-clamp-2 text-xs text-muted">{attentionReason(task, unresolved, fileCount, worktree)}</p>
+          </div>
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted">
+          {unresolved > 0 ? <Chip size="sm" variant="soft" color="warning">waiting {unresolved}</Chip> : null}
+          {fileCount > 0 ? <Chip size="sm" variant="soft" color="default">{fileCount} files</Chip> : null}
+          {worktree?.status === "ready_for_review" ? <Chip size="sm" variant="soft" color="success">ready</Chip> : null}
+          {worktree?.status === "conflict" ? <Chip size="sm" variant="soft" color="danger">conflict</Chip> : null}
+          <span className="ml-auto">{updatedAt ? formatRelativeTime(updatedAt) : "-"}</span>
+        </div>
+      </button>
+    </li>
   );
 }
 
@@ -447,6 +663,7 @@ function TaskKanbanCard({ task, allTasks, onOpen }: { task: TaskViewModel; allTa
   const fileCount = aggregateFileChanges(task);
   const worktree = latestWorktreeReview(task);
   const turnCount = task.delegations?.filter((delegation) => delegation.runId !== undefined).length ?? 0;
+  const activeRuns = activeRunCount(task);
   const style: CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition
@@ -473,22 +690,26 @@ function TaskKanbanCard({ task, allTasks, onOpen }: { task: TaskViewModel; allTa
             ::
           </button>
           <button type="button" className="min-w-0 flex-1 text-left" onClick={onOpen} aria-label={`Open task ${task.title}`}>
-            <span className="block truncate text-sm font-medium">{task.title}</span>
+            <span className="block line-clamp-2 text-sm font-semibold leading-snug">{task.title}</span>
             <span className="mt-1 block truncate text-xs text-muted">{task.description?.trim() || "No description"}</span>
           </button>
         </div>
-        <div className="flex flex-wrap gap-1">
-          <Chip size="sm" variant="soft" color={priorityColor(task.priority)}>{priorityLabel(task.priority)}</Chip>
+        <div className="flex items-center gap-1.5">
           <Chip size="sm" variant="soft" color={taskStatusColor(task.status)}>{task.status}</Chip>
-          {task.blockerReason ? <Chip size="sm" variant="soft" color="danger">Blocked</Chip> : null}
-          {task.blockerReason === "missing_completion_report" ? <Chip size="sm" variant="soft" color="warning">Missing report</Chip> : null}
-          {fileCount > 0 ? <Chip size="sm" variant="soft" color="accent">{fileCount} files</Chip> : null}
-          {unresolved > 0 ? <Chip size="sm" variant="soft" color="warning">Waiting on {unresolved}</Chip> : null}
-          {task.maxTurns !== undefined ? <Chip size="sm" variant="soft" color="default">{turnCount}/{task.maxTurns} turns</Chip> : null}
-          {worktree?.status === "ready_for_review" ? <Chip size="sm" variant="soft" color="success">Ready</Chip> : null}
-          {worktree?.status === "conflict" ? <Chip size="sm" variant="soft" color="danger">Conflict</Chip> : null}
+          <Chip size="sm" variant="soft" color={priorityColor(task.priority)}>{priorityLabel(task.priority)}</Chip>
+          {activeRuns > 0 ? <span className="ml-auto text-[11px] text-muted">{activeRuns} running</span> : null}
         </div>
-        {task.blockerReason ? <p className="line-clamp-2 text-xs text-danger-700 dark:text-danger-200">{humanizeReason(task.blockerReason)}</p> : null}
+        {task.blockerReason ? (
+          <div className="rounded-md border border-danger-200 bg-danger-50 px-2 py-1.5 text-xs text-danger-900 dark:border-danger-800 dark:bg-danger-950/40 dark:text-danger-100">
+            {humanizeReason(task.blockerReason)}
+          </div>
+        ) : null}
+        <div className="grid grid-cols-2 gap-1.5 text-[11px] text-muted">
+          <TaskCardFact label="Deps" value={unresolved > 0 ? `waiting ${unresolved}` : "clear"} tone={unresolved > 0 ? "warning" : "default"} />
+          <TaskCardFact label="Files" value={fileCount > 0 ? String(fileCount) : "none"} tone={fileCount > 0 ? "accent" : "default"} />
+          <TaskCardFact label="Worktree" value={worktreeLabel(worktree)} tone={worktreeTone(worktree)} />
+          <TaskCardFact label="Turns" value={task.maxTurns !== undefined ? `${turnCount}/${task.maxTurns}` : String(turnCount)} tone="default" />
+        </div>
         <div className="flex items-center gap-2 text-xs text-muted">
           <Avatar className="h-5 w-5 text-[10px]"><Avatar.Fallback>{initials(assignee)}</Avatar.Fallback></Avatar>
           <span className="min-w-0 flex-1 truncate">{assignee}</span>
@@ -496,6 +717,17 @@ function TaskKanbanCard({ task, allTasks, onOpen }: { task: TaskViewModel; allTa
         </div>
       </div>
     </Card>
+  );
+}
+
+function TaskCardFact({ label, value, tone }: { label: string; value: string; tone: ChipColor }) {
+  return (
+    <div className="min-w-0 rounded-md border border-border bg-surface-secondary px-2 py-1">
+      <div className="truncate text-[10px] uppercase text-muted">{label}</div>
+      <div className={`truncate text-[11px] ${tone === "danger" ? "text-danger-700 dark:text-danger-200" : tone === "warning" ? "text-warning-700 dark:text-warning-200" : tone === "accent" ? "text-accent-soft-foreground" : "text-foreground"}`}>
+        {value}
+      </div>
+    </div>
   );
 }
 
@@ -853,6 +1085,111 @@ function ActivityLinks({ activity }: { activity: TaskActivityViewModel }) {
       {artifact ? <a className="rounded-full bg-surface px-2 py-1 text-muted" href={`#artifact:${encodeURIComponent(artifact)}`}>Artifact: {artifact}</a> : null}
     </div>
   );
+}
+
+function attentionTasks(tasks: ReadonlyArray<TaskViewModel>, allTasks: ReadonlyArray<TaskViewModel>): TaskViewModel[] {
+  return [...tasks]
+    .filter((task) =>
+      isBlockedTask(task) ||
+      task.status === "review" ||
+      hasWorktreeConflict(task) ||
+      hasReadyWorktree(task) ||
+      unresolvedDependencyCount(task, allTasks) > 0 ||
+      aggregateFileChanges(task) > 0
+    )
+    .sort((a, b) => attentionScore(b, allTasks) - attentionScore(a, allTasks) || (taskUpdatedAt(b) ?? 0) - (taskUpdatedAt(a) ?? 0));
+}
+
+function attentionScore(task: TaskViewModel, allTasks: ReadonlyArray<TaskViewModel>): number {
+  let score = 0;
+  if (hasWorktreeConflict(task)) score += 80;
+  if (isBlockedTask(task)) score += 70;
+  if (task.status === "review") score += 45;
+  if (hasReadyWorktree(task)) score += 35;
+  if (unresolvedDependencyCount(task, allTasks) > 0) score += 25;
+  if (aggregateFileChanges(task) > 0) score += 15;
+  if (isActiveTask(task)) score += 10;
+  return score;
+}
+
+function attentionLabel(task: TaskViewModel): string {
+  if (hasWorktreeConflict(task)) return "Conflict";
+  if (isBlockedTask(task)) return "Blocked";
+  if (task.status === "review") return "Review";
+  if (hasReadyWorktree(task)) return "Ready";
+  if (aggregateFileChanges(task) > 0) return "Changed";
+  return "Waiting";
+}
+
+function attentionColor(task: TaskViewModel): ChipColor {
+  if (hasWorktreeConflict(task) || isBlockedTask(task)) return "danger";
+  if (task.status === "review") return "warning";
+  if (hasReadyWorktree(task)) return "success";
+  if (aggregateFileChanges(task) > 0) return "accent";
+  return "default";
+}
+
+function attentionReason(task: TaskViewModel, unresolved: number, fileCount: number, worktree: WorktreeReviewViewModel | undefined): string {
+  if (worktree?.status === "conflict") return "Worktree has merge conflicts that need operator attention.";
+  if (task.blockerReason) return humanizeReason(task.blockerReason);
+  if (task.status === "blocked") return "Task is blocked.";
+  if (task.status === "review") return "Task is waiting for review.";
+  if (worktree?.status === "ready_for_review") return "Worktree changes are ready to apply.";
+  if (unresolved > 0) return `Waiting on ${unresolved} unresolved dependenc${unresolved === 1 ? "y" : "ies"}.`;
+  if (fileCount > 0) return `${fileCount} changed file${fileCount === 1 ? "" : "s"} recorded.`;
+  return "Needs attention.";
+}
+
+function blockerText(task: TaskViewModel): string {
+  if (task.blockerReason) return humanizeReason(task.blockerReason);
+  if (hasWorktreeConflict(task)) return "Worktree conflict";
+  return "Blocked";
+}
+
+function isActiveTask(task: TaskViewModel): boolean {
+  return task.status === "in_progress" || task.status === "running";
+}
+
+function isBlockedTask(task: TaskViewModel): boolean {
+  return task.status === "blocked" || Boolean(task.blockerReason) || hasWorktreeConflict(task);
+}
+
+function hasReadyWorktree(task: TaskViewModel): boolean {
+  return task.worktreeStatus === "ready_for_review" || latestWorktreeReview(task)?.status === "ready_for_review";
+}
+
+function hasWorktreeConflict(task: TaskViewModel): boolean {
+  return task.worktreeStatus === "conflict" || latestWorktreeReview(task)?.status === "conflict";
+}
+
+function activeRunCount(task: TaskViewModel): number {
+  return task.delegations?.filter((delegation) => delegation.runId !== undefined && delegation.completedAt === undefined).length ?? 0;
+}
+
+function worktreeLabel(worktree: WorktreeReviewViewModel | undefined): string {
+  switch (worktree?.status) {
+    case "ready_for_review":
+      return "ready";
+    case "conflict":
+      return "conflict";
+    case "applied":
+      return "applied";
+    case "discarded":
+      return "discarded";
+    default:
+      return "none";
+  }
+}
+
+function worktreeTone(worktree: WorktreeReviewViewModel | undefined): ChipColor {
+  switch (worktree?.status) {
+    case "ready_for_review":
+      return "success";
+    case "conflict":
+      return "danger";
+    default:
+      return "default";
+  }
 }
 
 function makeKanbanCollision(columnIds: Set<string>): CollisionDetection {
