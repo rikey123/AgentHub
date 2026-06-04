@@ -33,4 +33,23 @@ describe("buildLeaderPrompt", () => {
     expect(prompt).toContain("Delegation instructions should be terse");
     expect(prompt).toContain("Do not paste long teammate reports into the room chat");
   });
+
+  test("uses attributed synthesis and visible handoff language without bypassing review", () => {
+    const prompt = buildLeaderPrompt({
+      agentName: "Project Manager",
+      teammates: [
+        { agentId: "agent_builder", name: "Builder", slug: "builder", role: "teammate", presence: "active" },
+        { agentId: "agent_reviewer", name: "Reviewer", slug: "reviewer", role: "teammate", presence: "idle" }
+      ]
+    });
+
+    expect(prompt).toContain("attribute contributions by teammate name");
+    expect(prompt).toContain("Builder found");
+    expect(prompt).toContain("Reviewer flagged");
+    expect(prompt).toContain("brief public handoff line");
+    expect(prompt).toContain("who is taking which angle");
+    expect(prompt).toContain("do not present teammate output as final until review is complete");
+    expect(prompt).toContain("ready for review");
+    expect(prompt).toContain("under review");
+  });
 });

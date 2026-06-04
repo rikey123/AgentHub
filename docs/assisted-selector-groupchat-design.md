@@ -28,7 +28,8 @@ AutoGen files to consult before implementation:
 Relevant AutoGen mechanics:
 
 - `SelectorGroupChat` is a team where participants publish messages to all members, and a ChatCompletion model selects the next speaker based on shared conversation context.
-- `BaseGroupChatManager` owns the message thread, waits for active speakers to finish, applies termination/max-turn rules, then transitions to the next selected speaker.
+- `BaseGroupChatManager` owns the message thread, waits for active speakers to finish, appends the completed response to the thread, applies termination/max-turn rules, then transitions to the next selected speaker. This ordering matters: AgentHub should decide whether the group should stop before asking the selector to keep the group going.
+- `ChatAgentContainer` buffers group messages and passes that shared buffer into the selected participant when it receives `GroupChatRequestPublish`. AutoGen does not hard-code a "quote the previous speaker" rule; the group-chat feel comes from every participant seeing the shared message thread.
 - `SelectorGroupChatManager.select_speaker()` uses this stack:
   1. `selector_func` override if it returns a valid speaker.
   2. `candidate_func` to filter participants when no selector override is set.
@@ -88,7 +89,12 @@ Do not implement a bespoke "always wake 1-2 active members" algorithm. If a dete
 The selector prompt should follow AutoGen's structure but be adapted to AgentHub:
 
 ```text
-You are selecting the next speaker in an AgentHub assisted group chat.
+You are managing an AutoGen-style SelectorGroupChat for AgentHub assisted mode.
+
+First inspect the shared conversation history.
+If the latest assistant message already gives a final synthesis, answers the user, or leaves no distinct non-redundant contribution for another participant, return NO_SPEAKER.
+Otherwise choose exactly one candidate whose role can add the most useful next contribution.
+Do not choose a speaker just to keep the group going.
 
 Roles:
 {roles}
@@ -105,6 +111,16 @@ Return only the candidate id, candidate name, or NO_SPEAKER. Do not explain.
 ```
 
 The parser must accept only exact valid participant ids/names. It should also accept AutoGen-compatible underscore variants, so `Story_writer`, `Story writer`, and `Story\_writer` refer to the same participant name. If the model returns none, multiple names, an unknown name, or the previous speaker when repeats are disabled, retry with feedback. Do not silently wake an unknown agent.
+
+## Speaker Prompt Shape
+
+AutoGen's participant agents receive the shared group buffer through their container. In AgentHub, assisted participants are independent room agents, so the first-wake prompt must make that shared-thread behavior explicit:
+
+- Treat the room transcript as the shared group message thread.
+- When another agent spoke immediately before the current speaker, briefly reference the concrete point being answered.
+- Add one useful group-chat move: agree and extend, challenge with a reason, clarify a missing detail, or synthesize.
+- Do not restate the previous speaker's whole answer.
+- If the discussion already feels complete, give a concise closing synthesis and stop instead of forcing another handoff.
 
 ## Termination Rules
 

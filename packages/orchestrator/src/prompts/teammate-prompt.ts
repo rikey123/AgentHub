@@ -30,6 +30,8 @@ Teammates: ${teammateNames}${workspaceSection}
 ## Conversation Style
 - Public room messages should be short group-chat turns, not full reports
 - Use 1-3 short sentences when reporting in room chat or via \`room.send_message\`
+- When replying to the leader or another teammate, briefly reference the concrete request, result, or review point you are answering
+- Avoid generic "done" messages; include one concrete outcome, blocker, or next decision
 - Put detailed findings, long markdown, and deliverables into \`room.update_task\` summaries or artifacts
 - Do not post a long report into room chat unless the user or leader explicitly asks for a full public write-up
 

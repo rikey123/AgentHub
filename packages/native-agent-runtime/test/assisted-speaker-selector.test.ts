@@ -48,6 +48,10 @@ describe("selectAssistedSpeakerWithModelConfig", () => {
     expect(generateTextMock.mock.calls[0]?.[0].prompt).toEqual(expect.stringContaining("Selector feedback from previous attempt:"));
     expect(generateTextMock.mock.calls[0]?.[0].prompt).toEqual(expect.stringContaining("No valid name was mentioned."));
     expect(generateTextMock.mock.calls[0]?.[0].prompt).toEqual(expect.stringContaining("Attempt: 2"));
+    expect(generateTextMock.mock.calls[0]?.[0].prompt).toEqual(expect.stringContaining("First inspect the shared conversation history."));
+    expect(generateTextMock.mock.calls[0]?.[0].prompt).toEqual(expect.stringContaining("If the latest assistant message already gives a final synthesis"));
+    expect(generateTextMock.mock.calls[0]?.[0].prompt).toEqual(expect.stringContaining("no distinct non-redundant contribution"));
+    expect(generateTextMock.mock.calls[0]?.[0].prompt).toEqual(expect.stringContaining("Do not choose a speaker just to keep the group going."));
     expect(generateTextMock.mock.calls[0]?.[0].prompt).toEqual(expect.stringContaining("Return NO_SPEAKER only if the group should stop"));
     expect(generateTextMock.mock.calls[0]?.[0].prompt).toEqual(expect.stringContaining("Return only the candidate id, candidate name, or NO_SPEAKER."));
   });

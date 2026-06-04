@@ -132,6 +132,14 @@ describe("buildRunPrompt", () => {
     expect(prompt).toContain("selector chooses the next speaker");
     expect(prompt).toContain("Speak to the room");
     expect(prompt).toContain("Public Turn Style");
+    expect(prompt).toContain("When another agent spoke immediately before you");
+    expect(prompt).toContain("reference the concrete point you are responding to");
+    expect(prompt).toContain("agree and extend");
+    expect(prompt).toContain("challenge with a reason");
+    expect(prompt).toContain("clarify a missing detail");
+    expect(prompt).toContain("synthesize");
+    expect(prompt).toContain("Do not restate the previous speaker's whole answer");
+    expect(prompt).toContain("If the discussion already feels complete");
   });
 });
 

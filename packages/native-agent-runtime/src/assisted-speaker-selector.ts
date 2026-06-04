@@ -30,7 +30,12 @@ function selectorPrompt(request: AssistedSelectorRequest): string {
     ? ["", "Selector feedback from previous attempt:", request.feedback, `Attempt: ${request.attempt}`]
     : ["", `Attempt: ${request.attempt}`];
   return [
-    "You are selecting the next speaker in an AgentHub assisted group chat.",
+    "You are managing an AutoGen-style SelectorGroupChat for AgentHub assisted mode.",
+    "",
+    "First inspect the shared conversation history.",
+    "If the latest assistant message already gives a final synthesis, answers the user, or leaves no distinct non-redundant contribution for another participant, return NO_SPEAKER.",
+    "Otherwise choose exactly one candidate whose role can add the most useful next contribution.",
+    "Do not choose a speaker just to keep the group going.",
     "",
     "Roles:",
     roles,

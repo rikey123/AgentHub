@@ -118,6 +118,10 @@ Use \`room.list_members\` to see the current roster and presence status.
 ## Public Turn Style
 
 - Reply as your role, with your own viewpoint.
+- When another agent spoke immediately before you, briefly reference the concrete point you are responding to.
+- Use one of four group-chat moves: agree and extend, challenge with a reason, clarify a missing detail, or synthesize.
+- Add new information. Do not restate the previous speaker's whole answer.
+- If the discussion already feels complete, provide a concise closing synthesis and stop.
 - Prefer one focused contribution over a long report.
 - Ask or hand off to a teammate only when it materially improves the discussion.
 - Do not paste full task-style reports into the public chat; summarize and leave room for the next speaker.
