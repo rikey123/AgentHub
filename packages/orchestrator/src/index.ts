@@ -1,4 +1,5 @@
 export * from "./active-wakes.ts";
+export * from "./assisted-selector.ts";
 export * from "./adapter-bridge.ts";
 export * from "./commands.ts";
 export * from "./mailbox-service.ts";

@@ -12,19 +12,20 @@ import { ContextLedger, createContextCommandHandlers, HeuristicBriefGenerator } 
 import { createDatabase, type AgentHubDatabase } from "@agenthub/db";
 import { MockAdapterManager } from "@agenthub/adapter-mock";
 import { createInterventionCommandHandlers, InterventionEngine } from "@agenthub/interventions";
-import { ActiveWakesRegistry, checkTaskTimeouts, createCancelRunHandler, createCompleteTaskHandler, createConsumePendingTurnHandler, createCreateTaskHandler, createUpdateTaskHandler, createWakeAgentHandler, handleTeamDispatchReviewTerminal, MailboxService, maybePublishTeamDispatchCompleted, PendingTurnService, ReclaimStaleClaimedRun, reconcileTerminalDelegatedTaskRuns, RoomMcpServer, RunLifecycleService, RunQueue, StartupRecovery, TaskService, WELL_KNOWN_CAPABILITY_TOKENS, type BriefResolver } from "@agenthub/orchestrator";
+import { ActiveWakesRegistry, AssistedSelectorGroupChatManager, checkTaskTimeouts, createCancelRunHandler, createCompleteTaskHandler, createConsumePendingTurnHandler, createCreateTaskHandler, createUpdateTaskHandler, createWakeAgentHandler, handleTeamDispatchReviewTerminal, MailboxService, maybePublishTeamDispatchCompleted, PendingTurnService, ReclaimStaleClaimedRun, reconcileTerminalDelegatedTaskRuns, RoomMcpServer, RunLifecycleService, RunQueue, StartupRecovery, TaskService, WELL_KNOWN_CAPABILITY_TOKENS, type BriefResolver } from "@agenthub/orchestrator";
 import { createPermissionCommandHandlers, PermissionEngine, seedBuiltInPermissionProfiles } from "@agenthub/permissions";
 import type { EventEnvelope } from "@agenthub/protocol/events";
 import { SkillRegistry, listRuntimeLocalSkills, loadRuntimeLocalSkillBundle } from "@agenthub/skills";
 import { attachmentMaxBytes, authenticateBrowserRequest, createKeychain, createKeychainAccount, issueBrowserSession, redactAndTruncate, storeAttachment, type BrowserAuthResult, type KeychainBridge } from "@agenthub/security";
 import { Effect } from "effect";
-import { generateRoleDraftWithModelConfig, type ModelConfigRow, type RoleDraft, type RoleDraftGenerationInput } from "@agenthub/native-agent-runtime";
+import { generateRoleDraftWithModelConfig, selectAssistedSpeakerWithModelConfig, type AssistedSpeakerSelectionInput, type ModelConfigRow, type RoleDraft, type RoleDraftGenerationInput } from "@agenthub/native-agent-runtime";
 
 import { AdapterRegistry } from "./adapters/registry.ts";
 import { defaultBuiltinRolesDir, seedBuiltinRoles } from "./builtin-roles.ts";
 import { normalizeRoomCreateCompat } from "./compat/agent-profile-compat.ts";
 import { migrateAgentProfilesToV10 } from "./migrations/0014_data.ts";
 import { cleanExpiredRoleDrafts, startRoleDraftGC } from "./role-draft-gc.ts";
+import { continueAssistedSelectorAfterRun } from "./assisted-selector-continuation.ts";
 import { createDaemonCommandHandlers, seedDefaultData } from "./commands.ts";
 export { daemonPidPath, defaultConfigPath, ensureAgentHubHome, ensureParentDirectory, loadAgentHubConfig, redactConfig, type AgentHubConfig, type ConfigOverrides } from "./config.ts";
 import { openApiDocument } from "./openapi.ts";
@@ -81,6 +82,29 @@ function messageText(database: AgentHubDatabase, messageId: string): string {
   }).filter((text) => text.length > 0).join("\n");
 }
 
+function assistedSelectorModelConfig(database: AgentHubDatabase, roomId: string): ModelConfigRow | undefined {
+  const row = database.sqlite
+    .prepare(
+      `SELECT mc.id, mc.provider, mc.model, mc.base_url, mc.api_key_ref
+       FROM rooms
+       JOIN room_participants rp ON rp.room_id = rooms.id
+       JOIN agent_bindings ab ON ab.id = rp.agent_binding_id
+       JOIN model_configs mc ON mc.id = ab.model_config_id
+       WHERE rooms.id = ?
+         AND rp.participant_type = 'agent'
+         AND rp.default_presence = 'active'
+       ORDER BY CASE WHEN rp.participant_id = rooms.primary_agent_id THEN 0 ELSE 1 END, rp.joined_at ASC
+       LIMIT 1`
+    )
+    .get(roomId) as ModelConfigRow | undefined;
+  if (row !== undefined) return row;
+  const workspace = database.sqlite.prepare("SELECT workspace_id FROM rooms WHERE id = ?").get(roomId) as { readonly workspace_id: string } | undefined;
+  if (workspace === undefined) return undefined;
+  return database.sqlite
+    .prepare("SELECT id, provider, model, base_url, api_key_ref FROM model_configs WHERE workspace_id = ? OR workspace_id IS NULL ORDER BY workspace_id IS NULL ASC, created_at ASC LIMIT 1")
+    .get(workspace.workspace_id) as ModelConfigRow | undefined;
+}
+
 export type DaemonStartupPhase =
   | "SQLite open + pragma + migrate"
   | "EventStore readiness check"
@@ -92,7 +116,8 @@ export type DaemonStartupPhase =
   | "CommandBus open"
   | "HTTP server bind + SSE accept";
 export type RoleDraftGenerator = (input: RoleDraftGenerationInput) => Promise<RoleDraft>;
-export type DaemonOptions = { readonly databasePath: string; readonly workspaceRoot?: string; readonly host?: string; readonly port?: number; readonly token?: string; readonly allowRemote?: boolean; readonly allowedOrigins?: readonly string[]; readonly adapterCommands?: { readonly claude?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv }; readonly opencode?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv } }; readonly now?: () => number; readonly modelTestFetch?: typeof fetch; readonly roleDraftGenerator?: RoleDraftGenerator; readonly onLifecyclePhase?: (event: { readonly direction: "startup" | "shutdown"; readonly phase: DaemonStartupPhase }) => void };
+export type AssistedSpeakerSelector = (input: AssistedSpeakerSelectionInput) => Promise<string | undefined>;
+export type DaemonOptions = { readonly databasePath: string; readonly workspaceRoot?: string; readonly host?: string; readonly port?: number; readonly token?: string; readonly allowRemote?: boolean; readonly allowedOrigins?: readonly string[]; readonly adapterCommands?: { readonly claude?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv }; readonly opencode?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv } }; readonly now?: () => number; readonly modelTestFetch?: typeof fetch; readonly roleDraftGenerator?: RoleDraftGenerator; readonly assistedSpeakerSelector?: AssistedSpeakerSelector; readonly onLifecyclePhase?: (event: { readonly direction: "startup" | "shutdown"; readonly phase: DaemonStartupPhase }) => void };
 export type DaemonCloseOptions = { readonly forceCancelAfterMs?: number };
 export type DaemonCloseResult = { readonly forced: boolean; readonly cancelledRunIds: readonly string[] };
 export type DaemonApp = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly lifecycle: RunLifecycleService; readonly roomMcpServer: RoomMcpServer; readonly adapterRegistry: AdapterRegistry; readonly mockAdapter: MockAdapterManager; readonly handle: (req: IncomingMessage, res: ServerResponse) => void; readonly inFlightRunIds: () => readonly string[]; start(): Promise<Server>; close(options?: DaemonCloseOptions): Promise<DaemonCloseResult> };
@@ -281,6 +306,20 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     const roomMcpServerRef: { current?: RoomMcpServer } = {};
     const pendingTurns = new PendingTurnService({ database, eventBus, getCommandBus: () => currentCommandBus(commandBusRef), ...(options.now !== undefined ? { now: options.now } : {}) });
     const runQueueRef: { current?: RunQueue } = {};
+    const assistedSelector = new AssistedSelectorGroupChatManager({
+      selectSpeaker: async (request) => {
+        const modelConfig = assistedSelectorModelConfig(database, request.roomId);
+        if (modelConfig === undefined) return undefined;
+        const apiKey = modelConfig.api_key_ref !== null && modelConfig.api_key_ref !== undefined
+          ? await modelConfigSecrets.get(modelConfig.api_key_ref) ?? undefined
+          : undefined;
+        const selectSpeaker = options.assistedSpeakerSelector ?? selectAssistedSpeakerWithModelConfig;
+        return selectSpeaker({ modelConfig, ...(apiKey !== undefined ? { apiKey } : {}), request }).catch(() => undefined);
+      },
+      maxTurns: 3,
+      maxSelectorAttempts: 3,
+      allowRepeatedSpeaker: false
+    });
     const taskTerminalHooks = {
       onRunStarted: (runId: string) => {
         const run = database.sqlite.prepare("SELECT task_id, wake_reason FROM runs WHERE id = ?").get(runId) as { readonly task_id: string | null; readonly wake_reason: string | null } | undefined;
@@ -372,10 +411,23 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     };
     const lifecycleOptions = {
       ...(options.now !== undefined ? { now: options.now } : {}),
-      sideEffects: { onRunning: (runId: string) => taskTerminalHooks.onRunStarted(runId), onCompleted: (runId: string) => taskTerminalHooks.onRunCompleted(runId), onFailed: (runId: string) => taskTerminalHooks.onRunFailed(runId), onTerminal: (runId: string) => { activeWakes.releaseRun(runId); runQueueRef.current?.releaseLocks(runId); pendingTurns.handleTerminal(runId); void handleTeamDispatchReviewTerminal({ database, eventBus, commandBus: commandBusRef.current ?? commandBus, taskService, ...(options.now !== undefined ? { now: options.now } : {}) }, runId); }, finalizeNextTurns: (tx: AgentHubDatabase["sqlite"], runId: string, failureClass: Parameters<MailboxService["finalizeForRun"]>[2], now: number) => mailbox.finalizeForRun(tx, runId, failureClass, now), onTargetUnavailable: (tx: AgentHubDatabase["sqlite"], runId: string) => {
+      sideEffects: {
+        onRunning: (runId: string) => taskTerminalHooks.onRunStarted(runId),
+        onCompleted: (runId: string) => taskTerminalHooks.onRunCompleted(runId),
+        onFailed: (runId: string) => taskTerminalHooks.onRunFailed(runId),
+        onTerminal: (runId: string) => {
+          activeWakes.releaseRun(runId);
+          runQueueRef.current?.releaseLocks(runId);
+          pendingTurns.handleTerminal(runId);
+          void handleTeamDispatchReviewTerminal({ database, eventBus, commandBus: commandBusRef.current ?? commandBus, taskService, ...(options.now !== undefined ? { now: options.now } : {}) }, runId);
+          void continueAssistedSelectorAfterRun({ database, getCommandBus: () => commandBusRef.current, assistedSelector }, runId).catch(() => undefined);
+        },
+        finalizeNextTurns: (tx: AgentHubDatabase["sqlite"], runId: string, failureClass: Parameters<MailboxService["finalizeForRun"]>[2], now: number) => mailbox.finalizeForRun(tx, runId, failureClass, now),
+        onTargetUnavailable: (tx: AgentHubDatabase["sqlite"], runId: string) => {
         const rows = tx.prepare("SELECT id FROM mailbox_messages WHERE claimed_run_id = ? AND delivery_failure_reason IS NULL").all(runId) as { readonly id: string }[];
         for (const row of rows) mailbox.publishTargetUnavailable(tx, row.id);
-      } }
+        }
+      }
     };
     const lifecycle = new RunLifecycleService(database, eventBus, lifecycleOptions);
     // Synchronous brief resolver. HeuristicBriefGenerator.generate returns Effect<string,never>,
@@ -469,7 +521,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     const commandBus = createCommandBus({
       database,
       handlers: {
-        ...createDaemonCommandHandlers({ database, eventBus, getCommandBus: () => commandBus, pendingTurns, workspaceRoot, prewarmRoomAgents: (roomId) => adapterRegistry.prewarmRoomAgents(roomId), disposeRoomAgents: (roomId) => adapterRegistry.disposeRoomAgents(roomId), ...(options.now !== undefined ? { now: options.now } : {}) }),
+        ...createDaemonCommandHandlers({ database, eventBus, getCommandBus: () => commandBus, pendingTurns, workspaceRoot, assistedSelector, prewarmRoomAgents: (roomId) => adapterRegistry.prewarmRoomAgents(roomId), disposeRoomAgents: (roomId) => adapterRegistry.disposeRoomAgents(roomId), ...(options.now !== undefined ? { now: options.now } : {}) }),
         ...createContextCommandHandlers(contextLedger, options.now),
         ...createArtifactCommandHandlers(artifactService),
         ...createPermissionCommandHandlers(permissionEngine, database, eventBus, options.now),

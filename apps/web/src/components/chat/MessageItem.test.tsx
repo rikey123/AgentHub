@@ -53,6 +53,22 @@ describe("MessageItem public chat rendering", () => {
     expect(html).not.toContain("Show full");
     expect(html).toContain("The final sentence should still render.");
   });
+
+  it("renders agent messages with a visible group-chat speaker badge", () => {
+    const html = renderToStaticMarkup(createElement(MessageItem, {
+      message: messageFixture({
+        senderType: "agent",
+        senderName: "Reviewer",
+        role: "teammate",
+        text: "I see one risk in the handoff."
+      }),
+      csrfFetch: vi.fn<typeof fetch>()
+    }));
+
+    expect(html).toContain("Reviewer");
+    expect(html).toContain("teammate");
+    expect(html).toContain("data-speaker-type=\"agent\"");
+  });
 });
 
 function messageFixture(patch: Partial<MessageViewModel>): MessageViewModel {

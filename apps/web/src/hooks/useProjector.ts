@@ -416,6 +416,8 @@ class Projector {
             cost: typeof payload.cost === "object" && payload.cost !== null ? (payload.cost as RunViewModel["cost"]) : existing?.cost,
             failureClass: typeof payload.failureClass === "string" ? payload.failureClass : existing?.failureClass,
             error: typeof payload.error === "string" ? payload.error : existing?.error,
+            wakeReason: typeof payload.wakeReason === "string" ? payload.wakeReason : existing?.wakeReason,
+            messageId: typeof payload.messageId === "string" ? payload.messageId : existing?.messageId,
             taskId: typeof payload.taskId === "string" ? payload.taskId : existing?.taskId,
             parentRunId: typeof payload.parentRunId === "string" ? payload.parentRunId : existing?.parentRunId
           };

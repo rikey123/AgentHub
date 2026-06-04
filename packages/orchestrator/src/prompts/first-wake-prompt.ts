@@ -101,15 +101,26 @@ export function buildFirstWakePrompt(
 
   const firstTeammateSlug = othersFormatted[0]?.slug ?? "teammate";
 
-  const teammatesSection = `## Your Teammates
+  const teammatesSection = `## Assisted Group Chat
 
-You are in a multi-agent room. Use the \`room.send_message\` MCP tool with @mentions to contact teammates.
+You are one speaker in an assisted multi-agent group chat. A selector chooses the next speaker after each public turn, similar to AutoGen SelectorGroupChat.
+
+Speak to the room, not only to the user. Keep public turns short enough that another teammate can naturally continue.
 
 ${teammateLines}
+
+## Teammates
 
 Example: \`room.send_message({ text: "@${firstTeammateSlug} please review this" })\`
 
 Use \`room.list_members\` to see the current roster and presence status.
+
+## Public Turn Style
+
+- Reply as your role, with your own viewpoint.
+- Prefer one focused contribution over a long report.
+- Ask or hand off to a teammate only when it materially improves the discussion.
+- Do not paste full task-style reports into the public chat; summarize and leave room for the next speaker.
 
 ## Receiving Messages from Other Agents (CRITICAL)
 

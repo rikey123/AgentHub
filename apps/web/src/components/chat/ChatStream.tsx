@@ -50,6 +50,23 @@ export function buildChatFeedItems(room: RoomViewModel): FeedItem[] {
   ];
 }
 
+export function activeRunIndicatorProps(room: RoomViewModel): { readonly agentName: string; readonly status: string; readonly mode?: string; readonly turnIndex?: number } | undefined {
+  const activeRun = room.runs.find((r) => r.status === "running" || r.status === "starting" || r.status === "queued");
+  if (activeRun === undefined) return undefined;
+  const sameMessageRuns = activeRun.messageId !== undefined
+    ? room.runs.filter((run) => run.messageId === activeRun.messageId && run.wakeReason === activeRun.wakeReason)
+    : [];
+  const turnIndex = room.mode === "assisted" && sameMessageRuns.length > 0
+    ? sameMessageRuns.findIndex((run) => run.id === activeRun.id) + 1
+    : undefined;
+  return {
+    agentName: activeRun.agentName,
+    status: activeRun.status,
+    mode: room.mode,
+    ...(turnIndex !== undefined && turnIndex > 0 ? { turnIndex } : {})
+  };
+}
+
 export function ChatStream(props: ChatStreamProps) {
   const { room } = props;
 
@@ -95,7 +112,7 @@ export function ChatStream(props: ChatStreamProps) {
     if (!inRange) virtualizer.scrollToIndex(idx, { align: "center" });
   }, [props.selectedMessageId, items, virtualizer]);
 
-  const activeRun = room.runs.find((r) => r.status === "running" || r.status === "starting");
+  const activeIndicator = activeRunIndicatorProps(room);
   const [dismissedFailures, setDismissedFailures] = useState<Set<string>>(() => new Set());
   const visibleFailures = useMemo(
     () => room.mailboxFailures.filter((f) => !dismissedFailures.has(f.id)),
@@ -199,8 +216,8 @@ export function ChatStream(props: ChatStreamProps) {
           )}
         </div>
       </ScrollShadow>
-      {activeRun ? (
-        <TypingIndicator agentName={activeRun.agentName} status={activeRun.status} />
+      {activeIndicator ? (
+        <TypingIndicator {...activeIndicator} />
       ) : null}
     </div>
   );

@@ -48,6 +48,7 @@ export function MessageItem(props: MessageItemProps) {
         isSelected ? "rounded-2xl bg-accent-soft" : ""
       ].join(" ")}
       data-message-id={message.id}
+      data-speaker-type={isUser ? "user" : isSystem ? "system" : "agent"}
       data-testid={testId}
     >
       <div className={["flex items-end gap-2", isUser ? "justify-end" : "justify-start"].join(" ")}>
@@ -60,7 +61,7 @@ export function MessageItem(props: MessageItemProps) {
         <div className={["flex min-w-0 max-w-[min(78%,760px)] flex-col", isUser ? "items-end" : "items-start"].join(" ")}>
           <header className={["mb-1 flex max-w-full items-center gap-2 text-xs", isUser ? "justify-end" : "justify-start"].join(" ")}>
             {!isUser ? <span className="truncate font-semibold text-foreground">{message.senderName}</span> : null}
-            {isSystem ? <Chip size="sm" variant="soft" color={senderColor}>{message.role}</Chip> : null}
+            {!isUser ? <Chip size="sm" variant="soft" color={senderColor}>{message.role}</Chip> : null}
             {message.pendingTurnStatus ? (
               <Chip
                 size="sm"

@@ -11,17 +11,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AdapterRegistry } from "../src/adapters/registry.ts";
 import { seedBuiltinRoles } from "../src/builtin-roles.ts";
 import { migrateAgentProfilesToV10 } from "../src/migrations/0014_data.ts";
-import { createDaemon, finalizeFailedRoleGenerationJob, loadAgentHubConfig, type DaemonApp, type DaemonStartupPhase, type RoleDraftGenerator } from "../src/index.ts";
+import { createDaemon, finalizeFailedRoleGenerationJob, loadAgentHubConfig, type AssistedSpeakerSelector, type DaemonApp, type DaemonStartupPhase, type RoleDraftGenerator } from "../src/index.ts";
 import { checkTaskTimeouts } from "@agenthub/orchestrator";
 import { cleanExpiredRoleDrafts, startRoleDraftGC } from "../src/role-draft-gc.ts";
 import { CodexAdapterStub } from "../../adapters/codex/src/index.ts";
 
 const resolveProviderMock = vi.hoisted(() => vi.fn());
 const streamTextMock = vi.hoisted(() => vi.fn());
+const generateTextMock = vi.hoisted(() => vi.fn());
 const nativeAdapterCtorMock = vi.hoisted(() => vi.fn());
 const nativeAdapterRunManagedMock = vi.hoisted(() => vi.fn());
 
 vi.mock("ai", () => ({
+  generateText: generateTextMock,
   streamText: streamTextMock
 }));
 
@@ -102,6 +104,7 @@ describe("daemon M1.4 composition", () => {
   let baseUrl: string;
   let modelTestFetchMock: TestFetch;
   let roleDraftGeneratorMock: ReturnType<typeof vi.fn<RoleDraftGenerator>>;
+  let assistedSpeakerSelectorMock: ReturnType<typeof vi.fn<AssistedSpeakerSelector>>;
 
   beforeEach(async () => {
     const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-test-"));
@@ -122,7 +125,8 @@ describe("daemon M1.4 composition", () => {
       capabilities: ["chat", "code.review"],
       suggestedPermissionProfileId: "perm-readonly"
     }));
-    daemon = createDaemon({ databasePath: join(dir, "agenthub.sqlite"), port: 0, modelTestFetch: modelTestFetchMock, roleDraftGenerator: roleDraftGeneratorMock });
+    assistedSpeakerSelectorMock = vi.fn<AssistedSpeakerSelector>(async () => undefined);
+    daemon = createDaemon({ databasePath: join(dir, "agenthub.sqlite"), port: 0, modelTestFetch: modelTestFetchMock, roleDraftGenerator: roleDraftGeneratorMock, assistedSpeakerSelector: assistedSpeakerSelectorMock });
     currentDaemon = daemon;
     const server = await daemon.start();
     const address = server.address();
@@ -1689,16 +1693,84 @@ describe("daemon M1.4 composition", () => {
     expect(daemon.mockAdapter.llmCallsFor("mock-observer")).toBe(0);
   });
 
-  it("routes assisted mentions without waking primary when omitted", async () => {
+  it("does not wake assisted observers even when mentioned", async () => {
     const client = new AgentHubClient({ baseUrl });
     const room = await client.createRoom({ title: "Mentions", mode: "assisted", primaryAgentId: "mock-builder", participants: [{ type: "agent", agentId: "mock-observer", role: "observer", defaultPresence: "active" }] }) as { readonly data: { readonly roomId: string } };
 
     await client.sendMessage(room.data.roomId, { text: "@mock-observer please review", idempotencyKey: "mention-observer-1" });
 
-    expect(daemon.mockAdapter.llmCallsFor("mock-builder")).toBe(0);
-    expect(daemon.mockAdapter.llmCallsFor("mock-observer")).toBe(1);
+    expect(daemon.mockAdapter.llmCallsFor("mock-builder")).toBe(1);
+    expect(daemon.mockAdapter.llmCallsFor("mock-observer")).toBe(0);
     const idempotencyKeys = daemon.database.sqlite.prepare("SELECT idempotency_key FROM command_records WHERE command_type = 'WakeAgent' ORDER BY created_at ASC").all() as { readonly idempotency_key: string }[];
-    expect(idempotencyKeys.every((row) => /^wake:.+:mock-observer$/u.test(row.idempotency_key))).toBe(true);
+    expect(idempotencyKeys.every((row) => /^wake:.+:mock-builder$/u.test(row.idempotency_key))).toBe(true);
+  });
+
+  it("routes assisted teammate mentions directly without waking primary", async () => {
+    const client = new AgentHubClient({ baseUrl });
+    const room = await client.createRoom({ title: "Teammate Mentions", mode: "assisted", primaryAgentId: "mock-builder", participants: [{ type: "agent", agentId: "mock-reviewer", role: "teammate", defaultPresence: "active" }] }) as { readonly data: { readonly roomId: string } };
+
+    await client.sendMessage(room.data.roomId, { text: "@mock-reviewer please review", idempotencyKey: "mention-teammate-1" });
+
+    expect(daemon.mockAdapter.llmCallsFor("mock-reviewer")).toBe(1);
+    const runs = daemon.database.sqlite.prepare("SELECT agent_id, wake_reason FROM runs WHERE room_id = ? ORDER BY created_at ASC").all(room.data.roomId) as { readonly agent_id: string; readonly wake_reason: string }[];
+    expect(runs[0]).toMatchObject({ agent_id: "mock-reviewer", wake_reason: "user_mention" });
+  });
+
+  it("uses the assisted selector model to choose the first active speaker", async () => {
+    const now = Date.now();
+    const runtimeId = `runtime-selector-${now}`;
+    const modelConfigId = `model-selector-${now}`;
+    const pmRoleId = `role-selector-pm-${now}`;
+    const builderRoleId = `role-selector-builder-${now}`;
+    const pmBindingId = `binding-selector-pm-${now}`;
+    const builderBindingId = `binding-selector-builder-${now}`;
+    daemon.database.sqlite.transaction(() => {
+      daemon.database.sqlite.prepare("INSERT INTO model_configs (id, workspace_id, name, provider, model, base_url, api_key_ref, api_key_fingerprint, temperature, max_tokens, reasoning, extra, profile, created_at, updated_at) VALUES (?, 'default-workspace', 'Selector Model', 'openai', 'gpt-4o', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)").run(modelConfigId, now, now);
+      daemon.database.sqlite.prepare("INSERT INTO runtimes (id, workspace_id, kind, name, command, args, env, detected_at, detected_path, detected_version, supported_caps, version, status, manifest_json, created_at, updated_at) VALUES (?, 'default-workspace', 'native', 'Native', NULL, NULL, NULL, NULL, NULL, NULL, '[]', NULL, NULL, '{}', ?, ?)").run(runtimeId, now, now);
+      daemon.database.sqlite.prepare("INSERT INTO roles (id, workspace_id, name, avatar, description, prompt, capabilities, default_permission_profile_id, tags, is_builtin, source_path, version, created_at, updated_at) VALUES (?, 'default-workspace', 'Project Manager', NULL, 'Coordinates the discussion.', 'PM prompt', '[]', NULL, NULL, 0, NULL, NULL, ?, ?)").run(pmRoleId, now, now);
+      daemon.database.sqlite.prepare("INSERT INTO roles (id, workspace_id, name, avatar, description, prompt, capabilities, default_permission_profile_id, tags, is_builtin, source_path, version, created_at, updated_at) VALUES (?, 'default-workspace', 'Builder', NULL, 'Builds architecture suggestions.', 'Builder prompt', '[]', NULL, NULL, 0, NULL, NULL, ?, ?)").run(builderRoleId, now, now);
+      daemon.database.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES (?, 'default-workspace', ?, ?, ?, NULL, ?, ?)").run(pmBindingId, pmRoleId, runtimeId, modelConfigId, now, now);
+      daemon.database.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES (?, 'default-workspace', ?, ?, ?, NULL, ?, ?)").run(builderBindingId, builderRoleId, runtimeId, modelConfigId, now, now);
+    })();
+    assistedSpeakerSelectorMock.mockResolvedValueOnce(builderBindingId);
+    const created = await fetch(`${baseUrl}/rooms`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        title: "Selector Assisted",
+        mode: "assisted",
+        primaryAgentId: pmBindingId,
+        participants: [
+          { roleId: pmRoleId, runtimeId, modelConfigId, role: "primary", defaultPresence: "active" },
+          { roleId: builderRoleId, runtimeId, modelConfigId, role: "teammate", defaultPresence: "active" }
+        ]
+      })
+    });
+    const createdPayload = await created.json() as { readonly data?: { readonly roomId?: string }; readonly error?: unknown };
+    expect(created.status).toBe(201);
+    const roomId = createdPayload.data?.roomId ?? "";
+    expect(roomId).not.toBe("");
+    const sent = await fetch(`${baseUrl}/rooms/${roomId}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "Discuss the group chat design", idempotencyKey: "selector-assisted-1" })
+    });
+    const sentPayload = await sent.json() as { readonly ok?: boolean; readonly error?: unknown };
+    expect(sent.status).toBe(200);
+    expect(sentPayload.ok).toBe(true);
+
+    await waitFor(
+      () => daemon.database.sqlite.prepare("SELECT agent_id, wake_reason FROM runs WHERE room_id = ? ORDER BY created_at ASC").all(roomId) as { readonly agent_id: string; readonly wake_reason: string }[],
+      (runs) => runs.some((run) => run.agent_id === builderBindingId)
+    );
+    expect(assistedSpeakerSelectorMock).toHaveBeenCalledWith(expect.objectContaining({
+      modelConfig: expect.objectContaining({ id: modelConfigId }),
+      request: expect.objectContaining({
+        participants: expect.arrayContaining([expect.objectContaining({ agentId: builderBindingId })])
+      })
+    }));
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM runs WHERE room_id = ? AND agent_id = ?").get(roomId, pmBindingId)).toMatchObject({ count: 0 });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM runs WHERE room_id = ? AND agent_id = ?").get(roomId, builderBindingId)).toMatchObject({ count: 1 });
   });
 
   it("queues pending turns while primary is busy and preserves immediate wake when idle", async () => {

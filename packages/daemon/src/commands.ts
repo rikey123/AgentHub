@@ -2,7 +2,12 @@ import { randomUUID } from "node:crypto";
 
 import type { Command, CommandBus, CommandErrorCode, CommandHandler, CommandMeta, CommandResult, EventBus, PublishInput } from "@agenthub/bus";
 import type { AgentHubDatabase } from "@agenthub/db";
-import { parseMentions, nameToSlug, type PendingTurnService } from "@agenthub/orchestrator";
+import { parseMentions, nameToSlug, type AssistedSelectorInput, type AssistedSelectorParticipant, type AssistedSelectorResult, type PendingTurnService } from "@agenthub/orchestrator";
+
+export type AssistedSelectorRouter = {
+  readonly startTurn: (input: AssistedSelectorInput) => Promise<AssistedSelectorResult>;
+  readonly forgetRoomTurns?: (roomId: string) => void;
+};
 
 export type DaemonCommandHandlersOptions = {
   readonly database: AgentHubDatabase;
@@ -10,6 +15,7 @@ export type DaemonCommandHandlersOptions = {
   readonly getCommandBus: () => CommandBus;
   readonly pendingTurns: PendingTurnService;
   readonly workspaceRoot?: string;
+  readonly assistedSelector?: AssistedSelectorRouter;
   readonly prewarmRoomAgents?: (roomId: string) => void | Promise<void>;
   readonly disposeRoomAgents?: (roomId: string) => void;
   readonly now?: () => number;
@@ -109,8 +115,8 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
     if (!isObject(participant)) continue;
     if (participant.type === "agent" && typeof participant.agentId === "string" && participant.agentId !== primaryAgentId) {
       const info = lookupAgent(participant.agentId);
-      const role = isTeamMode ? "teammate" : (typeof participant.role === "string" ? participant.role : "observer");
-      const presence = isTeamMode ? "active" : (participant.defaultPresence === "active" ? "active" : "observing");
+      const role = participantRole(participant, isTeamMode);
+      const presence = participantPresence(participant, isTeamMode, role);
       resolvedParticipants.push({ participantId: participant.agentId, agentBindingId: typeof participant.agentBindingId === "string" ? participant.agentBindingId : participant.agentId, adapterId: info.adapterId, name: info.name, role, presence });
       continue;
     }
@@ -118,8 +124,8 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
       const modelConfigId = stringField(participant as Record<string, unknown>, "modelConfigId");
       const binding = lookupBinding(participant.roleId, participant.runtimeId, modelConfigId);
       if (binding === undefined) return failed("not_found", "agent_binding_not_found");
-      const role = isTeamMode ? "teammate" : (typeof participant.role === "string" ? participant.role : "observer");
-      const presence = isTeamMode ? "active" : (participant.defaultPresence === "active" ? "active" : "observing");
+      const role = participantRole(participant, isTeamMode);
+      const presence = participantPresence(participant, isTeamMode, role);
       const record: RoomParticipantRecord = { participantId: binding.bindingId, agentBindingId: binding.bindingId, adapterId: binding.adapterId, name: binding.name, role, presence };
       resolvedParticipants.push(record);
       if (isTeamMode && leaderRoleId !== undefined && participant.roleId === leaderRoleId) primaryParticipant = record;
@@ -285,7 +291,8 @@ function sendMessage(options: DaemonCommandHandlersOptions, command: Command, me
   const mentions = (room.mode === "assisted") ? parseMentions(text, members) : [];
   const quotedMessageId = stringField(command, "quotedMessageId") ?? stringField(command, "quoted_message_id");
   const attachmentFileIds = stringArrayField(command, "attachmentFileIds", "attachments");
-  const wakeTargets = wakeTargetsForMessage(room, mentions);
+  const useAssistedSelector = room.mode === "assisted" && options.assistedSelector !== undefined;
+  const wakeTargets = useAssistedSelector ? [] : wakeTargetsForMessage(room, mentions);
   const primaryTargeted = room.primary_agent_id !== null && wakeTargets.includes(room.primary_agent_id);
   const busy = primaryTargeted && room.primary_agent_id !== null && primaryBusy(options.database, roomId, room.primary_agent_id);
   const pendingTurnId = busy ? messageId : undefined;
@@ -316,6 +323,11 @@ function sendMessage(options: DaemonCommandHandlersOptions, command: Command, me
     }
   })();
 
+  if (useAssistedSelector) {
+    void routeAssistedSelectorTurn(options, meta, room, roomId, messageId, text, mentions).catch(() => undefined);
+    return successMessage(options, roomId, messageId);
+  }
+
   // Per-agent wake reason: the primary always gets `primary_turn` (it owns the conversation
   // turn even when @-mentioned alongside others); explicitly mentioned non-primary agents get
   // `user_mention`; an agent woken without mentions gets `primary_turn` by default.
@@ -334,6 +346,35 @@ function sendMessage(options: DaemonCommandHandlersOptions, command: Command, me
   if (!wakeResult.ok) return wakeResult;
 
   return successMessage(options, roomId, messageId);
+}
+
+async function routeAssistedSelectorTurn(options: DaemonCommandHandlersOptions, meta: CommandMeta, room: RoomRow, roomId: string, messageId: string, text: string, mentions: readonly string[]): Promise<CommandResult> {
+  const selector = options.assistedSelector;
+  if (selector === undefined) return successMessage(options, roomId, messageId);
+  selector.forgetRoomTurns?.(roomId);
+  const result = await selector.startTurn({
+    roomId,
+    workspaceId: room.workspace_id,
+    userMessageId: messageId,
+    text,
+    participants: assistedSelectorParticipants(options.database, roomId),
+    primaryAgentId: room.primary_agent_id,
+    mentions,
+    history: recentRoomHistory(options.database, roomId)
+  });
+  if (!("agentId" in result)) return successMessage(options, roomId, messageId);
+  const wakeResult = wakeAgents(
+    options,
+    meta,
+    room,
+    roomId,
+    messageId,
+    text,
+    [result.agentId],
+    mentions.includes(result.agentId) ? "user_mention" : "primary_turn"
+  );
+  if (isPromiseLike(wakeResult)) return wakeResult.then((woken) => (woken.ok ? successMessage(options, roomId, messageId) : woken));
+  return wakeResult.ok ? successMessage(options, roomId, messageId) : wakeResult;
 }
 
 function wakeAgents(options: DaemonCommandHandlersOptions, meta: CommandMeta, room: RoomRow, roomId: string, messageId: string, text: string, agentIds: readonly string[], reason: "primary_turn" | "user_mention" | "plan" | ((agentId: string) => "primary_turn" | "user_mention" | "plan")): CommandResult | Promise<CommandResult> {
@@ -524,9 +565,11 @@ function getRoom(database: AgentHubDatabase, roomId: string): RoomRow | undefine
 function roomMembers(database: AgentHubDatabase, roomId: string): { readonly agentId: string; readonly slug?: string; readonly name?: string }[] {
   const rows = database.sqlite
     .prepare(
-      `SELECT rp.participant_id, ap.name
+      `SELECT rp.participant_id, COALESCE(roles.name, ap.name) AS name
        FROM room_participants rp
        LEFT JOIN agent_profiles ap ON ap.id = rp.participant_id
+       LEFT JOIN agent_bindings bindings ON bindings.id = rp.agent_binding_id
+       LEFT JOIN roles ON roles.id = bindings.role_id
        WHERE rp.room_id = ? AND rp.participant_type = 'agent'
        ORDER BY rp.joined_at ASC`
     )
@@ -538,6 +581,95 @@ function roomMembers(database: AgentHubDatabase, roomId: string): { readonly age
     if (slug !== undefined) member.slug = slug;
     return member;
   });
+}
+
+function assistedSelectorParticipants(database: AgentHubDatabase, roomId: string): AssistedSelectorParticipant[] {
+  const rows = database.sqlite
+    .prepare(
+      `SELECT
+         rp.participant_id,
+         rp.role,
+         COALESCE(apres.state, rp.default_presence) AS presence,
+         rp.joined_at,
+         COALESCE(roles.name, ap.name, rp.participant_id) AS name,
+         COALESCE(roles.description, ap.role_prompt, '') AS description,
+         COALESCE(roles.capabilities, ap.capabilities, '[]') AS capabilities
+       FROM room_participants rp
+       LEFT JOIN agent_profiles ap ON ap.id = rp.participant_id
+       LEFT JOIN agent_presence apres ON apres.room_id = rp.room_id AND apres.agent_id = rp.participant_id
+       LEFT JOIN agent_bindings bindings ON bindings.id = rp.agent_binding_id
+       LEFT JOIN roles ON roles.id = bindings.role_id
+       WHERE rp.room_id = ? AND rp.participant_type = 'agent'
+       ORDER BY rp.joined_at ASC`
+    )
+    .all(roomId) as {
+      readonly participant_id: string;
+      readonly role: string;
+      readonly presence: string | null;
+      readonly joined_at: number | null;
+      readonly name: string;
+      readonly description: string | null;
+      readonly capabilities: string | null;
+    }[];
+  return rows.map((row) => ({
+    agentId: row.participant_id,
+    name: row.name,
+    role: row.role,
+    description: selectorParticipantDescription(row.description, parseCapabilities(row.capabilities), effectiveSkillSummaries(database, roomId, row.participant_id)),
+    ...(row.presence !== null ? { presence: row.presence } : {}),
+    ...(row.joined_at !== null ? { joinedAt: row.joined_at } : {})
+  }));
+}
+
+function selectorParticipantDescription(base: string | null, capabilities: readonly string[], skills: readonly string[]): string {
+  return [
+    base?.trim() ?? "",
+    capabilities.length > 0 ? `Capabilities: ${capabilities.join(", ")}` : "",
+    skills.length > 0 ? `Skills: ${skills.join("; ")}` : ""
+  ].filter((line) => line.length > 0).join("\n");
+}
+
+function effectiveSkillSummaries(database: AgentHubDatabase, roomId: string, participantId: string): string[] {
+  const roomRows = database.sqlite
+    .prepare(
+      `SELECT s.id, s.name, s.description
+       FROM room_skills rs
+       INNER JOIN skills s ON s.id = rs.skill_id
+       WHERE rs.room_id = ? AND rs.enabled = 1
+       ORDER BY s.name ASC`
+    )
+    .all(roomId) as { readonly id: string; readonly name: string; readonly description: string }[];
+  const overrides = database.sqlite
+    .prepare("SELECT skill_id, mode FROM agent_skills WHERE room_participant_id = ?")
+    .all(`${roomId}:${participantId}`) as { readonly skill_id: string; readonly mode: "add" | "restrict" }[];
+  const pool = new Map(roomRows.map((skill) => [skill.id, skill] as const));
+  for (const override of overrides) {
+    if (override.mode === "restrict") pool.delete(override.skill_id);
+  }
+  const addIds = overrides.filter((override) => override.mode === "add" && !pool.has(override.skill_id)).map((override) => override.skill_id);
+  if (addIds.length > 0) {
+    const placeholders = addIds.map(() => "?").join(", ");
+    const addRows = database.sqlite
+      .prepare(`SELECT id, name, description FROM skills WHERE id IN (${placeholders}) ORDER BY name ASC`)
+      .all(...addIds) as { readonly id: string; readonly name: string; readonly description: string }[];
+    for (const skill of addRows) pool.set(skill.id, skill);
+  }
+  return Array.from(pool.values())
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((skill) => `${skill.name} - ${skill.description}`);
+}
+
+function recentRoomHistory(database: AgentHubDatabase, roomId: string): string {
+  const rows = database.sqlite
+    .prepare(
+      `SELECT id, role, sender_id
+       FROM messages
+       WHERE room_id = ? AND deleted_at IS NULL
+       ORDER BY created_at DESC, id DESC
+       LIMIT 12`
+    )
+    .all(roomId) as { readonly id: string; readonly role: string; readonly sender_id: string }[];
+  return [...rows].reverse().map((row) => `${row.role === "assistant" ? row.sender_id : "user"}: ${messageText(database, row.id)}`).filter((line) => line.trim().length > 2).join("\n");
 }
 
 function wakeTargetsForMessage(room: RoomRow, mentions: readonly string[]): string[] {
@@ -597,6 +729,16 @@ function stringArrayField(command: Record<string, unknown>, ...keys: readonly st
       .filter((item): item is string => item !== undefined && item.length > 0);
   }
   return [];
+}
+
+function participantRole(participant: Record<string, unknown>, isTeamMode: boolean): string {
+  if (isTeamMode) return "teammate";
+  return participant.role === "teammate" || participant.role === "primary" ? participant.role : "observer";
+}
+
+function participantPresence(participant: Record<string, unknown>, isTeamMode: boolean, role: string): string {
+  if (isTeamMode || role === "teammate" || role === "primary") return "active";
+  return participant.defaultPresence === "active" ? "active" : "observing";
 }
 
 function parseCapabilities(value: string | null): string[] {

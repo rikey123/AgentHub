@@ -15,7 +15,9 @@ const vitestArgs = [
   "packages/orchestrator/test/room-mcp-symlink.test.ts",
   "packages/orchestrator/test/complete-task.test.ts",
   "packages/orchestrator/test/mission-brief.test.ts",
-  "packages/orchestrator/test/planning-phase.test.ts"
+  "packages/orchestrator/test/planning-phase.test.ts",
+  "packages/orchestrator/test/assisted-selector.test.ts",
+  "packages/orchestrator/test/assisted-selector-routing.test.ts"
 ];
 const command = process.platform === "win32" ? "cmd.exe" : vitestBin;
 const args = process.platform === "win32" ? ["/c", vitestBin, ...vitestArgs] : vitestArgs;

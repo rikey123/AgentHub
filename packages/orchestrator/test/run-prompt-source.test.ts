@@ -121,6 +121,18 @@ describe("buildRunPrompt", () => {
     expect(prompt).toContain("Builder detailed architecture output");
     expect(prompt).toContain("Generalist detailed governance output");
   });
+
+  test("assisted first-wake prompt frames the run as selector group chat", () => {
+    seedUserMessage("msg_assisted", "What should we discuss?", 1);
+    createRun("run_assisted", "primary_turn", { messageId: "msg_assisted" });
+
+    const prompt = buildRunPrompt(run("run_assisted"), currentDatabase(), { now: () => now });
+
+    expect(prompt).toContain("Assisted Group Chat");
+    expect(prompt).toContain("selector chooses the next speaker");
+    expect(prompt).toContain("Speak to the room");
+    expect(prompt).toContain("Public Turn Style");
+  });
 });
 
 function currentDatabase(): AgentHubDatabase {

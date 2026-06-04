@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RoomViewModel } from "../../types.ts";
-import { buildChatFeedItems } from "./ChatStream.tsx";
+import { activeRunIndicatorProps, buildChatFeedItems } from "./ChatStream.tsx";
 
 describe("ChatStream task notification feed", () => {
   it("keeps delegated task updates out of the main chat feed", () => {
@@ -113,6 +113,23 @@ describe("ChatStream task notification feed", () => {
     expect(buildChatFeedItems(room)).toMatchObject([
       { kind: "permission", id: "perm-1" }
     ]);
+  });
+
+  it("labels assisted active runs by their group turn for the same user message", () => {
+    const room = roomFixture({
+      mode: "assisted",
+      runs: [
+        { id: "run-builder", agentId: "builder", agentName: "Builder", status: "completed", wakeReason: "primary_turn", messageId: "msg-1" },
+        { id: "run-reviewer", agentId: "reviewer", agentName: "Reviewer", status: "starting", wakeReason: "primary_turn", messageId: "msg-1" }
+      ]
+    });
+
+    expect(activeRunIndicatorProps(room)).toEqual({
+      agentName: "Reviewer",
+      status: "starting",
+      mode: "assisted",
+      turnIndex: 2
+    });
   });
 });
 

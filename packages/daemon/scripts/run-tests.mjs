@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = resolve(packageRoot, "..", "..");
 const vitestBin = resolve(repoRoot, "node_modules", ".bin", process.platform === "win32" ? "vitest.cmd" : "vitest");
-const result = spawnSync(process.platform === "win32" ? "cmd.exe" : vitestBin, process.platform === "win32" ? ["/c", vitestBin, "run", "packages/daemon/test/daemon.test.ts"] : ["run", "packages/daemon/test/daemon.test.ts"], { cwd: repoRoot, stdio: "inherit", shell: false });
+const vitestArgs = ["run", "packages/daemon/test/daemon.test.ts", "packages/daemon/test/assisted-selector-continuation.test.ts"];
+const result = spawnSync(process.platform === "win32" ? "cmd.exe" : vitestBin, process.platform === "win32" ? ["/c", vitestBin, ...vitestArgs] : vitestArgs, { cwd: repoRoot, stdio: "inherit", shell: false });
 if (result.error) throw result.error;
 process.exitCode = result.status ?? 1;

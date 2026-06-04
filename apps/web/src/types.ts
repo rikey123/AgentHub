@@ -166,6 +166,7 @@ export type RunViewModel = {
   readonly error?: string | undefined;
   readonly permissionSummary?: readonly { readonly resource: { readonly type: string; readonly provider?: string | undefined }; readonly decision: string; readonly modelConfigId: string }[] | undefined;
   readonly wakeReason?: string | undefined;
+  readonly messageId?: string | undefined;
   readonly parentRunId?: string | undefined;
   readonly parentTaskId?: string | undefined;
   readonly taskId?: string | undefined;

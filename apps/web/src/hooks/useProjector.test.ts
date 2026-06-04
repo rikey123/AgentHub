@@ -274,6 +274,24 @@ describe("useProjector replay handling", () => {
     expect(brief).toMatchObject({ dispatchId: "team-dispatch:source_run_id:run-parent-1", runId: "run-lead-1" });
   });
 
+  it("keeps queued run wake reason and message id for assisted group turn UI", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "assisted" }));
+    projector.apply(makeAgentEvent("agent.joined", roomId, "agent-builder", { agentId: "agent-builder", agentName: "Builder", role: "teammate" }));
+    projector.apply(makeAgentEvent("agent.run.queued", roomId, "agent-builder", {
+      runId: "run-builder-1",
+      wakeReason: "primary_turn",
+      messageId: "msg-user-1"
+    }));
+
+    const run = emittedState.rooms.get(roomId)?.runs.find((item) => item.id === "run-builder-1");
+    expect(run).toMatchObject({
+      wakeReason: "primary_turn",
+      messageId: "msg-user-1"
+    });
+  });
+
   it("stores skill materialization failures with skill name for chat visibility", () => {
     const roomId = `room-${randomUUID()}`;
     const projector = getProjector();
