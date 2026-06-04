@@ -128,7 +128,12 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
       const presence = participantPresence(participant, isTeamMode, role);
       const record: RoomParticipantRecord = { participantId: binding.bindingId, agentBindingId: binding.bindingId, adapterId: binding.adapterId, name: binding.name, role, presence };
       resolvedParticipants.push(record);
-      if (isTeamMode && leaderRoleId !== undefined && participant.roleId === leaderRoleId) primaryParticipant = record;
+      if (
+        (isTeamMode && leaderRoleId !== undefined && participant.roleId === leaderRoleId)
+        || (!isTeamMode && (role === "primary" || binding.bindingId === primaryAgentId))
+      ) {
+        primaryParticipant = record;
+      }
     }
   }
 

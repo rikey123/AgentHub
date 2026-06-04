@@ -331,6 +331,44 @@ describe("daemon M1.4 composition", () => {
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM room_participants WHERE room_id = ?").get(roomId)).toMatchObject({ count: 2 });
   });
 
+  it("creates solo rooms from a V1 role/runtime/model binding without falling back to mock", async () => {
+    const now = Date.now();
+    const roleId = `role-solo-v1-${now}`;
+    const runtimeId = "native-default";
+    const modelConfigId = `model-solo-v1-${now}`;
+    const bindingId = `binding-solo-v1-${now}`;
+    daemon.database.sqlite.transaction(() => {
+      daemon.database.sqlite.prepare("INSERT INTO roles (id, workspace_id, name, avatar, description, prompt, capabilities, default_permission_profile_id, tags, is_builtin, source_path, version, created_at, updated_at) VALUES (?, 'default-workspace', 'Solo V1 Role', NULL, 'Solo V1 role.', 'Use the selected runtime.', '[]', NULL, NULL, 0, NULL, NULL, ?, ?)").run(roleId, now, now);
+      daemon.database.sqlite.prepare("INSERT INTO model_configs (id, workspace_id, name, provider, model, base_url, api_key_ref, api_key_fingerprint, temperature, max_tokens, reasoning, extra, profile, created_at, updated_at) VALUES (?, 'default-workspace', 'Solo V1 Model', 'openai', 'gpt-4o', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)").run(modelConfigId, now, now);
+      daemon.database.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES (?, 'default-workspace', ?, ?, ?, NULL, ?, ?)").run(bindingId, roleId, runtimeId, modelConfigId, now, now);
+    })();
+
+    const created = await fetch(`${baseUrl}/rooms`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        title: "Solo V1 Binding",
+        mode: "solo",
+        primaryAgentId: bindingId,
+        participants: [
+          { roleId, runtimeId, modelConfigId, role: "primary", defaultPresence: "active" }
+        ]
+      })
+    });
+    const createdBody = await created.json() as { readonly data?: { readonly roomId?: string }; readonly error?: unknown };
+
+    expect(created.status).toBe(201);
+    const roomId = createdBody.data?.roomId ?? "";
+    expect(roomId).not.toBe("");
+    expect(daemon.database.sqlite.prepare("SELECT mode, primary_agent_id FROM rooms WHERE id = ?").get(roomId)).toMatchObject({ mode: "solo", primary_agent_id: bindingId });
+    expect(daemon.database.sqlite.prepare("SELECT participant_id, role, adapter_id, agent_binding_id FROM room_participants WHERE room_id = ?").get(roomId)).toMatchObject({
+      participant_id: bindingId,
+      role: "primary",
+      adapter_id: "native",
+      agent_binding_id: bindingId
+    });
+  });
+
   it("backfills v1.0 role/runtime/model config bindings from agent profiles", async () => {
     const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-v10-data-"));
     const databasePath = join(dir, "agenthub.sqlite");

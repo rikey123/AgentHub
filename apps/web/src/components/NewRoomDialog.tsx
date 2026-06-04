@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
-  Avatar,
   Button,
   Checkbox,
   Chip,
@@ -14,12 +13,11 @@ import {
   Select,
   TextField
 } from "@heroui/react";
-import { useAgents, type AgentSummary } from "../hooks/useAgents.ts";
 import { useRoomCreationOptions, type AgentBindingSummary } from "../hooks/useRoomCreationOptions.ts";
-import { initials } from "../lib/format.ts";
 
 export type RoomMode = "solo" | "assisted" | "squad" | "team";
 export type RoomParticipantRole = "observer" | "reviewer" | "specialist";
+export type V1RoomParticipantRole = RoomParticipantRole | "primary" | "teammate";
 export type RoomPresence = "observing" | "active";
 export type LegacyAgentParticipant = {
   type: "agent";
@@ -31,7 +29,7 @@ export type V1RoomParticipant = {
   roleId: string;
   runtimeId: string;
   modelConfigId?: string;
-  role?: RoomParticipantRole;
+  role?: V1RoomParticipantRole;
   defaultPresence?: RoomPresence;
 };
 
@@ -82,11 +80,50 @@ export function buildCreateRoomInput(input: {
   const title = input.title.trim() || "New room";
   const skillIds = Array.from(new Set(input.skillIds ?? [])).filter((id) => id.length > 0);
   const selectedSkills = skillIds.length > 0 ? { skillIds } : {};
+  const toV1Participant = (
+    participant: BuildV1ParticipantInput,
+    patch: Partial<Pick<V1RoomParticipant, "role" | "defaultPresence">> = {}
+  ): V1RoomParticipant => {
+    if (participant.runtimeKind === "native" && !participant.modelConfigId) {
+      throw new Error("Native runtime participants require a model config.");
+    }
+    const next: V1RoomParticipant = {
+      roleId: participant.roleId,
+      runtimeId: participant.runtimeId
+    };
+    if (participant.modelConfigId) next.modelConfigId = participant.modelConfigId;
+    const role = patch.role ?? participant.role;
+    const defaultPresence = patch.defaultPresence ?? participant.defaultPresence;
+    if (role !== undefined) next.role = role;
+    if (defaultPresence !== undefined) next.defaultPresence = defaultPresence;
+    return next;
+  };
   if (input.mode === "solo") {
-    return { title, mode: "solo", primaryAgentId: input.primaryAgentId, participants: [], ...selectedSkills };
+    if (input.v1Participants.length !== 1) {
+      throw new Error("Solo rooms require exactly one role participant.");
+    }
+    return {
+      title,
+      mode: "solo",
+      primaryAgentId: input.primaryAgentId,
+      participants: [toV1Participant(input.v1Participants[0]!, { role: "primary", defaultPresence: "active" })],
+      ...selectedSkills
+    };
   }
   if (input.mode === "assisted") {
-    return { title, mode: "assisted", primaryAgentId: input.primaryAgentId, participants: input.legacyAgentParticipants, ...selectedSkills };
+    if (input.v1Participants.length === 0) {
+      throw new Error("Assisted rooms require a primary role participant.");
+    }
+    return {
+      title,
+      mode: "assisted",
+      primaryAgentId: input.primaryAgentId,
+      participants: input.v1Participants.map((participant, index) => toV1Participant(participant, {
+        role: index === 0 ? "primary" : "teammate",
+        defaultPresence: "active"
+      })),
+      ...selectedSkills
+    };
   }
   if (!input.leaderRoleId) {
     throw new Error("Pick a leader role.");
@@ -97,19 +134,7 @@ export function buildCreateRoomInput(input: {
   if (!input.v1Participants.some((participant) => participant.roleId === input.leaderRoleId)) {
     throw new Error("Leader role must be included as a participant.");
   }
-  const participants = input.v1Participants.map((participant) => {
-    if (participant.runtimeKind === "native" && !participant.modelConfigId) {
-      throw new Error("Native runtime participants require a model config.");
-    }
-    const next: V1RoomParticipant = {
-      roleId: participant.roleId,
-      runtimeId: participant.runtimeId
-    };
-    if (participant.modelConfigId) next.modelConfigId = participant.modelConfigId;
-    if (participant.role) next.role = participant.role;
-    if (participant.defaultPresence) next.defaultPresence = participant.defaultPresence;
-    return next;
-  });
+  const participants = input.v1Participants.map((participant) => toV1Participant(participant));
   return {
     title,
     mode: input.mode,
@@ -125,40 +150,6 @@ interface NewRoomDialogProps {
   onOpenChange: (open: boolean) => void;
   onCreate: (input: CreateRoomInput) => Promise<void> | void;
   csrfFetch?: typeof fetch | undefined;
-}
-
-const providerColor: Record<string, "default" | "accent" | "success" | "warning" | "danger"> = {
-  "claude-code": "accent",
-  "opencode": "warning",
-  "codex": "warning",
-  "native": "success",
-  "mock": "default",
-  "langgraph": "accent",
-  "a2a": "accent"
-};
-
-function providerLabel(provider: string) {
-  switch (provider) {
-    case "claude-code": return "Claude";
-    case "opencode": return "OpenCode";
-    case "native": return "Native";
-    default: return provider;
-  }
-}
-
-function capabilitySummary(agent: AgentSummary) {
-  const labels = [
-    agent.capabilities.includes("code.edit") ? "builder" : undefined,
-    agent.capabilities.includes("code.review") ? "review" : undefined,
-    agent.capabilities.includes("task.delegate") ? "delegate" : undefined
-  ].filter(Boolean);
-  return labels.length > 0 ? labels.join(" / ") : agent.defaultPresence;
-}
-
-function roleForAgent(agent: AgentSummary | undefined): RoomParticipantRole {
-  if (agent?.capabilities.includes("code.review")) return "reviewer";
-  if (agent?.capabilities.includes("task.delegate")) return "specialist";
-  return "observer";
 }
 
 function selectValue(key: unknown): string {
@@ -536,7 +527,6 @@ function skillOriginColor(origin: string): "default" | "accent" | "success" | "w
 }
 
 export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetch }: NewRoomDialogProps) {
-  const { agents, loading, error: agentsError } = useAgents();
   const {
     roles,
     runtimes,
@@ -548,11 +538,9 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
   const [createdAgentBindings, setCreatedAgentBindings] = useState<AgentBindingSummary[]>([]);
   const [title, setTitle] = useState("");
   const [mode, setMode] = useState<RoomMode>("assisted");
-  const [primaryId, setPrimaryId] = useState<string | undefined>(undefined);
   const [leaderRoleId, setLeaderRoleId] = useState<string>("");
   const [leaderBinding, setLeaderBinding] = useState<V1ParticipantDraft | undefined>(undefined);
   const [v1Participants, setV1Participants] = useState<V1ParticipantDraft[]>([]);
-  const [extraIds, setExtraIds] = useState<Set<string>>(new Set());
   const [skills, setSkills] = useState<WorkspaceSkillSummary[]>([]);
   const [selectedSkillIds, setSelectedSkillIds] = useState<Set<string>>(new Set());
   const [skillsLoading, setSkillsLoading] = useState(false);
@@ -564,7 +552,6 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
     if (isOpen) {
       setTitle(`Room ${new Date().toLocaleString([], { hour: "2-digit", minute: "2-digit", month: "short", day: "2-digit" })}`);
       setError(undefined);
-      setExtraIds(new Set());
       setMode("assisted");
       setLeaderRoleId("");
       setLeaderBinding(undefined);
@@ -608,13 +595,6 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
   }, [csrfFetch, isOpen]);
 
   useEffect(() => {
-    if (!primaryId && agents.length > 0) {
-      const builder = agents.find((a) => a.capabilities.includes("code.edit") || a.id.includes("builder"));
-      setPrimaryId((builder ?? agents[0]!).id);
-    }
-  }, [agents, primaryId]);
-
-  useEffect(() => {
     if (leaderRoleId || roles.length === 0) return;
     const leader = roles.find((role) => role.capabilities.includes("task.delegate")) ?? roles[0];
     setLeaderRoleId(leader?.id ?? "");
@@ -630,27 +610,8 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
     setLeaderRoleId(next.roleId);
   }, [leaderBinding, leaderRoleId, modelConfigs, roles, runtimes]);
 
-  const sortedAgents = useMemo(
-    () => agents.slice().sort((a, b) => {
-      const score = (x: AgentSummary) => (x.defaultPresence === "active" ? 2 : 0) + (x.capabilities.includes("code.edit") ? 1 : 0);
-      const diff = score(b) - score(a);
-      return diff !== 0 ? diff : a.name.localeCompare(b.name);
-    }),
-    [agents]
-  );
-
-  const primaryAgent = sortedAgents.find((agent) => agent.id === primaryId);
-  const selectedExtras = sortedAgents.filter((agent) => extraIds.has(agent.id) && agent.id !== primaryId);
   const selectedLeader = roles.find((role) => role.id === (leaderBinding?.roleId ?? leaderRoleId));
   const teamMode = mode === "squad" || mode === "team";
-
-  const setExtraSelected = (id: string, selected: boolean) => {
-    setExtraIds((prev) => {
-      const next = new Set(prev);
-      if (selected) next.add(id); else next.delete(id);
-      return next;
-    });
-  };
 
   const updateV1Participant = (id: string, patch: Partial<V1ParticipantDraft>) => {
     setV1Participants((current) => current.map((participant) => {
@@ -698,21 +659,16 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
   };
 
   const handleSubmit = async () => {
-    if (!primaryId && !teamMode) {
-      setError("Pick a primary agent");
+    if (!leaderBinding) {
+      setError("Pick a primary role binding.");
       return;
     }
     setSubmitting(true);
     setError(undefined);
     try {
-      const legacyAgentParticipants = Array.from(extraIds)
-        .filter((id) => id !== primaryId)
-        .map((id) => {
-          const agent = agents.find((x) => x.id === id);
-          const defaultPresence: RoomPresence = agent?.defaultPresence === "active" ? "active" : "observing";
-          return { type: "agent" as const, agentId: id, role: roleForAgent(agent), defaultPresence };
-        });
-      const allV1Participants = leaderBinding ? [leaderBinding, ...v1Participants] : v1Participants;
+      const allV1Participants = leaderBinding
+        ? mode === "solo" ? [leaderBinding] : [leaderBinding, ...v1Participants]
+        : v1Participants;
       const v1ParticipantInput = allV1Participants.map((participant) => {
         const runtime = runtimes.find((candidate) => candidate.id === participant.runtimeId);
         const next: BuildV1ParticipantInput = {
@@ -726,32 +682,29 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
       });
       const currentLeaderRoleId = leaderBinding?.roleId ?? leaderRoleId;
       const leaderParticipant = leaderBinding ?? allV1Participants.find((participant) => participant.roleId === currentLeaderRoleId);
-      let leaderBindingId: string | undefined;
-      if (teamMode) {
-        const ensured = await ensureAgentBindingsForParticipants({
-          fetchImpl: csrfFetch,
-          existingBindings: [...agentBindings, ...createdAgentBindings],
-          participants: v1ParticipantInput
-        });
-        if (ensured.createdBindings.length > 0) {
-          setCreatedAgentBindings((current) => mergeAgentBindings(current, ensured.createdBindings));
-        }
-        if (leaderParticipant) {
-          const leaderIndex = v1ParticipantInput.findIndex((participant) =>
-            participant.roleId === currentLeaderRoleId
-            && participant.runtimeId === leaderParticipant.runtimeId
-            && normalizedModelConfigId(participant.modelConfigId) === normalizedModelConfigId(leaderParticipant.modelConfigId)
-          );
-          leaderBindingId = ensured.bindingIds[leaderIndex >= 0 ? leaderIndex : 0];
-        }
+      const ensured = await ensureAgentBindingsForParticipants({
+        fetchImpl: csrfFetch,
+        existingBindings: [...agentBindings, ...createdAgentBindings],
+        participants: v1ParticipantInput
+      });
+      if (ensured.createdBindings.length > 0) {
+        setCreatedAgentBindings((current) => mergeAgentBindings(current, ensured.createdBindings));
       }
-      const primaryAgentId = teamMode ? (leaderBindingId ?? "") : (primaryId ?? "");
+      let primaryAgentId = ensured.bindingIds[0] ?? "";
+      if (leaderParticipant) {
+        const leaderIndex = v1ParticipantInput.findIndex((participant) =>
+          participant.roleId === currentLeaderRoleId
+          && participant.runtimeId === leaderParticipant.runtimeId
+          && normalizedModelConfigId(participant.modelConfigId) === normalizedModelConfigId(leaderParticipant.modelConfigId)
+        );
+        primaryAgentId = ensured.bindingIds[leaderIndex >= 0 ? leaderIndex : 0] ?? primaryAgentId;
+      }
       const createInput = {
         title,
         mode,
         primaryAgentId,
         skillIds: Array.from(selectedSkillIds),
-        legacyAgentParticipants,
+        legacyAgentParticipants: [],
         v1Participants: v1ParticipantInput
       };
       await onCreate(buildCreateRoomInput(currentLeaderRoleId ? { ...createInput, leaderRoleId: currentLeaderRoleId } : createInput));
@@ -814,105 +767,57 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
                   </div>
                 </section>
 
-                {!teamMode ? (
-                  <section className="rounded-2xl border border-border bg-overlay p-4 shadow-sm">
+                <section className="rounded-2xl border border-border bg-overlay p-4 shadow-sm">
                   <div className="mb-3 flex items-start justify-between gap-3">
                     <div>
-                      <h3 className="text-sm font-semibold">Primary agent</h3>
-                      <p className="text-xs text-muted">This agent receives the first turn and owns the main run.</p>
+                      <h3 className="text-sm font-semibold">{teamMode ? "Role team" : "Primary role"}</h3>
+                      <p className="text-xs text-muted">
+                        {teamMode
+                          ? "Bind the leader to a role, runtime, and model, then add teammates when needed."
+                          : "Choose the role, runtime, and model for the primary agent in this room."}
+                      </p>
                     </div>
-                    {primaryAgent ? (
-                      <Chip size="sm" variant="soft" color={providerColor[primaryAgent.provider] ?? "default"}>
-                        {providerLabel(primaryAgent.provider)}
-                      </Chip>
-                    ) : null}
+                    <Chip size="sm" variant="soft" color={selectedLeader ? "accent" : "default"}>
+                      {selectedLeader?.name ?? "No primary"}
+                    </Chip>
                   </div>
 
-                  {agentsError ? <p className="mb-2 text-xs text-danger">{agentsError}</p> : null}
-                  {loading ? <p className="mb-2 text-xs text-muted">Loading agents...</p> : null}
+                  {optionsError ? <p className="mb-2 text-xs text-danger">{optionsError}</p> : null}
+                  {optionsLoading ? <p className="mb-2 text-xs text-muted">Loading roles, runtimes, and models...</p> : null}
 
-                  <div role="radiogroup" aria-label="Primary agent" className="grid max-h-[340px] gap-2 overflow-auto pr-1 md:grid-cols-2 xl:grid-cols-3">
-                    {sortedAgents.map((agent) => {
-                      const selected = agent.id === primaryId;
-                      return (
-                        <button
-                          key={agent.id}
-                          type="button"
-                          onClick={() => setPrimaryId(agent.id)}
-                          aria-checked={selected}
-                          role="radio"
-                          className={[
-                            "relative flex min-h-[126px] w-full items-start gap-3 rounded-2xl border p-3 text-left transition-all",
-                            selected
-                              ? "border-accent bg-accent-soft shadow-[0_12px_26px_color-mix(in_oklab,var(--accent)_18%,transparent)]"
-                              : "border-border bg-surface hover:bg-surface-secondary"
-                          ].join(" ")}
-                        >
-                          <Avatar size="sm">
-                            <Avatar.Fallback>{agent.avatar ? agent.avatar : initials(agent.name)}</Avatar.Fallback>
-                          </Avatar>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex min-w-0 items-start gap-2">
-                              <span className="truncate font-semibold">{agent.name}</span>
-                              <Chip className="ml-auto shrink-0" size="sm" variant="soft" color={providerColor[agent.provider] ?? "default"}>{agent.provider}</Chip>
-                            </div>
-                            <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted">{agent.description ?? agent.adapterId}</p>
-                            <div className="mt-2 flex flex-wrap gap-1">
-                              <Chip size="sm" variant="soft" color="default">{capabilitySummary(agent)}</Chip>
-                              <Chip size="sm" variant="soft" color={agent.defaultPresence === "active" ? "success" : "default"}>{agent.defaultPresence}</Chip>
-                            </div>
-                          </div>
-                          {selected ? <span className="absolute right-3 top-3 h-2.5 w-2.5 rounded-full bg-accent" aria-hidden="true" /> : null}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  </section>
-                ) : (
-                  <section className="rounded-2xl border border-border bg-overlay p-4 shadow-sm">
-                    <div className="mb-3 flex items-start justify-between gap-3">
-                      <div>
-                        <h3 className="text-sm font-semibold">Role team</h3>
-                        <p className="text-xs text-muted">Bind the leader to a role, runtime, and model, then add teammates when needed.</p>
-                      </div>
-                      <Chip size="sm" variant="soft" color={selectedLeader ? "accent" : "default"}>
-                        {selectedLeader?.name ?? "No leader"}
-                      </Chip>
+                  {leaderBinding ? (
+                    <RoleBindingRow
+                      title={teamMode ? "Leader binding" : "Primary binding"}
+                      roleId={leaderBinding.roleId}
+                      runtimeId={leaderBinding.runtimeId}
+                      modelConfigId={leaderBinding.modelConfigId}
+                      presence={leaderBinding.defaultPresence}
+                      roles={roles}
+                      runtimes={runtimes}
+                      modelConfigs={modelConfigs}
+                      onChange={updateLeaderBinding}
+                      testIdPrefix="new-room-leader"
+                    />
+                  ) : (
+                    <div className="rounded-xl border border-dashed border-border bg-surface p-3 text-sm text-muted">
+                      Loading role binding options...
                     </div>
+                  )}
 
-                    {optionsError ? <p className="mb-2 text-xs text-danger">{optionsError}</p> : null}
-                    {optionsLoading ? <p className="mb-2 text-xs text-muted">Loading roles, runtimes, and models...</p> : null}
-
-                    {leaderBinding ? (
-                      <RoleBindingRow
-                        title="Leader binding"
-                        roleId={leaderBinding.roleId}
-                        runtimeId={leaderBinding.runtimeId}
-                        modelConfigId={leaderBinding.modelConfigId}
-                        presence={leaderBinding.defaultPresence}
-                        roles={roles}
-                        runtimes={runtimes}
-                        modelConfigs={modelConfigs}
-                        onChange={updateLeaderBinding}
-                        testIdPrefix="new-room-leader"
-                      />
-                    ) : (
-                      <div className="rounded-xl border border-dashed border-border bg-surface p-3 text-sm text-muted">
-                        Loading leader binding options...
-                      </div>
-                    )}
-
+                  {mode !== "solo" ? (
                     <div className="mt-4 grid gap-3">
                       <div className="flex items-center justify-between gap-3">
-                        <h4 className="text-sm font-semibold">Teammates</h4>
+                        <h4 className="text-sm font-semibold">{teamMode ? "Teammates" : "Collaborators"}</h4>
                         <Button size="sm" variant="secondary" onPress={addV1Participant} isDisabled={roles.length === 0 || runtimes.length === 0}>
-                          Add teammate
+                          {teamMode ? "Add teammate" : "Add collaborator"}
                         </Button>
                       </div>
 
                       {v1Participants.length === 0 ? (
                         <div className="rounded-xl border border-dashed border-border bg-surface p-3 text-sm text-muted">
-                          Add teammate roles here. The leader binding above is always included.
+                          {teamMode
+                            ? "Add teammate roles here. The leader binding above is always included."
+                            : "Add collaborator roles here. The primary binding above is always included."}
                         </div>
                       ) : v1Participants.map((participant, index) => {
                         return (
@@ -936,49 +841,8 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
                         );
                       })}
                     </div>
-                  </section>
-                )}
-
-                {mode === "assisted" ? (
-                  <section className="rounded-2xl border border-border bg-overlay p-4 shadow-sm">
-                    <div className="mb-3 flex items-start justify-between gap-3">
-                      <div>
-                        <h3 className="text-sm font-semibold">Additional agents</h3>
-                        <p className="text-xs text-muted">Add observers, reviewers, or specialists. They join according to their default presence.</p>
-                      </div>
-                      <Chip size="sm" variant="soft" color={selectedExtras.length > 0 ? "accent" : "default"}>
-                        {selectedExtras.length} selected
-                      </Chip>
-                    </div>
-
-                    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                      {sortedAgents
-                        .filter((agent) => agent.id !== primaryId)
-                        .map((agent) => {
-                          const checked = extraIds.has(agent.id);
-                          return (
-                            <Checkbox
-                              key={agent.id}
-                              isSelected={checked}
-                              onChange={(selected) => setExtraSelected(agent.id, selected)}
-                              className={[
-                                "rounded-2xl border bg-surface px-3 py-2 transition-colors",
-                                checked ? "border-accent bg-accent-soft" : "border-border hover:bg-surface-secondary"
-                              ].join(" ")}
-                            >
-                              <span className="flex min-w-0 items-center gap-2 text-sm">
-                                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-secondary text-xs font-semibold">
-                                  {agent.avatar ?? initials(agent.name)}
-                                </span>
-                                <span className="min-w-0 flex-1 truncate font-medium">{agent.name}</span>
-                                <Chip size="sm" variant="soft" color={providerColor[agent.provider] ?? "default"}>{agent.provider}</Chip>
-                              </span>
-                            </Checkbox>
-                          );
-                        })}
-                    </div>
-                  </section>
-                ) : null}
+                  ) : null}
+                </section>
 
                 <section className="rounded-2xl border border-border bg-overlay p-4 shadow-sm">
                   <div className="mb-3 flex items-start justify-between gap-3">
@@ -1037,13 +901,13 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
                 ? "Solo rooms start with the primary agent only."
                 : teamMode
                   ? `Leader plus ${v1Participants.length} teammate${v1Participants.length === 1 ? "" : "s"} will join this room.`
-                  : `${selectedExtras.length + 1} agent${selectedExtras.length === 0 ? "" : "s"} will join this room.`}
+                  : `Primary plus ${v1Participants.length} collaborator${v1Participants.length === 1 ? "" : "s"} will join this room.`}
             </div>
             <Button slot="close" variant="tertiary">Cancel</Button>
             <Button
               variant="primary"
               isPending={submitting}
-              isDisabled={submitting || (!teamMode && !primaryId) || (teamMode && !leaderBinding)}
+              isDisabled={submitting || !leaderBinding}
               onPress={() => void handleSubmit()}
             >
               Create room

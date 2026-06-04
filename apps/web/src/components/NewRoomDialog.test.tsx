@@ -111,6 +111,88 @@ describe("NewRoomDialog create-room contract", () => {
     });
   });
 
+  it("builds a solo payload from one role/runtime/model participant", () => {
+    const input = buildCreateRoomInput({
+      title: "Native solo",
+      mode: "solo",
+      primaryAgentId: "binding_pm",
+      legacyAgentParticipants: [
+        { type: "agent", agentId: "mock-builder", role: "observer", defaultPresence: "observing" }
+      ],
+      v1Participants: [
+        {
+          roleId: "role_pm",
+          runtimeId: "native-default",
+          runtimeKind: "native",
+          modelConfigId: "mc_gpt4o",
+          defaultPresence: "active"
+        }
+      ]
+    });
+
+    expect(input).toEqual({
+      title: "Native solo",
+      mode: "solo",
+      primaryAgentId: "binding_pm",
+      participants: [
+        {
+          roleId: "role_pm",
+          runtimeId: "native-default",
+          modelConfigId: "mc_gpt4o",
+          role: "primary",
+          defaultPresence: "active"
+        }
+      ]
+    });
+  });
+
+  it("builds an assisted payload from role/runtime/model participants instead of legacy agents", () => {
+    const input = buildCreateRoomInput({
+      title: "Assisted room",
+      mode: "assisted",
+      primaryAgentId: "binding_pm",
+      legacyAgentParticipants: [
+        { type: "agent", agentId: "mock-reviewer", role: "reviewer", defaultPresence: "active" }
+      ],
+      v1Participants: [
+        {
+          roleId: "role_pm",
+          runtimeId: "native-default",
+          runtimeKind: "native",
+          modelConfigId: "mc_gpt4o",
+          defaultPresence: "active"
+        },
+        {
+          roleId: "role_builder",
+          runtimeId: "runtime-opencode",
+          runtimeKind: "opencode",
+          defaultPresence: "active"
+        }
+      ]
+    });
+
+    expect(input).toEqual({
+      title: "Assisted room",
+      mode: "assisted",
+      primaryAgentId: "binding_pm",
+      participants: [
+        {
+          roleId: "role_pm",
+          runtimeId: "native-default",
+          modelConfigId: "mc_gpt4o",
+          role: "primary",
+          defaultPresence: "active"
+        },
+        {
+          roleId: "role_builder",
+          runtimeId: "runtime-opencode",
+          role: "teammate",
+          defaultPresence: "active"
+        }
+      ]
+    });
+  });
+
   it("rejects native runtime participants without a model config before submit", () => {
     expect(() => buildCreateRoomInput({
       title: "Bad native room",

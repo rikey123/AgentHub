@@ -75,6 +75,89 @@ test.describe("V1.0 room creation", () => {
     ]);
   });
 
+  test("creates a solo room from Role/Runtime/Model selections", async ({ page }) => {
+    const roomRequests: unknown[] = [];
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (url.pathname !== "/rooms" || request.method() !== "POST") return;
+      roomRequests.push(request.postDataJSON() as unknown);
+    });
+
+    await page.goto(testUrl);
+    await page.locator('[data-testid="room-list-create-room"]').click();
+    await page.getByLabel("Title").fill("Solo V1 E2E Room");
+    await page.getByText("Solo", { exact: true }).click();
+    await expect(page.locator('[data-testid="new-room-leader-role"]')).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Primary role" })).toBeVisible();
+    await chooseHeroSelect(page, "new-room-leader-role", "Leader E2E");
+    await chooseHeroSelect(page, "new-room-leader-runtime", "AgentHub Native");
+    await chooseHeroSelect(page, "new-room-leader-model", "Local E2E Model");
+    await page.getByRole("button", { name: "Create room" }).click();
+
+    await expect(page.getByRole("textbox", { name: "Message" })).toBeEnabled();
+    await expect(page.getByRole("heading", { name: "Solo V1 E2E Room" })).toBeVisible();
+
+    expect(roomRequests).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        mode: "solo",
+        primaryAgentId: "binding_e2e_leader",
+        participants: [
+          { roleId: "role_e2e_leader", runtimeId: "native-default", modelConfigId: "mc_e2e_native", role: "primary", defaultPresence: "active" }
+        ]
+      })
+    ]));
+    const room = daemon.database.sqlite.prepare("SELECT id, mode, primary_agent_id FROM rooms WHERE title = ?").get("Solo V1 E2E Room") as { readonly id: string; readonly mode: string; readonly primary_agent_id: string } | undefined;
+    expect(room).toMatchObject({ mode: "solo", primary_agent_id: "binding_e2e_leader" });
+    expect(daemon.database.sqlite.prepare("SELECT participant_id, role, adapter_id, agent_binding_id FROM room_participants WHERE room_id = ?").get(room?.id ?? "")).toMatchObject({
+      participant_id: "binding_e2e_leader",
+      role: "primary",
+      adapter_id: "native",
+      agent_binding_id: "binding_e2e_leader"
+    });
+  });
+
+  test("creates an assisted room from separated role/runtime collaborators", async ({ page }) => {
+    const roomRequests: unknown[] = [];
+    page.on("request", (request) => {
+      const url = new URL(request.url());
+      if (url.pathname !== "/rooms" || request.method() !== "POST") return;
+      roomRequests.push(request.postDataJSON() as unknown);
+    });
+
+    await page.goto(testUrl);
+    await page.locator('[data-testid="room-list-create-room"]').click();
+    await page.getByLabel("Title").fill("Assisted V1 E2E Room");
+    await page.getByText("Assisted", { exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Primary role" })).toBeVisible();
+    await chooseHeroSelect(page, "new-room-leader-role", "Leader E2E");
+    await chooseHeroSelect(page, "new-room-leader-runtime", "AgentHub Native");
+    await chooseHeroSelect(page, "new-room-leader-model", "Local E2E Model");
+    await page.getByRole("button", { name: "Add collaborator" }).click();
+    await chooseHeroSelect(page, "new-room-participant-0-role", "Reviewer E2E");
+    await chooseHeroSelect(page, "new-room-participant-0-runtime", "Claude E2E ACP");
+    await page.getByRole("button", { name: "Create room" }).click();
+
+    await expect(page.getByRole("textbox", { name: "Message" })).toBeEnabled();
+    await expect(page.getByRole("heading", { name: "Assisted V1 E2E Room" })).toBeVisible();
+
+    expect(roomRequests).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        mode: "assisted",
+        primaryAgentId: "binding_e2e_leader",
+        participants: [
+          { roleId: "role_e2e_leader", runtimeId: "native-default", modelConfigId: "mc_e2e_native", role: "primary", defaultPresence: "active" },
+          { roleId: "role_e2e_reviewer", runtimeId: "runtime_e2e_claude", role: "teammate", defaultPresence: "active" }
+        ]
+      })
+    ]));
+    const room = daemon.database.sqlite.prepare("SELECT id, mode, primary_agent_id FROM rooms WHERE title = ?").get("Assisted V1 E2E Room") as { readonly id: string; readonly mode: string; readonly primary_agent_id: string } | undefined;
+    expect(room).toMatchObject({ mode: "assisted", primary_agent_id: "binding_e2e_leader" });
+    expect(daemon.database.sqlite.prepare("SELECT participant_id, role, agent_binding_id FROM room_participants WHERE room_id = ? ORDER BY joined_at ASC").all(room?.id ?? "")).toMatchObject([
+      { participant_id: "binding_e2e_leader", role: "primary", agent_binding_id: "binding_e2e_leader" },
+      { participant_id: "binding_e2e_reviewer", role: "teammate", agent_binding_id: "binding_e2e_reviewer" }
+    ]);
+  });
+
   test("creates a missing leader binding before creating a team room", async ({ page }) => {
     daemon.database.sqlite.prepare("DELETE FROM agent_bindings WHERE id = ?").run("binding_e2e_leader");
     const bindingRequests: unknown[] = [];
