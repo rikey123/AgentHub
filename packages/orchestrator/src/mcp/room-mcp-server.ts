@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync, realpathSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import * as net from "node:net";
-import { join, dirname, resolve, sep, relative } from "node:path";
+import { basename, extname, join, dirname, resolve, sep, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
@@ -17,6 +17,7 @@ import { TaskService, normalizeStatus, normalizeTaskPriority, type TaskRow } fro
 import { writeTcpMessage, createTcpMessageReader } from "./tcp-helpers.ts";
 
 const execFileAsync = promisify(execFile);
+const DEFAULT_FILE_MESSAGE_NAME = "message" + ".md";
 
 export const WELL_KNOWN_CAPABILITY_TOKENS = new Set<string>([
   "chat",
@@ -55,6 +56,33 @@ export type RoomMcpToolResult =
   | { readonly ok: true; readonly data: unknown }
   | { readonly ok: false; readonly error: { readonly code: string; readonly message: string; readonly details?: unknown } };
 
+export type RoomMcpArtifactService = {
+  readonly create: (input: {
+    readonly workspaceId: string;
+    readonly roomId?: string;
+    readonly taskId?: string;
+    readonly runId?: string;
+    readonly messageId?: string;
+    readonly type: "file";
+    readonly title: string;
+    readonly status?: "draft";
+    readonly createdBy: string;
+    readonly metadata?: Record<string, unknown>;
+    readonly files?: ReadonlyArray<{
+      readonly path: string;
+      readonly oldContent?: string;
+      readonly newContent?: string;
+      readonly patch?: string;
+      readonly additions: number;
+      readonly deletions: number;
+      readonly fileStatus: "added" | "modified" | "deleted";
+      readonly oldSha256?: string;
+      readonly newSha256?: string;
+      readonly contentPath?: string;
+    }>;
+  }, trace?: { readonly traceId?: string; readonly causationId?: string; readonly correlationId?: string }) => { readonly id: string };
+};
+
 /** Stdio MCP config injected into ACP session/new mcpServers[]. */
 export type RoomMcpStdioConfig = {
   readonly name: string;
@@ -69,7 +97,7 @@ export class RoomMcpServer {
   private readonly authToken = randomUUID();
   private readonly sessionRegistrations = new Map<string, RoomMcpSessionRegistration>();
 
-  constructor(private readonly options: { readonly commandBus: CommandBus; readonly taskService: TaskService; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly permissionEngine?: PermissionEngine; readonly artifactFs?: { readonly readTextFile?: (input: { readonly runId: string; readonly path: string }) => string | undefined; readonly writeTextFile: (input: { readonly runId: string; readonly path: string; readonly content: string }) => void }; readonly now?: () => number }) {}
+  constructor(private readonly options: { readonly commandBus: CommandBus; readonly taskService: TaskService; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly permissionEngine?: PermissionEngine; readonly artifactFs?: { readonly readTextFile?: (input: { readonly runId: string; readonly path: string }) => string | undefined; readonly writeTextFile: (input: { readonly runId: string; readonly path: string; readonly content: string }) => void }; readonly artifactService?: RoomMcpArtifactService; readonly now?: () => number }) {}
 
   /**
    * Start the TCP server. Must be called once before getStdioConfig().
@@ -244,6 +272,7 @@ export class RoomMcpServer {
     if (name === "todo.write") return this.handleTodoWrite(input, session, context);
     if (name === "room.read_mailbox") return this.handleReadMailbox(input, session, context);
     if (name === "room.send_message") return this.handleSendMessage(input, session, context);
+    if (name === "room.send_file_message") return await this.handleSendFileMessage(input, session, context);
     if (name === "room.list_members") return this.handleListMembers(session);
     if (name === "room.list_runtimes") return this.handleListRuntimes(session);
     if (name === "room.list_models") return this.handleListModels(session);
@@ -643,6 +672,119 @@ export class RoomMcpServer {
       ? []
       : this.options.database.sqlite.prepare("SELECT path, content FROM skill_files WHERE skill_id = ? ORDER BY path ASC").all((skill as { readonly id: string }).id);
     return { ok: true, data: { skill: normalizeSkillForTool(skill as Record<string, unknown>), files } };
+  }
+
+  // ---------------------------------------------------------------------------
+  // room.send_file_message
+  // ---------------------------------------------------------------------------
+
+  private async handleSendFileMessage(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): Promise<RoomMcpToolResult> {
+    if (!isRecord(input)) return failure("validation_failed", "input must be an object");
+    const artifactService = this.options.artifactService;
+    if (artifactService === undefined) return failure("not_implemented", "artifact service is not available");
+    const room = this.options.database.sqlite.prepare("SELECT workspace_id FROM rooms WHERE id = ? AND archived_at IS NULL").get(session.roomId) as { readonly workspace_id: string } | undefined;
+    if (room === undefined) return failure("not_found", `Room '${session.roomId}' not found`);
+
+    const contentInput = typeof input.content === "string" ? input.content : undefined;
+    const pathInput = typeof input.path === "string" && input.path.length > 0 ? input.path : undefined;
+    const fileNameInput = typeof input.fileName === "string" && input.fileName.length > 0 ? input.fileName : undefined;
+    if (fileNameInput !== undefined && (hasPathTraversal(fileNameInput) || isSensitiveWorkspacePath(fileNameInput))) return failure("permission_denied", "file name is not allowed");
+    const explicitFileName = fileNameInput !== undefined ? normalizeMessageFilePath(fileNameInput) : undefined;
+    let path = explicitFileName ?? (pathInput !== undefined ? normalizeMessageFilePath(pathInput) : undefined);
+    let content = contentInput;
+
+    if (content === undefined) {
+      if (pathInput === undefined) return failure("validation_failed", "content or path is required");
+      if (hasPathTraversal(pathInput) || isSensitiveWorkspacePath(pathInput)) return failure("permission_denied", "file path is not allowed");
+      const workspaceRoot = this.workspaceRootFor(session.roomId);
+      if (workspaceRoot === undefined) return failure("not_found", `Workspace for room '${session.roomId}' not found`);
+      const target = resolveWorkspacePath(workspaceRoot, pathInput, { existing: true });
+      if (!target.ok) return target.result;
+      const permission = await this.checkPermissionAsync(session, context, { type: "file", path: pathInput, operation: "read" });
+      if (!permission.ok) return permission;
+      try {
+        content = readFileSync(target.path, "utf8");
+      } catch (error) {
+        return failure("file_not_found", error instanceof Error ? error.message : String(error));
+      }
+      path = path ?? normalizeMessageFilePath(pathInput);
+    }
+
+    if (path === undefined) path = DEFAULT_FILE_MESSAGE_NAME;
+    if (isSensitiveWorkspacePath(path)) return failure("permission_denied", "file path is not allowed");
+    const fileName = basename(path);
+    const title = typeof input.title === "string" && input.title.length > 0 ? input.title : fileName;
+    const mimeType = typeof input.mimeType === "string" && input.mimeType.length > 0
+      ? input.mimeType
+      : (typeof input.mime_type === "string" && input.mime_type.length > 0 ? input.mime_type : mimeTypeForPath(path));
+    const previewKind = previewKindFor(path, mimeType);
+    const now = this.options.now?.() ?? Date.now();
+    const runId = this.requireRunId(session, context);
+    let messageId = "";
+    const payload = {
+      fileId: "",
+      name: fileName,
+      mimeType,
+      sizeBytes: Buffer.byteLength(content, "utf8"),
+      artifactId: "",
+      path,
+      previewKind
+    };
+    const trace = { traceId: `mcp:${runId}:send-file-message` };
+
+    let artifactId = "";
+    let seq = 0;
+    this.options.database.sqlite.transaction(() => {
+      messageId = this.ensureRunMessage(room.workspace_id, session, runId, now);
+      const artifact = artifactService.create({
+        workspaceId: room.workspace_id,
+        roomId: session.roomId,
+        runId,
+        messageId,
+        type: "file",
+        title,
+        status: "draft",
+        createdBy: session.agentId,
+        metadata: {
+          source: contentInput !== undefined ? "mcp_content" : "workspace_path",
+          ...(typeof input.summary === "string" ? { summary: input.summary } : {})
+        },
+        files: [{ path: path as string, oldContent: "", newContent: content as string, additions: lineCount(content as string), deletions: 0, fileStatus: "added" }]
+      }, trace);
+      artifactId = artifact.id;
+      const maxSeq = this.options.database.sqlite.prepare("SELECT COALESCE(MAX(seq), -1) AS maxSeq FROM message_parts WHERE message_id = ?").get(messageId) as { readonly maxSeq: number };
+      seq = maxSeq.maxSeq + 1;
+      const partPayload = { ...payload, fileId: artifactId, artifactId };
+      this.options.database.sqlite
+        .prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, ?, 'attachment', ?, ?)")
+        .run(messageId, seq, JSON.stringify(partPayload), now);
+      this.options.eventBus.publish({
+        id: randomUUID(),
+        type: "message.part.added",
+        schemaVersion: 1,
+        workspaceId: room.workspace_id,
+        roomId: session.roomId,
+        runId,
+        agentId: session.agentId,
+        payload: { messageId, part: { type: "attachment", seq, ...partPayload } },
+        createdAt: now
+      });
+    })();
+
+    return { ok: true, data: { messageId, artifactId, fileName, path, mimeType, sizeBytes: payload.sizeBytes, previewKind } };
+  }
+
+  private ensureRunMessage(workspaceId: string, session: RoomMcpSessionContext, runId: string, now: number): string {
+    const existing = this.options.database.sqlite.prepare("SELECT id FROM messages WHERE run_id = ? AND room_id = ? ORDER BY created_at ASC LIMIT 1").get(runId, session.roomId) as { readonly id: string } | undefined;
+    if (existing !== undefined) return existing.id;
+    const messageId = `msg_${runId}`;
+    const byId = this.options.database.sqlite.prepare("SELECT id FROM messages WHERE id = ?").get(messageId) as { readonly id: string } | undefined;
+    if (byId !== undefined) return byId.id;
+    this.options.database.sqlite
+      .prepare("INSERT INTO messages (id, workspace_id, room_id, sender_type, sender_id, run_id, role, status, quoted_message_id, turn_dispatch_mode, pending_turn_id, created_at, updated_at, deleted_at) VALUES (?, ?, ?, 'agent', ?, ?, 'assistant', 'streaming', NULL, 'immediate', NULL, ?, ?, NULL)")
+      .run(messageId, workspaceId, session.roomId, session.agentId, runId, now, now);
+    this.options.eventBus.publish({ id: randomUUID(), type: "message.created", schemaVersion: 1, workspaceId, roomId: session.roomId, runId, agentId: session.agentId, payload: { messageId, senderType: "agent", senderId: session.agentId, role: "assistant", status: "streaming" }, createdAt: now });
+    return messageId;
   }
 
   // ---------------------------------------------------------------------------
@@ -1623,6 +1765,93 @@ function isLikelyTextFile(path: string): boolean {
   } catch {
     return false;
   }
+}
+
+function normalizeMessageFilePath(path: string): string {
+  const normalized = toPosixPath(path).replace(/^\.\//u, "");
+  const segments = normalized.split("/").filter((segment) => segment.length > 0);
+  return segments.length > 0 ? segments.join("/") : DEFAULT_FILE_MESSAGE_NAME;
+}
+
+function isSensitiveWorkspacePath(path: string): boolean {
+  const normalized = normalizeMessageFilePath(path).toLowerCase();
+  const name = basename(normalized);
+  return name === ".env"
+    || name.startsWith(".env.")
+    || name.endsWith(".pem")
+    || name.endsWith(".key")
+    || name === "id_rsa"
+    || name === "id_ed25519"
+    || normalized === ".netrc"
+    || normalized.startsWith(".ssh/")
+    || normalized.startsWith(".aws/")
+    || normalized.startsWith(".gcp/")
+    || normalized.endsWith("/credentials.json")
+    || normalized.endsWith("/service-account.json")
+    || /\/service-account[^/]*\.json$/u.test(normalized);
+}
+
+function mimeTypeForPath(path: string): string {
+  switch (extname(path).toLowerCase()) {
+    case ".md":
+    case ".markdown":
+      return "text/markdown";
+    case ".txt":
+      return "text/plain";
+    case ".json":
+      return "application/json";
+    case ".csv":
+      return "text/csv";
+    case ".html":
+      return "text/html";
+    case ".css":
+      return "text/css";
+    case ".js":
+    case ".mjs":
+    case ".cjs":
+      return "text/javascript";
+    case ".ts":
+    case ".tsx":
+    case ".jsx":
+    case ".py":
+    case ".rs":
+    case ".go":
+    case ".java":
+    case ".cs":
+    case ".cpp":
+    case ".c":
+    case ".h":
+    case ".sql":
+    case ".yaml":
+    case ".yml":
+    case ".toml":
+    case ".xml":
+      return "text/plain";
+    case ".png":
+      return "image/png";
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".gif":
+      return "image/gif";
+    case ".webp":
+      return "image/webp";
+    default:
+      return "application/octet-stream";
+  }
+}
+
+function previewKindFor(path: string, mimeType: string): "markdown" | "text" | "code" | "image" | "download" {
+  const extension = extname(path).toLowerCase();
+  if (mimeType.startsWith("image/")) return "image";
+  if (mimeType === "text/markdown" || extension === ".md" || extension === ".markdown") return "markdown";
+  if ([".js", ".jsx", ".ts", ".tsx", ".py", ".rs", ".go", ".java", ".cs", ".cpp", ".c", ".h", ".sql", ".css", ".html", ".json", ".yaml", ".yml", ".toml", ".xml"].includes(extension)) return "code";
+  if (mimeType.startsWith("text/") || mimeType === "application/json") return "text";
+  return "download";
+}
+
+function lineCount(value: string): number {
+  return value.length === 0 ? 0 : value.split(/\r?\n/u).length;
 }
 
 function countOccurrences(content: string, needle: string): number {

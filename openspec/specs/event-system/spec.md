@@ -55,6 +55,7 @@ The canonical event registry SHALL be extended with the following V1.0 event typ
 |---|---|---|---|---|---|
 | `message.created` | message | durable | both | messaging | 需要 projector handler |
 | `message.part.delta` | message | ephemeral | detail | messaging | streaming delta |
+| `message.part.added` | message | durable | both | messaging | 需要 projector handler |
 | `message.completed` | message | durable | both | messaging | 需要 projector handler |
 | `message.cancelled` | message | durable | both | messaging | 需要 projector handler |
 | `message.deleted` | message | durable | both | messaging | 需要 projector handler |
@@ -502,4 +503,3 @@ These run on every PR and on `bun run check:all` locally; `openspec validate --s
 
 - **WHEN** orchestrator 代码 dispatch `{ type: "WakeAgent", ... }` 但 `bus-runtime` 的 Command union 没有 WakeAgent
 - **THEN** `bun run command:check` 报错
-

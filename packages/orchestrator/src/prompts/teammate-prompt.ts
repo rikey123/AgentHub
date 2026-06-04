@@ -1,3 +1,5 @@
+import { GROUP_CHAT_FILE_MESSAGE_GUIDANCE } from "./file-message-guidance.ts";
+
 export type TeammatePromptParams = {
   readonly agentName: string;
   readonly leaderName: string;
@@ -34,6 +36,8 @@ Teammates: ${teammateNames}${workspaceSection}
 - Avoid generic "done" messages; include one concrete outcome, blocker, or next decision
 - Put detailed findings, long markdown, and deliverables into \`room.update_task\` summaries or artifacts
 - Do not post a long report into room chat unless the user or leader explicitly asks for a full public write-up
+
+${GROUP_CHAT_FILE_MESSAGE_GUIDANCE}
 
 ## Team Coordination Tools
 Use the \`room.*\` MCP tools for ALL team coordination:

@@ -10,6 +10,7 @@
     "test": "node scripts/run-tests.mjs"
   },
   "dependencies": {
+    "@agenthub/artifacts": "workspace:*",
     "@agenthub/bus": "workspace:*",
     "@agenthub/db": "workspace:*",
     "@agenthub/protocol": "workspace:*"

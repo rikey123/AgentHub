@@ -1953,6 +1953,24 @@ describe("daemon M1.4 composition", () => {
     expect(nextPayload.messages.map((message) => message.id)).toContain(second.data.messageId);
   });
 
+  it("hydrates artifact attachment message parts as flat parts for REST message history", async () => {
+    const client = new AgentHubClient({ baseUrl });
+    const room = await client.createRoom({ title: "File Parts", mode: "solo", primaryAgentId: "mock-builder" }) as { readonly data: { readonly roomId: string } };
+    const messageId = "msg_file_part_history";
+    daemon.database.sqlite.transaction(() => {
+      daemon.database.sqlite.prepare("INSERT INTO messages (id, workspace_id, room_id, sender_type, sender_id, run_id, role, status, quoted_message_id, turn_dispatch_mode, pending_turn_id, created_at, updated_at, deleted_at) VALUES (?, 'default-workspace', ?, 'agent', 'mock-builder', NULL, 'assistant', 'completed', NULL, 'immediate', NULL, 1, 1, NULL)").run(messageId, room.data.roomId);
+      daemon.database.sqlite.prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, 0, 'attachment', ?, 1)").run(messageId, JSON.stringify({ fileId: "artifact-1", artifactId: "artifact-1", name: "design.md", mimeType: "text/markdown", sizeBytes: 42, path: "design.md", previewKind: "markdown" }));
+    })();
+
+    const response = await fetch(`${baseUrl}/rooms/${room.data.roomId}/messages`);
+    const payload = await response.json() as { readonly messages: readonly { readonly id: string; readonly parts?: readonly unknown[] }[] };
+
+    expect(response.status).toBe(200);
+    expect(payload.messages.find((message) => message.id === messageId)?.parts).toEqual([
+      { seq: 0, type: "attachment", fileId: "artifact-1", artifactId: "artifact-1", name: "design.md", mimeType: "text/markdown", sizeBytes: 42, path: "design.md", previewKind: "markdown" }
+    ]);
+  });
+
   it("pins messages into workspace context and regenerates assistant messages through WakeAgent", async () => {
     const client = new AgentHubClient({ baseUrl });
     const room = await client.createRoom({ title: "Pin Regen", mode: "solo", primaryAgentId: "mock-builder" }) as { readonly data: { readonly roomId: string } };

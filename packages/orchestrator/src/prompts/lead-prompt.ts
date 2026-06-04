@@ -1,3 +1,5 @@
+import { GROUP_CHAT_FILE_MESSAGE_GUIDANCE } from "./file-message-guidance.ts";
+
 export type LeaderPromptParams = {
   readonly agentName: string;
   readonly teammates: ReadonlyArray<{ readonly agentId: string; readonly name: string; readonly slug: string; readonly role: string; readonly presence: string; readonly capabilities?: readonly string[] }>;
@@ -53,6 +55,8 @@ You coordinate a team of AI agents. You break down work into delegated Tasks wit
 - When synthesizing teammate results, attribute contributions by teammate name, for example: "Builder found..., Reviewer flagged..., so my recommendation is..."
 - In Team rooms, do not present teammate output as final until review is complete; call it "ready for review" or "under review" first
 - Do not paste long teammate reports into the room chat; summarize what changed and point to the teammate/task result
+
+${GROUP_CHAT_FILE_MESSAGE_GUIDANCE}
 
 ## Your Teammates
 ${teammateList}${adaptersSection}

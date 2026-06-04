@@ -279,6 +279,22 @@ class Projector {
         }
         break;
       }
+      case "message.part.added": {
+        if (payload && typeof payload.messageId === "string" && payload.part && typeof payload.part === "object") {
+          const part = payload.part as MessageViewModel["parts"][number];
+          room = {
+            ...room,
+            messages: room.messages.map((m) => {
+              if (m.id !== payload.messageId) return m;
+              if (m.parts.some((existing) => existing.seq === part.seq && existing.type === part.type)) return m;
+              return { ...m, parts: [...m.parts, part].sort((a, b) => a.seq - b.seq) };
+            })
+          };
+          this.rooms.set(roomId, room);
+          changed = true;
+        }
+        break;
+      }
       case "message.completed": {
         if (payload && typeof payload.messageId === "string") {
           // Flush any pending deltas for this message first

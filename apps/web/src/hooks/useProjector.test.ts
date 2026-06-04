@@ -199,6 +199,49 @@ describe("useProjector replay handling", () => {
     });
   });
 
+  it("appends artifact attachment parts from live message.part.added events", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "assisted" }));
+    projector.apply(makeAgentEvent("message.created", roomId, "agent-builder", {
+      messageId: "msg-file-1",
+      role: "assistant",
+      senderId: "agent-builder",
+      senderType: "agent",
+      text: "I wrote the full architecture note as a file."
+    }));
+
+    projector.apply(makeEvent("message.part.added", roomId, {
+      messageId: "msg-file-1",
+      part: {
+        type: "attachment",
+        seq: 1,
+        fileId: "file-1",
+        name: "multi-agent-platform-architecture.md",
+        mimeType: "text/markdown",
+        sizeBytes: 2048,
+        artifactId: "artifact-1",
+        path: "multi-agent-platform-architecture.md",
+        previewKind: "markdown"
+      }
+    }));
+
+    const message = emittedState.rooms.get(roomId)?.messages.find((item) => item.id === "msg-file-1");
+    expect(message?.parts).toEqual([
+      {
+        type: "attachment",
+        seq: 1,
+        fileId: "file-1",
+        name: "multi-agent-platform-architecture.md",
+        mimeType: "text/markdown",
+        sizeBytes: 2048,
+        artifactId: "artifact-1",
+        path: "multi-agent-platform-architecture.md",
+        previewKind: "markdown"
+      }
+    ]);
+  });
+
   it("stores worktree review state and conflicts for task cards", () => {
     const roomId = `room-${randomUUID()}`;
     const projector = getProjector();

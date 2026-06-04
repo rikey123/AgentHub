@@ -140,6 +140,9 @@ describe("buildRunPrompt", () => {
     expect(prompt).toContain("synthesize");
     expect(prompt).toContain("Do not restate the previous speaker's whole answer");
     expect(prompt).toContain("If the discussion already feels complete");
+    expect(prompt).toContain("room.send_file_message");
+    expect(prompt).toContain("short public summary");
+    expect(prompt).toContain("file card");
   });
 
   test("assisted first-wake prompt reserves room.send_message for private mailbox coordination", () => {

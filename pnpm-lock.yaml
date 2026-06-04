@@ -437,6 +437,9 @@ importers:
 
   packages/orchestrator:
     dependencies:
+      '@agenthub/artifacts':
+        specifier: workspace:*
+        version: link:../artifacts
       '@agenthub/bus':
         specifier: workspace:*
         version: link:../bus

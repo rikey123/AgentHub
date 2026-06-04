@@ -69,6 +69,32 @@ describe("MessageItem public chat rendering", () => {
     expect(html).toContain("teammate");
     expect(html).toContain("data-speaker-type=\"agent\"");
   });
+
+  it("renders artifact attachments as clickable file cards", () => {
+    const html = renderToStaticMarkup(createElement(MessageItem, {
+      message: messageFixture({
+        text: "I put the full design in a file.",
+        parts: [{
+          type: "attachment",
+          seq: 1,
+          fileId: "artifact_1",
+          artifactId: "artifact_1",
+          name: "multi-agent-platform-architecture.md",
+          mimeType: "text/markdown",
+          sizeBytes: 4096,
+          path: "multi-agent-platform-architecture.md",
+          previewKind: "markdown"
+        }]
+      }),
+      csrfFetch: vi.fn<typeof fetch>()
+    }));
+
+    expect(html).toContain("data-testid=\"artifact-file-card\"");
+    expect(html).toContain("multi-agent-platform-architecture.md");
+    expect(html).toContain("Markdown");
+    expect(html).toContain("4.0 KB");
+    expect(html).toContain("Open file preview");
+  });
 });
 
 function messageFixture(patch: Partial<MessageViewModel>): MessageViewModel {

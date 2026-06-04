@@ -34,6 +34,19 @@ describe("buildLeaderPrompt", () => {
     expect(prompt).toContain("Do not paste long teammate reports into the room chat");
   });
 
+  test("tells leaders to publish long synthesis deliverables as file messages", () => {
+    const prompt = buildLeaderPrompt({
+      agentName: "Project Manager",
+      teammates: [
+        { agentId: "agent_builder", name: "Builder", slug: "builder", role: "teammate", presence: "active" }
+      ]
+    });
+
+    expect(prompt).toContain("room.send_file_message");
+    expect(prompt).toContain("short public summary");
+    expect(prompt).toContain("file card");
+  });
+
   test("uses attributed synthesis and visible handoff language without bypassing review", () => {
     const prompt = buildLeaderPrompt({
       agentName: "Project Manager",

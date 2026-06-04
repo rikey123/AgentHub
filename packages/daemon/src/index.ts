@@ -565,7 +565,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
       }
     });
     commandBusRef.current = commandBus;
-    const roomMcpServer = new RoomMcpServer({ commandBus, taskService, database, eventBus, permissionEngine, artifactFs, ...(options.now !== undefined ? { now: options.now } : {}) });
+    const roomMcpServer = new RoomMcpServer({ commandBus, taskService, database, eventBus, permissionEngine, artifactFs, artifactService, ...(options.now !== undefined ? { now: options.now } : {}) });
     // Start the TCP server so agents can reach room.* MCP tools via the stdio bridge.
     await roomMcpServer.startTcp();
     roomMcpServerRef.current = roomMcpServer;
@@ -1809,16 +1809,17 @@ function attachMessageText(ctx: RouteContext, row: { readonly id: string }): unk
     "SELECT seq, part_type, payload FROM message_parts WHERE message_id = ? ORDER BY seq ASC",
     row.id
   ) as Array<{ readonly seq: number; readonly part_type: string; readonly payload: string }>;
-  const decoded = parts.map((part) => {
+  const decoded: Array<Record<string, unknown> & { readonly seq: number; readonly type: string }> = parts.map((part) => {
     let payload: unknown;
     try { payload = JSON.parse(part.payload); } catch { payload = part.payload; }
-    return { seq: part.seq, type: part.part_type, payload };
+    return isPlainObject(payload)
+      ? { seq: part.seq, type: part.part_type, ...payload }
+      : { seq: part.seq, type: part.part_type, payload };
   });
   const textChunks = decoded
     .filter((part) => part.type === "text" || part.type === "code")
     .map((part) => {
-      const p = part.payload as { text?: unknown };
-      return typeof p?.text === "string" ? p.text : "";
+      return typeof part.text === "string" ? part.text : "";
     })
     .filter((t) => t.length > 0);
   return { ...row, text: textChunks.join("\n"), parts: decoded };
@@ -1836,6 +1837,10 @@ function cursorParam(value: string | null): { readonly createdAt: number; readon
 
 function encodeCursor(row: { readonly created_at: number; readonly id: string }): string {
   return Buffer.from(JSON.stringify({ createdAt: row.created_at, id: row.id }), "utf8").toString("base64url");
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 /**

@@ -72,6 +72,7 @@ export const EVENT_PAYLOAD_SCHEMAS = {
 export const EVENT_REGISTRY = [
   { type: "message.created", category: "message", durability: "durable", visibility: "both", schemaVersion: 1 },
   { type: "message.part.delta", category: "message", durability: "ephemeral", visibility: "detail", schemaVersion: 1 },
+  { type: "message.part.added", category: "message", durability: "durable", visibility: "both", schemaVersion: 1 },
   { type: "message.completed", category: "message", durability: "durable", visibility: "both", schemaVersion: 1 },
   { type: "message.cancelled", category: "message", durability: "durable", visibility: "both", schemaVersion: 1 },
   { type: "message.deleted", category: "message", durability: "durable", visibility: "both", schemaVersion: 1 },

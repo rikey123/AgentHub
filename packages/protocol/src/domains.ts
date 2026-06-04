@@ -118,7 +118,17 @@ export const MessagePartSchema = Schema.Union(
   Schema.Struct({ type: Schema.Literal("code"), seq: Schema.Number, lang: Schema.String, text: Schema.String }),
   Schema.Struct({ type: Schema.Literal("tool_call"), seq: Schema.Number, name: Schema.String, input: Schema.Unknown }),
   Schema.Struct({ type: Schema.Literal("tool_result"), seq: Schema.Number, toolCallId: IdSchema, output: Schema.Unknown, ok: Schema.Boolean }),
-  Schema.Struct({ type: Schema.Literal("attachment"), seq: Schema.Number, fileId: IdSchema, name: Schema.String, mimeType: Schema.String, sizeBytes: Schema.Number }),
+  Schema.Struct({
+    type: Schema.Literal("attachment"),
+    seq: Schema.Number,
+    fileId: IdSchema,
+    name: Schema.String,
+    mimeType: Schema.String,
+    sizeBytes: Schema.Number,
+    artifactId: Schema.optional(IdSchema),
+    path: Schema.optional(Schema.String),
+    previewKind: Schema.optional(Schema.Literal("markdown", "text", "code", "image", "download"))
+  }),
   Schema.Struct({ type: Schema.Literal("card"), seq: Schema.Number, card: CardSchema })
 );
 export type MessagePart = typeof MessagePartSchema.Type;

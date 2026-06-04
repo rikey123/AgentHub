@@ -1,5 +1,6 @@
 import type { AgentHubDatabase } from "@agenthub/db";
 import { nameToSlug } from "../mention-parser.ts";
+import { GROUP_CHAT_FILE_MESSAGE_GUIDANCE } from "./file-message-guidance.ts";
 import { buildLeaderPrompt } from "./lead-prompt.ts";
 import { buildTeammatePrompt } from "./teammate-prompt.ts";
 
@@ -128,6 +129,8 @@ Use \`room.list_members\` to see the current roster and presence status.
 - Prefer one focused contribution over a long report.
 - Ask or hand off to a teammate only when it materially improves the discussion.
 - Do not paste full task-style reports into the public chat; summarize and leave room for the next speaker.
+
+${GROUP_CHAT_FILE_MESSAGE_GUIDANCE}
 
 ## Receiving Messages from Other Agents (CRITICAL)
 

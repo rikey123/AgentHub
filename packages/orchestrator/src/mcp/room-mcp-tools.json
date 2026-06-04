@@ -22,6 +22,23 @@
     }
   },
   {
+    "name": "room.send_file_message",
+    "description": "Publish a long deliverable as an artifact-backed file card in the public room message. Use this for reports, designs, plans, code snippets, tables, or any answer too long for a concise chat reply.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string", "description": "Workspace-relative source file path to publish as a file message." },
+        "content": { "type": "string", "description": "Inline file content to publish without reading from the workspace." },
+        "fileName": { "type": "string", "description": "File name or relative artifact path when using content mode." },
+        "title": { "type": "string", "description": "Human-readable file card title." },
+        "summary": { "type": "string", "description": "Short summary of the file for audit and preview metadata." },
+        "mimeType": { "type": "string", "description": "MIME type, such as text/markdown or text/plain." },
+        "mime_type": { "type": "string", "description": "MIME type alias for runtimes that prefer snake_case." }
+      },
+      "additionalProperties": true
+    }
+  },
+  {
     "name": "room.read_mailbox",
     "description": "Read mailbox messages and queued next-turn inputs delivered to this run.",
     "inputSchema": {

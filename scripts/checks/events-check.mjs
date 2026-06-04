@@ -49,6 +49,7 @@ const ignoredNonEventLiterals = new Set([
   "web.fetch",
   "web.search",
   // V1.1 artifact file paths (not event types)
+  "message.md",
   "worktree.patch"
 ]);
 

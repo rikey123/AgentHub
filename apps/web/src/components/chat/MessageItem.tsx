@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { Avatar, Button, Card, Chip, Dropdown } from "@heroui/react";
+import { Avatar, Button, Card, Chip, Dropdown, Modal } from "@heroui/react";
 import type { MessageViewModel } from "../../types.ts";
-import { formatTime, initials } from "../../lib/format.ts";
+import { formatBytes, formatTime, initials } from "../../lib/format.ts";
 import { pendingTurnColor } from "../../lib/status.ts";
 import { CardRenderer } from "../cards/CardRenderer.tsx";
 
@@ -224,15 +224,99 @@ function PartView({ part, csrfFetch }: { part: MessageViewModel["parts"][number]
         </Card>
       );
     case "attachment":
-      return (
-        <Chip size="sm" variant="soft" color="default" className="ah-mono">
-          File {part.name} - {Math.round(part.sizeBytes / 1024)}kb
-        </Chip>
-      );
+      return <ArtifactAttachmentCard part={part} csrfFetch={csrfFetch} />;
     case "card":
       return <CardRenderer card={part.card} csrfFetch={csrfFetch} />;
     default: {
       return null;
     }
   }
+}
+
+function ArtifactAttachmentCard({ part, csrfFetch }: { part: Extract<MessageViewModel["parts"][number], { type: "attachment" }>; csrfFetch: typeof fetch }) {
+  const [preview, setPreview] = useState<{ readonly title: string; readonly content: string; readonly error?: string | undefined } | undefined>();
+  const [loading, setLoading] = useState(false);
+  const canPreview = part.artifactId !== undefined && part.path !== undefined && (part.previewKind === "markdown" || part.previewKind === "text" || part.previewKind === "code");
+  const previewLabel = previewLabelFor(part.previewKind, part.mimeType);
+
+  const openPreview = async () => {
+    if (!canPreview) return;
+    setLoading(true);
+    try {
+      const res = await csrfFetch(`/artifacts/${encodeURIComponent(part.artifactId!)}/files/${encodeURIComponent(part.path!)}`);
+      if (!res.ok) throw new Error(`Failed to load file (${res.status})`);
+      const body = await res.json() as { readonly content?: { readonly content?: unknown } | null };
+      const content = body.content && typeof body.content.content === "string" ? body.content.content : "";
+      setPreview({ title: part.name, content });
+    } catch (err) {
+      setPreview({ title: part.name, content: "", error: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        className="flex w-full max-w-[420px] items-center gap-3 rounded-lg border border-border bg-surface-secondary px-3 py-2 text-left shadow-sm transition-colors hover:border-accent hover:bg-surface-tertiary"
+        onClick={openPreview}
+        disabled={!canPreview}
+        data-testid="artifact-file-card"
+        aria-label="Open file preview"
+      >
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-border bg-surface ah-mono text-xs font-semibold text-muted">
+          {fileBadgeFor(part)}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-semibold text-foreground">{part.name}</span>
+          <span className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted">
+            <span>{previewLabel}</span>
+            <span>{formatBytes(part.sizeBytes)}</span>
+          </span>
+        </span>
+        <span className="shrink-0 text-xs font-semibold text-accent">{loading ? "Loading" : canPreview ? "Open" : "Download"}</span>
+      </button>
+      <Modal.Backdrop isOpen={preview !== undefined} onOpenChange={(open) => { if (!open) setPreview(undefined); }}>
+        <Modal.Container size="lg">
+          <Modal.Dialog aria-label="File preview" className="max-h-[86vh]">
+            <Modal.CloseTrigger aria-label="Close file preview" />
+            <Modal.Header>
+              <div className="min-w-0">
+                <Modal.Heading>{preview?.title ?? part.name}</Modal.Heading>
+                <p className="mt-1 text-xs text-muted">{previewLabel} - {formatBytes(part.sizeBytes)}</p>
+              </div>
+            </Modal.Header>
+            <Modal.Body>
+              {preview?.error ? (
+                <p className="rounded-lg border border-danger/40 bg-danger/10 p-3 text-sm text-danger">{preview.error}</p>
+              ) : (
+                <pre className="ah-mono max-h-[58vh] overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-surface-secondary p-4 text-xs leading-5 text-foreground">
+                  {preview?.content}
+                </pre>
+              )}
+            </Modal.Body>
+          </Modal.Dialog>
+        </Modal.Container>
+      </Modal.Backdrop>
+    </>
+  );
+}
+
+function previewLabelFor(previewKind: string | undefined, mimeType: string): string {
+  if (previewKind === "markdown") return "Markdown";
+  if (previewKind === "code") return "Code";
+  if (previewKind === "image") return "Image";
+  if (previewKind === "text") return "Text";
+  if (mimeType === "text/markdown") return "Markdown";
+  if (mimeType.startsWith("text/")) return "Text";
+  return "File";
+}
+
+function fileBadgeFor(part: Extract<MessageViewModel["parts"][number], { type: "attachment" }>): string {
+  const extension = part.name.includes(".") ? part.name.split(".").pop() : undefined;
+  if (extension && extension.length > 0 && extension.length <= 4) return extension.toUpperCase();
+  if (part.previewKind === "markdown") return "MD";
+  if (part.previewKind === "code") return "CODE";
+  return "FILE";
 }

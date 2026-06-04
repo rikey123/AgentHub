@@ -19,6 +19,21 @@ describe("buildTeammatePrompt", () => {
     expect(prompt).toContain("Do not post a long report into room chat");
   });
 
+  test("tells teammates to publish long deliverables as file messages", () => {
+    const prompt = buildTeammatePrompt({
+      agentName: "Builder",
+      leaderName: "Project Manager",
+      leaderSlug: "project-manager",
+      teammates: [
+        { name: "Reviewer", slug: "reviewer", presence: "idle" }
+      ]
+    });
+
+    expect(prompt).toContain("room.send_file_message");
+    expect(prompt).toContain("short public summary");
+    expect(prompt).toContain("file card");
+  });
+
   test("makes teammate replies feel like concrete group-chat follow-ups", () => {
     const prompt = buildTeammatePrompt({
       agentName: "Builder",
