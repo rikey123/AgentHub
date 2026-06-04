@@ -61,6 +61,8 @@ describe("buildLeaderPrompt", () => {
     expect(prompt).toContain("Reviewer flagged");
     expect(prompt).toContain("brief public handoff line");
     expect(prompt).toContain("who is taking which angle");
+    expect(prompt).toContain("The system also mirrors task lifecycle milestones into short public room messages");
+    expect(prompt).toContain("Do not repeat those lifecycle updates mechanically");
     expect(prompt).toContain("do not present teammate output as final until review is complete");
     expect(prompt).toContain("ready for review");
     expect(prompt).toContain("under review");

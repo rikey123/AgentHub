@@ -7,19 +7,21 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { EventBus } from "@agenthub/bus";
 import { createDatabase, type AgentHubDatabase } from "@agenthub/db";
 
-import { TaskService } from "../src/index.ts";
+import { TaskModeGroupChatPresenter, TaskService } from "../src/index.ts";
 
 let tempDir: string | undefined;
 let database: AgentHubDatabase | undefined;
 let eventBus: EventBus | undefined;
 let service: TaskService | undefined;
+let presenter: TaskModeGroupChatPresenter | undefined;
 let now = 1_000;
 
 beforeEach(() => {
   tempDir = mkdtempSync(join(tmpdir(), "agenthub-orchestrator-complete-task-"));
   database = createDatabase({ path: join(tempDir, "agenthub.sqlite"), applyMigrations: true });
   eventBus = new EventBus({ database: currentDatabase() });
-  service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
+  presenter = new TaskModeGroupChatPresenter({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
+  service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), taskModeGroupChatPresenter: currentPresenter(), now: () => now });
   seedWorkspace();
 });
 
@@ -31,6 +33,7 @@ afterEach(() => {
   database = undefined;
   eventBus = undefined;
   service = undefined;
+  presenter = undefined;
   now = 1_000;
 });
 
@@ -51,12 +54,13 @@ describe("TaskService.completeTask", () => {
 
     expect(result.ok).toBe(true);
     expect(currentDatabase().sqlite.prepare("SELECT status, blocker_reason FROM tasks WHERE id = ?").get(taskId)).toMatchObject({ status: "completed", blocker_reason: null });
-    expect(eventsFor(taskId)).toEqual(["task.created", "task.assigned", "task.status.changed", "task.activity.added", "task.delegation.completed"]);
+    expect(eventsFor(taskId)).toEqual(expect.arrayContaining(["task.created", "task.assigned", "task.status.changed", "task.activity.added", "task.delegation.completed"]));
     const activity = currentDatabase().sqlite.prepare("SELECT kind, by_kind, by, payload FROM task_activities WHERE task_id = ? AND kind = 'comment'").get(taskId) as { readonly kind: string; readonly by_kind: string; readonly by: string; readonly payload: string };
     expect(activity).toMatchObject({ kind: "comment", by_kind: "role", by: "agent_worker" });
     expect(JSON.parse(activity.payload)).toMatchObject({ reportType: "completion_report", summary: "Done", finalStatus: "completed", byRunId: "run_1", artifactIds: ["artifact_1"], filesChanged: ["src/app.ts"] });
     const completedEvent = currentDatabase().sqlite.prepare("SELECT payload FROM events WHERE type = 'task.delegation.completed' AND task_id = ? ORDER BY seq DESC LIMIT 1").get(taskId) as { readonly payload: string };
     expect(JSON.parse(completedEvent.payload)).toMatchObject({ taskId, finalStatus: "completed", byRunId: "run_1", summary: "Done", artifactIds: ["artifact_1"], filesChanged: ["src/app.ts"] });
+    expect(publicMessageTexts("room_squad")).toContain("Worker：我完成了「Task」。核心结论：Done");
   });
 
   test("team mode routes completed into review when review is expected", () => {
@@ -66,7 +70,17 @@ describe("TaskService.completeTask", () => {
 
     expect(result.ok).toBe(true);
     expect(currentDatabase().sqlite.prepare("SELECT status, blocker_reason FROM tasks WHERE id = ?").get(taskId)).toMatchObject({ status: "review", blocker_reason: null });
-    expect(eventsFor(taskId)).toEqual(["task.created", "task.assigned", "task.status.changed", "task.activity.added", "task.delegation.completed"]);
+    expect(eventsFor(taskId)).toEqual(expect.arrayContaining(["task.created", "task.assigned", "task.status.changed", "task.activity.added", "task.delegation.completed"]));
+    expect(publicMessageTexts("room_team")).toContain("Worker：我完成了「Task」，先交给 PM review。核心结论：Done");
+  });
+
+  test("delegated run start presentation does not duplicate on repeated start", () => {
+    const taskId = createTask({ roomId: "room_squad", assigneeAgentId: "agent_worker", expectsReview: false, status: "pending" });
+
+    expect(currentService().startDelegatedRun(taskId, "run_1")).toMatchObject({ ok: true });
+    expect(currentService().startDelegatedRun(taskId, "run_1")).toMatchObject({ ok: false });
+
+    expect(publicMessageTexts("room_squad")).toHaveLength(1);
   });
 
   test("blocked status requires a blocker reason and stores it", () => {
@@ -164,6 +178,11 @@ function currentService(): TaskService {
   return service as TaskService;
 }
 
+function currentPresenter(): TaskModeGroupChatPresenter {
+  expect(presenter).toBeDefined();
+  return presenter as TaskModeGroupChatPresenter;
+}
+
 function seedWorkspace(): void {
   currentDatabase().sqlite.prepare("INSERT INTO workspaces (id, name, root_path, created_at, updated_at) VALUES ('ws_1', 'Workspace', '.', 1, 1)").run();
   currentDatabase().sqlite.prepare("INSERT INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES ('agent_a', 'ws_1', 'Agent A', 'mock', NULL, '', '[]', NULL, 0, NULL, 1, 1)").run();
@@ -193,4 +212,16 @@ function eventsFor(taskId: string): string[] {
     .prepare("SELECT type FROM events WHERE task_id = ? ORDER BY seq ASC")
     .all(taskId)
     .map((row) => (row as { readonly type: string }).type);
+}
+
+function publicMessageTexts(roomId: string): string[] {
+  const rows = currentDatabase().sqlite.prepare(
+    `SELECT mp.payload
+     FROM messages m
+     JOIN message_parts mp ON mp.message_id = m.id AND mp.part_type = 'text'
+     WHERE m.room_id = ?
+       AND m.sender_type = 'agent'
+     ORDER BY m.created_at ASC, m.id ASC, mp.seq ASC`
+  ).all(roomId) as Array<{ readonly payload: string }>;
+  return rows.map((row) => (JSON.parse(row.payload) as { readonly text: string }).text);
 }

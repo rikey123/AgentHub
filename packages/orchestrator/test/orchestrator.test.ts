@@ -19,6 +19,7 @@ import {
   RunLifecycleService,
   RunQueue,
   TaskService,
+  TaskModeGroupChatPresenter,
   handleTeamDispatchReviewTerminal,
   maybePublishTeamDispatchCompleted,
   reconcileTerminalDelegatedTaskRuns,
@@ -463,7 +464,8 @@ describe("TaskService and RoomMcpServer", () => {
     createRun("run_delegate", { roomId: "room_delegate", agentId: "agent_leader" });
     const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
     const commandBus = commandBusWithHandlers();
-    const mcp = new RoomMcpServer({ commandBus, taskService: service, database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const presenter = new TaskModeGroupChatPresenter({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const mcp = new RoomMcpServer({ commandBus, taskService: service, database: currentDatabase(), eventBus: currentBus(), taskModeGroupChatPresenter: presenter, now: () => now });
 
     const result = await mcp.callTool("room.delegate", { toRoleId: "role_builder", title: "Implement login", description: "Add the login flow", expectsReview: true }, { roomId: "room_delegate", runId: "run_delegate", agentId: "agent_leader" });
 
@@ -483,6 +485,7 @@ describe("TaskService and RoomMcpServer", () => {
     expect(currentDatabase().sqlite.prepare("SELECT payload FROM events WHERE type = 'task.delegation.created' AND task_id = ?").get(result.data.taskId)).toMatchObject({
       payload: JSON.stringify({ taskId: result.data.taskId, delegationId: result.data.taskId, runId: result.data.runId, byRoleId: "role_leader", atRunId: "run_delegate", expectsReview: true })
     });
+    expect(publicMessageTexts("room_delegate")).toContain("Builder，我把「Implement login」交给你，先从你的角度推进。");
   });
 
   test("room.delegate can dispatch an existing pending backlog task", async () => {
@@ -558,10 +561,12 @@ describe("TaskService and RoomMcpServer", () => {
 
   test("team mode wakes leader only after every sibling task is in review", async () => {
     seedDelegatedRoom("room_team_review", "agent_leader", "role_leader", "role_builder", "binding_leader", "binding_builder", "agent_builder");
+    currentDatabase().sqlite.prepare("UPDATE rooms SET mode = 'team' WHERE id = 'room_team_review'").run();
     const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const presenter = new TaskModeGroupChatPresenter({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
     const dispatched: Array<{ readonly reason: string; readonly taskId: string; readonly idempotencyKey: string }> = [];
     const commandBus = { dispatch: (command: { readonly reason: string; readonly taskId: string; readonly idempotencyKey: string }) => { dispatched.push(command); return { ok: true, data: { runId: `leader-${dispatched.length}` }, emittedEvents: [] }; } } as unknown as CommandBus;
-    const mcp = new RoomMcpServer({ commandBus, taskService: service, database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const mcp = new RoomMcpServer({ commandBus, taskService: service, database: currentDatabase(), eventBus: currentBus(), taskModeGroupChatPresenter: presenter, now: () => now });
     const leaderSession = { roomId: "room_team_review", runId: "run_team_leader", agentId: "agent_leader" };
 
     const created1 = await mcp.callTool("room.delegate", { toRoleId: "role_builder", title: "Task 1", expectsReview: true }, leaderSession);
@@ -569,17 +574,18 @@ describe("TaskService and RoomMcpServer", () => {
     if (!created1.ok || !created2.ok || !isRecord(created1.data) || !isRecord(created2.data) || typeof created1.data.taskId !== "string" || typeof created2.data.taskId !== "string") throw new Error("expected delegated tasks");
     insertTerminalRun(created1.data.taskId, "run_review_1", "completed");
     expect(service.review(created1.data.taskId)).toMatchObject({ ok: true });
-    await handleTeamDispatchReviewTerminal({ database: currentDatabase(), eventBus: currentBus(), commandBus, taskService: service, now: () => now }, "run_review_1");
+    await handleTeamDispatchReviewTerminal({ database: currentDatabase(), eventBus: currentBus(), commandBus, taskService: service, taskModeGroupChatPresenter: presenter, now: () => now }, "run_review_1");
     expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'team.dispatch.started' AND json_extract(payload, '$.sourceRunId') = ?").get("run_team_leader")).toMatchObject({ count: 0 });
     insertTerminalRun(created2.data.taskId, "run_review_2", "completed");
     expect(service.review(created2.data.taskId)).toMatchObject({ ok: true });
-    await handleTeamDispatchReviewTerminal({ database: currentDatabase(), eventBus: currentBus(), commandBus, taskService: service, now: () => now }, "run_review_2");
+    await handleTeamDispatchReviewTerminal({ database: currentDatabase(), eventBus: currentBus(), commandBus, taskService: service, taskModeGroupChatPresenter: presenter, now: () => now }, "run_review_2");
     expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'team.dispatch.started' AND json_extract(payload, '$.sourceRunId') = ?").get("run_team_leader")).toMatchObject({ count: 1 });
-    await handleTeamDispatchReviewTerminal({ database: currentDatabase(), eventBus: currentBus(), commandBus, taskService: service, now: () => now }, "run_review_2");
+    await handleTeamDispatchReviewTerminal({ database: currentDatabase(), eventBus: currentBus(), commandBus, taskService: service, taskModeGroupChatPresenter: presenter, now: () => now }, "run_review_2");
     expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'team.dispatch.started' AND json_extract(payload, '$.sourceRunId') = ?").get("run_team_leader")).toMatchObject({ count: 1 });
     const leaderWakes = dispatched.filter((command) => command.reason === "task_review");
     expect(leaderWakes).toHaveLength(1);
     expect(leaderWakes[0]).toMatchObject({ taskId: created2.data.taskId });
+    expect(publicMessageTexts("room_team_review")).toContain("Leader：我开始 review 这 2 个结果，稍后给你收束。");
   });
 
   test("team mode forces delegated tasks into review even if the model asks to skip review", async () => {
@@ -601,9 +607,11 @@ describe("TaskService and RoomMcpServer", () => {
 
   test("leader approval of review task emits team.dispatch.completed after all siblings complete", async () => {
     seedDelegatedRoom("room_team_approve", "agent_leader", "role_leader", "role_builder", "binding_leader", "binding_builder", "agent_builder");
-    const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now, onTaskCompleted: (task) => maybePublishTeamDispatchCompleted({ database: currentDatabase(), eventBus: currentBus(), now: () => now }, task) });
+    currentDatabase().sqlite.prepare("UPDATE rooms SET mode = 'team' WHERE id = 'room_team_approve'").run();
+    const presenter = new TaskModeGroupChatPresenter({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now, onTaskCompleted: (task) => maybePublishTeamDispatchCompleted({ database: currentDatabase(), eventBus: currentBus(), taskModeGroupChatPresenter: presenter, now: () => now }, task) });
     const commandBus = new CommandBus({ database: currentDatabase(), handlers: { WakeAgent: createWakeAgentHandler({ database: currentDatabase(), activeWakes: currentActiveWakes(), mailbox: currentMailbox(), lifecycle: currentLifecycle() }) as CommandHandler, UpdateTask: createUpdateTaskHandler(service), CompleteTask: createCompleteTaskHandler(service) } });
-    const mcp = new RoomMcpServer({ commandBus, taskService: service, database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const mcp = new RoomMcpServer({ commandBus, taskService: service, database: currentDatabase(), eventBus: currentBus(), taskModeGroupChatPresenter: presenter, now: () => now });
     const leaderSession = { roomId: "room_team_approve", runId: "run_team_review_leader", agentId: "agent_leader" };
 
     const created = await mcp.callTool("room.delegate", { toRoleId: "role_builder", title: "Review me", expectsReview: true }, leaderSession);
@@ -613,6 +621,10 @@ describe("TaskService and RoomMcpServer", () => {
     expect(await mcp.callTool("room.update_task", { taskId: created.data.taskId, status: "completed" }, leaderSession)).toMatchObject({ ok: true });
     expect(currentDatabase().sqlite.prepare("SELECT status FROM tasks WHERE id = ?").get(created.data.taskId)).toMatchObject({ status: "completed" });
     expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'team.dispatch.completed' AND json_extract(payload, '$.sourceRunId') = ?").get("run_team_review_leader")).toMatchObject({ count: 1 });
+    expect(publicMessageTexts("room_team_approve")).toEqual(expect.arrayContaining([
+      "Builder，我把「Review me」交给你，先从你的角度推进。",
+      "Leader：这组任务已经 review 完成，我来给你合并结论。"
+    ]));
   });
 
   test("team mode wakes leader with task_blocked when a sibling run fails", async () => {
@@ -1491,6 +1503,19 @@ function runEvents(runId: string): string[] {
 
 function eventTypes(): string[] {
   return currentDatabase().sqlite.prepare("SELECT type FROM events ORDER BY seq ASC").all().map((row) => (row as { type: string }).type);
+}
+
+function publicMessageTexts(roomId: string): string[] {
+  const rows = currentDatabase().sqlite.prepare(
+    `SELECT mp.payload
+     FROM messages m
+     JOIN message_parts mp ON mp.message_id = m.id AND mp.part_type = 'text'
+     WHERE m.room_id = ?
+       AND m.sender_type = 'agent'
+       AND m.role = 'assistant'
+     ORDER BY m.created_at ASC, m.id ASC, mp.seq ASC`
+  ).all(roomId) as Array<{ readonly payload: string }>;
+  return rows.map((row) => (JSON.parse(row.payload) as { readonly text: string }).text);
 }
 
 function eventPayload(type: string, runId: string): unknown {
