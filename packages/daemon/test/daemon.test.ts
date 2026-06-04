@@ -155,6 +155,40 @@ describe("daemon M1.4 composition", () => {
     expect(messages.messages.some((message) => message.role === "assistant" && message.status === "completed")).toBe(true);
   });
 
+  it("serves built web assets from the daemon without relying on Vite", async () => {
+    await daemon.close();
+    currentDaemon = undefined;
+
+    const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-web-assets-"));
+    const webAssetsRoot = join(dir, "web-dist");
+    mkdirSync(join(webAssetsRoot, "assets"), { recursive: true });
+    writeFileSync(join(webAssetsRoot, "index.html"), '<!doctype html><div id="root"></div><script type="module" src="/assets/app.js"></script>');
+    writeFileSync(join(webAssetsRoot, "assets", "app.js"), "globalThis.__agenthubWeb = true;");
+
+    daemon = createDaemon({ databasePath: join(dir, "agenthub.sqlite"), port: 0, webAssetsRoot, modelTestFetch: modelTestFetchMock });
+    currentDaemon = daemon;
+    const server = await daemon.start();
+    const address = server.address();
+    if (typeof address !== "object" || address === null) throw new Error("expected TCP address");
+    baseUrl = `http://127.0.0.1:${address.port}`;
+
+    const page = await fetch(`${baseUrl}/`);
+    expect(page.status).toBe(200);
+    expect(page.headers.get("content-type")).toContain("text/html");
+    expect(await page.text()).toContain("root");
+
+    const script = await fetch(`${baseUrl}/assets/app.js`);
+    expect(script.status).toBe(200);
+    expect(script.headers.get("content-type")).toContain("javascript");
+    expect(await script.text()).toContain("__agenthubWeb");
+
+    const apiMiss = await fetch(`${baseUrl}/auth/not-a-static-page`);
+    expect(apiMiss.status).toBe(404);
+
+    const traversal = await fetch(`${baseUrl}/%2e%2e%2fpackage.json`);
+    expect(traversal.status).toBe(400);
+  });
+
   it("rejects squad rooms without leaderRoleId", async () => {
     const response = await fetch(`${baseUrl}/rooms`, {
       method: "POST",

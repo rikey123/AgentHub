@@ -1,9 +1,9 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { join, resolve as resolvePath } from "node:path";
-import { URL } from "node:url";
+import { dirname, extname, isAbsolute, join, relative, resolve as resolvePath, sep } from "node:path";
+import { fileURLToPath, URL } from "node:url";
 
 import { createCommandBus, createDurableHandlerRegistry, createEventBus, createOutboxDispatcher, type CommandBus, type CommandHandler, type CommandType, type DurableHandlerRegistry, type EventBus, type EventBusSubscriber, type OutboxDispatcher, type PublishInput, type ReplayView } from "@agenthub/bus";
 import { bootstrapBuiltInAgents, watchAgentProfiles, type AgentProfileWatcher } from "@agenthub/agents";
@@ -117,7 +117,7 @@ export type DaemonStartupPhase =
   | "HTTP server bind + SSE accept";
 export type RoleDraftGenerator = (input: RoleDraftGenerationInput) => Promise<RoleDraft>;
 export type AssistedSpeakerSelector = (input: AssistedSpeakerSelectionInput) => Promise<string | undefined>;
-export type DaemonOptions = { readonly databasePath: string; readonly workspaceRoot?: string; readonly host?: string; readonly port?: number; readonly token?: string; readonly allowRemote?: boolean; readonly allowedOrigins?: readonly string[]; readonly adapterCommands?: { readonly claude?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv }; readonly opencode?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv } }; readonly now?: () => number; readonly modelTestFetch?: typeof fetch; readonly roleDraftGenerator?: RoleDraftGenerator; readonly assistedSpeakerSelector?: AssistedSpeakerSelector; readonly onLifecyclePhase?: (event: { readonly direction: "startup" | "shutdown"; readonly phase: DaemonStartupPhase }) => void };
+export type DaemonOptions = { readonly databasePath: string; readonly workspaceRoot?: string; readonly webAssetsRoot?: string; readonly host?: string; readonly port?: number; readonly token?: string; readonly allowRemote?: boolean; readonly allowedOrigins?: readonly string[]; readonly adapterCommands?: { readonly claude?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv }; readonly opencode?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv } }; readonly now?: () => number; readonly modelTestFetch?: typeof fetch; readonly roleDraftGenerator?: RoleDraftGenerator; readonly assistedSpeakerSelector?: AssistedSpeakerSelector; readonly onLifecyclePhase?: (event: { readonly direction: "startup" | "shutdown"; readonly phase: DaemonStartupPhase }) => void };
 export type DaemonCloseOptions = { readonly forceCancelAfterMs?: number };
 export type DaemonCloseResult = { readonly forced: boolean; readonly cancelledRunIds: readonly string[] };
 export type DaemonApp = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly lifecycle: RunLifecycleService; readonly roomMcpServer: RoomMcpServer; readonly adapterRegistry: AdapterRegistry; readonly mockAdapter: MockAdapterManager; readonly handle: (req: IncomingMessage, res: ServerResponse) => void; readonly inFlightRunIds: () => readonly string[]; start(): Promise<Server>; close(options?: DaemonCloseOptions): Promise<DaemonCloseResult> };
@@ -181,6 +181,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
   const sseClients = new Set<SseClient>();
   const settingsJobs = new Map<string, SettingsJobRecord>();
   const modelConfigSecrets = createKeychain("agenthub-model-configs");
+  const webAssetsRoot = resolveWebAssetsRoot(options.webAssetsRoot);
 
   const emitPhase = (direction: "startup" | "shutdown", phase: DaemonStartupPhase): void => {
     options.onLifecyclePhase?.({ direction, phase });
@@ -196,6 +197,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     if (req.method === "GET" && url.pathname === "/healthz") return json(res, 200, stopping ? { status: "shutting_down" } : { ok: true });
     if (stopping) return json(res, 503, { error: "service_stopping" });
     if (!ready) return json(res, 503, { error: "service_starting", retryAfterMs: 500 });
+    if (serveWebAsset({ req, res, url, ...(webAssetsRoot !== undefined ? { webAssetsRoot } : {}) })) return;
     const app = requireRuntime();
     void route({ req, res, database: app.database, eventBus: app.eventBus, commandBus: app.commandBus, artifactService: app.artifactService, taskService: app.taskService, skillRegistry: app.skillRegistry, outbox: app.outbox, modelConfigSecrets, settingsJobs, modelTestFetch: options.modelTestFetch ?? globalThis.fetch.bind(globalThis), roleDraftGenerator: options.roleDraftGenerator ?? generateRoleDraftWithModelConfig, registerSseClient: (client) => { sseClients.add(client); return () => sseClients.delete(client); }, ...(options.token !== undefined ? { token: options.token } : {}), ...(options.allowedOrigins !== undefined ? { allowedOrigins: options.allowedOrigins } : {}), host: `${options.host ?? "127.0.0.1"}:${options.port ?? 6677}`, ...(options.now !== undefined ? { now: options.now } : {}) });
   };
@@ -2709,6 +2711,124 @@ function costGroupBy(value: string | null): "agent" | "model" | "day" { return v
 function parseScopes(value: unknown): readonly string[] { const scopes = Array.isArray(value) ? value.filter((scope): scope is string => typeof scope === "string") : ["read", "write"]; const allowed = scopes.filter((scope) => scope === "read" || scope === "write" || scope === "admin"); return allowed.length > 0 ? [...new Set(allowed)] : ["read"]; }
 function tokenFingerprint(token: string): string { return sha256(token).slice(0, 12); }
 function sha256(value: string): string { return createHash("sha256").update(value).digest("hex"); }
+
+function resolveWebAssetsRoot(explicitRoot?: string): string | undefined {
+  const candidates = [
+    explicitRoot,
+    resolvePath(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "apps", "web", "dist")
+  ].filter((value): value is string => value !== undefined);
+  for (const candidate of candidates) {
+    const root = resolvePath(candidate);
+    if (existsSync(join(root, "index.html"))) return root;
+  }
+  return undefined;
+}
+
+const WEB_API_PREFIXES = [
+  "/auth",
+  "/workspaces",
+  "/attachments",
+  "/event",
+  "/rooms",
+  "/roles",
+  "/runtimes",
+  "/model-configs",
+  "/agent-bindings",
+  "/settings",
+  "/agents",
+  "/runs",
+  "/context",
+  "/permissions",
+  "/interventions",
+  "/artifacts",
+  "/debug",
+  "/healthz",
+  "/openapi.json",
+  "/pending-turns",
+  "/messages",
+  "/tasks",
+  "/mailbox",
+  "/skills",
+  "/board",
+  "/timeline",
+  "/scheduler",
+  "/cron",
+  "/recurring-tasks"
+] as const;
+
+function serveWebAsset(input: { readonly req: IncomingMessage; readonly res: ServerResponse; readonly url: URL; readonly webAssetsRoot?: string }): boolean {
+  if (input.webAssetsRoot === undefined) return false;
+  if (input.req.method !== "GET" && input.req.method !== "HEAD") return false;
+  if (isApiPath(input.url.pathname)) return false;
+
+  const filePath = resolveWebAssetPath(input.webAssetsRoot, input.url.pathname);
+  if (filePath === undefined) {
+    json(input.res, 400, { error: "invalid_static_path" });
+    return true;
+  }
+
+  if (serveStaticFile(input.req, input.res, filePath)) return true;
+  if (!hasFileExtension(input.url.pathname)) return serveStaticFile(input.req, input.res, join(input.webAssetsRoot, "index.html"));
+  return false;
+}
+
+function isApiPath(pathname: string): boolean {
+  return WEB_API_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+}
+
+function resolveWebAssetPath(root: string, pathname: string): string | undefined {
+  let decoded = "";
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    return undefined;
+  }
+  const resolvedRoot = resolvePath(root);
+  const withoutLeadingSlash = decoded.replace(/^\/+/u, "");
+  const candidate = resolvePath(resolvedRoot, withoutLeadingSlash.length === 0 ? "index.html" : withoutLeadingSlash);
+  const rel = relative(resolvedRoot, candidate);
+  if (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))) return candidate;
+  return undefined;
+}
+
+function serveStaticFile(req: IncomingMessage, res: ServerResponse, filePath: string): boolean {
+  try {
+    const stat = statSync(filePath);
+    if (!stat.isFile()) return false;
+    const contentType = contentTypeFor(filePath);
+    const immutable = filePath.includes(`${sep}assets${sep}`);
+    res.writeHead(200, {
+      "content-type": contentType,
+      "cache-control": immutable ? "public, max-age=31536000, immutable" : "no-cache"
+    });
+    if (req.method === "HEAD") res.end();
+    else res.end(readFileSync(filePath));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function hasFileExtension(pathname: string): boolean {
+  return extname(pathname).length > 0;
+}
+
+function contentTypeFor(filePath: string): string {
+  const ext = extname(filePath).toLowerCase();
+  if (ext === ".html") return "text/html; charset=utf-8";
+  if (ext === ".js" || ext === ".mjs") return "text/javascript; charset=utf-8";
+  if (ext === ".css") return "text/css; charset=utf-8";
+  if (ext === ".json" || ext === ".map") return "application/json; charset=utf-8";
+  if (ext === ".svg") return "image/svg+xml";
+  if (ext === ".png") return "image/png";
+  if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
+  if (ext === ".gif") return "image/gif";
+  if (ext === ".ico") return "image/x-icon";
+  if (ext === ".webmanifest") return "application/manifest+json; charset=utf-8";
+  if (ext === ".woff2") return "font/woff2";
+  if (ext === ".woff") return "font/woff";
+  return "application/octet-stream";
+}
 
 function modelConfigFingerprint(apiKey: string): string {
   if (apiKey.length <= 8) return apiKey;

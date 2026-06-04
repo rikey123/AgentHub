@@ -1,11 +1,17 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import { existsSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 
 type ChildExit = { readonly code: number | null; readonly signal: NodeJS.Signals | null };
 
 export async function runWebCommand(argv: readonly string[]): Promise<number | undefined> {
   if (!isWebCommand(argv)) return undefined;
 
+  const callerWorkspaceRoot = resolve(process.env.AGENTHUB_CALLER_CWD ?? process.cwd());
+  const agenthubSourceRoot = findAgentHubSourceRoot();
+  const webAssetsRoot = resolveWebAssetsRoot(agenthubSourceRoot);
   const daemonUrl = "http://127.0.0.1:6677";
   const webUrl = "http://127.0.0.1:5173";
   const managedChildren: ChildProcess[] = [];
@@ -25,12 +31,25 @@ export async function runWebCommand(argv: readonly string[]): Promise<number | u
 
   try {
     if (!(await probeHealth(daemonUrl))) {
-      const daemon = await spawnManaged("pnpm.cmd", ["exec", "tsx", "apps/cli/src/index.ts", "start", "--workspace-root", process.cwd()], true);
+      const daemon = await spawnCli([
+        "start",
+        "--workspace-root",
+        callerWorkspaceRoot,
+        ...(webAssetsRoot !== undefined ? ["--web-assets-root", webAssetsRoot] : [])
+      ], agenthubSourceRoot);
       managedChildren.push(daemon);
       await waitForHealth(`${daemonUrl}/healthz`, daemon, () => stopState.requested, "daemon");
     }
 
-    const web = await spawnManaged("pnpm.cmd", ["--filter", "@agenthub/web", "dev", "--", "--host", "127.0.0.1", "--port", "5173", "--strictPort"], true);
+    if (webAssetsRoot !== undefined) {
+      await openBrowser(daemonUrl);
+      if (managedChildren.length === 0) return 0;
+      const winner = await Promise.race(managedChildren.map((child) => waitForExit(child)));
+      await stop(winner.code ?? 1);
+      return winner.code ?? 1;
+    }
+
+    const web = await spawnPnpm(["--filter", "@agenthub/web", "dev", "--", "--host", "127.0.0.1", "--port", "5173", "--strictPort"], agenthubSourceRoot);
     managedChildren.push(web);
     await waitForHealth(webUrl, web, () => stopState.requested, "web");
     await openBrowser(webUrl);
@@ -49,12 +68,50 @@ export function isWebCommand(argv: readonly string[]): boolean {
   return command === "web" || command === "-web";
 }
 
-async function spawnManaged(command: string, args: readonly string[], useWindowsShell = false): Promise<ChildProcess> {
+function findAgentHubSourceRoot(): string {
+  let current = dirname(fileURLToPath(import.meta.url));
+  for (;;) {
+    if (
+      existsSync(resolve(current, "package.json")) &&
+      existsSync(resolve(current, "apps", "cli", "src", "index.ts")) &&
+      existsSync(resolve(current, "apps", "web", "package.json"))
+    ) {
+      return current;
+    }
+    const parent = dirname(current);
+    if (parent === current) return resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
+    current = parent;
+  }
+}
+
+function resolveWebAssetsRoot(agenthubSourceRoot: string): string | undefined {
+  const explicitRoot = process.env.AGENTHUB_WEB_ASSETS_ROOT;
+  const candidates = [
+    explicitRoot,
+    resolve(agenthubSourceRoot, "apps", "web", "dist")
+  ].filter((value): value is string => value !== undefined && value.length > 0);
+  for (const candidate of candidates) {
+    const root = resolve(candidate);
+    if (existsSync(resolve(root, "index.html"))) return root;
+  }
+  return undefined;
+}
+
+async function spawnPnpm(args: readonly string[], cwd: string): Promise<ChildProcess> {
+  if (process.platform === "win32") return spawnManaged("cmd.exe", ["/d", "/s", "/c", "pnpm.cmd", ...args], cwd);
+  return spawnManaged("pnpm", args, cwd);
+}
+
+async function spawnCli(args: readonly string[], cwd: string): Promise<ChildProcess> {
+  return spawnManaged(process.execPath, [...process.execArgv, resolve(cwd, "apps", "cli", "src", "index.ts"), ...args], cwd);
+}
+
+async function spawnManaged(command: string, args: readonly string[], cwd: string): Promise<ChildProcess> {
   const child = spawn(command, args, {
-    cwd: process.cwd(),
+    cwd,
     env: process.env,
     stdio: "inherit",
-    shell: useWindowsShell,
+    shell: false,
     windowsHide: true
   });
   await new Promise<void>((resolve, reject) => {
