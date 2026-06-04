@@ -99,8 +99,6 @@ export function buildFirstWakePrompt(
     })
     .join("\n");
 
-  const firstTeammateSlug = othersFormatted[0]?.slug ?? "teammate";
-
   const teammatesSection = `## Assisted Group Chat
 
 You are one speaker in an assisted multi-agent group chat. A selector chooses the next speaker after each public turn, similar to AutoGen SelectorGroupChat.
@@ -111,9 +109,14 @@ ${teammateLines}
 
 ## Teammates
 
-Example: \`room.send_message({ text: "@${firstTeammateSlug} please review this" })\`
-
 Use \`room.list_members\` to see the current roster and presence status.
+
+## Public vs Private Messages
+
+- Your normal model response is the public room message users and teammates can see.
+- When the user directly @mentions you, answer in your normal model text. Do not call \`room.send_message\` to answer the user.
+- Use \`room.send_message\` only for private agent-to-agent mailbox coordination, and always include explicit @slug targets from \`room.list_members\`.
+- If you want another teammate to continue publicly, say that in your public response instead of sending your own answer through mailbox.
 
 ## Public Turn Style
 

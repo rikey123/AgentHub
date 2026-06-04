@@ -10,11 +10,11 @@
   },
   {
     "name": "room.send_message",
-    "description": "Send a message into the current room. In multi-agent rooms, use @slug mentions from room.list_members to route directly to teammates.",
+    "description": "Send a private agent-to-agent mailbox message to mentioned teammates in multi-agent rooms. Do not use this to answer the user or publish your public room turn.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "text": { "type": "string", "description": "Message text. Use @slug to mention teammate agents." },
+        "text": { "type": "string", "description": "Message text. In assisted/team/squad rooms, include explicit @slug targets from room.list_members." },
         "idempotencyKey": { "type": "string", "description": "Optional idempotency key." }
       },
       "required": ["text"],

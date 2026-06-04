@@ -141,6 +141,19 @@ describe("buildRunPrompt", () => {
     expect(prompt).toContain("Do not restate the previous speaker's whole answer");
     expect(prompt).toContain("If the discussion already feels complete");
   });
+
+  test("assisted first-wake prompt reserves room.send_message for private mailbox coordination", () => {
+    seedUserMessage("msg_assisted", "@teammate what do you think?", 1);
+    createRun("run_assisted", "user_mention", { messageId: "msg_assisted" });
+
+    const prompt = buildRunPrompt(run("run_assisted"), currentDatabase(), { now: () => now });
+
+    expect(prompt).toContain("When the user directly @mentions you");
+    expect(prompt).toContain("answer in your normal model text");
+    expect(prompt).toContain("Do not call `room.send_message` to answer the user");
+    expect(prompt).toContain("Use `room.send_message` only for private agent-to-agent mailbox coordination");
+    expect(prompt).not.toContain("Example: `room.send_message");
+  });
 });
 
 function currentDatabase(): AgentHubDatabase {
