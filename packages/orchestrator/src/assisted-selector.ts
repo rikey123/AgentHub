@@ -1,3 +1,5 @@
+import type { AgentPromptDelta } from "./run-lifecycle-service.ts";
+
 export type AssistedSelectorParticipant = {
   readonly agentId: string;
   readonly name: string;
@@ -32,9 +34,10 @@ export type AssistedSelectorRequest = {
 
 export type AssistedSelectorSelection = {
   readonly agentId: string;
-  readonly reason: "selector_func" | "selector" | "fallback";
+  readonly reason: "selector_func" | "selector" | "fallback" | "closing_synthesis";
   readonly turnIndex: number;
   readonly userMessageId: string;
+  readonly promptDelta?: AgentPromptDelta;
 };
 
 export type AssistedSelectorStop = {
@@ -62,11 +65,21 @@ type TurnState = {
   history: string;
   readonly spokenAgentIds: string[];
   readonly selectedAgentIds: string[];
+  completedTurnCount: number;
   fallbackUsed: boolean;
+  closingSynthesisRequested: boolean;
+  directMentionOnly: boolean;
 };
 
-const DEFAULT_MAX_TURNS = 3;
+const DEFAULT_MAX_TURNS = 6;
 const DEFAULT_MAX_SELECTOR_ATTEMPTS = 3;
+const CLOSING_SYNTHESIS_INSTRUCTIONS = [
+  "This is the final closing synthesis for the current assisted group turn.",
+  "Respond as the room's primary facilitator, not as another teammate adding a separate opinion.",
+  "Name the concrete conclusion, the main tradeoffs, and the recommended next step.",
+  "If the discussion produced enough material for a useful deliverable, create one professional final report with room.send_file_message and mention it briefly in chat. Otherwise provide a concise conclusion in chat only.",
+  "Do not ask another teammate to continue unless the user explicitly requests more discussion."
+].join("\n");
 
 export class AssistedSelectorGroupChatManager {
   private readonly maxTurns: number;
@@ -93,7 +106,10 @@ export class AssistedSelectorGroupChatManager {
       history: input.history ?? `User: ${input.text}`,
       spokenAgentIds: [],
       selectedAgentIds: [],
-      fallbackUsed: false
+      completedTurnCount: 0,
+      fallbackUsed: false,
+      closingSynthesisRequested: false,
+      directMentionOnly: false
     };
     this.turns.set(input.userMessageId, state);
     return this.selectNext(state);
@@ -109,6 +125,15 @@ export class AssistedSelectorGroupChatManager {
     if (!state.spokenAgentIds.includes(input.completedAgentId)) {
       state.spokenAgentIds.push(input.completedAgentId);
     }
+    state.completedTurnCount += 1;
+    if (state.directMentionOnly) {
+      this.turns.delete(input.userMessageId);
+      return { stopReason: "selector_stop", userMessageId: input.userMessageId };
+    }
+    if (state.closingSynthesisRequested && input.completedAgentId === state.primaryAgentId) {
+      this.turns.delete(input.userMessageId);
+      return { stopReason: "selector_stop", userMessageId: input.userMessageId };
+    }
     if (input.completedText !== undefined) {
       const terminal = completedReplyStopReason(input.completedText);
       if (terminal !== undefined) {
@@ -116,7 +141,7 @@ export class AssistedSelectorGroupChatManager {
         return { stopReason: terminal, userMessageId: input.userMessageId };
       }
     }
-    if (state.spokenAgentIds.length >= this.maxTurns) {
+    if (state.completedTurnCount >= this.maxTurns) {
       this.turns.delete(input.userMessageId);
       return { stopReason: "max_turns", userMessageId: input.userMessageId };
     }
@@ -143,6 +168,7 @@ export class AssistedSelectorGroupChatManager {
 
     const mentioned = state.mentions.find((agentId) => candidates.some((participant) => participant.agentId === agentId));
     if (mentioned !== undefined && state.spokenAgentIds.length === 0) {
+      state.directMentionOnly = true;
       return this.selection(state, mentioned, "selector_func");
     }
 
@@ -163,6 +189,13 @@ export class AssistedSelectorGroupChatManager {
         ...(feedback !== undefined ? { feedback } : {})
       });
       if (isSelectorStopOutput(output)) {
+        if (this.shouldRequestClosingSynthesis(state)) {
+          state.closingSynthesisRequested = true;
+          return this.selection(state, state.primaryAgentId!, "closing_synthesis", {
+            kind: "delta_only",
+            instructions: CLOSING_SYNTHESIS_INSTRUCTIONS
+          });
+        }
         this.turns.delete(state.userMessageId);
         return { stopReason: "selector_stop", userMessageId: state.userMessageId };
       }
@@ -212,13 +245,25 @@ export class AssistedSelectorGroupChatManager {
     return candidates.find((candidate) => candidate.agentId === state.primaryAgentId) ?? candidates[0];
   }
 
-  private selection(state: TurnState, agentId: string, reason: AssistedSelectorSelection["reason"]): AssistedSelectorSelection {
+  private shouldRequestClosingSynthesis(state: TurnState): boolean {
+    if (state.closingSynthesisRequested) return false;
+    if (state.primaryAgentId === undefined || state.primaryAgentId === null) return false;
+    if (state.completedTurnCount >= this.maxTurns - 1) return false;
+    const primary = this.speakableParticipants(state).find((participant) => participant.agentId === state.primaryAgentId);
+    if (primary === undefined) return false;
+    const previousSpeakerId = state.spokenAgentIds.at(-1);
+    if (!this.allowRepeatedSpeaker && previousSpeakerId === state.primaryAgentId) return false;
+    return state.spokenAgentIds.some((agentId) => agentId !== state.primaryAgentId);
+  }
+
+  private selection(state: TurnState, agentId: string, reason: AssistedSelectorSelection["reason"], promptDelta?: AgentPromptDelta): AssistedSelectorSelection {
     state.selectedAgentIds.push(agentId);
     return {
       agentId,
       reason,
       turnIndex: state.selectedAgentIds.length,
-      userMessageId: state.userMessageId
+      userMessageId: state.userMessageId,
+      ...(promptDelta !== undefined ? { promptDelta } : {})
     };
   }
 }

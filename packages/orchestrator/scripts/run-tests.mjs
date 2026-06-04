@@ -8,6 +8,7 @@ const vitestBin = resolve(repoRoot, "node_modules", ".bin", process.platform ===
 const vitestArgs = [
   "run",
   "packages/orchestrator/test/orchestrator.test.ts",
+  "packages/orchestrator/test/public-message-persistence.test.ts",
   "packages/orchestrator/test/run-prompt-source.test.ts",
   "packages/orchestrator/test/room-mcp-tools.test.ts",
   "packages/orchestrator/test/room-mcp-mature-tools.test.ts",

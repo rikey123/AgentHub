@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { stepCountIs, streamText, type LanguageModel, type ToolSet } from "ai";
 import type { EventBus, PublishInput } from "../../bus/src/index.ts";
 import type { AgentHubDatabase } from "../../db/src/index.ts";
-import { AdapterBridge, buildFirstWakePrompt, buildPlanPhasePrompt, buildRunPrompt, type AdapterArtifactFSBoundary, type RunLifecycleService, type RunRow } from "../../orchestrator/src/index.ts";
+import { AdapterBridge, buildFirstWakePrompt, buildPlanPhasePrompt, buildRunPrompt, persistAssistantPublicMessage, type AdapterArtifactFSBoundary, type FileMessageService, type RunLifecycleService, type RunRow } from "../../orchestrator/src/index.ts";
 import { nameToSlug } from "../../orchestrator/src/mention-parser.ts";
 import type { AgentAdapterManifest } from "../../protocol/src/index.ts";
 import type { PermissionEngine, PermissionResource } from "../../permissions/src/index.ts";
@@ -66,6 +66,7 @@ export type NativeAgentAdapterOptions = {
   readonly artifactFs?: AdapterArtifactFSBoundary;
   readonly mcpTools?: readonly McpToolDefinition[];
   readonly mcpToolExecutor?: McpToolExecutor;
+  readonly fileMessageService?: FileMessageService;
   readonly tools?: ToolSet;
   readonly onSessionEndedWithoutCompletion?: (taskId: string) => void | Promise<void>;
   readonly onPlanPhaseEnded?: (runId: string, planText?: string) => void | Promise<void>;
@@ -299,11 +300,15 @@ export class NativeAgentAdapter {
   }
 
   private persistAssistantMessageEnd(run: RunRow, messageId: string, text: string): void {
-    const now = this.now();
-    const nextSeq = ((this.options.database.sqlite.prepare("SELECT COALESCE(MAX(seq), 0) + 1 AS seq FROM message_parts WHERE message_id = ?").get(messageId) as { readonly seq: number }).seq);
-    this.options.database.sqlite.prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, ?, 'text', ?, ?)").run(messageId, nextSeq, JSON.stringify({ text }), now);
-    this.options.database.sqlite.prepare("UPDATE messages SET status = 'completed', updated_at = ? WHERE id = ?").run(now, messageId);
-    this.publishRunEvent(run, "message.completed", { messageId, text });
+    persistAssistantPublicMessage({
+      database: this.options.database,
+      eventBus: this.options.eventBus,
+      run,
+      messageId,
+      text,
+      ...(this.options.fileMessageService !== undefined ? { fileMessageService: this.options.fileMessageService } : {}),
+      now: this.now
+    });
   }
 
   private publishRunEvent(run: RunRow, type: PublishInput["type"], payload: Record<string, unknown>): void {

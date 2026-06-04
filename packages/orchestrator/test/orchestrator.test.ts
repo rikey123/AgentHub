@@ -1040,6 +1040,14 @@ describe("TaskService and RoomMcpServer", () => {
     expect(parseMentions("hi @agent-1 and @missing and @agent-2 then @agent-1", [{ agentId: "agent-1" }, { agentId: "agent-2" }])).toEqual(["agent-1", "agent-2"]);
   });
 
+  test("mention parser resolves quoted non-latin display names", () => {
+    expect(parseMentions('@"头脑风暴引导助手" 请补充', [
+      { agentId: "agent-cn", slug: "", name: "头脑风暴引导助手" },
+      { agentId: "agent-writer", slug: "", name: "写作助手" },
+      { agentId: "agent-builder", slug: "builder", name: "Builder" },
+    ])).toEqual(["agent-cn"]);
+  });
+
   test("room MCP send_message degrades inactive observers to mailbox and audits active observers", async () => {
     seedRoom("room_mcp_send", "primary_agent");
     currentDatabase().sqlite.prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, default_presence, joined_at) VALUES ('room_mcp_send', 'observer_agent', 'agent', 'observer', 'mock', NULL, 'observing', ?)").run(now);

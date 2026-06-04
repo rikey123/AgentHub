@@ -47,6 +47,31 @@ describe("AssistedSelectorGroupChatManager", () => {
     expect(selectSpeaker).not.toHaveBeenCalled();
   });
 
+  test("explicit mention turns stop after the mentioned speaker replies", async () => {
+    const selectSpeaker = vi.fn(async () => "pm");
+    const manager = new AssistedSelectorGroupChatManager({ selectSpeaker });
+
+    const selected = await manager.startTurn({
+      roomId: "room_1",
+      workspaceId: "ws_1",
+      userMessageId: "msg_1",
+      text: "@reviewer check this",
+      participants,
+      mentions: ["reviewer"],
+      primaryAgentId: "pm"
+    });
+    const stopped = await manager.continueTurn({
+      userMessageId: "msg_1",
+      completedRunId: "run_reviewer",
+      completedAgentId: "reviewer",
+      completedText: "Looks good."
+    });
+
+    expect(selected).toMatchObject({ agentId: "reviewer", reason: "selector_func" });
+    expect(stopped).toMatchObject({ stopReason: "selector_stop", userMessageId: "msg_1" });
+    expect(selectSpeaker).not.toHaveBeenCalled();
+  });
+
   test("filters inactive participants and rejects repeated speakers by default", async () => {
     const selectSpeaker = vi.fn(async () => "reviewer");
     const manager = new AssistedSelectorGroupChatManager({ selectSpeaker });
@@ -177,6 +202,32 @@ describe("AssistedSelectorGroupChatManager", () => {
 
     expect(second).toMatchObject({ agentId: "reviewer" });
     expect(third).toMatchObject({ agentId: "builder" });
+  });
+
+  test("default turn budget allows a second round after every participant has spoken", async () => {
+    const selectSpeaker = vi.fn()
+      .mockResolvedValueOnce("builder")
+      .mockResolvedValueOnce("reviewer")
+      .mockResolvedValueOnce("pm")
+      .mockResolvedValueOnce("builder");
+    const manager = new AssistedSelectorGroupChatManager({ selectSpeaker });
+
+    const first = await manager.startTurn({
+      roomId: "room_1",
+      workspaceId: "ws_1",
+      userMessageId: "msg_1",
+      text: "Discuss this",
+      participants,
+      primaryAgentId: "pm"
+    });
+    const second = await manager.continueTurn({ userMessageId: "msg_1", completedRunId: "run_builder", completedAgentId: "builder" });
+    const third = await manager.continueTurn({ userMessageId: "msg_1", completedRunId: "run_reviewer", completedAgentId: "reviewer" });
+    const fourth = await manager.continueTurn({ userMessageId: "msg_1", completedRunId: "run_pm", completedAgentId: "pm" });
+
+    expect(first).toMatchObject({ agentId: "builder" });
+    expect(second).toMatchObject({ agentId: "reviewer" });
+    expect(third).toMatchObject({ agentId: "pm" });
+    expect(fourth).toMatchObject({ agentId: "builder" });
   });
 
   test("falls back to the previous speaker after selector attempts fail mid-thread", async () => {
@@ -326,6 +377,54 @@ describe("AssistedSelectorGroupChatManager", () => {
     expect(stopped).toMatchObject({ stopReason: "selector_stop", userMessageId: "msg_1" });
   });
 
+  test("requests a primary closing synthesis before stopping after teammate discussion", async () => {
+    const selectSpeaker = vi.fn()
+      .mockResolvedValueOnce("builder")
+      .mockResolvedValueOnce("reviewer")
+      .mockResolvedValueOnce("NO_SPEAKER");
+    const manager = new AssistedSelectorGroupChatManager({ selectSpeaker });
+
+    const first = await manager.startTurn({
+      roomId: "room_1",
+      workspaceId: "ws_1",
+      userMessageId: "msg_1",
+      text: "Design a multi-agent platform",
+      participants,
+      primaryAgentId: "pm"
+    });
+    const second = await manager.continueTurn({
+      userMessageId: "msg_1",
+      completedRunId: "run_builder",
+      completedAgentId: "builder",
+      history: "User: Design a multi-agent platform\nBuilder: Start with protocol and state machine."
+    });
+    const closing = await manager.continueTurn({
+      userMessageId: "msg_1",
+      completedRunId: "run_reviewer",
+      completedAgentId: "reviewer",
+      history: "User: Design a multi-agent platform\nBuilder: Start with protocol and state machine.\nReviewer: Add risk controls."
+    });
+    const stopped = await manager.continueTurn({
+      userMessageId: "msg_1",
+      completedRunId: "run_pm",
+      completedAgentId: "pm",
+      completedText: "结论：先做最小状态机，并补一份报告。"
+    });
+
+    expect(first).toMatchObject({ agentId: "builder" });
+    expect(second).toMatchObject({ agentId: "reviewer" });
+    expect(closing).toMatchObject({
+      agentId: "pm",
+      reason: "closing_synthesis",
+      promptDelta: expect.objectContaining({
+        kind: "delta_only",
+        instructions: expect.stringContaining("final closing synthesis")
+      })
+    });
+    expect(stopped).toMatchObject({ stopReason: "selector_stop", userMessageId: "msg_1" });
+    expect(selectSpeaker).toHaveBeenCalledTimes(3);
+  });
+
   test("stops after max turns", async () => {
     const selectSpeaker = vi.fn()
       .mockResolvedValueOnce("builder")
@@ -355,5 +454,47 @@ describe("AssistedSelectorGroupChatManager", () => {
       completedAgentId: "reviewer"
     });
     expect(stopped).toMatchObject({ stopReason: "max_turns" });
+  });
+
+  test("counts repeated speakers toward max turns", async () => {
+    const selectSpeaker = vi.fn()
+      .mockResolvedValueOnce("builder")
+      .mockResolvedValueOnce("reviewer")
+      .mockResolvedValueOnce("builder")
+      .mockResolvedValueOnce("reviewer");
+    const manager = new AssistedSelectorGroupChatManager({ selectSpeaker, maxTurns: 3 });
+
+    const first = await manager.startTurn({
+      roomId: "room_1",
+      workspaceId: "ws_1",
+      userMessageId: "msg_1",
+      text: "Discuss this",
+      participants,
+      primaryAgentId: "pm"
+    });
+    const second = await manager.continueTurn({
+      userMessageId: "msg_1",
+      completedRunId: "run_builder_1",
+      completedAgentId: "builder",
+      completedText: "First builder point."
+    });
+    const third = await manager.continueTurn({
+      userMessageId: "msg_1",
+      completedRunId: "run_reviewer_1",
+      completedAgentId: "reviewer",
+      completedText: "Reviewer responds."
+    });
+    const stopped = await manager.continueTurn({
+      userMessageId: "msg_1",
+      completedRunId: "run_builder_2",
+      completedAgentId: "builder",
+      completedText: "Builder responds again."
+    });
+
+    expect(first).toMatchObject({ agentId: "builder", turnIndex: 1 });
+    expect(second).toMatchObject({ agentId: "reviewer", turnIndex: 2 });
+    expect(third).toMatchObject({ agentId: "builder", turnIndex: 3 });
+    expect(stopped).toMatchObject({ stopReason: "max_turns", userMessageId: "msg_1" });
+    expect(selectSpeaker).toHaveBeenCalledTimes(3);
   });
 });

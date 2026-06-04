@@ -92,4 +92,19 @@ describe("AgentHubClient", () => {
 
     expect(calls).toEqual(["http://daemon/interventions?roomId=room_1&status=pending_user_decision", "http://daemon/interventions/int_1/approve", "http://daemon/debug/events?traceId=trace_1&limit=10", "http://daemon/debug/stats"]);
   });
+
+  it("builds the assisted discussion stop request", async () => {
+    const calls: Array<{ readonly url: string; readonly method?: string }> = [];
+    const client = new AgentHubClient({
+      baseUrl: "http://daemon",
+      fetchImpl: (async (url, init) => {
+        calls.push({ url: String(url), ...(init?.method !== undefined ? { method: init.method } : {}) });
+        return new Response(JSON.stringify({ ok: true, cancelledRunIds: ["run-1"] }), { status: 200 });
+      }) as typeof fetch
+    });
+
+    await client.stopDiscussion("room_1");
+
+    expect(calls).toEqual([{ url: "http://daemon/rooms/room_1/discussion/stop", method: "POST" }]);
+  });
 });

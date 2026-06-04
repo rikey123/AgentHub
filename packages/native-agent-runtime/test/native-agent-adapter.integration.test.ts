@@ -113,6 +113,114 @@ describe("NativeAgentAdapter integration", () => {
     expect(runCost(run.id)).toMatchObject({ input_tokens: 120, output_tokens: 45, cached_tokens: 12, cost_usd: 0.001035, model_id: "gpt-4o" });
   });
 
+  test("turns long assisted public replies into a short chat message plus a file card", async () => {
+    currentDatabase().sqlite.prepare("UPDATE rooms SET mode = 'assisted' WHERE id = 'room_1'").run();
+    const run = createStartingRun("run_native_long_reply");
+    const longText = [
+      "我先抛一份正式方案，方便大家接着补充：",
+      "",
+      "# 多 Agent 交互助手方案",
+      "",
+      "开发一个多-agent交互助手，核心不是多接几个模型，而是先设计协作机制。",
+      "",
+      "## 1. 角色层",
+      "定义有哪些 agent、每个 agent 负责什么、什么时候发言，以及不同角色的语气和责任边界。",
+      "",
+      "## 2. 调度层",
+      "决定谁先说、谁补充、谁总结，避免所有人同时长篇输出，也避免第二个人看起来没读第一人的话。",
+      "",
+      "## 3. 产物层",
+      "把正式方案、表格和文档放入文件，聊天里只保留短观点和文件入口。",
+      "",
+      "## 4. 审计层",
+      "保留每次任务、工具调用和决策记录，让协作过程能追踪和复盘。",
+      "",
+      "## 5. 前端层",
+      "让用户看到群聊过程、任务进度和可点击文件，并能明确区分聊天消息和文档。",
+      "",
+      "## 6. 验证层",
+      "用端到端对话样例验证每个后续 agent 都能看到上一位的观点，并且只有正式交付物才生成文件卡。"
+    ].join("\n");
+    streamTextMock.mockReturnValue({ fullStream: asyncGenerator([{ type: "text-delta", text: longText }]), usage: Promise.resolve({ inputTokens: 2, outputTokens: 200 }) });
+
+    const createdFiles: Array<{ readonly title: string; readonly content: string; readonly messageId: string }> = [];
+    await new NativeAgentAdapter({
+      database: currentDatabase(),
+      eventBus: currentBus() as unknown as import("../../bus/src/index.ts").EventBus,
+      lifecycle: currentLifecycle(),
+      permissions: currentPermissions(),
+      modelConfig: openAiModelConfig(),
+      fileMessageService: {
+        createFromContent(input) {
+          createdFiles.push({ title: input.title, content: input.content, messageId: input.messageId });
+          const artifactId = "artifact-long-reply";
+          return {
+            artifactId,
+            path: "agent-reply.md",
+            name: "agent-reply.md",
+            mimeType: "text/markdown",
+            sizeBytes: Buffer.byteLength(input.content, "utf8"),
+            previewKind: "markdown"
+          };
+        }
+      },
+      now: () => now
+    }).runManaged(run);
+
+    expect(assistantMessageText(run.id)).toBe("我先抛一份正式方案，方便大家接着补充： 详细内容见文件。");
+    expect(createdFiles).toEqual([{ title: "Native Agent reply", content: longText, messageId: `msg_${run.id}` }]);
+    expect(messagePartTypes(`msg_${run.id}`)).toEqual(["text", "attachment"]);
+    expect(eventTypesForRun(run.id)).toContain("message.part.added");
+    expect(eventPayload("message.part.added", run.id)).toMatchObject({
+      messageId: `msg_${run.id}`,
+      part: {
+        type: "attachment",
+        artifactId: "artifact-long-reply",
+        path: "agent-reply.md",
+        previewKind: "markdown"
+      }
+    });
+    expect(eventPayload("message.completed", run.id)).toMatchObject({ messageId: `msg_${run.id}`, text: "我先抛一份正式方案，方便大家接着补充： 详细内容见文件。" });
+  });
+
+  test("keeps ordinary assisted follow-up replies in chat without forcing a file", async () => {
+    currentDatabase().sqlite.prepare("UPDATE rooms SET mode = 'assisted' WHERE id = 'room_1'").run();
+    const run = createStartingRun("run_native_short_followup");
+    const text = [
+      "我接着 PM 的“发言权控制”补一句：这里最好先让 selector 决定谁该说，而不是所有 agent 一起冲出来。",
+      "从 Builder 角度看，先把上一位的观点传给下一位，比马上做复杂工作流更重要。"
+    ].join("\n");
+    streamTextMock.mockReturnValue({ fullStream: asyncGenerator([{ type: "text-delta", text }]), usage: Promise.resolve({ inputTokens: 2, outputTokens: 40 }) });
+
+    const createdFiles: Array<{ readonly title: string; readonly content: string; readonly messageId: string }> = [];
+    await new NativeAgentAdapter({
+      database: currentDatabase(),
+      eventBus: currentBus() as unknown as import("../../bus/src/index.ts").EventBus,
+      lifecycle: currentLifecycle(),
+      permissions: currentPermissions(),
+      modelConfig: openAiModelConfig(),
+      fileMessageService: {
+        createFromContent(input) {
+          createdFiles.push({ title: input.title, content: input.content, messageId: input.messageId });
+          return {
+            artifactId: "artifact-unexpected",
+            path: "agent-reply.md",
+            name: "agent-reply.md",
+            mimeType: "text/markdown",
+            sizeBytes: Buffer.byteLength(input.content, "utf8"),
+            previewKind: "markdown"
+          };
+        }
+      },
+      now: () => now
+    }).runManaged(run);
+
+    expect(assistantMessageText(run.id)).toBe(text);
+    expect(createdFiles).toEqual([]);
+    expect(messagePartTypes(`msg_${run.id}`)).toEqual(["text"]);
+    expect(eventTypesForRun(run.id)).not.toContain("message.part.added");
+  });
+
   test("allows model.api_call permission and emits a terminal run summary", async () => {
     seedPermissionRule("rule_allow_openai", "model.api_call.openai", "openai", "allow");
     const run = createStartingRun("run_native_permission_allow");
@@ -267,6 +375,7 @@ function eventPayload(type: string, runId: string): Record<string, unknown> {
   return JSON.parse((row as { payload: string }).payload) as Record<string, unknown>;
 }
 function runCost(runId: string) { return currentDatabase().sqlite.prepare("SELECT input_tokens, output_tokens, cached_tokens, cost_usd, model_id FROM runs WHERE id = ?").get(runId); }
+function messagePartTypes(messageId: string): string[] { return currentDatabase().sqlite.prepare("SELECT part_type FROM message_parts WHERE message_id = ? ORDER BY seq ASC").all(messageId).map((row) => (row as { part_type: string }).part_type); }
 
 async function waitFor(predicate: () => boolean): Promise<void> {
   for (let i = 0; i < 50; i += 1) {

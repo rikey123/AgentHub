@@ -33,7 +33,6 @@ export function buildFirstWakePrompt(
     .prepare("SELECT mode, primary_agent_id FROM rooms WHERE id = ?")
     .get(roomId) as { mode: string; primary_agent_id: string | null } | undefined;
 
-  const agentName = profile?.name ?? agentId;
   const roomMode = room?.mode ?? "solo";
 
   // Fetch all participants with their profiles and presence.
@@ -51,15 +50,21 @@ export function buildFirstWakePrompt(
     )
     .all(roomId) as { agentId: string; role: string; name: string | null; adapterId: string | null; presence: string; capabilities: string | null }[];
 
+  const selfPersona = roomMode === "assisted" ? assistedParticipantPersona(db, roomId, agentId) : undefined;
+  const agentName = selfPersona?.name ?? profile?.name ?? agentId;
+  const basePrompt = selfPersona?.prompt?.trim() ?? profile?.role_prompt?.trim() ?? "";
   const others = participants.filter((p) => p.agentId !== agentId);
-  const othersFormatted = others.map((p) => ({
-    agentId: p.agentId,
-    name: p.name ?? p.agentId,
-    slug: nameToSlug(p.name ?? p.agentId),
-    role: p.role,
-    presence: p.presence,
-    capabilities: parseCapabilities(p.capabilities),
-  }));
+  const othersFormatted = others.map((p) => {
+    const persona = roomMode === "assisted" ? assistedParticipantPersona(db, roomId, p.agentId) : undefined;
+    return {
+      agentId: p.agentId,
+      name: persona?.name ?? p.name ?? p.agentId,
+      slug: nameToSlug(persona?.name ?? p.name ?? p.agentId),
+      role: p.role,
+      presence: p.presence,
+      capabilities: parseCapabilities(persona?.capabilities ?? p.capabilities),
+    };
+  });
 
   // In team/squad mode, use structured leader/teammate prompts.
   if (roomMode === "team" || roomMode === "squad") {
@@ -90,7 +95,6 @@ export function buildFirstWakePrompt(
   }
 
   // In assisted mode (or solo with teammates): append teammates section to role_prompt.
-  const basePrompt = profile?.role_prompt?.trim() ?? "";
   if (others.length === 0) return basePrompt.length > 0 ? basePrompt : undefined;
 
   const teammateLines = othersFormatted
@@ -100,11 +104,17 @@ export function buildFirstWakePrompt(
     })
     .join("\n");
 
+  const identitySection = roomMode === "assisted" ? `## Your Room Role
+
+You are **${agentName}** in this room.${basePrompt.length > 0 ? `\n\n${basePrompt}` : ""}` : "";
+
   const teammatesSection = `## Assisted Group Chat
 
 You are one speaker in an assisted multi-agent group chat. A selector chooses the next speaker after each public turn, similar to AutoGen SelectorGroupChat.
 
 Speak to the room, not only to the user. Keep public turns short enough that another teammate can naturally continue.
+Roleplay as your room role: sound like ${agentName}, not like a generic assistant writing a report.
+Use first-person, role-specific judgment. Your public message should sound like a real person in a group chat.
 
 ${teammateLines}
 
@@ -121,12 +131,16 @@ Use \`room.list_members\` to see the current roster and presence status.
 
 ## Public Turn Style
 
-- Reply as your role, with your own viewpoint.
-- When another agent spoke immediately before you, briefly reference the concrete point you are responding to.
+- Roleplay as your room role. Reply as ${agentName}, with your own viewpoint, priorities, and temperament.
+- Do not sound like a generic assistant writing a report. Sound like a real person in a group chat.
+- Use natural first-person phrasing when appropriate: "我觉得", "我补一句", "我不同意这里", "我从 ${agentName} 的角度看".
+- When another agent spoke immediately before you, briefly reference the concrete point you are responding to only when that makes your reply clearer.
+- Do not use a fixed opener every turn. Avoid mechanical openings such as "我接着...", "我先...", "I'll first", "I can start by", or "Let me give a framework"; answer as a distinct room member.
+- Vary your first sentence: sometimes give a direct judgment, sometimes ask a sharp question, sometimes disagree, sometimes synthesize.
 - Use one of four group-chat moves: agree and extend, challenge with a reason, clarify a missing detail, or synthesize.
 - Add new information. Do not restate the previous speaker's whole answer.
-- If the discussion already feels complete, provide a concise closing synthesis and stop.
-- Prefer one focused contribution over a long report.
+- If the discussion is repeating itself or already feels complete, provide a concise closing synthesis and stop instead of inviting another round.
+- Prefer one focused contribution over a long report. A useful follow-up can be just one or two sentences.
 - Ask or hand off to a teammate only when it materially improves the discussion.
 - Do not paste full task-style reports into the public chat; summarize and leave room for the next speaker.
 
@@ -141,8 +155,20 @@ When woken by a message from another agent, ask first: **does this message conta
 
 Every \`room.send_message\` wakes the recipient. Replying to non-task messages creates infinite loops.`;
 
-  if (basePrompt.length === 0) return teammatesSection;
-  return `${basePrompt}\n\n${teammatesSection}`;
+  return [roomMode === "assisted" ? identitySection : basePrompt, teammatesSection].filter((part) => part.trim().length > 0).join("\n\n");
+}
+
+function assistedParticipantPersona(db: DbLike, roomId: string, agentId: string): { readonly name: string; readonly prompt: string; readonly capabilities: string | null } | undefined {
+  return db.sqlite
+    .prepare(
+      `SELECT r.name, r.prompt, r.capabilities
+       FROM room_participants rp
+       JOIN agent_bindings ab ON ab.id = rp.agent_binding_id
+       JOIN roles r ON r.id = ab.role_id
+       WHERE rp.room_id = ? AND rp.participant_id = ? AND rp.participant_type = 'agent'
+       LIMIT 1`
+    )
+    .get(roomId, agentId) as { readonly name: string; readonly prompt: string; readonly capabilities: string | null } | undefined;
 }
 
 function parseCapabilities(value: string | null): string[] {

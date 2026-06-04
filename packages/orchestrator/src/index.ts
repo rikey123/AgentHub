@@ -4,6 +4,7 @@ export * from "./adapter-bridge.ts";
 export * from "./commands.ts";
 export * from "./mailbox-service.ts";
 export * from "./mention-parser.ts";
+export * from "./public-message-persistence.ts";
 export * from "./pending-turn.ts";
 export * from "./prompts/index.ts";
 export * from "./recovery.ts";

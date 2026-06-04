@@ -144,6 +144,8 @@ function handleWakeAgent(
         return { rejected: "wake_rejected_no_mailbox" };
       }
 
+      createdRunId = runId;
+      guard.bindToRun(runId);
       options.lifecycle.create(options.database.sqlite, {
         runId,
         agentId: command.agentId,
@@ -162,13 +164,11 @@ function handleWakeAgent(
         ...(command.messageId !== undefined ? { messageId: command.messageId } : {}),
         ...(command.pendingTurnId !== undefined ? { pendingTurnId: command.pendingTurnId } : {})
       });
-      createdRunId = runId;
       const emitted = latestRunEvents(options.database, runId);
       return { runId, emitted };
     })();
 
-    if (createdRunId) guard.bindToRun(createdRunId);
-    else guard.release();
+    if (!createdRunId) guard.release();
 
     if ("rejected" in data) return failed("validation_failed", data.rejected);
     if ("appendedToRunId" in data) return { ok: true, data, emittedEvents: [] };

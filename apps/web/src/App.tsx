@@ -115,7 +115,7 @@ export default function App() {
       ...(input.quotedMessageId ? { quotedMessageId: input.quotedMessageId } : {}),
       ...(input.attachmentIds.length > 0 ? { attachmentIds: input.attachmentIds } : {}),
       ...(input.mentions.length > 0 ? { mentions: input.mentions } : {})
-    } as never);
+    });
   }, [activeRoomId, sdk]);
 
   const handleEditSend = useCallback(async (messageId: string, input: { text: string; attachmentIds: string[]; mentions: string[] }) => {
@@ -129,6 +129,17 @@ export default function App() {
   const handleCancelPending = useCallback(async (pendingTurnId: string) => {
     await csrfFetch(`/pending-turns/${encodeURIComponent(pendingTurnId)}`, { method: "DELETE" });
   }, [csrfFetch]);
+
+  const handleStopDiscussion = useCallback(async () => {
+    if (!activeRoomId) return;
+    setBannerError(undefined);
+    try {
+      const response = await csrfFetch(`/rooms/${encodeURIComponent(activeRoomId)}/discussion/stop`, { method: "POST" });
+      if (!response.ok) throw new Error(`Stop discussion failed with ${response.status}`);
+    } catch (err) {
+      setBannerError(err instanceof Error ? err.message : String(err));
+    }
+  }, [activeRoomId, csrfFetch]);
 
   const handleQuoteMessage = useCallback((id: string) => {
     if (!activeRoomId) return;
@@ -308,6 +319,7 @@ export default function App() {
               onOpenTask={handleOpenTask}
               onOpenTasks={openTasksPanel}
               onCancelPending={(id) => void handleCancelPending(id)}
+              onStopDiscussion={() => void handleStopDiscussion()}
               onEditPending={handleEditPending}
               csrfFetch={csrfFetch}
               connectionStatus={projector.connectionStatus}

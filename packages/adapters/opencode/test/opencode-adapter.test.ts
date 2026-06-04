@@ -84,6 +84,68 @@ describe("OpenCodeACPAdapter", () => {
       fixture.close();
     }
   });
+
+  it("turns long assisted public replies into a short chat message plus a file card", async () => {
+    const fixture = createPromptFixture("opencode");
+    try {
+      const createdFiles: Array<{ readonly title: string; readonly content: string; readonly messageId: string }> = [];
+      const adapter = new OpenCodeACPAdapter({
+        command: "",
+        services: {
+          database: fixture.database,
+          eventBus: fixture.eventBus,
+          fileMessageService: {
+            createFromContent(input) {
+              createdFiles.push({ title: input.title, content: input.content, messageId: input.messageId });
+              return {
+                artifactId: "artifact-opencode-long-reply",
+                path: "opencode-reply.md",
+                name: "opencode-reply.md",
+                mimeType: "text/markdown",
+                sizeBytes: Buffer.byteLength(input.content, "utf8"),
+                previewKind: "markdown"
+              };
+            }
+          }
+        },
+        lifecycle: fixture.lifecycle,
+        workspaceId: "ws_1",
+        now: () => 1234
+      });
+      const run = fixture.lifecycle.read("run_mailbox");
+      const longText = [
+        "我先抛一个框架，方便大家接着补充：",
+        "",
+        "开发一个多-agent交互助手，核心不是多接几个模型，而是先设计协作机制。",
+        "",
+        "1. 角色层：定义有哪些agent、每个agent负责什么、什么时候发言。",
+        "2. 调度层：决定谁先说、谁补充、谁总结，避免所有人同时长篇输出。",
+        "3. 产物层：把详细方案、表格和文档放入文件，聊天里只保留短观点。",
+        "4. 审计层：保留每次任务、工具调用和决策记录。",
+        "5. 前端层：让用户看到群聊过程、任务进度和可点击文件。"
+      ].join("\n");
+
+      await adapter.runManaged(run);
+      adapter.feedProviderLineForTest("acp-opencode-run_mailbox", JSON.stringify({ jsonrpc: "2.0", method: "message/delta", params: { delta: longText } }));
+      adapter.feedProviderLineForTest("acp-opencode-run_mailbox", JSON.stringify({ jsonrpc: "2.0", method: "session/end", params: { sessionId: "acp-opencode-run_mailbox", reason: "completed", modelId: "opencode-test" } }));
+
+      expect(assistantMessageText(fixture.database, "run_mailbox")).toBe("我先抛一个框架，方便大家接着补充：");
+      expect(createdFiles).toEqual([{ title: "Agent One reply", content: longText, messageId: "msg_run_mailbox" }]);
+      expect(messagePartTypes(fixture.database, "msg_run_mailbox")).toEqual(["text", "attachment"]);
+      expect(eventPayload(fixture.database, "message.part.added", "run_mailbox")).toMatchObject({
+        messageId: "msg_run_mailbox",
+        part: {
+          type: "attachment",
+          artifactId: "artifact-opencode-long-reply",
+          path: "opencode-reply.md",
+          previewKind: "markdown"
+        }
+      });
+      expect(eventPayload(fixture.database, "message.completed", "run_mailbox")).toMatchObject({ messageId: "msg_run_mailbox", text: "我先抛一个框架，方便大家接着补充：" });
+    } finally {
+      fixture.close();
+    }
+  });
 });
 
 class CapturingOpenCodeACPAdapter extends OpenCodeACPAdapter {
@@ -123,4 +185,21 @@ function createPromptFixture(adapterId: string): { readonly database: AgentHubDa
       rmSync(dir, { recursive: true, force: true });
     }
   };
+}
+
+function assistantMessageText(database: AgentHubDatabase, runId: string): string {
+  const messageId = `msg_${runId}`;
+  const payload = database.sqlite.prepare("SELECT payload FROM message_parts WHERE message_id = ? AND part_type = 'text' ORDER BY seq DESC LIMIT 1").pluck().get(messageId) as string | undefined;
+  if (payload === undefined) return "";
+  return (JSON.parse(payload) as { readonly text?: string }).text ?? "";
+}
+
+function messagePartTypes(database: AgentHubDatabase, messageId: string): string[] {
+  return database.sqlite.prepare("SELECT part_type FROM message_parts WHERE message_id = ? ORDER BY seq ASC").all(messageId).map((row) => (row as { readonly part_type: string }).part_type);
+}
+
+function eventPayload(database: AgentHubDatabase, type: string, runId: string): Record<string, unknown> {
+  const row = database.sqlite.prepare("SELECT payload FROM events WHERE type = ? AND run_id = ? ORDER BY seq DESC LIMIT 1").get(type, runId);
+  expect(row).toBeDefined();
+  return JSON.parse((row as { readonly payload: string }).payload) as Record<string, unknown>;
 }

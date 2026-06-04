@@ -19,12 +19,14 @@ export function nameToSlug(name: string): string {
 
 export function parseMentions(text: string, members: readonly MentionMember[]): string[] {
   const bySlug = new Map<string, string>();
+  const byName = new Map<string, string>();
   for (const member of members) {
     bySlug.set(member.agentId, member.agentId);
     if (member.slug !== undefined && member.slug.length > 0) bySlug.set(member.slug, member.agentId);
-    // Also index by name-derived slug so "@OpenCode Builder" resolves correctly
     if (member.name !== undefined && member.name.length > 0) {
-      bySlug.set(nameToSlug(member.name), member.agentId);
+      byName.set(member.name.trim().toLowerCase(), member.agentId);
+      const nameSlug = nameToSlug(member.name);
+      if (nameSlug.length > 0) bySlug.set(nameSlug, member.agentId);
     }
   }
 
@@ -34,9 +36,9 @@ export function parseMentions(text: string, members: readonly MentionMember[]): 
     // Groups: [2]=double-quoted name, [3]=single-quoted name, [4]=bare kebab slug
     const raw = match[2] ?? match[3] ?? match[4];
     if (raw === undefined) continue;
-    // Normalise: quoted names go through nameToSlug, bare slugs are already lowercase
-    const slug = match[4] !== undefined ? raw : nameToSlug(raw);
-    const agentId = bySlug.get(slug);
+    const agentId = match[4] !== undefined
+      ? bySlug.get(raw)
+      : byName.get(raw.trim().toLowerCase()) ?? bySlug.get(nameToSlug(raw));
     if (agentId === undefined || seen.has(agentId)) continue;
     seen.add(agentId);
     mentions.push(agentId);

@@ -1788,6 +1788,23 @@ describe("daemon M1.4 composition", () => {
     expect(runs[0]).toMatchObject({ agent_id: "mock-reviewer", wake_reason: "user_mention" });
   });
 
+  it("routes assisted UI-selected mentions even when display text is not slug-parseable", async () => {
+    const client = new AgentHubClient({ baseUrl });
+    const targetAgentId = "agent-brainstorm-cn";
+    daemon.database.sqlite.prepare("INSERT INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES (?, 'default-workspace', '头脑风暴引导助手', 'mock', NULL, '', '{}', NULL, 0, NULL, ?, ?)").run(targetAgentId, Date.now(), Date.now());
+    const room = await client.createRoom({ title: "Chinese Mention", mode: "assisted", primaryAgentId: "mock-builder", participants: [{ type: "agent", agentId: targetAgentId, role: "teammate", defaultPresence: "active" }] }) as { readonly data: { readonly roomId: string } };
+
+    await fetch(`${baseUrl}/rooms/${room.data.roomId}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "@ 请补充一个短观点", mentions: [targetAgentId], idempotencyKey: "mention-ui-cn-1" })
+    });
+
+    expect(daemon.mockAdapter.llmCallsFor(targetAgentId)).toBe(1);
+    const runs = daemon.database.sqlite.prepare("SELECT agent_id, wake_reason FROM runs WHERE room_id = ? ORDER BY created_at ASC").all(room.data.roomId) as { readonly agent_id: string; readonly wake_reason: string }[];
+    expect(runs[0]).toMatchObject({ agent_id: targetAgentId, wake_reason: "user_mention" });
+  });
+
   it("uses the assisted selector model to choose the first active speaker", async () => {
     const now = Date.now();
     const runtimeId = `runtime-selector-${now}`;
@@ -1843,6 +1860,56 @@ describe("daemon M1.4 composition", () => {
     }));
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM runs WHERE room_id = ? AND agent_id = ?").get(roomId, pmBindingId)).toMatchObject({ count: 0 });
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM runs WHERE room_id = ? AND agent_id = ?").get(roomId, builderBindingId)).toMatchObject({ count: 1 });
+  });
+
+  it("queues a primary closing synthesis after three assisted speakers instead of stopping at the old turn cap", async () => {
+    const now = Date.now();
+    const modelConfigId = `model-closing-${now}`;
+    daemon.database.sqlite
+      .prepare("INSERT INTO model_configs (id, workspace_id, name, provider, model, base_url, api_key_ref, api_key_fingerprint, temperature, max_tokens, reasoning, extra, profile, created_at, updated_at) VALUES (?, 'default-workspace', 'Closing Selector Model', 'openai', 'gpt-4o', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)")
+      .run(modelConfigId, now, now);
+    daemon.database.sqlite
+      .prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES ('mock-builder', 'default-workspace', 'mock-builder', 'runtime-mock', ?, NULL, ?, ?) ON CONFLICT(id) DO UPDATE SET model_config_id = excluded.model_config_id")
+      .run(modelConfigId, now, now);
+
+    const client = new AgentHubClient({ baseUrl });
+    const room = await client.createRoom({
+      title: "Closing Assisted",
+      mode: "assisted",
+      primaryAgentId: "mock-builder",
+      participants: [
+        { type: "agent", agentId: "mock-reviewer", role: "teammate", defaultPresence: "active" },
+        { type: "agent", agentId: "mock-observer", role: "teammate", defaultPresence: "active" }
+      ]
+    }) as { readonly data: { readonly roomId: string } };
+
+    assistedSpeakerSelectorMock
+      .mockResolvedValueOnce("mock-builder")
+      .mockResolvedValueOnce("mock-reviewer")
+      .mockResolvedValueOnce("mock-observer")
+      .mockResolvedValueOnce("NO_SPEAKER");
+
+    await client.sendMessage(room.data.roomId, { text: "讨论一个多 agent 平台怎么设计", idempotencyKey: "closing-assisted-1" });
+
+    const closingRun = await waitFor(
+      () => daemon.database.sqlite
+        .prepare("SELECT id, agent_id, wake_reason FROM runs WHERE room_id = ? ORDER BY created_at ASC")
+        .all(room.data.roomId) as { readonly id: string; readonly agent_id: string; readonly wake_reason: string }[],
+      (runs) => runs.length >= 4 && runs[3]?.agent_id === "mock-builder"
+    );
+
+    expect(closingRun.map((run) => run.agent_id)).toEqual(["mock-builder", "mock-reviewer", "mock-observer", "mock-builder"]);
+    expect(assistedSpeakerSelectorMock).toHaveBeenCalledTimes(4);
+    const queued = daemon.database.sqlite
+      .prepare("SELECT payload FROM events WHERE type = 'agent.run.queued' AND run_id = ?")
+      .get(closingRun[3]!.id) as { readonly payload: string } | undefined;
+    expect(JSON.parse(queued?.payload ?? "{}")).toMatchObject({
+      wakeReason: "primary_turn",
+      promptDelta: {
+        kind: "delta_only",
+        instructions: expect.stringContaining("final closing synthesis")
+      }
+    });
   });
 
   it("queues pending turns while primary is busy and preserves immediate wake when idle", async () => {
@@ -2383,6 +2450,21 @@ describe("daemon M1.4 composition", () => {
 
     expect(result).toEqual({ forced: true, cancelledRunIds: ["run_shutdown"] });
     expect(daemon.inFlightRunIds()).toEqual([]);
+  });
+
+  it("stops an assisted discussion by cancelling active room runs", async () => {
+    const roomId = "room_stop_discussion";
+    daemon.database.sqlite.prepare(
+      "INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES (?, 'default-workspace', 'Stop Discussion', 'assisted', 'conversation', 'mock-builder', NULL, ?, ?)"
+    ).run(roomId, Date.now(), Date.now());
+    seedBusyRun(roomId, "mock-builder", "run_stop_discussion");
+
+    const response = await fetch(`${baseUrl}/rooms/${roomId}/discussion/stop`, { method: "POST" });
+    const payload = await response.json() as { readonly ok?: boolean; readonly cancelledRunIds?: readonly string[] };
+
+    expect(response.status).toBe(200);
+    expect(payload).toEqual({ ok: true, roomId, cancelledRunIds: ["run_stop_discussion"] });
+    expect(daemon.database.sqlite.prepare("SELECT status FROM runs WHERE id = 'run_stop_discussion'").get()).toMatchObject({ status: "cancelling" });
   });
 });
 

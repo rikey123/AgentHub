@@ -153,6 +153,7 @@ type DaemonRuntime = {
   artifactService: ArtifactService;
   taskService: TaskService;
   skillRegistry: SkillRegistry;
+  assistedSelector: AssistedSelectorGroupChatManager;
   outbox: OutboxDispatcher;
   handlers: DurableHandlerRegistry;
   runQueue: RunQueue;
@@ -199,7 +200,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     if (!ready) return json(res, 503, { error: "service_starting", retryAfterMs: 500 });
     if (serveWebAsset({ req, res, url, ...(webAssetsRoot !== undefined ? { webAssetsRoot } : {}) })) return;
     const app = requireRuntime();
-    void route({ req, res, database: app.database, eventBus: app.eventBus, commandBus: app.commandBus, artifactService: app.artifactService, taskService: app.taskService, skillRegistry: app.skillRegistry, outbox: app.outbox, modelConfigSecrets, settingsJobs, modelTestFetch: options.modelTestFetch ?? globalThis.fetch.bind(globalThis), roleDraftGenerator: options.roleDraftGenerator ?? generateRoleDraftWithModelConfig, registerSseClient: (client) => { sseClients.add(client); return () => sseClients.delete(client); }, ...(options.token !== undefined ? { token: options.token } : {}), ...(options.allowedOrigins !== undefined ? { allowedOrigins: options.allowedOrigins } : {}), host: `${options.host ?? "127.0.0.1"}:${options.port ?? 6677}`, ...(options.now !== undefined ? { now: options.now } : {}) });
+    void route({ req, res, database: app.database, eventBus: app.eventBus, commandBus: app.commandBus, artifactService: app.artifactService, taskService: app.taskService, skillRegistry: app.skillRegistry, outbox: app.outbox, stopAssistedDiscussion: (roomId) => stopAssistedRoomDiscussion(app, roomId), modelConfigSecrets, settingsJobs, modelTestFetch: options.modelTestFetch ?? globalThis.fetch.bind(globalThis), roleDraftGenerator: options.roleDraftGenerator ?? generateRoleDraftWithModelConfig, registerSseClient: (client) => { sseClients.add(client); return () => sseClients.delete(client); }, ...(options.token !== undefined ? { token: options.token } : {}), ...(options.allowedOrigins !== undefined ? { allowedOrigins: options.allowedOrigins } : {}), host: `${options.host ?? "127.0.0.1"}:${options.port ?? 6677}`, ...(options.now !== undefined ? { now: options.now } : {}) });
   };
 
   const start = async (): Promise<Server> => {
@@ -318,7 +319,6 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
         const selectSpeaker = options.assistedSpeakerSelector ?? selectAssistedSpeakerWithModelConfig;
         return selectSpeaker({ modelConfig, ...(apiKey !== undefined ? { apiKey } : {}), request }).catch(() => undefined);
       },
-      maxTurns: 3,
       maxSelectorAttempts: 3,
       allowRepeatedSpeaker: false
     });
@@ -451,7 +451,24 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
       buildRunArtifact: (input: Parameters<typeof artifactFs.buildRunArtifact>[0]) => artifactFs.buildRunArtifact(input),
       buildWorktreeDiffArtifact: (input: Parameters<typeof artifactFs.buildWorktreeDiffArtifact>[0]) => artifactFs.buildWorktreeDiffArtifact(input)
     };
-    const adapterRegistry = new AdapterRegistry({ database, eventBus, lifecycle, permissionEngine, keychain: modelConfigSecrets, artifactFs: artifactFsBoundary, briefResolver, getRoomMcpServer: () => currentRoomMcpServer(roomMcpServerRef), getCommandBus: () => commandBusRef.current, onSessionEndedWithoutCompletion, onPlanPhaseEnded, onSkillMaterializationFailed, skillRegistry, ...(options.adapterCommands !== undefined ? { adapterCommands: options.adapterCommands } : {}), ...(options.now !== undefined ? { now: options.now } : {}) });
+    const fileMessageService = {
+      createFromContent(input: { readonly workspaceId: string; readonly roomId: string; readonly runId: string; readonly agentId: string; readonly messageId: string; readonly title: string; readonly path: string; readonly content: string; readonly mimeType: string; readonly previewKind: "markdown" | "text" | "code" }) {
+        const artifact = artifactService.create({
+          workspaceId: input.workspaceId,
+          roomId: input.roomId,
+          runId: input.runId,
+          messageId: input.messageId,
+          type: "file",
+          title: input.title,
+          status: "draft",
+          createdBy: input.agentId,
+          metadata: { source: "native_long_reply_fallback" },
+          files: [{ path: input.path, oldContent: "", newContent: input.content, additions: input.content.length === 0 ? 0 : input.content.split(/\r?\n/u).length, deletions: 0, fileStatus: "added" }]
+        }, { traceId: `native:${input.runId}:long-reply-file` });
+        return { artifactId: artifact.id, path: input.path, name: input.path.split(/[\\/]/u).pop() ?? input.path, mimeType: input.mimeType, sizeBytes: Buffer.byteLength(input.content, "utf8"), previewKind: input.previewKind };
+      }
+    };
+    const adapterRegistry = new AdapterRegistry({ database, eventBus, lifecycle, permissionEngine, keychain: modelConfigSecrets, artifactFs: artifactFsBoundary, fileMessageService, briefResolver, getRoomMcpServer: () => currentRoomMcpServer(roomMcpServerRef), getCommandBus: () => commandBusRef.current, onSessionEndedWithoutCompletion, onPlanPhaseEnded, onSkillMaterializationFailed, skillRegistry, ...(options.adapterCommands !== undefined ? { adapterCommands: options.adapterCommands } : {}), ...(options.now !== undefined ? { now: options.now } : {}) });
 
     emitPhase("startup", PHASE_OUTBOX);
     const handlers = createDurableHandlerRegistry({ database, retryDelaysMs: [0] });
@@ -584,7 +601,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     };
     taskTimeoutTimer = setInterval(runTaskTimeoutSweep, 60_000);
     taskTimeoutTimer.unref?.();
-    runtime = { database, eventBus, commandBus, roomMcpServer, adapterRegistry, mockAdapter, artifactService, taskService, skillRegistry, outbox, handlers, runQueue, agentProfiles, roleDraftGcCleanup, lifecycle };
+    runtime = { database, eventBus, commandBus, roomMcpServer, adapterRegistry, mockAdapter, artifactService, taskService, skillRegistry, assistedSelector, outbox, handlers, runQueue, agentProfiles, roleDraftGcCleanup, lifecycle };
 
     emitPhase("startup", PHASE_HTTP);
     return await new Promise<Server>((resolve) => {
@@ -663,6 +680,24 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
   };
 }
 
+async function stopAssistedRoomDiscussion(app: DaemonRuntime, roomId: string): Promise<{ readonly ok: boolean; readonly roomId: string; readonly cancelledRunIds: readonly string[] }> {
+  app.assistedSelector.forgetRoomTurns(roomId);
+  const rows = app.database.sqlite
+    .prepare("SELECT id FROM runs WHERE room_id = ? AND status IN ('queued','waiting','claimed','starting','running','waiting_permission') ORDER BY created_at ASC")
+    .all(roomId) as { readonly id: string }[];
+  const cancelledRunIds: string[] = [];
+  for (const row of rows) {
+    const idempotencyKey = `stop-discussion:${roomId}:${row.id}`;
+    const result = await Promise.resolve(app.commandBus.dispatch(
+      { type: "CancelRun", runId: row.id, idempotencyKey },
+      { actor: { type: "user", id: "local" }, traceId: `stop-discussion:${roomId}`, idempotencyKey, origin: "http" }
+    ));
+    if (result.ok) cancelledRunIds.push(row.id);
+  }
+  await app.outbox.drainPending();
+  return { ok: true, roomId, cancelledRunIds };
+}
+
 function withStatusLineCoalescing(eventBus: EventBus): StatusLineEventBus {
   const basePublish = eventBus.publish.bind(eventBus);
   const buffers = new Map<string, { input: PublishInput; timer: ReturnType<typeof setTimeout> }>();
@@ -695,7 +730,7 @@ function withStatusLineCoalescing(eventBus: EventBus): StatusLineEventBus {
   return wrapped;
 }
 
-type RouteContext = { readonly req: IncomingMessage; readonly res: ServerResponse; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly artifactService: ArtifactService; readonly taskService: TaskService; readonly skillRegistry: SkillRegistry; readonly outbox: { drainPending(): Promise<void> }; readonly modelConfigSecrets: KeychainBridge; readonly settingsJobs: Map<string, SettingsJobRecord>; readonly modelTestFetch: typeof fetch; readonly roleDraftGenerator: RoleDraftGenerator; readonly registerSseClient: (client: SseClient) => () => void; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly host: string; readonly now?: () => number };
+type RouteContext = { readonly req: IncomingMessage; readonly res: ServerResponse; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly artifactService: ArtifactService; readonly taskService: TaskService; readonly skillRegistry: SkillRegistry; readonly outbox: { drainPending(): Promise<void> }; readonly stopAssistedDiscussion: (roomId: string) => Promise<{ readonly ok: boolean; readonly roomId: string; readonly cancelledRunIds: readonly string[] }>; readonly modelConfigSecrets: KeychainBridge; readonly settingsJobs: Map<string, SettingsJobRecord>; readonly modelTestFetch: typeof fetch; readonly roleDraftGenerator: RoleDraftGenerator; readonly registerSseClient: (client: SseClient) => () => void; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly host: string; readonly now?: () => number };
 
 async function route(ctx: RouteContext): Promise<void> {
   const url = new URL(ctx.req.url ?? "/", "http://127.0.0.1");
@@ -988,6 +1023,7 @@ async function route(ctx: RouteContext): Promise<void> {
   if (ctx.req.method === "GET" && url.pathname === "/messages") return messages(ctx, url);
   if (ctx.req.method === "GET" && parts[0] === "rooms" && parts[2] === "messages") return messages(ctx, url, parts[1] as string);
   if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "messages") return dispatch(ctx, { ...(await body(ctx)), roomId: parts[1] }, "SendMessage");
+  if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "discussion" && parts[3] === "stop") return stopDiscussion(ctx, parts[1] as string);
   if (ctx.req.method === "DELETE" && parts[0] === "pending-turns" && parts[1]) return dispatch(ctx, { pendingTurnId: parts[1] }, "CancelPendingTurn");
   if (ctx.req.method === "PATCH" && parts[0] === "messages" && parts[1]) return dispatch(ctx, { ...(await body(ctx)), messageId: parts[1] }, "EditMessage");
   if (ctx.req.method === "POST" && parts[0] === "messages" && parts[1] && parts[2] === "regenerate") return dispatch(ctx, { ...(await body(ctx)), messageId: parts[1] }, "RegenerateMessage");
@@ -2303,6 +2339,13 @@ async function dispatchCreated(ctx: RouteContext, data: Record<string, unknown>,
   const result = await ctx.commandBus.dispatch({ ...data, type, idempotencyKey: typeof data.idempotencyKey === "string" ? data.idempotencyKey : randomUUID() }, { actor: { type: "user", id: "local" }, traceId: randomUUID(), origin: "http" });
   await ctx.outbox.drainPending();
   json(ctx.res, result.ok ? 201 : statusForError(result.error.code), result);
+}
+
+async function stopDiscussion(ctx: RouteContext, roomId: string): Promise<void> {
+  const room = ctx.database.sqlite.prepare("SELECT id, mode FROM rooms WHERE id = ? AND archived_at IS NULL").get(roomId) as { readonly id: string; readonly mode: string } | undefined;
+  if (room === undefined) return json(ctx.res, 404, { error: "room_not_found" });
+  const result = await ctx.stopAssistedDiscussion(roomId);
+  json(ctx.res, 200, result);
 }
 
 function statusForError(code: string): number { return code === "rate_limited" ? 429 : code === "conflict" ? 409 : code === "not_found" ? 404 : code === "permission_denied" ? 403 : 400; }

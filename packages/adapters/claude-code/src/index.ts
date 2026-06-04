@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { ACPAdapter, ACPAdapterError, AdapterHealthRegistry, AdapterRawLogger, classifyClaudeDetection, emitAdapterRegistered, permissionForTool, type AcpAdapterSession, type AcpProviderEvent, type AdapterRuntimeServices, type JsonRpcMessage } from "@agenthub/adapter-acp-base";
 import type { PublishInput } from "@agenthub/bus";
-import { AdapterBridge, buildRunPrompt, type AdapterArtifactFSBoundary, type RoomMcpServer, type RunLifecycleService, type RunRow } from "@agenthub/orchestrator";
+import { AdapterBridge, buildRunPrompt, persistAssistantPublicMessage, type AdapterArtifactFSBoundary, type RoomMcpServer, type RunLifecycleService, type RunRow } from "@agenthub/orchestrator";
 import type { PermissionEngine } from "@agenthub/permissions";
 import type { AdapterError, AgentAdapterManifest, DetectedRuntime } from "@agenthub/protocol";
 import { Effect } from "effect";
@@ -248,12 +248,18 @@ export class ClaudeCodeACPAdapter extends ACPAdapter {
 
   private persistAssistantMessageEnd(runId: string, messageId: string, text: string): void {
     const db = this.options.services?.database;
-    if (db === undefined) return;
-    const now = this.options.now?.() ?? Date.now();
-    const nextSeq = ((db.sqlite.prepare("SELECT COALESCE(MAX(seq), 0) + 1 AS seq FROM message_parts WHERE message_id = ?").get(messageId) as { seq: number }).seq);
-    db.sqlite.prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, ?, 'text', ?, ?)").run(messageId, nextSeq, JSON.stringify({ text }), now);
-    db.sqlite.prepare("UPDATE messages SET status = 'completed', updated_at = ? WHERE id = ?").run(now, messageId);
-    this.publishRunEvent(runId, "message.completed", { messageId, text });
+    const eventBus = this.options.services?.eventBus;
+    const run = this.runById.get(runId);
+    if (db === undefined || eventBus === undefined || run === undefined) return;
+    persistAssistantPublicMessage({
+      database: db,
+      eventBus,
+      run,
+      messageId,
+      text,
+      ...(this.options.services?.fileMessageService !== undefined ? { fileMessageService: this.options.services.fileMessageService } : {}),
+      ...(this.options.now !== undefined ? { now: this.options.now } : {})
+    });
   }
 
   private publishRunEvent(runId: string, type: PublishInput["type"], payload: Record<string, unknown>): void {

@@ -169,10 +169,20 @@ export function MessageItem(props: MessageItemProps) {
 }
 
 function publicAgentTextPreview(text: string, senderType: MessageViewModel["senderType"], isStreaming: boolean): { collapsed: boolean; preview: string } {
-  if (senderType !== "agent" || isStreaming) return { collapsed: false, preview: text };
+  if (senderType !== "agent") return { collapsed: false, preview: text };
   const contentLines = text.split(/\r?\n/).filter((line) => line.trim().length > 0);
   const shouldCollapse = text.length > 640 || contentLines.length > 4;
   if (!shouldCollapse) return { collapsed: false, preview: text };
+
+  if (isStreaming) {
+    const firstNonEmpty = contentLines[0];
+    const preview = firstNonEmpty !== undefined && firstNonEmpty.length <= 180
+      ? firstNonEmpty
+      : firstNonEmpty !== undefined
+        ? `${firstNonEmpty.slice(0, 177).trimEnd()}...`
+        : "Receiving a longer reply...";
+    return { collapsed: true, preview };
+  }
 
   if (text.length > 640 && contentLines.length <= 4) {
     return { collapsed: true, preview: `${text.slice(0, 520).trimEnd()}...` };

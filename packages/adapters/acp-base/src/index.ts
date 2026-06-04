@@ -750,7 +750,29 @@ export class AdapterRawLogger {
   }
 }
 
-export type AdapterRuntimeServices = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly getCommandBus?: () => CommandBus | undefined; readonly permissionEngine?: PermissionEngine; readonly artifactFs?: AdapterArtifactFSBoundary; readonly briefResolver?: BriefResolver; readonly now?: () => number };
+export type AdapterFileMessageService = {
+  readonly createFromContent: (input: {
+    readonly workspaceId: string;
+    readonly roomId: string;
+    readonly runId: string;
+    readonly agentId: string;
+    readonly messageId: string;
+    readonly title: string;
+    readonly path: string;
+    readonly content: string;
+    readonly mimeType: string;
+    readonly previewKind: "markdown" | "text" | "code";
+  }) => {
+    readonly artifactId: string;
+    readonly path: string;
+    readonly name: string;
+    readonly mimeType: string;
+    readonly sizeBytes: number;
+    readonly previewKind: "markdown" | "text" | "code";
+  };
+};
+
+export type AdapterRuntimeServices = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly getCommandBus?: () => CommandBus | undefined; readonly permissionEngine?: PermissionEngine; readonly artifactFs?: AdapterArtifactFSBoundary; readonly fileMessageService?: AdapterFileMessageService; readonly briefResolver?: BriefResolver; readonly now?: () => number };
 
 export function emitAdapterRegistered(eventBus: EventBus, workspaceId: string, manifest: AgentAdapterManifest, now = Date.now()): void {
   eventBus.publish(adapterEvent("adapter.registered", workspaceId, manifest.id, { adapterId: manifest.id, manifest }, now));

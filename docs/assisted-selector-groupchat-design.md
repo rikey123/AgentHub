@@ -92,9 +92,11 @@ The selector prompt should follow AutoGen's structure but be adapted to AgentHub
 You are managing an AutoGen-style SelectorGroupChat for AgentHub assisted mode.
 
 First inspect the shared conversation history.
-If the latest assistant message already gives a final synthesis, answers the user, or leaves no distinct non-redundant contribution for another participant, return NO_SPEAKER.
-Otherwise choose exactly one candidate whose role can add the most useful next contribution.
-Do not choose a speaker just to keep the group going.
+Use the shared history like AutoGen's group chat message thread.
+Choose exactly one candidate whose role can add the most useful next contribution.
+Prefer a candidate who can respond to a concrete prior point, file, disagreement, or gap in the thread.
+Do not stop merely because the latest assistant message partially answers the user.
+Do not choose a speaker just to keep the group going when every useful role has already contributed.
 
 Roles:
 {roles}
@@ -106,7 +108,7 @@ Candidates:
 {participants}
 
 Choose exactly one candidate who should speak next.
-Return NO_SPEAKER only if the group should stop because the conversation is complete or no candidate should reply.
+Return NO_SPEAKER only if the conversation has an explicit closing synthesis, every useful role has already contributed, or no candidate should reply.
 Return only the candidate id, candidate name, or NO_SPEAKER. Do not explain.
 ```
 

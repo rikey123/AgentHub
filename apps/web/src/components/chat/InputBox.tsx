@@ -119,7 +119,8 @@ export function InputBox(props: InputBoxProps) {
     const at = before.lastIndexOf("@");
     if (at < 0) return;
     const slug = p.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-    const newText = before.slice(0, at) + `@${slug} ` + after;
+    const mentionText = slug.length > 0 ? `@${slug}` : `@"${p.name.replace(/"/g, '\\"')}"`;
+    const newText = before.slice(0, at) + `${mentionText} ` + after;
     setText(newText);
     setMentionQuery(undefined);
     setMentions((prev) => Array.from(new Set([...prev, p.id])));

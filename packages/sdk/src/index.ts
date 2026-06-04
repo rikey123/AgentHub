@@ -24,7 +24,8 @@ export class AgentHubClient {
   listRooms(): Promise<unknown> { return this.request("/rooms"); }
   createRoom(input: CreateRoomInput): Promise<unknown> { return this.request("/rooms", { method: "POST", body: input }); }
   listMessages(roomId: string): Promise<unknown> { return this.request(`/rooms/${encodeURIComponent(roomId)}/messages`); }
-  sendMessage(roomId: string, input: { readonly text: string; readonly idempotencyKey?: string }): Promise<unknown> { return this.request(`/rooms/${encodeURIComponent(roomId)}/messages`, { method: "POST", body: input }); }
+  sendMessage(roomId: string, input: { readonly text: string; readonly idempotencyKey?: string; readonly quotedMessageId?: string; readonly attachmentIds?: readonly string[]; readonly mentions?: readonly string[] }): Promise<unknown> { return this.request(`/rooms/${encodeURIComponent(roomId)}/messages`, { method: "POST", body: input }); }
+  stopDiscussion(roomId: string): Promise<unknown> { return this.request(`/rooms/${encodeURIComponent(roomId)}/discussion/stop`, { method: "POST" }); }
   listAgents(): Promise<unknown> { return this.request("/agents"); }
   getRun(runId: string): Promise<unknown> { return this.request(`/runs/${encodeURIComponent(runId)}`); }
   listContext(filters: { readonly workspaceId?: string; readonly roomId?: string; readonly taskId?: string; readonly status?: string } = {}): Promise<unknown> { return this.request(`/context${query(filters)}`); }

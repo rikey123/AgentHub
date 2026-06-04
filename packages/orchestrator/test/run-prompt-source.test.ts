@@ -131,6 +131,9 @@ describe("buildRunPrompt", () => {
     expect(prompt).toContain("Assisted Group Chat");
     expect(prompt).toContain("selector chooses the next speaker");
     expect(prompt).toContain("Speak to the room");
+    expect(prompt).toContain("Roleplay as your room role");
+    expect(prompt).toContain("sound like a real person in a group chat");
+    expect(prompt).toContain("Do not sound like a generic assistant writing a report");
     expect(prompt).toContain("Public Turn Style");
     expect(prompt).toContain("When another agent spoke immediately before you");
     expect(prompt).toContain("reference the concrete point you are responding to");
@@ -139,10 +142,14 @@ describe("buildRunPrompt", () => {
     expect(prompt).toContain("clarify a missing detail");
     expect(prompt).toContain("synthesize");
     expect(prompt).toContain("Do not restate the previous speaker's whole answer");
-    expect(prompt).toContain("If the discussion already feels complete");
+    expect(prompt).toContain("If the discussion is repeating itself or already feels complete");
+    expect(prompt).toContain("Avoid mechanical openings");
+    expect(prompt).toContain("Do not use a fixed opener every turn");
+    expect(prompt).toContain("If the discussion is repeating itself");
     expect(prompt).toContain("room.send_file_message");
-    expect(prompt).toContain("short public summary");
-    expect(prompt).toContain("file card");
+    expect(prompt).toContain("Documents are optional");
+    expect(prompt).toContain("Do not create a file just because your message has a few bullets");
+    expect(prompt).toContain("Only create a file for a substantial deliverable");
   });
 
   test("assisted first-wake prompt reserves room.send_message for private mailbox coordination", () => {
@@ -156,6 +163,72 @@ describe("buildRunPrompt", () => {
     expect(prompt).toContain("Do not call `room.send_message` to answer the user");
     expect(prompt).toContain("Use `room.send_message` only for private agent-to-agent mailbox coordination");
     expect(prompt).not.toContain("Example: `room.send_message");
+  });
+
+  test("assisted selected speaker prompt includes shared group transcript with prior agent output", () => {
+    seedUserMessage("msg_assisted", "Design a multi-agent platform", 1);
+    seedAssistantMessage("msg_builder", "agent_2", "run_builder", "Builder: use an event bus plus a task board.", 2);
+    createRun("run_assisted_followup", "primary_turn", { messageId: "msg_assisted" });
+
+    const prompt = buildRunPrompt(run("run_assisted_followup"), currentDatabase(), { now: () => now });
+
+    expect(prompt).toContain("Assisted Shared Conversation");
+    expect(prompt).toContain("AutoGen-style shared message thread");
+    expect(prompt).toContain("User: Design a multi-agent platform");
+    expect(prompt).toContain("Teammate: Builder: use an event bus plus a task board.");
+    expect(prompt).toContain("respond naturally to the shared thread");
+    expect(prompt).toContain("do not mechanically prefix your message");
+    expect(prompt).toContain("If the thread is repeating itself");
+    expect(prompt).toContain("Do not restart the discussion from the original user prompt");
+  });
+
+  test("assisted opening speaker prompt does not ask the first agent to continue a prior teammate", () => {
+    seedUserMessage("msg_assisted", "Design a multi-agent platform", 1);
+    createRun("run_assisted_opening", "primary_turn", { messageId: "msg_assisted" });
+
+    const prompt = buildRunPrompt(run("run_assisted_opening"), currentDatabase(), { now: () => now });
+
+    expect(prompt).toContain("You are the first agent speaker for this user message");
+    expect(prompt).toContain("open the discussion naturally");
+    expect(prompt).toContain("Do not say you are adding to, continuing, or building on a teammate");
+    expect(prompt).not.toContain("respond to one concrete prior point");
+  });
+
+  test("assisted prompt uses role binding persona when agent profile is only a runtime identity", () => {
+    seedRoleBoundAssistedRoom();
+    seedUserMessage("msg_assisted", "Brainstorm a launch plan", 1);
+    createRun("run_role_bound", "primary_turn", { messageId: "msg_assisted" });
+
+    const prompt = buildRunPrompt(run("run_role_bound"), currentDatabase(), { now: () => now });
+
+    expect(prompt).toContain("头脑风暴引导助手");
+    expect(prompt).toContain("帮助用户快速产生更多更好的想法");
+    expect(prompt).toContain("Project Manager");
+    expect(prompt).not.toContain("Runtime Shell");
+  });
+
+  test("assisted shared transcript includes markdown attachment excerpts from prior file-backed replies", () => {
+    seedUserMessage("msg_assisted", "Discuss this design", 1);
+    seedAssistantMessage("msg_builder", "agent_2", "run_builder", "I put the detailed architecture in a file.", 2);
+    seedFileAttachment("msg_builder", "artifact_builder", "agent-replies/builder.md", "# Architecture\n\nDetailed architecture section from the file.", 2);
+    createRun("run_assisted_followup", "primary_turn", { messageId: "msg_assisted" });
+
+    const prompt = buildRunPrompt(run("run_assisted_followup"), currentDatabase(), { now: () => now });
+
+    expect(prompt).toContain("[File: agent-replies/builder.md]");
+    expect(prompt).toContain("Detailed architecture section from the file.");
+  });
+
+  test("assisted shared transcript uses role binding names for prior speakers", () => {
+    seedRoleBoundAssistedRoom();
+    seedUserMessage("msg_assisted", "Design a multi-agent platform", 1);
+    seedAssistantMessage("msg_pm", "agent_2", "run_pm", "Project Manager: start from clear coordination boundaries.", 2);
+    createRun("run_role_bound_followup", "primary_turn", { messageId: "msg_assisted" });
+
+    const prompt = buildRunPrompt(run("run_role_bound_followup"), currentDatabase(), { now: () => now });
+
+    expect(prompt).toContain("- Project Manager: Project Manager: start from clear coordination boundaries.");
+    expect(prompt).not.toContain("Runtime Teammate: Project Manager: start from clear coordination boundaries.");
   });
 });
 
@@ -211,6 +284,25 @@ function seedAssistantMessage(id: string, agentId: string, runId: string, text: 
   currentDatabase().sqlite.prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, 1, 'text', ?, ?)").run(id, JSON.stringify({ text }), createdAt);
 }
 
+function seedFileAttachment(messageId: string, artifactId: string, path: string, content: string, createdAt: number): void {
+  currentDatabase().sqlite.prepare(
+    "INSERT INTO artifacts (id, workspace_id, room_id, task_id, run_id, message_id, type, title, status, created_by, metadata, created_at, updated_at, applied_at) VALUES (?, 'ws_1', 'room_1', NULL, 'run_builder', ?, 'file', ?, 'draft', 'agent_2', '{}', ?, ?, NULL)"
+  ).run(artifactId, messageId, path, createdAt, createdAt);
+  currentDatabase().sqlite.prepare(
+    "INSERT INTO artifact_files (artifact_id, path, old_content, new_content, patch, additions, deletions, file_status, old_sha256, new_sha256, applied_state, content_path, created_at) VALUES (?, ?, '', ?, NULL, 1, 0, 'added', NULL, NULL, NULL, NULL, ?)"
+  ).run(artifactId, path, content, createdAt);
+  currentDatabase().sqlite.prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, 2, 'attachment', ?, ?)").run(messageId, JSON.stringify({
+    type: "attachment",
+    fileId: artifactId,
+    artifactId,
+    name: path.split("/").at(-1) ?? path,
+    mimeType: "text/markdown",
+    sizeBytes: Buffer.byteLength(content, "utf8"),
+    path,
+    previewKind: "markdown"
+  }), createdAt);
+}
+
 function seedTeamLeaderRoom(): void {
   currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO roles (id, workspace_id, name, prompt, capabilities, is_builtin, created_at, updated_at) VALUES ('role_leader', 'ws_1', 'Project Manager', '', '[]', 0, ?, ?)").run(now, now);
   currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO roles (id, workspace_id, name, prompt, capabilities, is_builtin, created_at, updated_at) VALUES ('role_builder', 'ws_1', 'Builder', '', '[]', 0, ?, ?)").run(now, now);
@@ -228,6 +320,17 @@ function seedTeamLeaderRoom(): void {
   currentDatabase().sqlite.prepare("INSERT OR REPLACE INTO agent_presence (room_id, agent_id, state, reason, status_line, updated_at) VALUES ('room_1', 'agent_1', 'active', NULL, NULL, ?)").run(now);
   currentDatabase().sqlite.prepare("INSERT OR REPLACE INTO agent_presence (room_id, agent_id, state, reason, status_line, updated_at) VALUES ('room_1', 'agent_2', 'active', NULL, NULL, ?)").run(now);
   currentDatabase().sqlite.prepare("INSERT OR REPLACE INTO agent_presence (room_id, agent_id, state, reason, status_line, updated_at) VALUES ('room_1', 'agent_3', 'active', NULL, NULL, ?)").run(now);
+}
+
+function seedRoleBoundAssistedRoom(): void {
+  currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO roles (id, workspace_id, name, prompt, capabilities, is_builtin, created_at, updated_at) VALUES ('role_brainstorm', 'ws_1', '头脑风暴引导助手', '你是一名头脑风暴引导助手，帮助用户快速产生更多更好的想法。', '[\"chat\"]', 0, ?, ?)").run(now, now);
+  currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO roles (id, workspace_id, name, prompt, capabilities, is_builtin, created_at, updated_at) VALUES ('role_pm', 'ws_1', 'Project Manager', 'You coordinate the room.', '[\"chat\"]', 0, ?, ?)").run(now, now);
+  currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES ('binding_brainstorm', 'ws_1', 'role_brainstorm', 'runtime_1', NULL, NULL, ?, ?)").run(now, now);
+  currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES ('binding_pm', 'ws_1', 'role_pm', 'runtime_1', NULL, NULL, ?, ?)").run(now, now);
+  currentDatabase().sqlite.prepare("UPDATE agent_profiles SET name = 'Runtime Shell', role_prompt = '' WHERE id = 'agent_1'").run();
+  currentDatabase().sqlite.prepare("UPDATE agent_profiles SET name = 'Runtime Teammate', role_prompt = '' WHERE id = 'agent_2'").run();
+  currentDatabase().sqlite.prepare("UPDATE room_participants SET role = 'primary', agent_binding_id = 'binding_brainstorm' WHERE room_id = 'room_1' AND participant_id = 'agent_1'").run();
+  currentDatabase().sqlite.prepare("UPDATE room_participants SET role = 'teammate', agent_binding_id = 'binding_pm' WHERE room_id = 'room_1' AND participant_id = 'agent_2'").run();
 }
 
 function seedReviewTask(id: string, title: string, assigneeRoleId: string, assigneeAgentId: string, sourceRunId: string, createdAt: number): void {

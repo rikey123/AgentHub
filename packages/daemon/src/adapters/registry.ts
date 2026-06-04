@@ -19,6 +19,7 @@ export type AdapterRegistryOptions = {
   readonly permissionEngine?: PermissionEngine;
   readonly keychain?: KeychainBridge;
   readonly artifactFs?: AdapterArtifactFSBoundary;
+  readonly fileMessageService?: NativeFileMessageService;
   readonly briefResolver?: BriefResolver;
   readonly getRoomMcpServer?: () => RoomMcpServer;
   readonly getCommandBus?: () => CommandBus | undefined;
@@ -48,6 +49,28 @@ type NativeAgentAdapter = {
   readonly runManaged: (run: RunRow) => Promise<void>;
   readonly cancelManagedRun: (runId: string) => Promise<void>;
   readonly disposeAllRuns?: () => void;
+};
+
+type NativeFileMessageService = {
+  readonly createFromContent: (input: {
+    readonly workspaceId: string;
+    readonly roomId: string;
+    readonly runId: string;
+    readonly agentId: string;
+    readonly messageId: string;
+    readonly title: string;
+    readonly path: string;
+    readonly content: string;
+    readonly mimeType: string;
+    readonly previewKind: "markdown" | "text" | "code";
+  }) => {
+    readonly artifactId: string;
+    readonly path: string;
+    readonly name: string;
+    readonly mimeType: string;
+    readonly sizeBytes: number;
+    readonly previewKind: "markdown" | "text" | "code";
+  };
 };
 
 type ModelConfigRow = {
@@ -240,7 +263,7 @@ export class AdapterRegistry {
 
   private claude(): WarmableManagedAdapter {
     this.claudeAdapter ??= new ClaudeCodeACPAdapter({
-      services: { database: this.options.database, eventBus: this.options.eventBus, ...(this.options.getCommandBus !== undefined ? { getCommandBus: this.options.getCommandBus } : {}), ...(this.options.permissionEngine !== undefined ? { permissionEngine: this.options.permissionEngine } : {}), ...(this.options.artifactFs !== undefined ? { artifactFs: this.options.artifactFs } : {}), ...(this.options.briefResolver !== undefined ? { briefResolver: this.options.briefResolver } : {}) },
+      services: { database: this.options.database, eventBus: this.options.eventBus, ...(this.options.getCommandBus !== undefined ? { getCommandBus: this.options.getCommandBus } : {}), ...(this.options.permissionEngine !== undefined ? { permissionEngine: this.options.permissionEngine } : {}), ...(this.options.artifactFs !== undefined ? { artifactFs: this.options.artifactFs } : {}), ...(this.options.fileMessageService !== undefined ? { fileMessageService: this.options.fileMessageService } : {}), ...(this.options.briefResolver !== undefined ? { briefResolver: this.options.briefResolver } : {}) },
       lifecycle: this.options.lifecycle,
       workspaceId: "default-workspace",
       ...(this.options.onSessionEndedWithoutCompletion !== undefined ? { onSessionEndedWithoutCompletion: this.options.onSessionEndedWithoutCompletion } : {}),
@@ -257,7 +280,7 @@ export class AdapterRegistry {
 
   private opencode(): WarmableManagedAdapter {
     this.opencodeAdapter ??= new OpenCodeACPAdapter({
-      services: { database: this.options.database, eventBus: this.options.eventBus, ...(this.options.getCommandBus !== undefined ? { getCommandBus: this.options.getCommandBus } : {}), ...(this.options.permissionEngine !== undefined ? { permissionEngine: this.options.permissionEngine } : {}), ...(this.options.artifactFs !== undefined ? { artifactFs: this.options.artifactFs } : {}), ...(this.options.briefResolver !== undefined ? { briefResolver: this.options.briefResolver } : {}) },
+      services: { database: this.options.database, eventBus: this.options.eventBus, ...(this.options.getCommandBus !== undefined ? { getCommandBus: this.options.getCommandBus } : {}), ...(this.options.permissionEngine !== undefined ? { permissionEngine: this.options.permissionEngine } : {}), ...(this.options.artifactFs !== undefined ? { artifactFs: this.options.artifactFs } : {}), ...(this.options.fileMessageService !== undefined ? { fileMessageService: this.options.fileMessageService } : {}), ...(this.options.briefResolver !== undefined ? { briefResolver: this.options.briefResolver } : {}) },
       lifecycle: this.options.lifecycle,
       workspaceId: "default-workspace",
       ...(this.options.onSessionEndedWithoutCompletion !== undefined ? { onSessionEndedWithoutCompletion: this.options.onSessionEndedWithoutCompletion } : {}),
@@ -278,7 +301,7 @@ export class AdapterRegistry {
     if (existing !== undefined) return existing;
     const adapter = this.options.genericAcpAdapterFactory?.(runtimeConfig) ?? new GenericACPAdapter({
       ...runtimeConfig,
-      services: { database: this.options.database, eventBus: this.options.eventBus, ...(this.options.getCommandBus !== undefined ? { getCommandBus: this.options.getCommandBus } : {}), ...(this.options.permissionEngine !== undefined ? { permissionEngine: this.options.permissionEngine } : {}), ...(this.options.artifactFs !== undefined ? { artifactFs: this.options.artifactFs } : {}), ...(this.options.briefResolver !== undefined ? { briefResolver: this.options.briefResolver } : {}) },
+      services: { database: this.options.database, eventBus: this.options.eventBus, ...(this.options.getCommandBus !== undefined ? { getCommandBus: this.options.getCommandBus } : {}), ...(this.options.permissionEngine !== undefined ? { permissionEngine: this.options.permissionEngine } : {}), ...(this.options.artifactFs !== undefined ? { artifactFs: this.options.artifactFs } : {}), ...(this.options.fileMessageService !== undefined ? { fileMessageService: this.options.fileMessageService } : {}), ...(this.options.briefResolver !== undefined ? { briefResolver: this.options.briefResolver } : {}) },
       lifecycle: this.options.lifecycle,
       workspaceId: "default-workspace",
       ...(this.options.onSessionEndedWithoutCompletion !== undefined ? { onSessionEndedWithoutCompletion: this.options.onSessionEndedWithoutCompletion } : {}),
@@ -308,6 +331,7 @@ export class AdapterRegistry {
       getSkillsBlock: (runId: string) => this.getSkillsBlock(runId),
       ...(this.options.getRoomMcpServer !== undefined ? { getRoomMcpServer: this.options.getRoomMcpServer } : {}),
       ...(this.options.artifactFs !== undefined ? { artifactFs: this.options.artifactFs } : {}),
+      ...(this.options.fileMessageService !== undefined ? { fileMessageService: this.options.fileMessageService } : {}),
       ...(this.options.now !== undefined ? { now: this.options.now } : {})
     } as never);
     return this.nativeAdapter;

@@ -125,6 +125,7 @@ describe("ChatStream task notification feed", () => {
     });
 
     expect(activeRunIndicatorProps(room)).toEqual({
+      runId: "run-reviewer",
       agentName: "Reviewer",
       status: "starting",
       mode: "assisted",

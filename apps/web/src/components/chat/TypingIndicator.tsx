@@ -1,17 +1,20 @@
-import { Avatar, Chip, Spinner } from "@heroui/react";
+import { Avatar, Button, Chip, Spinner } from "@heroui/react";
 import { initials } from "../../lib/format.ts";
 
 interface TypingIndicatorProps {
+  runId?: string | undefined;
   agentName: string;
   status: string;
   mode?: string | undefined;
   turnIndex?: number | undefined;
+  onStopDiscussion?: ((runId: string) => void) | undefined;
 }
 
-export function TypingIndicator({ agentName, status, mode, turnIndex }: TypingIndicatorProps) {
+export function TypingIndicator({ runId, agentName, status, mode, turnIndex, onStopDiscussion }: TypingIndicatorProps) {
   const isAssisted = mode === "assisted";
   const label = isAssisted ? `${agentName} is speaking` : `${agentName} is`;
   const chipLabel = isAssisted && turnIndex !== undefined ? `Group turn ${turnIndex}` : status;
+  const canStop = isAssisted && runId !== undefined && onStopDiscussion !== undefined;
   return (
     <div className="px-4 py-2" role="status" aria-live="polite">
       <div className="mx-auto flex max-w-[920px] items-center gap-2 text-xs text-muted">
@@ -21,6 +24,11 @@ export function TypingIndicator({ agentName, status, mode, turnIndex }: TypingIn
         <span>{label}</span>
         <Chip size="sm" variant="soft" color="accent">{chipLabel}</Chip>
         <Spinner size="sm" color="current" />
+        {canStop ? (
+          <Button size="sm" variant="danger-soft" onPress={() => onStopDiscussion(runId)}>
+            Stop discussion
+          </Button>
+        ) : null}
       </div>
     </div>
   );

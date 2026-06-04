@@ -22,6 +22,7 @@ interface ChatStreamProps {
   onOpenTask: (taskId: string) => void;
   onOpenTasks: () => void;
   onCancelPending: (pendingTurnId: string) => void;
+  onStopDiscussion?: ((runId: string) => void) | undefined;
   onEditPending: (id: string) => void;
   csrfFetch: typeof fetch;
   connectionStatus: "connected" | "connecting" | "reconnecting" | "offline" | "disconnected";
@@ -50,7 +51,7 @@ export function buildChatFeedItems(room: RoomViewModel): FeedItem[] {
   ];
 }
 
-export function activeRunIndicatorProps(room: RoomViewModel): { readonly agentName: string; readonly status: string; readonly mode?: string; readonly turnIndex?: number } | undefined {
+export function activeRunIndicatorProps(room: RoomViewModel): { readonly runId: string; readonly agentName: string; readonly status: string; readonly mode?: string; readonly turnIndex?: number } | undefined {
   const activeRun = room.runs.find((r) => r.status === "running" || r.status === "starting" || r.status === "queued");
   if (activeRun === undefined) return undefined;
   const sameMessageRuns = activeRun.messageId !== undefined
@@ -60,6 +61,7 @@ export function activeRunIndicatorProps(room: RoomViewModel): { readonly agentNa
     ? sameMessageRuns.findIndex((run) => run.id === activeRun.id) + 1
     : undefined;
   return {
+    runId: activeRun.id,
     agentName: activeRun.agentName,
     status: activeRun.status,
     mode: room.mode,
@@ -217,7 +219,7 @@ export function ChatStream(props: ChatStreamProps) {
         </div>
       </ScrollShadow>
       {activeIndicator ? (
-        <TypingIndicator {...activeIndicator} />
+        <TypingIndicator {...activeIndicator} onStopDiscussion={props.onStopDiscussion} />
       ) : null}
     </div>
   );

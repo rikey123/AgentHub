@@ -30,8 +30,10 @@ type QueuedRunPayload = {
 const RECENT_ROOM_MESSAGE_LIMIT = 12;
 const REVIEW_TASK_LIMIT = 8;
 const MAX_MESSAGE_SNIPPET_CHARS = 1_200;
+const MAX_ATTACHMENT_EXCERPT_CHARS = 1_200;
 const MAX_TASK_RESULT_CHARS = 1_800;
 const MAX_LEADER_CONTEXT_CHARS = 10_000;
+const MAX_ASSISTED_CONTEXT_CHARS = 12_000;
 
 export function buildRunPrompt(run: RunRow, database: AgentHubDatabase, options: RunPromptOptions = {}): string {
   const room = database.sqlite.prepare("SELECT mode, primary_agent_id FROM rooms WHERE id = ?").get(run.room_id) as { readonly mode: string; readonly primary_agent_id: string | null } | undefined;
@@ -49,7 +51,8 @@ export function buildRunPrompt(run: RunRow, database: AgentHubDatabase, options:
   const batch = readCurrentRunMailbox(run, database, options);
   const input = renderBatch(batch) ?? renderQueuedRunInput(run, database) ?? `Run ${run.id} for agent ${run.agent_id}`;
   const leaderContext = renderLeaderRunContext(run, database);
-  return [options.skillsBlock, missionBriefBlock, priorProgress, rolePrompt, leaderContext, input].filter((part): part is string => part !== undefined && part.trim().length > 0).join("\n\n---\n\n");
+  const assistedContext = renderAssistedGroupContext(run, database);
+  return [options.skillsBlock, missionBriefBlock, priorProgress, rolePrompt, leaderContext, assistedContext, input].filter((part): part is string => part !== undefined && part.trim().length > 0).join("\n\n---\n\n");
 }
 
 function buildLeaderPromptParams(run: RunRow, database: AgentHubDatabase): Parameters<typeof buildPlanPhasePrompt>[0] {
@@ -169,6 +172,138 @@ function renderLeaderRunContext(run: RunRow, database: AgentHubDatabase): string
   ].filter((part): part is string => part !== undefined && part.trim().length > 0);
   if (sections.length === 0) return undefined;
   return truncateText(sections.join("\n\n"), MAX_LEADER_CONTEXT_CHARS);
+}
+
+function renderAssistedGroupContext(run: RunRow, database: AgentHubDatabase): string | undefined {
+  const room = database.sqlite.prepare("SELECT mode FROM rooms WHERE id = ?").get(run.room_id) as { readonly mode: string } | undefined;
+  if (room?.mode !== "assisted") return undefined;
+  const anchor = assistedThreadAnchor(run, database);
+  if (anchor === undefined) return undefined;
+  const nextUser = database.sqlite.prepare(
+    `SELECT created_at AS createdAt, id
+     FROM messages
+     WHERE room_id = ?
+       AND sender_type = 'user'
+       AND deleted_at IS NULL
+       AND (created_at > ? OR (created_at = ? AND id > ?))
+     ORDER BY created_at ASC, id ASC
+     LIMIT 1`
+  ).get(run.room_id, anchor.createdAt, anchor.createdAt, anchor.id) as { readonly createdAt: number; readonly id: string } | undefined;
+
+  const rows = database.sqlite.prepare(
+    `SELECT m.id, m.sender_type AS senderType, m.sender_id AS senderId, m.role, m.run_id AS runId, m.created_at AS createdAt,
+            COALESCE(r.name, ap.name, m.sender_id, m.sender_type) AS senderName
+     FROM messages m
+     LEFT JOIN agent_profiles ap ON ap.id = m.sender_id
+     LEFT JOIN room_participants rp ON rp.room_id = m.room_id AND rp.participant_id = m.sender_id AND rp.participant_type = 'agent'
+     LEFT JOIN agent_bindings ab ON ab.id = rp.agent_binding_id
+     LEFT JOIN roles r ON r.id = ab.role_id
+     WHERE m.room_id = ?
+       AND m.deleted_at IS NULL
+       AND m.sender_type IN ('user', 'agent')
+       AND (m.run_id IS NULL OR m.run_id != ?)
+       AND (m.created_at > ? OR (m.created_at = ? AND m.id >= ?))
+       AND (? IS NULL OR m.created_at < ? OR (m.created_at = ? AND m.id < ?))
+     ORDER BY m.created_at ASC, m.id ASC
+     LIMIT ?`
+  ).all(
+    run.room_id,
+    run.id,
+    anchor.createdAt,
+    anchor.createdAt,
+    anchor.id,
+    nextUser?.id ?? null,
+    nextUser?.createdAt ?? 0,
+    nextUser?.createdAt ?? 0,
+    nextUser?.id ?? "",
+    RECENT_ROOM_MESSAGE_LIMIT
+  ) as Array<{
+    readonly id: string;
+    readonly senderType: string;
+    readonly senderId: string | null;
+    readonly role: string;
+    readonly runId: string | null;
+    readonly createdAt: number;
+    readonly senderName: string | null;
+  }>;
+
+  const lines = rows
+    .map((row) => renderAssistedThreadMessage(row, database))
+    .filter((line): line is string => line !== undefined);
+
+  if (lines.length === 0) return undefined;
+  const hasPriorAgentMessage = rows.some((row) => row.senderType === "agent");
+  const turnInstruction = hasPriorAgentMessage
+    ? "Use this to respond naturally to the shared thread. React to one concrete prior point only when it helps; do not mechanically prefix your message with 'I am continuing...' or the prior speaker's name every time. Vary your opener, add one role-specific point, and keep useful follow-ups to one or two sentences when that is enough. Agree and extend, challenge with a reason, clarify a missing detail, or synthesize. If the thread is repeating itself, give a concise closing judgment instead of asking for another round. Do not restart the discussion from the original user prompt."
+    : "You are the first agent speaker for this user message; open the discussion naturally in your own role. Do not say you are adding to, continuing, or building on a teammate because no teammate has spoken in this turn yet.";
+  return truncateText([
+    "## Assisted Shared Conversation",
+    "AutoGen-style shared message thread for this selected speaker. Use it like the message buffer passed to an AutoGen ChatAgentContainer.",
+    turnInstruction,
+    ...lines
+  ].join("\n"), MAX_ASSISTED_CONTEXT_CHARS);
+}
+
+function assistedThreadAnchor(run: RunRow, database: AgentHubDatabase): { readonly id: string; readonly createdAt: number } | undefined {
+  const payload = readQueuedRunPayload(run, database);
+  const messageId = payload?.messageId ?? (payload?.pendingTurnId !== undefined ? pendingTurnMessageId(database, payload.pendingTurnId) : undefined);
+  if (messageId === undefined) return undefined;
+  const row = database.sqlite.prepare("SELECT id, created_at AS createdAt, sender_type AS senderType FROM messages WHERE id = ? AND room_id = ? AND deleted_at IS NULL").get(messageId, run.room_id) as { readonly id: string; readonly createdAt: number; readonly senderType: string } | undefined;
+  if (row?.senderType !== "user") return undefined;
+  return { id: row.id, createdAt: row.createdAt };
+}
+
+function renderAssistedThreadMessage(row: { readonly id: string; readonly senderType: string; readonly senderName: string | null; readonly senderId: string | null; readonly role: string }, database: AgentHubDatabase): string | undefined {
+  const text = messageText(database.sqlite, row.id);
+  const pieces = [
+    text !== undefined ? truncateText(cleanSnippet(text), MAX_MESSAGE_SNIPPET_CHARS) : undefined,
+    ...attachmentExcerptsForMessage(row.id, database).map((attachment) => `[File: ${attachment.path}]\n${truncateText(cleanSnippet(attachment.content), MAX_ATTACHMENT_EXCERPT_CHARS)}`)
+  ].filter((part): part is string => part !== undefined && part.trim().length > 0);
+  if (pieces.length === 0) return undefined;
+  return `- ${speakerName(row)}: ${pieces.join("\n").replace(/\n/g, "\n  ")}`;
+}
+
+function attachmentExcerptsForMessage(messageId: string, database: AgentHubDatabase): Array<{ readonly path: string; readonly content: string }> {
+  const rows = database.sqlite.prepare("SELECT payload FROM message_parts WHERE message_id = ? AND part_type = 'attachment' ORDER BY seq ASC LIMIT 3").all(messageId) as Array<{ readonly payload: string }>;
+  const excerpts: Array<{ readonly path: string; readonly content: string }> = [];
+  for (const row of rows) {
+    const payload = parseAttachmentPayload(row.payload);
+    if (payload === undefined || !isPreviewableAttachment(payload)) continue;
+    const content = artifactFileContent(database, payload.artifactId, payload.path);
+    if (content === undefined || content.trim().length === 0) continue;
+    excerpts.push({ path: payload.path, content });
+  }
+  return excerpts;
+}
+
+function parseAttachmentPayload(value: string): { readonly artifactId: string; readonly path: string; readonly mimeType?: string; readonly previewKind?: string } | undefined {
+  try {
+    const parsed = JSON.parse(value) as { readonly artifactId?: unknown; readonly path?: unknown; readonly mimeType?: unknown; readonly previewKind?: unknown };
+    if (typeof parsed.artifactId !== "string" || parsed.artifactId.length === 0) return undefined;
+    if (typeof parsed.path !== "string" || parsed.path.length === 0) return undefined;
+    return {
+      artifactId: parsed.artifactId,
+      path: parsed.path,
+      ...(typeof parsed.mimeType === "string" ? { mimeType: parsed.mimeType } : {}),
+      ...(typeof parsed.previewKind === "string" ? { previewKind: parsed.previewKind } : {})
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function isPreviewableAttachment(payload: { readonly mimeType?: string; readonly previewKind?: string }): boolean {
+  if (payload.previewKind === "markdown" || payload.previewKind === "text" || payload.previewKind === "code") return true;
+  if (payload.mimeType === undefined) return false;
+  const mime = payload.mimeType.toLowerCase();
+  return mime.startsWith("text/") || mime.includes("json") || mime.includes("xml") || mime.includes("yaml") || mime.includes("javascript") || mime.includes("typescript");
+}
+
+function artifactFileContent(database: AgentHubDatabase, artifactId: string, path: string): string | undefined {
+  const exact = database.sqlite.prepare("SELECT new_content AS content FROM artifact_files WHERE artifact_id = ? AND path = ? LIMIT 1").get(artifactId, path) as { readonly content: string | null } | undefined;
+  if (exact?.content !== undefined && exact.content !== null) return exact.content;
+  const fallback = database.sqlite.prepare("SELECT new_content AS content FROM artifact_files WHERE artifact_id = ? ORDER BY created_at ASC LIMIT 1").get(artifactId) as { readonly content: string | null } | undefined;
+  return fallback?.content ?? undefined;
 }
 
 function renderRecentRoomContext(run: RunRow, database: AgentHubDatabase, excludeMessageIds: ReadonlySet<string>): string | undefined {

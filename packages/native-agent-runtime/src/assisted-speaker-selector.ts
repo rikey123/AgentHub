@@ -33,9 +33,15 @@ function selectorPrompt(request: AssistedSelectorRequest): string {
     "You are managing an AutoGen-style SelectorGroupChat for AgentHub assisted mode.",
     "",
     "First inspect the shared conversation history.",
-    "If the latest assistant message already gives a final synthesis, answers the user, or leaves no distinct non-redundant contribution for another participant, return NO_SPEAKER.",
-    "Otherwise choose exactly one candidate whose role can add the most useful next contribution.",
-    "Do not choose a speaker just to keep the group going.",
+    "Use the shared history like AutoGen's group chat message thread.",
+    "Choose exactly one candidate whose role can add the most useful next contribution.",
+    "Prefer a candidate who can respond to a concrete prior point, file, disagreement, or gap in the thread.",
+    "Do not stop merely because the latest assistant message partially answers the user.",
+    "During the early part of a user turn, choose another useful role when one can add a distinct perspective.",
+    "A short one-or-two sentence contribution is valid; the next speaker does not need to write a full report.",
+    "Do not choose a speaker just to keep the group going when every useful role has already contributed.",
+    "If the latest turns are repeating the same stance, choose NO_SPEAKER so the primary facilitator can close.",
+    "If there is already a clear conclusion or recommendation, choose NO_SPEAKER.",
     "",
     "Roles:",
     roles,
@@ -49,7 +55,7 @@ function selectorPrompt(request: AssistedSelectorRequest): string {
     request.previousSpeakerId !== undefined ? `Previous speaker: ${request.previousSpeakerId}` : "Previous speaker: none",
     ...feedback,
     "Choose exactly one candidate who should speak next.",
-    "Return NO_SPEAKER only if the group should stop because the conversation is complete or no candidate should reply.",
+    "Return NO_SPEAKER if the conversation has an explicit closing synthesis, a clear conclusion, repeated turns without new information, every useful role has already contributed, or no candidate can add even a short useful reply.",
     "Return only the candidate id, candidate name, or NO_SPEAKER. Do not explain."
   ].join("\n");
 }

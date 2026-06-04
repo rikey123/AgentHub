@@ -293,7 +293,7 @@ function sendMessage(options: DaemonCommandHandlersOptions, command: Command, me
   const messageId = randomUUID();
   const members = roomMembers(options.database, roomId);
   // Parse @mentions in assisted mode; in team/squad mode the leader handles routing via MCP
-  const mentions = (room.mode === "assisted") ? parseMentions(text, members) : [];
+  const mentions = (room.mode === "assisted") ? resolveMessageMentions(command, text, members) : [];
   const quotedMessageId = stringField(command, "quotedMessageId") ?? stringField(command, "quoted_message_id");
   const attachmentFileIds = stringArrayField(command, "attachmentFileIds", "attachments");
   const useAssistedSelector = room.mode === "assisted" && options.assistedSelector !== undefined;
@@ -683,6 +683,20 @@ function wakeTargetsForMessage(room: RoomRow, mentions: readonly string[]): stri
   if (room.mode !== "assisted") return room.primary_agent_id ? [room.primary_agent_id] : [];
   if (mentions.length === 0) return room.primary_agent_id ? [room.primary_agent_id] : [];
   return [...mentions];
+}
+
+function resolveMessageMentions(command: Command, text: string, members: readonly { readonly agentId: string; readonly slug?: string; readonly name?: string }[]): string[] {
+  const memberIds = new Set(members.map((member) => member.agentId));
+  const seen = new Set<string>();
+  const mentions: string[] = [];
+  const add = (agentId: string): void => {
+    if (!memberIds.has(agentId) || seen.has(agentId)) return;
+    seen.add(agentId);
+    mentions.push(agentId);
+  };
+  for (const agentId of parseMentions(text, members)) add(agentId);
+  for (const agentId of stringArrayField(command, "mentions", "mentionAgentIds", "mention_agent_ids")) add(agentId);
+  return mentions;
 }
 
 function messageText(database: AgentHubDatabase, messageId: string): string {
