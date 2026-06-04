@@ -1,0 +1,88 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - link "Skip to workbench" [ref=e6] [cursor=pointer]:
+        - /url: "#agenthub-workbench-main"
+      - button "Toggle rooms panel" [ref=e7] [cursor=pointer]: ☰
+      - generic [ref=e8]:
+        - generic [ref=e9]: ●
+        - generic [ref=e10]: AgentHub
+      - 'generic "Connection: disconnected" [ref=e11]':
+        - generic [ref=e12]: disconnected
+      - button "Open command palette" [ref=e13] [cursor=pointer]:
+        - generic [ref=e14]: Command
+        - generic [ref=e15]: ⌘K
+      - button "Show keymap" [ref=e16] [cursor=pointer]: "?"
+      - 'button "Theme: auto" [ref=e17] [cursor=pointer]': 🌓
+      - button "Toggle workbench panel" [ref=e18] [cursor=pointer]: ⊟
+  - generic [ref=e19]:
+    - complementary "Primary navigation" [ref=e20]:
+      - navigation "Workbench navigation" [ref=e21]:
+        - generic [ref=e22]: AH
+        - generic [ref=e23]:
+          - button "Chat" [ref=e24]:
+            - button "Chat" [ref=e25]:
+              - generic [ref=e27]: CH
+          - button "Runs" [ref=e28]:
+            - button "Runs" [ref=e29]:
+              - generic [ref=e30]: RN
+          - button "Tasks" [ref=e31]:
+            - button "Tasks" [ref=e32]:
+              - generic [ref=e33]: TS
+          - button "Context" [ref=e34]:
+            - button "Context" [ref=e35]:
+              - generic [ref=e36]: CX
+          - button "Artifacts" [ref=e37]:
+            - button "Artifacts" [ref=e38]:
+              - generic [ref=e39]: AR
+          - button "Settings" [ref=e40]:
+            - button "Settings" [ref=e41]:
+              - generic [ref=e42]: SE
+        - generic [ref=e43]: v1.0
+    - complementary "Rooms panel" [ref=e44]:
+      - generic [ref=e46]:
+        - generic [ref=e47]:
+          - generic [ref=e48]:
+            - generic [ref=e49]:
+              - paragraph [ref=e50]: Workspace
+              - heading "Rooms" [level=2] [ref=e51]
+            - button "New Room" [ref=e52] [cursor=pointer]: New
+          - generic [ref=e53]:
+            - generic [ref=e54]:
+              - generic [ref=e55]: "0"
+              - generic [ref=e56]: rooms
+            - generic [ref=e57]:
+              - generic [ref=e58]: "0"
+              - generic [ref=e59]: live
+          - group [ref=e61]:
+            - searchbox "Search rooms" [ref=e62]
+        - listbox "Rooms" [ref=e64]:
+          - listitem [ref=e65]: No rooms yet. Create one to start.
+    - main [ref=e66]:
+      - generic [ref=e68]:
+        - generic [ref=e69]:
+          - generic [ref=e70]:
+            - heading "AgentHub" [level=1] [ref=e71]
+            - paragraph [ref=e72]: Your local-first multi-agent workbench.
+          - button "New Room" [ref=e74] [cursor=pointer]
+        - generic [ref=e75]:
+          - generic [ref=e77]:
+            - paragraph [ref=e78]: Rooms
+            - heading "0" [level=3] [ref=e79]
+          - generic [ref=e81]:
+            - paragraph [ref=e82]: Active
+            - heading "0" [level=3] [ref=e83]
+          - generic [ref=e85]:
+            - paragraph [ref=e86]: Unread
+            - heading "0" [level=3] [ref=e87]
+          - generic [ref=e89]:
+            - paragraph [ref=e90]: Pending
+            - heading "0" [level=3] [ref=e91]
+        - generic [ref=e92]:
+          - heading "Rooms" [level=2] [ref=e93]
+          - generic [ref=e94]:
+            - generic [ref=e95]:
+              - heading "No rooms yet" [level=3] [ref=e96]
+              - paragraph [ref=e97]: Start a new room to begin a conversation with your agents.
+            - button "Create your first room" [ref=e99] [cursor=pointer]
+    - complementary "Workbench panel" [ref=e100]

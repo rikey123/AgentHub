@@ -1,0 +1,161 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - link "Skip to workbench" [ref=e6] [cursor=pointer]:
+        - /url: "#agenthub-workbench-main"
+      - button "Toggle rooms panel" [ref=e7] [cursor=pointer]: ☰
+      - generic [ref=e8]:
+        - generic [ref=e9]: ●
+        - generic [ref=e10]: AgentHub
+        - generic [ref=e101]: /
+        - generic [ref=e102]: Room 6月02日 01:15
+      - 'generic "Connection: connected" [ref=e103]':
+        - generic [ref=e12]: connected
+      - button "Open command palette" [active] [ref=e13] [cursor=pointer]:
+        - generic [ref=e14]: Command
+        - generic [ref=e15]: ⌘K
+      - button "Show keymap" [ref=e16] [cursor=pointer]: "?"
+      - 'button "Theme: auto" [ref=e17] [cursor=pointer]': 🌓
+      - button "Toggle workbench panel" [ref=e18] [cursor=pointer]: ⊟
+  - generic [ref=e19]:
+    - complementary "Primary navigation" [ref=e20]:
+      - navigation "Workbench navigation" [ref=e21]:
+        - generic [ref=e22]: AH
+        - generic [ref=e23]:
+          - button "Chat" [ref=e24]:
+            - button "Chat" [ref=e25]:
+              - generic [ref=e27]: CH
+          - button "Runs" [ref=e28]:
+            - button "Runs" [ref=e29]:
+              - generic [ref=e30]: RN
+          - button "Tasks" [ref=e31]:
+            - button "Tasks" [ref=e32]:
+              - generic [ref=e33]: TS
+          - button "Context" [ref=e34]:
+            - button "Context" [ref=e35]:
+              - generic [ref=e36]: CX
+          - button "Artifacts" [ref=e37]:
+            - button "Artifacts" [ref=e38]:
+              - generic [ref=e39]: AR
+          - button "Settings" [ref=e40]:
+            - button "Settings" [ref=e41]:
+              - generic [ref=e42]: SE
+        - generic [ref=e43]: v1.0
+    - complementary "Rooms panel" [ref=e44]:
+      - generic [ref=e46]:
+        - generic [ref=e47]:
+          - generic [ref=e48]:
+            - generic [ref=e49]:
+              - paragraph [ref=e50]: Workspace
+              - heading "Rooms" [level=2] [ref=e51]
+            - button "New Room" [ref=e52] [cursor=pointer]: New
+          - generic [ref=e53]:
+            - generic [ref=e54]:
+              - generic [ref=e55]: "1"
+              - generic [ref=e56]: rooms
+            - generic [ref=e57]:
+              - generic [ref=e58]: "0"
+              - generic [ref=e59]: live
+          - group [ref=e61]:
+            - searchbox "Search rooms" [ref=e62]
+        - listbox "Rooms" [ref=e64]:
+          - option "R6 Room 6月02日 01:15 23h The user is saying hello. This is a simple greeting, not a complex task. Let me respond appropriately.你好！ 有什么我可以帮忙的吗？无论是研究代码、实现功能，还是讨论架构设计，我都在这里。需要我做什么吗？ solo 1 members" [selected] [ref=e105] [cursor=pointer]:
+            - generic [ref=e106]:
+              - generic [ref=e107]: R6
+              - generic [ref=e108]:
+                - generic [ref=e109]:
+                  - generic [ref=e110]: Room 6月02日 01:15
+                  - generic [ref=e111]: 23h
+                - paragraph [ref=e112]: The user is saying hello. This is a simple greeting, not a complex task. Let me respond appropriately.你好！ 有什么我可以帮忙的吗？无论是研究代码、实现功能，还是讨论架构设计，我都在这里。需要我做什么吗？
+            - generic [ref=e113]:
+              - generic [ref=e115]: solo
+              - generic [ref=e116]: 1 members
+    - main [ref=e66]:
+      - generic [ref=e119]:
+        - generic [ref=e124]:
+          - button "01:16 Message actions hello YO" [ref=e126]:
+            - generic [ref=e127]:
+              - generic [ref=e128]:
+                - generic [ref=e129]:
+                  - generic [ref=e130]: 01:16
+                  - button "Message actions" [ref=e131] [cursor=pointer]: ...
+                - paragraph [ref=e133]: hello
+              - generic [ref=e135]: YO
+          - button "OB OpenCode Builder 01:16 Message actions The user is saying hello. This is a simple greeting, not a complex task. Let me respond appropriately.你好！ 有什么我可以帮忙的吗？无论是研究代码、实现功能，还是讨论架构设计，我都在这里。需要我做什么吗？" [ref=e137]:
+            - generic [ref=e138]:
+              - generic [ref=e140]: OB
+              - generic [ref=e141]:
+                - generic [ref=e142]:
+                  - generic [ref=e143]: OpenCode Builder
+                  - generic [ref=e144]: 01:16
+                  - button "Message actions" [ref=e145] [cursor=pointer]: ...
+                - paragraph [ref=e147]: The user is saying hello. This is a simple greeting, not a complex task. Let me respond appropriately.你好！ 有什么我可以帮忙的吗？无论是研究代码、实现功能，还是讨论架构设计，我都在这里。需要我做什么吗？
+          - 'button "run completed OpenCode Builder: The user is saying hello Open run" [ref=e149]':
+            - generic [ref=e151]: run completed
+            - generic [ref=e152]: "OpenCode Builder: The user is saying hello"
+            - generic [ref=e154]: Open run
+        - generic [ref=e157]:
+          - generic [ref=e159]:
+            - generic [ref=e161]: Ready
+            - generic [ref=e162]: 1 active
+            - generic [ref=e163]: 1 agents
+          - generic [ref=e164]:
+            - textbox "Message" [ref=e166]:
+              - /placeholder: Message this room...
+            - generic [ref=e167]:
+              - generic [ref=e168]:
+                - button "Attach files" [ref=e169]
+                - button "Attach files" [ref=e170] [cursor=pointer]: Attach
+                - button "Mention agent" [ref=e171] [cursor=pointer]: "@ Agent"
+              - button "Send" [disabled]
+    - complementary "Workbench panel" [ref=e100]:
+      - generic [ref=e173]:
+        - heading "Room 6月02日 01:15" [level=2] [ref=e175]
+        - generic [ref=e176]:
+          - tablist "Workbench panels" [ref=e178]:
+            - tab "Context 0" [ref=e179] [cursor=pointer]:
+              - text: Context
+              - generic [ref=e181]: "0"
+            - tab "Tasks 0" [ref=e182] [cursor=pointer]:
+              - text: Tasks
+              - generic [ref=e184]: "0"
+            - tab "Members 1" [ref=e185] [cursor=pointer]:
+              - text: Members
+              - generic [ref=e187]: "1"
+            - tab "Debug" [selected] [ref=e188] [cursor=pointer]: Debug
+            - tab "Cost" [ref=e190] [cursor=pointer]: Cost
+          - tabpanel "Debug" [ref=e192]:
+            - generic [ref=e194]:
+              - heading "Debug snapshot" [level=3] [ref=e196]
+              - table [ref=e198]:
+                - rowgroup [ref=e199]:
+                  - row "Room ID 3039ef81-0b0a-49a4-b8df-bf4722e74ebd" [ref=e200]:
+                    - cell "Room ID" [ref=e201]
+                    - cell "3039ef81-0b0a-49a4-b8df-bf4722e74ebd" [ref=e202]
+                  - row "Messages 2" [ref=e203]:
+                    - cell "Messages" [ref=e204]
+                    - cell "2" [ref=e205]
+                  - row "Briefs 1" [ref=e206]:
+                    - cell "Briefs" [ref=e207]
+                    - cell "1" [ref=e208]
+                  - row "Runs 1" [ref=e209]:
+                    - cell "Runs" [ref=e210]
+                    - cell "1" [ref=e211]
+                  - row "Pending turns 0" [ref=e212]:
+                    - cell "Pending turns" [ref=e213]
+                    - cell "0" [ref=e214]
+                  - row "Permissions 0" [ref=e215]:
+                    - cell "Permissions" [ref=e216]
+                    - cell "0" [ref=e217]
+                  - row "Interventions 0" [ref=e218]:
+                    - cell "Interventions" [ref=e219]
+                    - cell "0" [ref=e220]
+                  - row "Context items 0" [ref=e221]:
+                    - cell "Context items" [ref=e222]
+                    - cell "0" [ref=e223]
+                  - row "Tasks 0" [ref=e224]:
+                    - cell "Tasks" [ref=e225]
+                    - cell "0" [ref=e226]
+                  - row "Participants 1" [ref=e227]:
+                    - cell "Participants" [ref=e228]
+                    - cell "1" [ref=e229]

@@ -1,0 +1,277 @@
+- generic [ref=e1]:
+  - generic [ref=e3]:
+    - banner [ref=e4]:
+      - generic [ref=e5]:
+        - link "Skip to workbench" [ref=e6] [cursor=pointer]:
+          - /url: "#agenthub-workbench-main"
+        - button "Toggle rooms panel" [ref=e7] [cursor=pointer]: ☰
+        - generic [ref=e8]:
+          - generic [ref=e9]: ●
+          - generic [ref=e10]: AgentHub
+          - generic [ref=e101]: /
+          - generic [ref=e102]: Room 6月02日 01:15
+        - 'generic "Connection: connected" [ref=e103]':
+          - generic [ref=e12]: connected
+        - button "Open command palette" [ref=e13] [cursor=pointer]:
+          - generic [ref=e14]: Command
+          - generic [ref=e15]: ⌘K
+        - button "Show keymap" [ref=e16] [cursor=pointer]: "?"
+        - 'button "Theme: auto" [ref=e286] [cursor=pointer]': 🌓
+        - button "Toggle workbench panel" [ref=e18] [cursor=pointer]: ⊟
+    - generic [ref=e19]:
+      - complementary "Primary navigation" [ref=e20]:
+        - navigation "Workbench navigation" [ref=e21]:
+          - generic [ref=e22]: AH
+          - generic [ref=e23]:
+            - button "Chat" [ref=e24]:
+              - button "Chat" [ref=e25]:
+                - generic [ref=e27]: CH
+            - button "Runs" [ref=e28]:
+              - button "Runs" [ref=e29]:
+                - generic [ref=e30]: RN
+            - button "Tasks" [ref=e31]:
+              - button "Tasks" [ref=e32]:
+                - generic [ref=e33]: TS
+            - button "Context" [ref=e34]:
+              - button "Context" [ref=e35]:
+                - generic [ref=e36]: CX
+            - button "Artifacts" [ref=e37]:
+              - button "Artifacts" [ref=e38]:
+                - generic [ref=e39]: AR
+            - button "Settings" [ref=e40]:
+              - button "Settings" [ref=e41]:
+                - generic [ref=e42]: SE
+          - generic [ref=e43]: v1.0
+      - complementary "Rooms panel" [ref=e44]:
+        - generic [ref=e46]:
+          - generic [ref=e47]:
+            - generic [ref=e48]:
+              - generic [ref=e49]:
+                - paragraph [ref=e50]: Workspace
+                - heading "Rooms" [level=2] [ref=e51]
+              - button "New Room" [ref=e52] [cursor=pointer]: New
+            - generic [ref=e53]:
+              - generic [ref=e54]:
+                - generic [ref=e55]: "1"
+                - generic [ref=e56]: rooms
+              - generic [ref=e57]:
+                - generic [ref=e58]: "0"
+                - generic [ref=e59]: live
+            - group [ref=e61]:
+              - searchbox "Search rooms" [ref=e62]
+          - listbox "Rooms" [ref=e64]:
+            - option "R6 Room 6月02日 01:15 23h The user is saying hello. This is a simple greeting, not a complex task. Let me respond appropriately.你好！ 有什么我可以帮忙的吗？无论是研究代码、实现功能，还是讨论架构设计，我都在这里。需要我做什么吗？ solo 1 members" [selected] [ref=e105] [cursor=pointer]:
+              - generic [ref=e106]:
+                - generic [ref=e107]: R6
+                - generic [ref=e108]:
+                  - generic [ref=e109]:
+                    - generic [ref=e110]: Room 6月02日 01:15
+                    - generic [ref=e111]: 23h
+                  - paragraph [ref=e112]: The user is saying hello. This is a simple greeting, not a complex task. Let me respond appropriately.你好！ 有什么我可以帮忙的吗？无论是研究代码、实现功能，还是讨论架构设计，我都在这里。需要我做什么吗？
+              - generic [ref=e113]:
+                - generic [ref=e115]: solo
+                - generic [ref=e116]: 1 members
+      - main [ref=e66]:
+        - generic [ref=e119]:
+          - generic [ref=e124]:
+            - button "01:16 Message actions hello YO" [ref=e126]:
+              - generic [ref=e127]:
+                - generic [ref=e128]:
+                  - generic [ref=e129]:
+                    - generic [ref=e130]: 01:16
+                    - button "Message actions" [ref=e131] [cursor=pointer]: ...
+                  - paragraph [ref=e133]: hello
+                - generic [ref=e135]: YO
+            - button "OB OpenCode Builder 01:16 Message actions The user is saying hello. This is a simple greeting, not a complex task. Let me respond appropriately.你好！ 有什么我可以帮忙的吗？无论是研究代码、实现功能，还是讨论架构设计，我都在这里。需要我做什么吗？" [ref=e137]:
+              - generic [ref=e138]:
+                - generic [ref=e140]: OB
+                - generic [ref=e141]:
+                  - generic [ref=e142]:
+                    - generic [ref=e143]: OpenCode Builder
+                    - generic [ref=e144]: 01:16
+                    - button "Message actions" [ref=e145] [cursor=pointer]: ...
+                  - paragraph [ref=e147]: The user is saying hello. This is a simple greeting, not a complex task. Let me respond appropriately.你好！ 有什么我可以帮忙的吗？无论是研究代码、实现功能，还是讨论架构设计，我都在这里。需要我做什么吗？
+            - 'button "run completed OpenCode Builder: The user is saying hello Open run" [ref=e149]':
+              - generic [ref=e151]: run completed
+              - generic [ref=e152]: "OpenCode Builder: The user is saying hello"
+              - generic [ref=e154]: Open run
+          - generic [ref=e157]:
+            - generic [ref=e159]:
+              - generic [ref=e161]: Ready
+              - generic [ref=e162]: 1 active
+              - generic [ref=e163]: 1 agents
+            - generic [ref=e164]:
+              - textbox "Message" [ref=e166]:
+                - /placeholder: Message this room...
+              - generic [ref=e167]:
+                - generic [ref=e168]:
+                  - button "Attach files" [ref=e169]
+                  - button "Attach files" [ref=e170] [cursor=pointer]: Attach
+                  - button "Mention agent" [ref=e171] [cursor=pointer]: "@ Agent"
+                - button "Send" [disabled]
+      - complementary "Workbench panel" [ref=e100]:
+        - generic [ref=e173]:
+          - heading "Room 6月02日 01:15" [level=2] [ref=e175]
+          - generic [ref=e176]:
+            - tablist "Workbench panels" [ref=e178]:
+              - tab "Context 0" [ref=e179] [cursor=pointer]:
+                - text: Context
+                - generic [ref=e181]: "0"
+              - tab "Tasks 0" [ref=e182] [cursor=pointer]:
+                - text: Tasks
+                - generic [ref=e184]: "0"
+              - tab "Members 1" [ref=e185] [cursor=pointer]:
+                - text: Members
+                - generic [ref=e187]: "1"
+              - tab "Debug" [selected] [ref=e188] [cursor=pointer]: Debug
+              - tab "Cost" [ref=e190] [cursor=pointer]: Cost
+            - tabpanel "Debug" [ref=e192]:
+              - generic [ref=e194]:
+                - heading "Debug snapshot" [level=3] [ref=e196]
+                - table [ref=e198]:
+                  - rowgroup [ref=e199]:
+                    - row "Room ID 3039ef81-0b0a-49a4-b8df-bf4722e74ebd" [ref=e200]:
+                      - cell "Room ID" [ref=e201]
+                      - cell "3039ef81-0b0a-49a4-b8df-bf4722e74ebd" [ref=e202]
+                    - row "Messages 2" [ref=e203]:
+                      - cell "Messages" [ref=e204]
+                      - cell "2" [ref=e205]
+                    - row "Briefs 1" [ref=e206]:
+                      - cell "Briefs" [ref=e207]
+                      - cell "1" [ref=e208]
+                    - row "Runs 1" [ref=e209]:
+                      - cell "Runs" [ref=e210]
+                      - cell "1" [ref=e211]
+                    - row "Pending turns 0" [ref=e212]:
+                      - cell "Pending turns" [ref=e213]
+                      - cell "0" [ref=e214]
+                    - row "Permissions 0" [ref=e215]:
+                      - cell "Permissions" [ref=e216]
+                      - cell "0" [ref=e217]
+                    - row "Interventions 0" [ref=e218]:
+                      - cell "Interventions" [ref=e219]
+                      - cell "0" [ref=e220]
+                    - row "Context items 0" [ref=e221]:
+                      - cell "Context items" [ref=e222]
+                      - cell "0" [ref=e223]
+                    - row "Tasks 0" [ref=e224]:
+                      - cell "Tasks" [ref=e225]
+                      - cell "0" [ref=e226]
+                    - row "Participants 1" [ref=e227]:
+                      - cell "Participants" [ref=e228]
+                      - cell "1" [ref=e229]
+  - generic [ref=e287]:
+    - generic:
+      - generic:
+        - button "取消"
+      - dialog "Settings" [active] [ref=e288]:
+        - button "Close" [ref=e289] [cursor=pointer]:
+          - img
+        - generic [ref=e291]:
+          - generic [ref=e292]: SE
+          - generic [ref=e293]:
+            - heading "Settings" [level=2] [ref=e294]
+            - paragraph [ref=e295]: Configure local roles, runtimes, models, permissions, workspace defaults, and MCP tool surfaces.
+          - generic [ref=e297]: 7/7 loaded
+        - generic [ref=e299]:
+          - tablist "Settings sections" [ref=e301]:
+            - tab "Roles ready" [selected] [ref=e302] [cursor=pointer]:
+              - text: Roles
+              - generic [ref=e304]: ready
+            - tab "Runtimes ready" [ref=e306] [cursor=pointer]:
+              - text: Runtimes
+              - generic [ref=e308]: ready
+            - tab "Models ready" [ref=e309] [cursor=pointer]:
+              - text: Models
+              - generic [ref=e311]: ready
+            - tab "Permissions ready" [ref=e312] [cursor=pointer]:
+              - text: Permissions
+              - generic [ref=e314]: ready
+            - tab "Workspace" [ref=e315] [cursor=pointer]: Workspace
+            - tab "MCP" [ref=e316] [cursor=pointer]: MCP
+          - tabpanel "Roles ready" [ref=e318]:
+            - generic [ref=e320]:
+              - generic [ref=e321]:
+                - generic [ref=e323]:
+                  - generic [ref=e324]:
+                    - heading "Roles" [level=3] [ref=e325]
+                    - paragraph [ref=e326]: Role templates and editable agent responsibilities.
+                  - generic [ref=e327]:
+                    - button "Generate with AI" [ref=e328] [cursor=pointer]
+                    - button "New Role" [ref=e329] [cursor=pointer]
+                - list "Roles" [ref=e331]:
+                  - listitem [ref=e332]:
+                    - generic [ref=e333]:
+                      - generic [ref=e335]:
+                        - generic [ref=e336]:
+                          - heading "Archivist" [level=3] [ref=e337]
+                          - generic [ref=e339]: builtin
+                        - paragraph [ref=e340]: Archives context and produces confirmed summaries.
+                      - generic [ref=e341]:
+                        - button "Edit" [ref=e342] [cursor=pointer]
+                        - button "Delete" [disabled]
+                  - listitem [ref=e343]:
+                    - generic [ref=e344]:
+                      - generic [ref=e346]:
+                        - generic [ref=e347]:
+                          - heading "Builder" [level=3] [ref=e348]
+                          - generic [ref=e350]: builtin
+                        - paragraph [ref=e351]: General-purpose code builder.
+                      - generic [ref=e352]:
+                        - button "Edit" [ref=e353] [cursor=pointer]
+                        - button "Delete" [disabled]
+                  - listitem [ref=e354]:
+                    - generic [ref=e355]:
+                      - generic [ref=e357]:
+                        - generic [ref=e358]:
+                          - heading "Generalist" [level=3] [ref=e359]
+                          - generic [ref=e361]: builtin
+                        - paragraph [ref=e362]: General assistant without a specialized focus.
+                      - generic [ref=e363]:
+                        - button "Edit" [ref=e364] [cursor=pointer]
+                        - button "Delete" [disabled]
+                  - listitem [ref=e365]:
+                    - generic [ref=e366]:
+                      - generic [ref=e368]:
+                        - generic [ref=e369]:
+                          - heading "Project Manager" [level=3] [ref=e370]
+                          - generic [ref=e372]: builtin
+                        - paragraph [ref=e373]: Breaks work into tasks and routes execution to the right agents.
+                      - generic [ref=e374]:
+                        - button "Edit" [ref=e375] [cursor=pointer]
+                        - button "Delete" [disabled]
+                  - listitem [ref=e376]:
+                    - generic [ref=e377]:
+                      - generic [ref=e379]:
+                        - generic [ref=e380]:
+                          - heading "Reviewer" [level=3] [ref=e381]
+                          - generic [ref=e383]: builtin
+                        - paragraph [ref=e384]: Reviews code and can knock with intervention feedback.
+                      - generic [ref=e385]:
+                        - button "Edit" [ref=e386] [cursor=pointer]
+                        - button "Delete" [disabled]
+              - generic [ref=e387]:
+                - generic [ref=e389]:
+                  - generic [ref=e390]:
+                    - heading "Create role" [level=3] [ref=e391]
+                    - paragraph [ref=e392]: Save with REST; no SSE subscription is attached.
+                  - generic [ref=e394]: POST
+                - generic [ref=e395]:
+                  - generic [ref=e396]:
+                    - generic [ref=e397]: Name
+                    - textbox "Name" [ref=e398]:
+                      - /placeholder: e.g. Release reviewer
+                  - generic [ref=e399]:
+                    - generic [ref=e400]: Description
+                    - textbox "Description" [ref=e401]:
+                      - /placeholder: Short summary for the role list
+                  - generic [ref=e402]:
+                    - generic [ref=e403]: Prompt
+                    - textbox "Prompt" [ref=e404]:
+                      - /placeholder: Describe the role behavior and responsibilities
+                  - generic [ref=e405]:
+                    - generic [ref=e406]: Capabilities
+                    - textbox "Capabilities" [ref=e407]:
+                      - /placeholder: code.edit, code.review, task.delegate
+                  - generic [ref=e410]: no capabilities
+                - button "Save" [ref=e412] [cursor=pointer]
