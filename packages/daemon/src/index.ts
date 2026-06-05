@@ -1476,10 +1476,10 @@ function skills(ctx: RouteContext, url: URL): void {
   const workspaceId = url.searchParams.get("workspaceId") ?? defaultWorkspaceId(ctx.database);
   const rows = all(
     ctx.database,
-    "SELECT s.*, (SELECT COUNT(*) FROM skill_files sf WHERE sf.skill_id = s.id) AS file_count FROM skills s WHERE s.workspace_id = ? ORDER BY CASE s.origin WHEN 'builtin' THEN 0 WHEN 'workspace' THEN 1 ELSE 2 END, s.name ASC",
+    "SELECT s.id, s.workspace_id, s.name, s.description, s.origin, s.source_url, s.created_at, s.updated_at, (SELECT COUNT(*) FROM skill_files sf WHERE sf.skill_id = s.id) AS file_count FROM skills s WHERE s.workspace_id = ? ORDER BY CASE s.origin WHEN 'builtin' THEN 0 WHEN 'workspace' THEN 1 ELSE 2 END, s.name ASC",
     workspaceId
   ) as Array<Record<string, unknown>>;
-  json(ctx.res, 200, { skills: rows.map(normalizeSkillRow) });
+  json(ctx.res, 200, { skills: rows.map(normalizeSkillSummaryRow) });
 }
 
 function skill(ctx: RouteContext, skillId: string): void {
@@ -2514,6 +2514,25 @@ function normalizeSkillRow(row: Record<string, unknown>): Record<string, unknown
     name: row.name,
     description: row.description,
     content: row.content,
+    origin: row.origin,
+    source_url: row.source_url,
+    sourceUrl: row.source_url,
+    created_at: row.created_at,
+    createdAt: row.created_at,
+    updated_at: row.updated_at,
+    updatedAt: row.updated_at,
+    ...(fileCount !== undefined ? { file_count: fileCount, fileCount } : {})
+  };
+}
+
+function normalizeSkillSummaryRow(row: Record<string, unknown>): Record<string, unknown> {
+  const fileCount = typeof row.file_count === "number" ? row.file_count : typeof row.fileCount === "number" ? row.fileCount : undefined;
+  return {
+    id: row.id,
+    workspace_id: row.workspace_id,
+    workspaceId: row.workspace_id,
+    name: row.name,
+    description: row.description,
     origin: row.origin,
     source_url: row.source_url,
     sourceUrl: row.source_url,
