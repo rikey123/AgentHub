@@ -129,7 +129,7 @@ describe("OpenCodeACPAdapter", () => {
       adapter.feedProviderLineForTest("acp-opencode-run_mailbox", JSON.stringify({ jsonrpc: "2.0", method: "message/delta", params: { delta: longText } }));
       adapter.feedProviderLineForTest("acp-opencode-run_mailbox", JSON.stringify({ jsonrpc: "2.0", method: "session/end", params: { sessionId: "acp-opencode-run_mailbox", reason: "completed", modelId: "opencode-test" } }));
 
-      expect(assistantMessageText(fixture.database, "run_mailbox")).toBe("我先抛一个框架，方便大家接着补充：");
+      expect(assistantMessageText(fixture.database, "run_mailbox")).toBe("我先抛一个框架，方便大家接着补充： 详细内容见文件。");
       expect(createdFiles).toEqual([{ title: "Agent One reply", content: longText, messageId: "msg_run_mailbox" }]);
       expect(messagePartTypes(fixture.database, "msg_run_mailbox")).toEqual(["text", "attachment"]);
       expect(eventPayload(fixture.database, "message.part.added", "run_mailbox")).toMatchObject({
@@ -141,7 +141,7 @@ describe("OpenCodeACPAdapter", () => {
           previewKind: "markdown"
         }
       });
-      expect(eventPayload(fixture.database, "message.completed", "run_mailbox")).toMatchObject({ messageId: "msg_run_mailbox", text: "我先抛一个框架，方便大家接着补充：" });
+      expect(eventPayload(fixture.database, "message.completed", "run_mailbox")).toMatchObject({ messageId: "msg_run_mailbox", text: "我先抛一个框架，方便大家接着补充： 详细内容见文件。" });
     } finally {
       fixture.close();
     }

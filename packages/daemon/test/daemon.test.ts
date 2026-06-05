@@ -126,7 +126,14 @@ describe("daemon M1.4 composition", () => {
       suggestedPermissionProfileId: "perm-readonly"
     }));
     assistedSpeakerSelectorMock = vi.fn<AssistedSpeakerSelector>(async () => undefined);
-    daemon = createDaemon({ databasePath: join(dir, "agenthub.sqlite"), port: 0, modelTestFetch: modelTestFetchMock, roleDraftGenerator: roleDraftGeneratorMock, assistedSpeakerSelector: assistedSpeakerSelectorMock });
+    daemon = createDaemon({
+      databasePath: join(dir, "agenthub.sqlite"),
+      port: 0,
+      adapterCommands: { claude: { command: "" }, opencode: { command: "" } },
+      modelTestFetch: modelTestFetchMock,
+      roleDraftGenerator: roleDraftGeneratorMock,
+      assistedSpeakerSelector: assistedSpeakerSelectorMock
+    });
     currentDaemon = daemon;
     const server = await daemon.start();
     const address = server.address();

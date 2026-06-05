@@ -60,10 +60,12 @@ describe("M6 security package", () => {
 
   it("classifies traversal, symlink escape, file URI, and data URI constraints", () => {
     const root = mkdtempSync(join(tmpdir(), "agenthub-security-path-"));
+    const outside = mkdtempSync(join(tmpdir(), "agenthub-security-outside-"));
     mkdirSync(join(root, "src"));
     writeFileSync(join(root, "src", "ok.txt"), "ok");
+    writeFileSync(join(outside, "secret.txt"), "secret");
     let symlinkCreated = false;
-    try { symlinkSync(tmpdir(), join(root, "escape"), "dir"); symlinkCreated = true; } catch { symlinkCreated = false; }
+    try { symlinkSync(outside, join(root, "escape"), "dir"); symlinkCreated = true; } catch { symlinkCreated = false; }
 
     expect(resolveWorkspacePath(root, "src/../src/ok.txt")).toMatchObject({ ok: true, classification: "internal", relativePath: "src/ok.txt" });
     expect(resolveWorkspacePath(root, "../../outside.txt")).toMatchObject({ ok: true, classification: "external" });
