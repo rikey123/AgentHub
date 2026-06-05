@@ -153,7 +153,7 @@ export function ChatStream(props: ChatStreamProps) {
         </div>
       ) : null}
       <ScrollShadow className="min-h-0 flex-1 overflow-hidden" orientation="vertical">
-        <div ref={parentRef} className="h-full overflow-auto" tabIndex={0}>
+        <div ref={parentRef} className="h-full overflow-auto" tabIndex={0} onClick={() => props.onSelectMessage(undefined)}>
           {showFirstConnectSkeleton ? (
             <div className="mx-auto flex max-w-[920px] flex-col gap-3 p-4" aria-label="Loading messages">
               {Array.from({ length: 5 }).map((_, i) => (
@@ -167,7 +167,7 @@ export function ChatStream(props: ChatStreamProps) {
           ) : showEmptyState ? (
             <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-muted">
               <p>No messages yet.</p>
-              <p>Send a message to start the conversation.</p>
+              <p>发送一条消息来开始对话。</p>
             </div>
           ) : (
             <div style={{ height: `${virtualizer.getTotalSize()}px`, position: "relative" }}>

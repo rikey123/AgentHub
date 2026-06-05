@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Avatar, Button, Card, Chip, Input, Label, Modal, ScrollShadow, TextField } from "@heroui/react";
+import { Avatar, Button, Chip, Input, Label, Modal, ScrollShadow, TextField } from "@heroui/react";
 import type { ParticipantViewModel, TaskViewModel } from "../../types.ts";
 import { initials } from "../../lib/format.ts";
 import { presenceColor } from "../../lib/status.ts";
@@ -105,21 +105,22 @@ export function MembersPanel({
   };
 
   return (
-    <div className="flex flex-col gap-3 p-3">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-semibold">Members</h3>
+    <div className="ah-members-panel flex flex-col gap-4 p-3">
+      <div className="ah-panel-heading">
+        <div className="min-w-0">
+          <h3 className="text-base font-semibold">Members</h3>
           <p className="text-xs text-muted">{members.length} participant{members.length === 1 ? "" : "s"} in this room</p>
         </div>
-        <Button size="sm" variant="secondary" onPress={() => setAddOpen(true)} isDisabled={!roomId}>
-          Add teammate
+        <Button className="ah-pill-action" size="sm" variant="secondary" onPress={() => setAddOpen(true)} isDisabled={!roomId} aria-label="Add teammate">
+          <span className="ah-pill-action-plus" aria-hidden="true">+</span>
+          <span className="ah-pill-action-label">Add teammate</span>
         </Button>
       </div>
 
       {members.length === 0 ? (
         <EmptyState label="No members in this room yet." />
       ) : (
-        <ul className="flex flex-col gap-2" role="list">
+        <ul className="flex flex-col gap-1.5" role="list">
           {members.map((member) => (
             <MemberRow
               key={member.id}
@@ -153,14 +154,14 @@ export function MembersPanel({
                 <ScrollShadow className="max-h-80 overflow-auto pr-1" orientation="vertical">
                   <div className="grid gap-2">
                     {visibleBindings.length === 0 && !loadingBindings ? (
-                      <div className="rounded-xl border border-dashed border-border bg-surface p-3 text-sm text-muted">
+                      <div className="rounded-lg border border-dashed border-border bg-surface p-3 text-sm text-muted">
                         No available bindings.
                       </div>
                     ) : visibleBindings.map((binding) => (
                       <button
                         key={binding.id}
                         type="button"
-                        className="grid gap-1 rounded-xl border border-border bg-surface px-3 py-2 text-left hover:bg-surface-secondary"
+                        className="grid gap-1 rounded-lg border border-border bg-surface px-3 py-2 text-left hover:bg-surface-secondary"
                         onClick={() => addParticipant(binding.id)}
                         disabled={pendingBindingId !== undefined}
                       >
@@ -186,7 +187,7 @@ export function MembersPanel({
 }
 
 function RoomSkillPool({ roomId, csrfFetch }: { roomId: string; csrfFetch: typeof fetch }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
   const [skills, setSkills] = useState<SkillSummary[]>([]);
   const [roomSkills, setRoomSkills] = useState<SkillSummary[]>([]);
   const [loading, setLoading] = useState(false);
@@ -219,6 +220,7 @@ function RoomSkillPool({ roomId, csrfFetch }: { roomId: string; csrfFetch: typeo
   }, [open, roomId]);
 
   const enabledIds = new Set(roomSkills.filter((skill) => skill.enabled !== false).map((skill) => skill.id));
+  const enabledSkills = roomSkills.filter((skill) => enabledIds.has(skill.id));
 
   const setEnabled = (skillId: string, enabled: boolean) => {
     setPendingSkillId(skillId);
@@ -238,42 +240,60 @@ function RoomSkillPool({ roomId, csrfFetch }: { roomId: string; csrfFetch: typeo
   };
 
   return (
-    <details className="rounded-xl border border-border bg-surface-secondary px-3 py-2" open={open} onToggle={(event) => setOpen((event.currentTarget as HTMLDetailsElement).open)}>
-      <summary className="cursor-pointer text-xs font-semibold uppercase text-muted">Room skill pool</summary>
+    <details className="ah-dashboard-section ah-skill-section" open={open} onToggle={(event) => setOpen((event.currentTarget as HTMLDetailsElement).open)}>
+      <summary className="ah-section-summary">
+        <span className="ah-skill-toggle" aria-hidden="true">
+          <span className="ah-skill-toggle-bars">
+            <span className="ah-skill-toggle-line ah-skill-toggle-line-1" />
+            <span className="ah-skill-toggle-line ah-skill-toggle-line-2" />
+            <span className="ah-skill-toggle-line ah-skill-toggle-line-3" />
+          </span>
+        </span>
+        <span className="min-w-0 flex-1 truncate">Assigned skills</span>
+        <span className="ah-sr-only">Room skill pool</span>
+        <Chip size="sm" variant="soft" color="accent">{enabledSkills.length}</Chip>
+      </summary>
       <div className="mt-3 grid gap-3">
         {loading ? <p className="text-xs text-muted">Loading room skills...</p> : null}
         {error ? <p className="text-xs text-danger" role="alert">{error}</p> : null}
-        <div className="flex flex-wrap gap-1">
-          {enabledIds.size === 0 ? (
-            <Chip size="sm" variant="soft" color="default">no room skills</Chip>
-          ) : roomSkills.filter((skill) => enabledIds.has(skill.id)).map((skill) => (
-            <Chip key={skill.id} size="sm" variant="soft" color="accent">{skill.name}</Chip>
+        <div className="grid gap-2">
+          {enabledSkills.length === 0 ? (
+            <div className="ah-empty-row">No room skills enabled.</div>
+          ) : enabledSkills.map((skill) => (
+            <SkillRow
+              key={skill.id}
+              skill={skill}
+              actionLabel={`Disable ${skill.name}`}
+              actionText="-"
+              pending={pendingSkillId !== undefined}
+              onAction={() => setEnabled(skill.id, false)}
+            />
           ))}
         </div>
         {open ? (
           <div className="grid gap-2">
+            <div className="ah-subsection-label">
+              <span>Skill pool</span>
+              <Chip size="sm" variant="soft" color="default">{skills.length}</Chip>
+            </div>
             {skills.length === 0 && !loading ? <p className="text-xs text-muted">No workspace skills found.</p> : null}
             {skills.map((skill) => {
               const enabled = enabledIds.has(skill.id);
               return (
-                <div key={skill.id} className="grid gap-2 rounded-lg border border-border bg-overlay px-2 py-2 text-xs sm:grid-cols-[1fr_auto] sm:items-center">
-                  <div className="min-w-0">
-                    <div className="truncate font-semibold">{skill.name}</div>
-                    <div className="truncate text-muted">{skill.description ?? "No description"}</div>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant={enabled ? "danger" : "secondary"}
-                    isDisabled={pendingSkillId !== undefined}
-                    onPress={() => setEnabled(skill.id, !enabled)}
-                  >
-                    {enabled ? "Disable" : "Enable"}
-                  </Button>
-                </div>
+                <SkillRow
+                  key={skill.id}
+                  skill={skill}
+                  actionLabel={enabled ? `Disable ${skill.name}` : `Enable ${skill.name}`}
+                  actionText={enabled ? "-" : "+"}
+                  active={enabled}
+                  pending={pendingSkillId !== undefined}
+                  onAction={() => setEnabled(skill.id, !enabled)}
+                />
               );
             })}
           </div>
         ) : null}
+        <p className="text-xs text-muted">Enabled here can be used in this room; disable to hide or restrict skills.</p>
       </div>
     </details>
   );
@@ -294,41 +314,35 @@ function MemberRow({
   const capabilities = member.capabilities ?? [];
 
   return (
-    <li>
-      <Card variant="transparent" className="border border-border">
-        <Card.Header>
-          <div className="flex min-w-0 items-start gap-3">
-            <Avatar><Avatar.Fallback>{initials(member.name)}</Avatar.Fallback></Avatar>
-            <div className="min-w-0 flex-1">
-              <div className="flex min-w-0 flex-wrap items-center gap-2">
-                <Card.Title className="truncate text-sm">{member.name}</Card.Title>
-                {isLeader ? <Chip size="sm" variant="soft" color="accent">Leader</Chip> : null}
-                <Chip size="sm" variant="soft" color={presenceColor(member.presence)}>{member.presence}</Chip>
-              </div>
-              <Card.Description className="mt-1 text-xs">{member.role} / {member.adapterId}</Card.Description>
-              {task ? (
-                <div className="mt-2 rounded-lg border border-border bg-surface-secondary px-2 py-1.5">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <Chip size="sm" variant="soft" color={taskStatusColor(task.status)}>{taskStatusLabel(task.status)}</Chip>
-                    <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">{task.title}</span>
-                  </div>
-                  {task.blockerReason ? <p className="mt-1 truncate text-xs text-danger">{task.blockerReason}</p> : null}
-                </div>
-              ) : null}
-              <div className="mt-2 flex flex-wrap gap-1">
-                {capabilities.length === 0 ? (
-                  <Chip size="sm" variant="soft" color="default">no capabilities</Chip>
-                ) : capabilities.map((capability) => (
-                  <Chip key={capability} size="sm" variant="soft" color="default">{capability}</Chip>
-                ))}
-              </div>
-            </div>
+    <li className="ah-member-card">
+      <div className="flex min-w-0 items-start gap-3">
+        <Avatar className="ah-agent-avatar"><Avatar.Fallback>{initials(member.name)}</Avatar.Fallback></Avatar>
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="min-w-0 truncate text-sm font-semibold">{member.name}</span>
+            {isLeader ? <Chip size="sm" variant="soft" color="accent">Leader</Chip> : null}
+            <Chip size="sm" variant="soft" color={presenceColor(member.presence)}>{member.presence}</Chip>
           </div>
-        </Card.Header>
-        <Card.Content>
+          <p className="mt-1 truncate text-xs text-muted">{member.role} / {member.adapterId}</p>
+          {task ? (
+            <div className="mt-2 rounded-lg border border-border bg-surface-secondary px-2 py-1.5">
+              <div className="flex min-w-0 items-center gap-2">
+                <Chip size="sm" variant="soft" color={taskStatusColor(task.status)}>{taskStatusLabel(task.status)}</Chip>
+                <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">{task.title}</span>
+              </div>
+              {task.blockerReason ? <p className="mt-1 truncate text-xs text-danger">{task.blockerReason}</p> : null}
+            </div>
+          ) : null}
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {capabilities.length === 0 ? (
+              <Chip size="sm" variant="soft" color="default">no capabilities</Chip>
+            ) : capabilities.map((capability) => (
+              <Chip key={capability} size="sm" variant="soft" color="default">{capability}</Chip>
+            ))}
+          </div>
           <MemberSkills roomId={roomId} participantId={member.id} csrfFetch={csrfFetch} />
-        </Card.Content>
-      </Card>
+        </div>
+      </div>
     </li>
   );
 }
@@ -406,8 +420,11 @@ function MemberSkills({ roomId, participantId, csrfFetch }: { roomId?: string | 
   };
 
   return (
-    <details className="rounded-xl border border-border bg-surface-secondary px-3 py-2" open={open} onToggle={(event) => setOpen((event.currentTarget as HTMLDetailsElement).open)}>
-      <summary className="cursor-pointer text-xs font-semibold uppercase text-muted">Skills</summary>
+    <details className="ah-member-skills" open={open} onToggle={(event) => setOpen((event.currentTarget as HTMLDetailsElement).open)}>
+      <summary className="ah-member-skills-summary">
+        <span>Skills</span>
+        <Chip size="sm" variant="soft" color="default">{state.effectiveSkills.length}</Chip>
+      </summary>
       <div className="mt-3 grid gap-3">
         {loading ? <p className="text-xs text-muted">Loading skills...</p> : null}
         {error ? <p className="text-xs text-danger" role="alert">{error}</p> : null}
@@ -423,15 +440,15 @@ function MemberSkills({ roomId, participantId, csrfFetch }: { roomId?: string | 
             {skills.map((skill) => {
               const override = state.overrides.find((item) => item.id === skill.id);
               return (
-                <div key={skill.id} className="grid gap-2 rounded-lg border border-border bg-overlay px-2 py-2 text-xs sm:grid-cols-[1fr_auto] sm:items-center">
+                <div key={skill.id} className="ah-skill-override-row">
                   <div className="min-w-0">
-                    <div className="truncate font-semibold">{skill.name}</div>
-                    <div className="truncate text-muted">{override?.mode ? `Override: ${override.mode}` : skill.description ?? "No override"}</div>
+                    <div className="truncate text-xs font-semibold">{skill.name}</div>
+                    <div className="truncate text-xs text-muted">{override?.mode ? `Override: ${override.mode}` : skill.description ?? "No override"}</div>
                   </div>
-                  <div className="flex flex-wrap gap-1 sm:justify-end">
-                    <Button size="sm" variant="secondary" isDisabled={pending !== undefined} onPress={() => writeOverride(skill.id, "add")}>Add</Button>
-                    <Button size="sm" variant="tertiary" isDisabled={pending !== undefined} onPress={() => writeOverride(skill.id, "restrict")}>Restrict</Button>
-                    {override ? <Button size="sm" variant="danger" isDisabled={pending !== undefined} onPress={() => removeOverride(skill.id)}>Clear</Button> : null}
+                  <div className="flex shrink-0 flex-wrap gap-1">
+                    <Button isIconOnly size="sm" variant="secondary" isDisabled={pending !== undefined} onPress={() => writeOverride(skill.id, "add")} aria-label={`Add ${skill.name}`}>+</Button>
+                    <Button isIconOnly size="sm" variant="tertiary" isDisabled={pending !== undefined} onPress={() => writeOverride(skill.id, "restrict")} aria-label={`Restrict ${skill.name}`}>-</Button>
+                    {override ? <Button isIconOnly size="sm" variant="danger" isDisabled={pending !== undefined} onPress={() => removeOverride(skill.id)} aria-label={`Clear ${skill.name}`}>x</Button> : null}
                   </div>
                 </div>
               );
@@ -440,6 +457,43 @@ function MemberSkills({ roomId, participantId, csrfFetch }: { roomId?: string | 
         ) : null}
       </div>
     </details>
+  );
+}
+
+function SkillRow({
+  skill,
+  actionLabel,
+  actionText,
+  active,
+  pending,
+  onAction
+}: {
+  skill: SkillSummary;
+  actionLabel: string;
+  actionText: string;
+  active?: boolean | undefined;
+  pending: boolean;
+  onAction: () => void;
+}) {
+  return (
+    <div className="ah-skill-row">
+      <span className="ah-skill-icon" aria-hidden="true">{skill.name.slice(0, 1).toUpperCase()}</span>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-semibold">{skill.name}</div>
+        <div className="truncate text-xs text-muted">{skill.description ?? skill.origin ?? "No description"}</div>
+      </div>
+      <Button
+        isIconOnly
+        size="sm"
+        variant={active ? "primary" : "secondary"}
+        className={active ? "ah-round-action ah-round-action-active" : "ah-round-action"}
+        isDisabled={pending}
+        onPress={onAction}
+        aria-label={actionLabel}
+      >
+        {actionText}
+      </Button>
+    </div>
   );
 }
 
@@ -575,5 +629,5 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function EmptyState({ label }: { label: string }) {
-  return <div className="rounded-xl border border-dashed border-border bg-surface p-6 text-center text-sm text-muted">{label}</div>;
+  return <div className="ah-empty-state">{label}</div>;
 }

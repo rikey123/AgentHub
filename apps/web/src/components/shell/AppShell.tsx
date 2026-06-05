@@ -15,7 +15,7 @@ export function AppShell({ topBar, rail, rooms, center, panel, panelCollapsed, r
     "60px",
     roomsCollapsed ? "0px" : "304px",
     "1fr",
-    panelCollapsed || !panel ? "0px" : "360px"
+    panelCollapsed || !panel ? "0px" : "420px"
   ].join(" ");
 
   return (
@@ -32,7 +32,7 @@ export function AppShell({ topBar, rail, rooms, center, panel, panelCollapsed, r
           <div className={roomsCollapsed ? "hidden" : "h-full"}>{rooms}</div>
         </aside>
         <main id="agenthub-workbench-main" className="min-w-0 overflow-hidden">{center}</main>
-        <aside aria-label="Workbench panel" className="border-l border-border bg-surface/90 overflow-hidden backdrop-blur">
+        <aside aria-label="Workbench panel" className="ah-workbench-panel overflow-hidden">
           <div className={panelCollapsed || !panel ? "hidden" : "h-full"}>{panel}</div>
         </aside>
       </div>

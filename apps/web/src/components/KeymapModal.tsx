@@ -5,35 +5,43 @@ interface KeymapModalProps {
   onOpenChange: (open: boolean) => void;
 }
 
+// Windows 下 ⌘ 对应 Ctrl；其余原样显示
+const KEY_LABEL: Record<string, string> = { "⌘": "CTRL" };
+
+// 全部大写显示；单键原样大写，组合键用 + 连接（如 CTRL+K）
+function formatKeys(keys: string[]): string {
+  return keys.map((k) => (KEY_LABEL[k] ?? k).toUpperCase()).join("+");
+}
+
 const groups: Array<{ title: string; rows: Array<[string[], string]> }> = [
   {
-    title: "Global",
+    title: "全局",
     rows: [
-      [["⌘", "K"], "Command palette"],
-      [["?"], "Show this help"],
-      [["g", "r"], "Focus rooms"],
-      [["g", "d"], "Focus debug panel"]
+      [["⌘", "K"], "命令面板"],
+      [["?"], "显示此帮助"],
+      [["g", "r"], "聚焦 rooms 面板"],
+      [["g", "d"], "聚焦 DEBUG 面板"]
     ]
   },
   {
-    title: "Chat",
+    title: "聊天",
     rows: [
-      [["j"], "Next message"],
-      [["k"], "Previous message"],
-      [["q"], "Quote selected"],
-      [["r"], "Open run"],
-      [["p"], "Pin message"],
-      [["d"], "Delete message"]
+      [["j"], "下一条消息"],
+      [["k"], "上一条消息"],
+      [["q"], "引用所选"],
+      [["r"], "打开运行详情"],
+      [["p"], "置顶消息"],
+      [["d"], "删除消息"]
     ]
   },
   {
-    title: "Compose",
+    title: "撰写",
     rows: [
-      [["Enter"], "Send"],
-      [["Shift", "Enter"], "Newline"],
-      [["⌘", "Enter"], "Send"],
-      [["@"], "Mention agent"],
-      [["Esc"], "Close popovers"]
+      [["Enter"], "发送"],
+      [["Shift", "Enter"], "换行"],
+      [["⌘", "Enter"], "发送"],
+      [["@"], "提及 agent"],
+      [["Esc"], "关闭弹窗"]
     ]
   }
 ];
@@ -41,24 +49,22 @@ const groups: Array<{ title: string; rows: Array<[string[], string]> }> = [
 export function KeymapModal({ isOpen, onOpenChange }: KeymapModalProps) {
   return (
     <Modal.Backdrop isOpen={isOpen} onOpenChange={onOpenChange}>
-      <Modal.Container size="md">
-        <Modal.Dialog>
+      <Modal.Container size="lg">
+        <Modal.Dialog className="!max-w-2xl">
           <Modal.CloseTrigger />
           <Modal.Header>
-            <Modal.Heading>Keyboard shortcuts</Modal.Heading>
+            <Modal.Heading className="text-lg font-bold">键盘快捷键</Modal.Heading>
           </Modal.Header>
           <Modal.Body>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-x-10 gap-y-6 sm:grid-cols-3">
               {groups.map((g) => (
                 <section key={g.title}>
-                  <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">{g.title}</h3>
-                  <ul className="flex flex-col gap-1.5 text-sm">
+                  <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">{g.title}</h3>
+                  <ul className="flex flex-col gap-2.5 text-sm">
                     {g.rows.map(([keys, label], rowIdx) => (
-                      <li key={`${g.title}-${rowIdx}-${label}`} className="flex items-center gap-2">
-                        <span className="flex-1">{label}</span>
-                        <span className="flex gap-1">
-                          {keys.map((k, i) => <Kbd key={i}>{k}</Kbd>)}
-                        </span>
+                      <li key={`${g.title}-${rowIdx}-${label}`} className="flex items-center justify-between gap-3">
+                        <span className="whitespace-nowrap text-foreground">{label}</span>
+                        <Kbd className="shrink-0 whitespace-nowrap">{formatKeys(keys)}</Kbd>
                       </li>
                     ))}
                   </ul>

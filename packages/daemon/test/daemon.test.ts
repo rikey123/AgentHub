@@ -126,7 +126,14 @@ describe("daemon M1.4 composition", () => {
       suggestedPermissionProfileId: "perm-readonly"
     }));
     assistedSpeakerSelectorMock = vi.fn<AssistedSpeakerSelector>(async () => undefined);
-    daemon = createDaemon({ databasePath: join(dir, "agenthub.sqlite"), port: 0, modelTestFetch: modelTestFetchMock, roleDraftGenerator: roleDraftGeneratorMock, assistedSpeakerSelector: assistedSpeakerSelectorMock });
+    daemon = createDaemon({
+      databasePath: join(dir, "agenthub.sqlite"),
+      port: 0,
+      adapterCommands: { claude: { command: "" }, opencode: { command: "" } },
+      modelTestFetch: modelTestFetchMock,
+      roleDraftGenerator: roleDraftGeneratorMock,
+      assistedSpeakerSelector: assistedSpeakerSelectorMock
+    });
     currentDaemon = daemon;
     const server = await daemon.start();
     const address = server.address();
@@ -2189,9 +2196,10 @@ describe("daemon M1.4 composition", () => {
 
   it("serves V1.1 skill CRUD routes and protects builtin skills", async () => {
     const listed = await fetch(`${baseUrl}/skills`);
-    const listedPayload = await listed.json() as { readonly skills: readonly { readonly id: string; readonly name: string; readonly origin: string }[] };
+    const listedPayload = await listed.json() as { readonly skills: readonly { readonly id: string; readonly name: string; readonly origin: string; readonly content?: string }[] };
     expect(listed.status).toBe(200);
     expect(listedPayload.skills.map((skill) => skill.name).sort()).toEqual(["skill-creator", "task-planner"]);
+    expect(listedPayload.skills.every((skill) => skill.content === undefined)).toBe(true);
 
     const builtinId = listedPayload.skills.find((skill) => skill.name === "task-planner")?.id ?? "";
     const deleteBuiltin = await fetch(`${baseUrl}/skills/${builtinId}`, { method: "DELETE" });
@@ -2215,7 +2223,7 @@ describe("daemon M1.4 composition", () => {
     expect(daemon.database.sqlite.prepare("SELECT type FROM events WHERE type = 'skill.created' AND json_extract(payload, '$.skillId') = ?").get(createdPayload.skill.id)).toBeDefined();
 
     const fetched = await fetch(`${baseUrl}/skills/${createdPayload.skill.id}`);
-    await expect(fetched.json()).resolves.toMatchObject({ skill: { id: createdPayload.skill.id, name: "review-helper", fileCount: 1 }, files: [{ path: "references/checklist.md", content: "- Check behavior\n- Check tests" }] });
+    await expect(fetched.json()).resolves.toMatchObject({ skill: { id: createdPayload.skill.id, name: "review-helper", content, fileCount: 1 }, files: [{ path: "references/checklist.md", content: "- Check behavior\n- Check tests" }] });
 
     const updatedContent = "---\nname: review-assistant\ndescription: Reviews patches with a checklist.\n---\n\nUse a concise checklist.";
     const updated = await fetch(`${baseUrl}/skills/${createdPayload.skill.id}`, {

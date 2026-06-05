@@ -6,6 +6,25 @@ import { formatBytes } from "../../lib/format.ts";
 const DRAFT_PREFIX = "agenthub.draft.";
 const MAX_ATTACH_BYTES = 50 * 1024 * 1024;
 
+// 附件 — 回形针图标
+function IconPaperclip() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+    </svg>
+  );
+}
+
+// 提及 — @ 图标
+function IconAt() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="4" />
+      <path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-3.92 7.94" />
+    </svg>
+  );
+}
+
 type DraftQuote = { messageId: string; preview: string };
 
 type Attachment = { fileId: string; name: string; sizeBytes: number };
@@ -221,13 +240,13 @@ export function InputBox(props: InputBoxProps) {
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-muted">
           <div className="flex flex-wrap items-center gap-2">
             <Chip size="sm" variant="soft" color={props.connectionStatus === "connected" ? "success" : "warning"}>
-              {props.connectionStatus === "connected" ? "Ready" : props.connectionStatus}
+              {props.connectionStatus === "connected" ? "就绪" : props.connectionStatus}
             </Chip>
-            <span>{activeParticipants.length} active</span>
-            <span>{agentCount} agents</span>
-            {props.pendingCount > 0 ? <span>{props.pendingCount} pending</span> : null}
+            <span>{activeParticipants.length} 活跃成员</span>
+            <span>{agentCount} Agents</span>
+            {props.pendingCount > 0 ? <span>{props.pendingCount} 待处理</span> : null}
           </div>
-          {queueFull ? <span className="text-warning-soft-foreground">Queue limit reached</span> : null}
+          {queueFull ? <span className="text-warning-soft-foreground">已达队列上限</span> : null}
         </div>
 
         {props.editingTurnId ? (
@@ -239,8 +258,8 @@ export function InputBox(props: InputBoxProps) {
 
         {quote ? (
           <div className="mb-2 flex items-start gap-2 rounded-xl border border-accent bg-accent-soft px-3 py-2 text-xs shadow-sm">
-            <span className="flex-1 truncate">Quoting: {quote.preview || quote.messageId}</span>
-            <Button isIconOnly size="sm" variant="ghost" onPress={() => setQuote(undefined)} aria-label="Remove quote">x</Button>
+            <span className="flex-1 truncate">引用：{quote.preview || quote.messageId}</span>
+            <Button isIconOnly size="sm" variant="ghost" onPress={() => setQuote(undefined)} aria-label="移除引用">x</Button>
           </div>
         ) : null}
 
@@ -317,9 +336,9 @@ export function InputBox(props: InputBoxProps) {
               aria-label="Message"
               data-testid="message-input"
               placeholder={
-                props.connectionStatus !== "connected" ? "Disconnected" :
-                queueFull ? "Queue full" :
-                "Message this room..."
+                props.connectionStatus !== "connected" ? "已断开连接" :
+                queueFull ? "队列已满" :
+                "输入消息..."
               }
               className="min-h-[72px] max-h-40 w-full"
               disabled={props.connectionStatus !== "connected" || queueFull}
@@ -359,7 +378,7 @@ export function InputBox(props: InputBoxProps) {
                 ref={fileInputRef}
                 type="file"
                 multiple
-                aria-label="Attach files"
+                aria-label="附件"
                 className="ah-sr-only"
                 onChange={(event) => {
                   const files = event.currentTarget.files;
@@ -368,25 +387,27 @@ export function InputBox(props: InputBoxProps) {
                 }}
               />
               <Button
+                isIconOnly
                 size="sm"
                 variant="ghost"
                 onPress={() => fileInputRef.current?.click()}
                 isDisabled={props.connectionStatus !== "connected"}
-                aria-label="Attach files"
+                aria-label="附件"
               >
-                Attach
+                <IconPaperclip />
               </Button>
               <Button
+                isIconOnly
                 size="sm"
                 variant="ghost"
                 onPress={startMention}
                 isDisabled={props.connectionStatus !== "connected" || queueFull}
-                aria-label="Mention agent"
+                aria-label="提及 Agent"
               >
-                @ Agent
+                <IconAt />
               </Button>
               {attachments.length > 0 ? (
-                <Chip size="sm" variant="soft" color="accent">{attachments.length} files</Chip>
+                <Chip size="sm" variant="soft" color="accent">{attachments.length} 个文件</Chip>
               ) : null}
             </div>
             <Button
@@ -398,7 +419,7 @@ export function InputBox(props: InputBoxProps) {
               onPress={() => void send()}
               data-testid="message-send"
             >
-              {props.editingTurnId ? "Save" : "Send"}
+              {props.editingTurnId ? "保存" : "发送"}
             </Button>
           </div>
         </div>

@@ -14,44 +14,29 @@ interface SidePanelProps {
 }
 
 export function SidePanel({ room, csrfFetch, initialTab = "context", onOpenArtifact }: SidePanelProps) {
+  const panelCounts = {
+    context: room.contextItems.length,
+    tasks: room.tasks.length,
+    members: room.participants.length
+  };
+
   return (
-    <div className="flex h-full flex-col">
-      <header className="border-b border-border px-3 py-2">
-        <h2 className="text-sm font-semibold truncate">{room.title}</h2>
+    <div className="ah-side-panel flex h-full flex-col">
+      <header className="ah-side-panel-header">
+        <p className="text-xs font-medium text-muted">Room</p>
+        <h2 className="truncate text-base font-semibold">{room.title}</h2>
       </header>
-      <Tabs defaultSelectedKey={initialTab} className="flex flex-1 min-h-0 flex-col">
-        <Tabs.ListContainer>
-          <Tabs.List aria-label="Workbench panels">
-            <Tabs.Tab id="context" data-testid="side-panel-tab-context">
-              Context
-              <Chip className="ml-2" size="sm" variant="soft" color="default">{room.contextItems.length}</Chip>
-              <Tabs.Indicator />
-            </Tabs.Tab>
-            <Tabs.Tab id="tasks" data-testid="side-panel-tab-tasks">
-              <Tabs.Separator />
-              Tasks
-              <Chip className="ml-2" size="sm" variant="soft" color="default">{room.tasks.length}</Chip>
-              <Tabs.Indicator />
-            </Tabs.Tab>
-            <Tabs.Tab id="members" data-testid="side-panel-tab-members">
-              <Tabs.Separator />
-              Members
-              <Chip className="ml-2" size="sm" variant="soft" color="default">{room.participants.length}</Chip>
-              <Tabs.Indicator />
-            </Tabs.Tab>
-            <Tabs.Tab id="debug" data-testid="side-panel-tab-debug">
-              <Tabs.Separator />
-              Debug
-              <Tabs.Indicator />
-            </Tabs.Tab>
-            <Tabs.Tab id="cost" data-testid="side-panel-tab-cost">
-              <Tabs.Separator />
-              Cost
-              <Tabs.Indicator />
-            </Tabs.Tab>
+      <Tabs defaultSelectedKey={initialTab} className="flex min-h-0 flex-1 flex-col">
+        <Tabs.ListContainer className="ah-side-tabs-wrap pb-4">
+          <Tabs.List aria-label="Workbench panels" className="ah-side-tabs">
+            <DashboardTab id="context" testId="side-panel-tab-context" count={panelCounts.context} label="Context" />
+            <DashboardTab id="tasks" testId="side-panel-tab-tasks" count={panelCounts.tasks} label="Tasks" />
+            <DashboardTab id="members" testId="side-panel-tab-members" count={panelCounts.members} label="Members" />
+            <DashboardTab id="debug" testId="side-panel-tab-debug" label="Debug" />
+            <DashboardTab id="cost" testId="side-panel-tab-cost" label="Cost" />
           </Tabs.List>
         </Tabs.ListContainer>
-        <ScrollShadow className="flex-1 min-h-0 overflow-auto" orientation="vertical">
+        <ScrollShadow className="min-h-0 flex-1 overflow-auto px-2 pb-4" orientation="vertical">
           <Tabs.Panel id="context"><ContextPanel items={room.contextItems} /></Tabs.Panel>
           <Tabs.Panel id="tasks"><TasksPanel roomId={room.id} tasks={room.tasks} executionPlan={room.executionPlan} csrfFetch={csrfFetch} onOpenArtifact={onOpenArtifact} /></Tabs.Panel>
           <Tabs.Panel id="members"><MembersPanel roomId={room.id} members={room.participants} tasks={room.tasks} csrfFetch={csrfFetch} /></Tabs.Panel>
@@ -60,5 +45,14 @@ export function SidePanel({ room, csrfFetch, initialTab = "context", onOpenArtif
         </ScrollShadow>
       </Tabs>
     </div>
+  );
+}
+
+function DashboardTab({ id, testId, label, count }: { id: "context" | "tasks" | "members" | "debug" | "cost"; testId: string; label: string; count?: number | undefined }) {
+  return (
+    <Tabs.Tab id={id} data-testid={testId} className="ah-side-tab">
+      <span>{label}</span>
+      {count !== undefined ? <Chip className="ah-side-tab-count" size="sm" variant="soft" color="default">{count}</Chip> : null}
+    </Tabs.Tab>
   );
 }

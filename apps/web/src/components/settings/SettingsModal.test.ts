@@ -62,84 +62,83 @@ describe("SettingsModal integration contract", () => {
       value: eventSourceSpy
     });
 
-    const calls: Array<{ path: string; signal: AbortSignal | undefined }> = [];
-    const pendingResolvers: Array<() => void> = [];
-    const fetchImpl = vi.fn<typeof fetch>((input, init) => {
-      calls.push({ path: String(input), signal: init?.signal ?? undefined });
-      return new Promise<Response>((resolve) => {
-        pendingResolvers.push(() => {
-          const path = String(input);
-          const body = path === "/agent-bindings"
-            ? { agentBindings: [{ id: "binding_1", workspaceId: "ws_1", role: { name: "Reviewer" }, runtime: { kind: "native", name: "Native", detectedVersion: "native" }, modelConfig: { id: "model_1", name: "OpenAI", provider: "openai", model: "gpt-4o" } }] }
-            : path === "/permissions/profiles"
-              ? { profiles: [{ id: "profile_1", name: "Default Policy", description: "Shared defaults", rules: [] }] }
-            : path === "/permissions/rules"
-              ? { rules: [{ id: "rule_1", workspace_id: "ws_1", resource_type: "file", resource_match: "src/**", action: "allow" }] }
-            : path === "/skills"
-              ? { skills: [{ id: "skill_1", name: "task-planner", description: "Plans tasks", origin: "builtin" }] }
-            : path === "/workspaces/ws_1"
-              ? { workspace: { id: "ws_1", name: "Workspace", root_path: "." } }
-              : { path };
-          resolve(new Response(JSON.stringify(body), {
-            status: 200,
-            headers: { "content-type": "application/json" }
-          }));
+    try {
+      const calls: Array<{ path: string; signal: AbortSignal | undefined }> = [];
+      const pendingResolvers: Array<() => void> = [];
+      const fetchImpl = vi.fn<typeof fetch>((input, init) => {
+        calls.push({ path: String(input), signal: init?.signal ?? undefined });
+        return new Promise<Response>((resolve) => {
+          pendingResolvers.push(() => {
+            const path = String(input);
+            const body = path === "/agent-bindings"
+              ? { agentBindings: [{ id: "binding_1", workspaceId: "ws_1", role: { name: "Reviewer" }, runtime: { kind: "native", name: "Native", detectedVersion: "native" }, modelConfig: { id: "model_1", name: "OpenAI", provider: "openai", model: "gpt-4o" } }] }
+              : path === "/permissions/profiles"
+                ? { profiles: [{ id: "profile_1", name: "Default Policy", description: "Shared defaults", rules: [] }] }
+              : path === "/permissions/rules"
+                ? { rules: [{ id: "rule_1", workspace_id: "ws_1", resource_type: "file", resource_match: "src/**", action: "allow" }] }
+              : path === "/skills"
+                ? { skills: [{ id: "skill_1", name: "task-planner", description: "Plans tasks", origin: "builtin" }] }
+              : path === "/workspaces/ws_1"
+                ? { workspace: { id: "ws_1", name: "Workspace", root_path: "." } }
+                : { path };
+            resolve(mockJsonResponse(body));
+          });
         });
       });
-    });
 
-    const controller = new AbortController();
-    const resultPromise = fetchSettingsBootstrap(fetchImpl, controller.signal);
+      const controller = new AbortController();
+      const resultPromise = fetchSettingsBootstrap(fetchImpl, controller.signal);
 
-    // First 7 requests fire in parallel immediately
-    expect(calls.map((call) => call.path).sort()).toEqual([
-      "/agent-bindings",
-      "/model-configs",
-      "/permissions/profiles",
-      "/permissions/rules",
-      "/roles",
-      "/runtimes",
-      "/skills"
-    ]);
-    expect(calls.every((call) => call.signal === controller.signal)).toBe(true);
-    expect(eventSourceSpy).not.toHaveBeenCalled();
+      // First 7 requests fire in parallel immediately.
+      expect(calls.map((call) => call.path).sort()).toEqual([
+        "/agent-bindings",
+        "/model-configs",
+        "/permissions/profiles",
+        "/permissions/rules",
+        "/roles",
+        "/runtimes",
+        "/skills"
+      ]);
+      expect(calls.every((call) => call.signal === controller.signal)).toBe(true);
+      expect(eventSourceSpy).not.toHaveBeenCalled();
 
-    // Resolve all pending fetches (including the sequential workspace fetch that fires after the first 5)
-    // Need multiple rounds because workspace fetch fires after first 5 resolve + json() parse
-    for (let i = 0; i < 10; i++) {
-      const batch = pendingResolvers.splice(0, pendingResolvers.length);
-      for (const resolve of batch) resolve();
-      await Promise.resolve();
+      // Resolve all pending fetches, including the sequential workspace fetch that fires
+      // after the initial bootstrap Promise.all settles.
+      for (let i = 0; i < 10; i++) {
+        const batch = pendingResolvers.splice(0, pendingResolvers.length);
+        for (const resolve of batch) resolve();
+        await Promise.resolve();
+      }
+
+      // After resolving, the workspace fetch should have been added.
+      expect(calls.map((call) => call.path).sort()).toEqual([
+        "/agent-bindings",
+        "/model-configs",
+        "/permissions/profiles",
+        "/permissions/rules",
+        "/roles",
+        "/runtimes",
+        "/skills",
+        "/workspaces/ws_1"
+      ]);
+      await expect(resultPromise).resolves.toEqual({
+        roles: { path: "/roles" },
+        runtimes: { path: "/runtimes" },
+        modelConfigs: { path: "/model-configs" },
+        agentBindings: { agentBindings: [{ id: "binding_1", workspaceId: "ws_1", role: { name: "Reviewer" }, runtime: { kind: "native", name: "Native", detectedVersion: "native" }, modelConfig: { id: "model_1", name: "OpenAI", provider: "openai", model: "gpt-4o" } }] },
+        permissionProfiles: { profiles: [{ id: "profile_1", name: "Default Policy", description: "Shared defaults", rules: [] }] },
+        permissionRules: { rules: [{ id: "rule_1", workspace_id: "ws_1", resource_type: "file", resource_match: "src/**", action: "allow" }] },
+        skills: { skills: [{ id: "skill_1", name: "task-planner", description: "Plans tasks", origin: "builtin" }] },
+        workspace: { workspace: { id: "ws_1", name: "Workspace", root_path: "." } },
+        errors: {}
+      });
+    } finally {
+      Object.defineProperty(globalThis, "EventSource", {
+        configurable: true,
+        writable: true,
+        value: previousEventSource
+      });
     }
-
-    // After resolving, the workspace fetch should have been added
-    expect(calls.map((call) => call.path).sort()).toEqual([
-      "/agent-bindings",
-      "/model-configs",
-      "/permissions/profiles",
-      "/permissions/rules",
-      "/roles",
-      "/runtimes",
-      "/skills",
-      "/workspaces/ws_1"
-    ]);
-    await expect(resultPromise).resolves.toEqual({
-      roles: { path: "/roles" },
-      runtimes: { path: "/runtimes" },
-      modelConfigs: { path: "/model-configs" },
-      agentBindings: { agentBindings: [{ id: "binding_1", workspaceId: "ws_1", role: { name: "Reviewer" }, runtime: { kind: "native", name: "Native", detectedVersion: "native" }, modelConfig: { id: "model_1", name: "OpenAI", provider: "openai", model: "gpt-4o" } }] },
-      permissionProfiles: { profiles: [{ id: "profile_1", name: "Default Policy", description: "Shared defaults", rules: [] }] },
-      permissionRules: { rules: [{ id: "rule_1", workspace_id: "ws_1", resource_type: "file", resource_match: "src/**", action: "allow" }] },
-      skills: { skills: [{ id: "skill_1", name: "task-planner", description: "Plans tasks", origin: "builtin" }] },
-      workspace: { workspace: { id: "ws_1", name: "Workspace", root_path: "." } },
-      errors: {}
-    });
-
-    Object.defineProperty(globalThis, "EventSource", {
-      configurable: true,
-      writable: true,
-      value: previousEventSource
-    });
   });
 
   it("wires abort signals into every pending settings request", async () => {
@@ -282,6 +281,13 @@ function jsonResponse(status: number, payload: unknown): Response {
     status,
     headers: { "content-type": "application/json" }
   });
+}
+
+function mockJsonResponse(payload: unknown): Response {
+  return {
+    ok: true,
+    json: async () => payload
+  } as Response;
 }
 
 describe("Skills settings tab contract", () => {

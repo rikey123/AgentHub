@@ -79,3 +79,5 @@ Thumbs.db
 
 # Tool-local private settings
 .claude/settings.local.json
+.playwright-mcp/
+.sisyphus/run-continuation/

@@ -61,7 +61,7 @@ export function RunBriefToasts({ roomId, briefs, onOpenRun }: RunBriefToastsProp
       notifiedBriefs.add(key);
 
       Toast.toast(briefTitle(brief), {
-        description: brief.summary || "Open run details to inspect transcript, tools, artifacts, and cost.",
+        description: brief.summary || "打开运行详情可查看 transcript、工具调用、产物和成本。",
         variant: briefVariant(brief),
         timeout: 5000,
         ...(brief.runId ? {

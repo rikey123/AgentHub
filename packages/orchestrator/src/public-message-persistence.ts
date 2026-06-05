@@ -131,6 +131,7 @@ function isSubstantialDeliverable(text: string, nonEmptyLines: readonly string[]
   const numberedItems = nonEmptyLines.filter((line) => /^\s*\d+[.)、]\s+\S/u.test(line)).length;
   const bulletItems = nonEmptyLines.filter((line) => /^\s*[-*]\s+\S/u.test(line)).length;
   if (numberedItems + bulletItems >= 8) return true;
+  if (numberedItems + bulletItems >= 5 && text.length >= 200) return true;
   if (headingCount >= 1 && numberedItems + bulletItems >= 4) return true;
   if (/^(#\s+|##\s+)?(方案|计划|清单|规范|规格|报告|评审|PRD|RFC|Spec|Checklist|Plan|Proposal|Review)\b/imu.test(text)) return true;
   return false;
