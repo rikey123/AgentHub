@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Badge, Button, Chip, SearchField, ScrollShadow } from "@heroui/react";
 import type { RoomViewModel } from "../../types.ts";
+import { roomModeLabel } from "../../lib/format.ts";
 
 interface RoomListProps {
   rooms: ReadonlyArray<RoomViewModel>;
@@ -66,25 +67,25 @@ export function RoomList({ rooms, activeRoomId, onSelect, onCreate }: RoomListPr
             <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted">Workspace</p>
             <h2 className="truncate text-lg font-semibold">Rooms</h2>
           </div>
-          <Button size="sm" variant="primary" className="rounded-full px-4" onPress={onCreate} aria-label="New Room" data-testid="room-list-create-room">
-            New
+          <Button size="sm" variant="primary" className="rounded-full px-4" onPress={onCreate} aria-label="新建房间" data-testid="room-list-create-room">
+            + 新建
           </Button>
         </div>
 
         <div className="mb-3 grid grid-cols-2 gap-2">
           <div className="rounded-xl border border-border bg-overlay/70 px-3 py-2 shadow-sm">
             <div className="text-base font-semibold">{rooms.length}</div>
-            <div className="text-[11px] uppercase tracking-wide text-muted">rooms</div>
+            <div className="text-[11px] tracking-wide text-muted">房间总数</div>
           </div>
           <div className="rounded-xl border border-border bg-overlay/70 px-3 py-2 shadow-sm">
             <div className="text-base font-semibold">{liveCount}</div>
-            <div className="text-[11px] uppercase tracking-wide text-muted">live</div>
+            <div className="text-[11px] tracking-wide text-muted">在线房间</div>
           </div>
         </div>
 
-        <SearchField aria-label="Search rooms" value={query} onChange={setQuery}>
+        <SearchField aria-label="搜索房间" value={query} onChange={setQuery}>
           <SearchField.Group className="rounded-xl border border-border bg-overlay shadow-sm">
-            <SearchField.Input placeholder="Search room or mode" />
+            <SearchField.Input placeholder="搜索房间 / 模式" className="placeholder:text-muted" />
           </SearchField.Group>
         </SearchField>
 
@@ -99,7 +100,7 @@ export function RoomList({ rooms, activeRoomId, onSelect, onCreate }: RoomListPr
         <ul role="listbox" aria-label="Rooms" className="flex flex-col gap-2 p-2">
           {filtered.length === 0 ? (
             <li className="rounded-2xl border border-dashed border-border bg-overlay/60 px-4 py-8 text-center text-sm text-muted">
-              {query ? "No rooms match your search." : "No rooms yet. Create one to start."}
+              {query ? "没有查找到相应的房间。" : "No rooms yet. Create one to start."}
             </li>
           ) : null}
           {filtered.map((room) => {
@@ -148,13 +149,13 @@ export function RoomList({ rooms, activeRoomId, onSelect, onCreate }: RoomListPr
                 </div>
 
                 <div className="mt-3 flex flex-wrap items-center gap-1.5 pl-[52px]">
-                  <Chip size="sm" variant="soft" color="default">{room.mode}</Chip>
-                  <Chip size="sm" variant="soft" color="default">{room.participants.length} members</Chip>
+                  <Chip size="sm" variant="soft" color="default">{roomModeLabel(room.mode)}</Chip>
+                  <Chip size="sm" variant="soft" color="default">{room.participants.length} 名成员</Chip>
                   {hasActiveRun ? (
-                    <Chip size="sm" variant="soft" color="accent">live</Chip>
+                    <Chip size="sm" variant="soft" color="accent">在线</Chip>
                   ) : null}
                   {room.pendingTurns.length > 0 ? (
-                    <Chip size="sm" variant="soft" color="warning">{room.pendingTurns.length} queued</Chip>
+                    <Chip size="sm" variant="soft" color="warning">{room.pendingTurns.length} 待处理</Chip>
                   ) : null}
                   {room.unreadCount > 0 ? (
                     <Badge color="danger" variant="primary">{String(room.unreadCount)}</Badge>
