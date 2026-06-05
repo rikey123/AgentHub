@@ -46,7 +46,7 @@ export function BriefItem({ brief, onOpenRun }: BriefItemProps) {
             {formatTokens(brief.cost.tokens)} tokens{brief.cost.usd != null ? ` · ${formatUsd(brief.cost.usd)}` : ""}
           </Chip>
         ) : null}
-        {brief.runId && onOpenRun ? <span className="text-foreground">Open run</span> : null}
+        {brief.runId && onOpenRun ? <span className="text-foreground">打开运行详情</span> : null}
       </span>
     </div>
   );

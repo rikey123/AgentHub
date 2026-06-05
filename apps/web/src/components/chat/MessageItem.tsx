@@ -93,7 +93,7 @@ export function MessageItem(props: MessageItemProps) {
             {message.quotedMessageId ? (
               <Card variant="transparent" className={["mb-2 border-l-2 pl-2", isUser ? "border-accent-foreground/70 bg-white/10" : "border-accent bg-accent-soft"].join(" ")}>
                 <Card.Description className={["text-xs", isUser ? "text-accent-foreground/85" : ""].join(" ")}>
-                  Quoting {message.quotedMessageId.slice(0, 8)}
+                  引用 {message.quotedMessageId.slice(0, 8)}
                 </Card.Description>
               </Card>
             ) : null}
@@ -106,13 +106,13 @@ export function MessageItem(props: MessageItemProps) {
 
             {textPreview.collapsed ? (
               <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border/70 pt-2">
-                <Chip size="sm" variant="soft" color="default">Long agent reply</Chip>
+                <Chip size="sm" variant="soft" color="default">长回复</Chip>
                 <Button size="sm" variant="tertiary" onPress={() => setExpanded((value) => !value)}>
-                  {expanded ? "Show less" : "Show full"}
+                  {expanded ? "收起" : "展开全文"}
                 </Button>
                 {message.runId && onOpenRun ? (
                   <Button size="sm" variant="secondary" onPress={() => onOpenRun(message.runId!)}>
-                    Open run
+                    打开运行详情
                   </Button>
                 ) : null}
               </div>
@@ -152,11 +152,11 @@ export function MessageItem(props: MessageItemProps) {
                 <Dropdown.Menu aria-label="消息操作">
                   {onQuote ? <Dropdown.Item onAction={onQuote}>引用</Dropdown.Item> : null}
                   {onRegenerate && message.senderType === "agent" && message.status === "completed" ? (
-                    <Dropdown.Item onAction={onRegenerate}>Regenerate</Dropdown.Item>
+                    <Dropdown.Item onAction={onRegenerate}>重新生成</Dropdown.Item>
                   ) : null}
                   {onPin && message.status === "completed" ? <Dropdown.Item onAction={onPin}>置顶</Dropdown.Item> : null}
                   {message.runId && onOpenRun ? (
-                    <Dropdown.Item onAction={() => onOpenRun(message.runId!)}>Open run</Dropdown.Item>
+                    <Dropdown.Item onAction={() => onOpenRun(message.runId!)}>打开运行详情</Dropdown.Item>
                   ) : null}
                   {onDelete ? (
                     <Dropdown.Item onAction={onDelete} className="text-danger">删除</Dropdown.Item>

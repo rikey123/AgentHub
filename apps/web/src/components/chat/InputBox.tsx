@@ -258,8 +258,8 @@ export function InputBox(props: InputBoxProps) {
 
         {quote ? (
           <div className="mb-2 flex items-start gap-2 rounded-xl border border-accent bg-accent-soft px-3 py-2 text-xs shadow-sm">
-            <span className="flex-1 truncate">Quoting: {quote.preview || quote.messageId}</span>
-            <Button isIconOnly size="sm" variant="ghost" onPress={() => setQuote(undefined)} aria-label="Remove quote">x</Button>
+            <span className="flex-1 truncate">引用：{quote.preview || quote.messageId}</span>
+            <Button isIconOnly size="sm" variant="ghost" onPress={() => setQuote(undefined)} aria-label="移除引用">x</Button>
           </div>
         ) : null}
 
@@ -378,7 +378,7 @@ export function InputBox(props: InputBoxProps) {
                 ref={fileInputRef}
                 type="file"
                 multiple
-                aria-label="Attach files"
+                aria-label="附件"
                 className="ah-sr-only"
                 onChange={(event) => {
                   const files = event.currentTarget.files;

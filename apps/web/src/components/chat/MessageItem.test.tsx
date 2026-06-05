@@ -26,8 +26,8 @@ describe("MessageItem public chat rendering", () => {
       csrfFetch: vi.fn<typeof fetch>()
     }));
 
-    expect(html).toContain("Show full");
-    expect(html).toContain("Long agent reply");
+    expect(html).toContain("展开全文");
+    expect(html).toContain("长回复");
     expect(html).toContain("Here is the full platform architecture review.");
     expect(html).not.toContain("Section five explains roadmap and implementation sequencing in detail.");
   });
@@ -50,7 +50,7 @@ describe("MessageItem public chat rendering", () => {
       csrfFetch: vi.fn<typeof fetch>()
     }));
 
-    expect(html).not.toContain("Show full");
+    expect(html).not.toContain("展开全文");
     expect(html).toContain("The final sentence should still render.");
   });
 

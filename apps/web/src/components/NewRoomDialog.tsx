@@ -99,7 +99,7 @@ export function buildCreateRoomInput(input: {
     patch: Partial<Pick<V1RoomParticipant, "role" | "defaultPresence">> = {}
   ): V1RoomParticipant => {
     if (participant.runtimeKind === "native" && !participant.modelConfigId) {
-      throw new Error("native Runtime 参与者需要指定模型配置。");
+      throw new Error("Native runtime participants require a model config.");
     }
     const next: V1RoomParticipant = {
       roleId: participant.roleId,
@@ -114,7 +114,7 @@ export function buildCreateRoomInput(input: {
   };
   if (input.mode === "solo") {
     if (input.v1Participants.length !== 1) {
-      throw new Error("Solo Room 需要且仅需要一个 role 参与者。");
+      throw new Error("Solo rooms require exactly one role participant.");
     }
     return {
       title,
@@ -126,7 +126,7 @@ export function buildCreateRoomInput(input: {
   }
   if (input.mode === "assisted") {
     if (input.v1Participants.length === 0) {
-      throw new Error("Assisted Room 需要一个主 role 参与者。");
+      throw new Error("Assisted rooms require a primary role participant.");
     }
     return {
       title,
@@ -140,13 +140,13 @@ export function buildCreateRoomInput(input: {
     };
   }
   if (!input.leaderRoleId) {
-    throw new Error("请选择 leader role。");
+    throw new Error("Pick a leader role.");
   }
   if (input.v1Participants.length === 0) {
-    throw new Error("请至少添加一个 role 参与者。");
+    throw new Error("Add at least one role participant.");
   }
   if (!input.v1Participants.some((participant) => participant.roleId === input.leaderRoleId)) {
-    throw new Error("leader role 必须包含在参与者中。");
+    throw new Error("Leader role must be included as a participant.");
   }
   const participants = input.v1Participants.map((participant) => toV1Participant(participant));
   return {
@@ -549,6 +549,20 @@ function errorMessage(payload: unknown, status: number): string {
   return `HTTP ${status}`;
 }
 
+const CREATE_ROOM_ERROR_TEXT: Record<string, string> = {
+  "Native runtime participants require a model config.": "native Runtime 参与者需要指定模型配置。",
+  "Solo rooms require exactly one role participant.": "Solo Room 需要且仅需要一个 role 参与者。",
+  "Assisted rooms require a primary role participant.": "Assisted Room 需要一个主 role 参与者。",
+  "Pick a leader role.": "请选择 leader role。",
+  "Add at least one role participant.": "请至少添加一个 role 参与者。",
+  "Leader role must be included as a participant.": "leader role 必须包含在参与者中。"
+};
+
+function displayErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return CREATE_ROOM_ERROR_TEXT[message] ?? message;
+}
+
 function normalizeWorkspaceSkills(payload: unknown): WorkspaceSkillSummary[] {
   const rows = Array.isArray(payload)
     ? payload
@@ -770,7 +784,7 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
       await onCreate(buildCreateRoomInput(currentLeaderRoleId ? { ...createInput, leaderRoleId: currentLeaderRoleId } : createInput));
       onOpenChange(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(displayErrorMessage(err));
     } finally {
       setSubmitting(false);
     }

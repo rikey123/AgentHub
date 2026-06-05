@@ -167,7 +167,7 @@ export function ChatStream(props: ChatStreamProps) {
           ) : showEmptyState ? (
             <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-muted">
               <p>No messages yet.</p>
-              <p>Send a message to start the conversation.</p>
+              <p>发送一条消息来开始对话。</p>
             </div>
           ) : (
             <div style={{ height: `${virtualizer.getTotalSize()}px`, position: "relative" }}>
