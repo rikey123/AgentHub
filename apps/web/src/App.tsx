@@ -52,7 +52,8 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(initialSettingsState.isOpen);
   const [settingsTab, setSettingsTab] = useState<SettingsTabId>(initialSettingsState.tab);
   const [leftCollapsed, setLeftCollapsed] = useState(false);
-  const [rightCollapsed, setRightCollapsed] = useState(false);
+  // 默认收起右侧工作台面板，打开房间时优先展示对话
+  const [rightCollapsed, setRightCollapsed] = useState(true);
   const [sidePanelTab, setSidePanelTab] = useState<"context" | "tasks" | "members" | "debug" | "cost">("context");
   const [rail, setRail] = useState<RailItem>("chat");
   const [bannerError, setBannerError] = useState<string | undefined>();
@@ -252,26 +253,26 @@ export default function App() {
 
   const commands = useMemo<PaletteCommand[]>(() => {
     const list: PaletteCommand[] = [
-      { id: "new-room", label: "New room", group: "Rooms", perform: openNewRoom },
-      { id: "open-settings", label: "Open Settings", group: "Settings", keywords: ["roles", "runtimes", "models", "permissions", "workspace", "mcp"], perform: openSettings },
-      { id: "toggle-left", label: leftCollapsed ? "Show rooms panel" : "Hide rooms panel", group: "View", perform: () => setLeftCollapsed((v) => !v) },
-      { id: "toggle-right", label: rightCollapsed ? "Show workbench panel" : "Hide workbench panel", group: "View", perform: () => setRightCollapsed((v) => !v) },
-      { id: "panel-context", label: "Workbench: Context", group: "View", perform: () => { setRightCollapsed(false); setSidePanelTab("context"); } },
-      { id: "panel-tasks", label: "Workbench: Tasks", group: "View", perform: () => { setRightCollapsed(false); setSidePanelTab("tasks"); } },
-      { id: "panel-members", label: "Workbench: Members", group: "View", perform: () => { setRightCollapsed(false); setSidePanelTab("members"); } },
-      { id: "panel-debug", label: "Workbench: Debug", group: "View", perform: () => { setRightCollapsed(false); setSidePanelTab("debug"); } },
-      { id: "panel-cost", label: "Workbench: Cost", group: "View", perform: () => { setRightCollapsed(false); setSidePanelTab("cost"); } },
-      { id: "theme-light", label: "Theme: Light", group: "Theme", keywords: ["theme", "light"], perform: () => setTheme("light") },
-      { id: "theme-dark", label: "Theme: Dark", group: "Theme", keywords: ["theme", "dark"], perform: () => setTheme("dark") },
-      { id: "theme-auto", label: "Theme: Auto", group: "Theme", keywords: ["theme", "auto"], perform: () => setTheme("auto") },
-      { id: "density-cozy", label: "Density: Cozy", group: "Theme", keywords: ["density", "cozy", "spacing"], perform: () => setDensity("cozy") },
-      { id: "density-compact", label: "Density: Compact", group: "Theme", keywords: ["density", "compact", "spacing"], perform: () => setDensity("compact") },
-      { id: "show-keymap", label: "Show keyboard shortcuts", group: "Help", perform: () => setKeymapOpen(true) }
+      { id: "new-room", label: "新建 room", group: "Rooms", perform: openNewRoom },
+      { id: "open-settings", label: "打开设置", group: "设置", keywords: ["roles", "runtimes", "models", "permissions", "workspace", "mcp"], perform: openSettings },
+      { id: "toggle-left", label: leftCollapsed ? "显示 rooms 面板" : "隐藏 rooms 面板", group: "视图", perform: () => setLeftCollapsed((v) => !v) },
+      { id: "toggle-right", label: rightCollapsed ? "显示工作台面板" : "隐藏工作台面板", group: "视图", perform: () => setRightCollapsed((v) => !v) },
+      { id: "panel-context", label: "工作台：上下文", group: "视图", perform: () => { setRightCollapsed(false); setSidePanelTab("context"); } },
+      { id: "panel-tasks", label: "工作台：任务", group: "视图", perform: () => { setRightCollapsed(false); setSidePanelTab("tasks"); } },
+      { id: "panel-members", label: "工作台：成员", group: "视图", perform: () => { setRightCollapsed(false); setSidePanelTab("members"); } },
+      { id: "panel-debug", label: "工作台：DEBUG", group: "视图", perform: () => { setRightCollapsed(false); setSidePanelTab("debug"); } },
+      { id: "panel-cost", label: "工作台：计费", group: "视图", perform: () => { setRightCollapsed(false); setSidePanelTab("cost"); } },
+      { id: "theme-light", label: "主题：浅色", group: "主题", keywords: ["theme", "light"], perform: () => setTheme("light") },
+      { id: "theme-dark", label: "主题：深色", group: "主题", keywords: ["theme", "dark"], perform: () => setTheme("dark") },
+      { id: "theme-auto", label: "主题：自动", group: "主题", keywords: ["theme", "auto"], perform: () => setTheme("auto") },
+      { id: "density-cozy", label: "密度：宽松", group: "主题", keywords: ["density", "cozy", "spacing"], perform: () => setDensity("cozy") },
+      { id: "density-compact", label: "密度：紧凑", group: "主题", keywords: ["density", "compact", "spacing"], perform: () => setDensity("compact") },
+      { id: "show-keymap", label: "显示键盘快捷键", group: "帮助", perform: () => setKeymapOpen(true) }
     ];
     for (const room of rooms) {
       list.push({
         id: `room-${room.id}`,
-        label: `Open room · ${room.title}`,
+        label: `打开 room · ${room.title}`,
         group: "Rooms",
         keywords: [room.id, room.mode],
         perform: () => setActiveRoomId(room.id)
