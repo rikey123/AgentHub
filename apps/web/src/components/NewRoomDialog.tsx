@@ -43,10 +43,10 @@ export type CreateRoomInput = {
 };
 
 export const ROOM_MODE_OPTIONS: ReadonlyArray<{ value: RoomMode; title: string; description: string }> = [
-  { value: "solo", title: "Solo", description: "One primary agent only." },
-  { value: "assisted", title: "Assisted", description: "Primary agent plus optional collaborators." },
-  { value: "squad", title: "Squad", description: "Leader role coordinates a focused group." },
-  { value: "team", title: "Team", description: "Leader role routes work across active teammates." }
+  { value: "solo", title: "Solo", description: "仅包含一个主 agent。" },
+  { value: "assisted", title: "Assisted", description: "主 agent 可搭配可选协作者。" },
+  { value: "squad", title: "Squad", description: "由 leader role 协调一个聚焦小组。" },
+  { value: "team", title: "Team", description: "由 leader role 在活跃队友之间分派工作。" }
 ];
 
 export type BuildV1ParticipantInput = V1RoomParticipant & {
@@ -68,6 +68,20 @@ type WorkspaceSkillSummary = {
   origin: string;
 };
 
+function IconRobot() {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="12" y1="3" x2="12" y2="5.5" />
+      <circle cx="12" cy="2.5" r="1" fill="currentColor" stroke="none" />
+      <rect x="4.5" y="5.5" width="15" height="12" rx="3" />
+      <circle cx="9" cy="11.5" r="1.5" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="11.5" r="1.5" fill="currentColor" stroke="none" />
+      <line x1="2.5" y1="10" x2="2.5" y2="14" />
+      <line x1="21.5" y1="10" x2="21.5" y2="14" />
+    </svg>
+  );
+}
+
 export function buildCreateRoomInput(input: {
   title: string;
   mode: RoomMode;
@@ -77,7 +91,7 @@ export function buildCreateRoomInput(input: {
   legacyAgentParticipants: LegacyAgentParticipant[];
   v1Participants: BuildV1ParticipantInput[];
 }): CreateRoomInput {
-  const title = input.title.trim() || "New room";
+  const title = input.title.trim() || "新建 Room";
   const skillIds = Array.from(new Set(input.skillIds ?? [])).filter((id) => id.length > 0);
   const selectedSkills = skillIds.length > 0 ? { skillIds } : {};
   const toV1Participant = (
@@ -85,7 +99,7 @@ export function buildCreateRoomInput(input: {
     patch: Partial<Pick<V1RoomParticipant, "role" | "defaultPresence">> = {}
   ): V1RoomParticipant => {
     if (participant.runtimeKind === "native" && !participant.modelConfigId) {
-      throw new Error("Native runtime participants require a model config.");
+      throw new Error("native Runtime 参与者需要指定模型配置。");
     }
     const next: V1RoomParticipant = {
       roleId: participant.roleId,
@@ -100,7 +114,7 @@ export function buildCreateRoomInput(input: {
   };
   if (input.mode === "solo") {
     if (input.v1Participants.length !== 1) {
-      throw new Error("Solo rooms require exactly one role participant.");
+      throw new Error("Solo Room 需要且仅需要一个 role 参与者。");
     }
     return {
       title,
@@ -112,7 +126,7 @@ export function buildCreateRoomInput(input: {
   }
   if (input.mode === "assisted") {
     if (input.v1Participants.length === 0) {
-      throw new Error("Assisted rooms require a primary role participant.");
+      throw new Error("Assisted Room 需要一个主 role 参与者。");
     }
     return {
       title,
@@ -126,13 +140,13 @@ export function buildCreateRoomInput(input: {
     };
   }
   if (!input.leaderRoleId) {
-    throw new Error("Pick a leader role.");
+    throw new Error("请选择 leader role。");
   }
   if (input.v1Participants.length === 0) {
-    throw new Error("Add at least one role participant.");
+    throw new Error("请至少添加一个 role 参与者。");
   }
   if (!input.v1Participants.some((participant) => participant.roleId === input.leaderRoleId)) {
-    throw new Error("Leader role must be included as a participant.");
+    throw new Error("leader role 必须包含在参与者中。");
   }
   const participants = input.v1Participants.map((participant) => toV1Participant(participant));
   return {
@@ -175,14 +189,46 @@ function roleBadge(capabilities: readonly string[]): string {
   return "role";
 }
 
+const ROLE_DISPLAY_TEXT: Record<string, { title: string; description: string }> = {
+  Archivist: {
+    title: "归档员",
+    description: "归档上下文，并产出已确认的摘要。"
+  },
+  Builder: {
+    title: "构建者",
+    description: "通用代码构建者。"
+  },
+  Generalist: {
+    title: "通用助手",
+    description: "没有特定专长方向的通用助手。"
+  },
+  "Project Manager": {
+    title: "项目经理",
+    description: "将工作拆分为任务，并把执行路由给合适的 agents。"
+  },
+  Reviewer: {
+    title: "评审员",
+    description: "审查代码，并可通过干预反馈发起提醒。"
+  }
+};
+
+function roleDisplayText(role: { name: string; description?: string | undefined }): { title: string; description?: string | undefined } {
+  const mapped = ROLE_DISPLAY_TEXT[role.name];
+  if (mapped) return mapped;
+  return { title: role.name, description: role.description };
+}
+
 function roleOptions(roles: readonly { id: string; name: string; description?: string; capabilities: string[] }[]): SelectOption[] {
-  return roles.map((role) => ({
-    id: role.id,
-    title: role.name,
-    description: role.description,
-    badge: roleBadge(role.capabilities),
-    tone: roleTone(role.capabilities)
-  }));
+  return roles.map((role) => {
+    const display = roleDisplayText(role);
+    return {
+      id: role.id,
+      title: display.title,
+      description: display.description,
+      badge: roleBadge(role.capabilities),
+      tone: roleTone(role.capabilities)
+    };
+  });
 }
 
 function runtimeOptions(runtimes: readonly { id: string; name: string; kind: string; detectedVersion?: string | null; version?: string | null }[]): SelectOption[] {
@@ -197,7 +243,7 @@ function runtimeOptions(runtimes: readonly { id: string; name: string; kind: str
 
 function modelOptions(modelConfigs: readonly { id: string; name: string; provider: string; model: string }[], placeholder: string): SelectOption[] {
   return [
-    { id: "", title: placeholder, description: "Leave unset when this runtime does not require a model.", badge: "optional", tone: "default" },
+    { id: "", title: placeholder, description: "当前 Runtime 不需要指定模型时可置为空。", badge: "optional", tone: "default" },
     ...modelConfigs.map((config) => ({
       id: config.id,
       title: config.name,
@@ -209,8 +255,8 @@ function modelOptions(modelConfigs: readonly { id: string; name: string; provide
 }
 
 const presenceOptions: SelectOption[] = [
-  { id: "active", title: "Active", description: "Starts ready to respond.", badge: "live", tone: "success" },
-  { id: "observing", title: "Observing", description: "Joins quietly and waits for delegation.", badge: "quiet", tone: "default" }
+  { id: "active", title: "活跃", description: "进入 Room 后即可响应。", badge: "live", tone: "success" },
+  { id: "observing", title: "观察中", description: "安静加入，并等待任务委派。", badge: "quiet", tone: "default" }
 ];
 
 function StyledSelect({
@@ -220,7 +266,8 @@ function StyledSelect({
   placeholder,
   onChange,
   testId,
-  isDisabled = false
+  isDisabled = false,
+  popoverClassName = "max-h-72"
 }: {
   label: string;
   value: string;
@@ -229,6 +276,7 @@ function StyledSelect({
   onChange: (value: string) => void;
   testId?: string | undefined;
   isDisabled?: boolean | undefined;
+  popoverClassName?: string | undefined;
 }) {
   return (
     <Select
@@ -242,23 +290,25 @@ function StyledSelect({
       onSelectionChange={(key: unknown) => onChange(selectValue(key))}
     >
       <Label className="text-xs font-semibold uppercase text-muted">{label}</Label>
-      <Select.Trigger className="min-h-12 bg-field-background" data-testid={testId}>
-        <Select.Value>
-          <span className="truncate font-semibold">{selectLabel(options, value, placeholder)}</span>
+      <Select.Trigger className="min-h-12 items-center bg-field-background" data-testid={testId}>
+        <Select.Value className="flex min-w-0 flex-1 items-center">
+          <span className="truncate font-semibold leading-none">{selectLabel(options, value, placeholder)}</span>
         </Select.Value>
         <Select.Indicator />
       </Select.Trigger>
-      <Select.Popover className="max-h-72">
+      <Select.Popover className={popoverClassName}>
         <ListBox aria-label={label}>
           {options.map((option) => (
             <ListBox.Item key={option.id || "__empty"} id={option.id} textValue={option.title}>
-              <div className="flex min-w-0 items-center gap-2 py-1">
+              <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 py-1">
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-semibold">{option.title}</div>
-                  {option.description ? <div className="truncate text-xs text-muted">{option.description}</div> : null}
+                  {option.description ? <div className="line-clamp-2 text-xs leading-5 text-muted">{option.description}</div> : null}
                 </div>
-                {option.badge ? <Chip size="sm" variant="soft" color={option.tone ?? "default"}>{option.badge}</Chip> : null}
-                <ListBox.ItemIndicator />
+                <span className="flex min-w-[76px] justify-end">
+                  {option.badge ? <Chip size="sm" variant="soft" color={option.tone ?? "default"}>{option.badge}</Chip> : null}
+                </span>
+                <span className="flex w-5 justify-end"><ListBox.ItemIndicator /></span>
               </div>
             </ListBox.Item>
           ))}
@@ -286,10 +336,11 @@ export function RoleSelect({
       label={label}
       value={value}
       options={roleOptions(roles)}
-      placeholder="Choose role"
+      placeholder="选择角色"
       onChange={onChange}
       testId={testId}
       isDisabled={roles.length === 0}
+      popoverClassName="max-h-80 w-[min(92vw,520px)]"
     />
   );
 }
@@ -331,7 +382,7 @@ export function RoleBindingRow({
       ) : null}
       <div className="grid gap-3 lg:grid-cols-[minmax(180px,1fr)_minmax(190px,1fr)_minmax(190px,1fr)_minmax(170px,0.8fr)_auto]">
         <RoleSelect
-          label="Role"
+          label="角色"
           value={roleId}
           roles={roles}
           onChange={(value) => onChange({ roleId: value })}
@@ -341,25 +392,25 @@ export function RoleBindingRow({
           label="Runtime"
           value={runtimeId}
           options={runtimeOptions(runtimes)}
-          placeholder="Choose runtime"
+          placeholder="选择 Runtime"
           onChange={(value) => onChange({ runtimeId: value })}
           testId={`${testIdPrefix}-runtime`}
           isDisabled={runtimes.length === 0}
         />
         <StyledSelect
-          label="Model"
+          label="模型"
           value={modelConfigId}
-          options={modelOptions(modelConfigs, needsModel ? "Choose model" : "No model override")}
-          placeholder={needsModel ? "Choose model" : "No model override"}
+          options={modelOptions(modelConfigs, needsModel ? "选择模型" : "不覆盖模型")}
+          placeholder={needsModel ? "选择模型" : "不覆盖模型"}
           onChange={(value) => onChange({ modelConfigId: value })}
           testId={`${testIdPrefix}-model`}
           isDisabled={!needsModel && modelConfigs.length === 0}
         />
         <StyledSelect
-          label="Presence"
+          label="状态"
           value={presence}
           options={presenceOptions}
-          placeholder="Choose presence"
+          placeholder="选择状态"
           onChange={(value) => onChange({ defaultPresence: value as RoomPresence })}
           testId={`${testIdPrefix}-presence`}
         />
@@ -437,7 +488,7 @@ export async function ensureAgentBindingsForParticipants(options: {
     });
     const payload = await readJson(response);
     if (!response.ok) {
-      throw new Error(`Create agent binding failed for ${participant.roleId}/${participant.runtimeId}: ${errorMessage(payload, response.status)}`);
+      throw new Error(`为 ${participant.roleId}/${participant.runtimeId} 创建 agent 绑定失败：${errorMessage(payload, response.status)}`);
     }
     const created = normalizeCreatedAgentBinding(payload, participant);
     known.set(key, created);
@@ -469,11 +520,11 @@ function normalizeCreatedAgentBinding(payload: unknown, participant: BuildV1Part
     ? (payload as { readonly agentBinding?: unknown }).agentBinding
     : payload;
   if (!record || typeof record !== "object") {
-    throw new Error("Create agent binding returned an invalid response.");
+    throw new Error("创建 agent 绑定返回了无效响应。");
   }
   const row = record as Record<string, unknown>;
   const id = stringValue(row.id);
-  if (!id) throw new Error("Create agent binding returned no id.");
+  if (!id) throw new Error("创建 agent 绑定未返回 id。");
   return {
     id,
     roleId: stringValue(row.roleId ?? row.role_id) ?? participant.roleId,
@@ -526,6 +577,15 @@ function skillOriginColor(origin: string): "default" | "accent" | "success" | "w
   return "default";
 }
 
+const SKILL_DESCRIPTION_TEXT: Record<string, string> = {
+  "skill-creator": "帮助用户按标准 SKILL.md 格式创建新的 skills。",
+  "task-planner": "帮助 agents 将复杂工作拆解为边界清晰、依赖明确、可分配的任务。"
+};
+
+function skillDescription(skill: WorkspaceSkillSummary): string {
+  return SKILL_DESCRIPTION_TEXT[skill.name] ?? skill.description;
+}
+
 export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetch }: NewRoomDialogProps) {
   const {
     roles,
@@ -574,7 +634,7 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
       signal: controller.signal
     })
       .then(async (response) => {
-        if (!response.ok) throw new Error(`Load skills failed: ${response.status}`);
+        if (!response.ok) throw new Error(`加载 skills 失败：${response.status}`);
         return response.json() as Promise<unknown>;
       })
       .then((payload) => {
@@ -660,7 +720,7 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
 
   const handleSubmit = async () => {
     if (!leaderBinding) {
-      setError("Pick a primary role binding.");
+      setError("请选择主 role 绑定。");
       return;
     }
     setSubmitting(true);
@@ -723,13 +783,13 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
           <Modal.CloseTrigger />
           <Modal.Header className="border-b border-border bg-[linear-gradient(135deg,var(--surface),var(--surface-secondary))] px-6 py-4">
             <div className="flex items-center gap-4">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-accent text-sm font-black text-accent-foreground shadow-[0_14px_30px_color-mix(in_oklab,var(--accent)_24%,transparent)]">
-                AH
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-accent text-accent-foreground shadow-[0_14px_30px_color-mix(in_oklab,var(--accent)_24%,transparent)]">
+                <IconRobot />
               </div>
               <div className="min-w-0">
-                <Modal.Heading>New room</Modal.Heading>
+                <Modal.Heading>新建 Room</Modal.Heading>
                 <p className="mt-1 max-w-xl text-sm text-muted">
-                  Set up a local agent workspace with one primary agent and optional collaborators.
+                  配置一个本地 agent 工作区，包含一个主 agent，并可按需添加协作者。
                 </p>
               </div>
             </div>
@@ -741,18 +801,19 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
                 <section className="rounded-2xl border border-border bg-overlay p-4 shadow-sm">
                   <div className="grid gap-4">
                     <TextField value={title} onChange={setTitle}>
-                      <Label className="text-sm font-semibold">Title</Label>
-                      <Input placeholder="e.g. Refactor auth flow" />
+                      <Label className="text-sm font-semibold">标题</Label>
+                      <Input placeholder="例如：重构认证流程" />
                     </TextField>
 
-                    <div>
-                      <h3 className="mb-2 text-sm font-semibold">Mode</h3>
+                    <div className="grid gap-2">
+                      <h3 className="text-sm font-semibold">模式</h3>
                       <RadioGroup
+                        className="gap-0"
                         value={mode}
                         onChange={(v: unknown) => setMode(v as RoomMode)}
-                        aria-label="Room mode"
+                        aria-label="Room 模式"
                       >
-                        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+                        <div className="-mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
                           {ROOM_MODE_OPTIONS.map((option) => (
                             <RoomModeOption
                               key={option.value}
@@ -770,24 +831,24 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
                 <section className="rounded-2xl border border-border bg-overlay p-4 shadow-sm">
                   <div className="mb-3 flex items-start justify-between gap-3">
                     <div>
-                      <h3 className="text-sm font-semibold">{teamMode ? "Role team" : "Primary role"}</h3>
+                      <h3 className="text-sm font-semibold">{teamMode ? "角色团队" : "主角色"}</h3>
                       <p className="text-xs text-muted">
                         {teamMode
-                          ? "Bind the leader to a role, runtime, and model, then add teammates when needed."
-                          : "Choose the role, runtime, and model for the primary agent in this room."}
+                          ? "为 leader 绑定角色、Runtime 和模型，并按需添加队友。"
+                          : "为此 Room 的主 agent 选择角色、Runtime 和模型。"}
                       </p>
                     </div>
                     <Chip size="sm" variant="soft" color={selectedLeader ? "accent" : "default"}>
-                      {selectedLeader?.name ?? "No primary"}
+                      {selectedLeader ? roleDisplayText(selectedLeader).title : "未选择主角色"}
                     </Chip>
                   </div>
 
                   {optionsError ? <p className="mb-2 text-xs text-danger">{optionsError}</p> : null}
-                  {optionsLoading ? <p className="mb-2 text-xs text-muted">Loading roles, runtimes, and models...</p> : null}
+                  {optionsLoading ? <p className="mb-2 text-xs text-muted">正在加载角色、Runtime 和模型...</p> : null}
 
                   {leaderBinding ? (
                     <RoleBindingRow
-                      title={teamMode ? "Leader binding" : "Primary binding"}
+                      title={teamMode ? "Leader 绑定" : "主绑定"}
                       roleId={leaderBinding.roleId}
                       runtimeId={leaderBinding.runtimeId}
                       modelConfigId={leaderBinding.modelConfigId}
@@ -800,24 +861,24 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
                     />
                   ) : (
                     <div className="rounded-xl border border-dashed border-border bg-surface p-3 text-sm text-muted">
-                      Loading role binding options...
+                      正在加载 role 绑定选项...
                     </div>
                   )}
 
                   {mode !== "solo" ? (
                     <div className="mt-4 grid gap-3">
                       <div className="flex items-center justify-between gap-3">
-                        <h4 className="text-sm font-semibold">{teamMode ? "Teammates" : "Collaborators"}</h4>
+                        <h4 className="text-sm font-semibold">{teamMode ? "队友" : "协作者"}</h4>
                         <Button size="sm" variant="secondary" onPress={addV1Participant} isDisabled={roles.length === 0 || runtimes.length === 0}>
-                          {teamMode ? "Add teammate" : "Add collaborator"}
+                          {teamMode ? "添加队友" : "添加协作者"}
                         </Button>
                       </div>
 
                       {v1Participants.length === 0 ? (
                         <div className="rounded-xl border border-dashed border-border bg-surface p-3 text-sm text-muted">
                           {teamMode
-                            ? "Add teammate roles here. The leader binding above is always included."
-                            : "Add collaborator roles here. The primary binding above is always included."}
+                            ? "在此添加队友角色。上方的 leader 绑定始终会包含在内。"
+                            : "在此添加协作者角色。上方的主绑定始终会包含在内。"}
                         </div>
                       ) : v1Participants.map((participant, index) => {
                         return (
@@ -834,7 +895,7 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
                             testIdPrefix={`new-room-participant-${index}`}
                             action={
                               <Button size="sm" variant="tertiary" onPress={() => removeV1Participant(participant.id)} isDisabled={v1Participants.length === 1}>
-                                Remove
+                                移除
                               </Button>
                             }
                           />
@@ -848,19 +909,19 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
                   <div className="mb-3 flex items-start justify-between gap-3">
                     <div>
                       <h3 className="text-sm font-semibold">Skills</h3>
-                      <p className="text-xs text-muted">Selected SKILL.md packages are available to this room on the next run.</p>
+                      <p className="text-xs text-muted">选中的 SKILL.md 包会在下一次运行时对该 Room 可用。</p>
                     </div>
                     <Chip size="sm" variant="soft" color={selectedSkillIds.size > 0 ? "accent" : "default"}>
-                      {selectedSkillIds.size} selected
+                      已选择 {selectedSkillIds.size} 个
                     </Chip>
                   </div>
 
                   {skillsError ? <p className="mb-2 text-xs text-danger">{skillsError}</p> : null}
-                  {skillsLoading ? <p className="mb-2 text-xs text-muted">Loading skills...</p> : null}
+                  {skillsLoading ? <p className="mb-2 text-xs text-muted">正在加载 skills...</p> : null}
 
                   {skills.length === 0 && !skillsLoading ? (
                     <div className="rounded-xl border border-dashed border-border bg-surface p-3 text-sm text-muted">
-                      No workspace skills found. Create or import skills from Settings.
+                      未找到工作区 skills。可在设置中创建或导入 skills。
                     </div>
                   ) : (
                     <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
@@ -879,7 +940,7 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
                             <span className="flex min-w-0 items-center gap-2 text-sm">
                               <span className="min-w-0 flex-1">
                                 <span className="block truncate font-medium">{skill.name}</span>
-                                <span className="block truncate text-xs text-muted">{skill.description || "No description"}</span>
+                                <span className="block truncate text-xs text-muted">{skillDescription(skill) || "无描述"}</span>
                               </span>
                               <Chip size="sm" variant="soft" color={skillOriginColor(skill.origin)}>{skill.origin}</Chip>
                             </span>
@@ -898,19 +959,19 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
           <Modal.Footer className="border-t border-border bg-surface/90 px-5 py-4">
             <div className="mr-auto hidden text-xs text-muted sm:block">
               {mode === "solo"
-                ? "Solo rooms start with the primary agent only."
+                ? "主Agent将加入此Room。"
                 : teamMode
-                  ? `Leader plus ${v1Participants.length} teammate${v1Participants.length === 1 ? "" : "s"} will join this room.`
-                  : `Primary plus ${v1Participants.length} collaborator${v1Participants.length === 1 ? "" : "s"} will join this room.`}
+                  ? `leader和${v1Participants.length}名队友将加入此Room。`
+                  : `主Agent和${v1Participants.length}名协作者将加入此Room。`}
             </div>
-            <Button slot="close" variant="tertiary">Cancel</Button>
+            <Button slot="close" variant="tertiary">取消</Button>
             <Button
               variant="primary"
               isPending={submitting}
               isDisabled={submitting || !leaderBinding}
               onPress={() => void handleSubmit()}
             >
-              Create room
+              创建 Room
             </Button>
           </Modal.Footer>
         </Modal.Dialog>
@@ -928,11 +989,11 @@ function mergeAgentBindings(current: readonly AgentBindingSummary[], next: reado
 
 function RoomModeOption({ value, title, description }: { value: RoomMode; title: string; description: string }) {
   return (
-    <Radio value={value} className="rounded-xl border border-border bg-surface px-3 py-2 hover:bg-surface-secondary">
+    <Radio value={value} className="rounded-xl border border-border bg-surface px-4 py-3 hover:bg-surface-secondary">
       <Radio.Control><Radio.Indicator /></Radio.Control>
-      <Radio.Content>
+      <Radio.Content className="grid gap-1">
         <span className="text-sm font-semibold">{title}</span>
-        <span className="block text-xs text-muted">{description}</span>
+        <span className="text-xs leading-5 text-muted">{description}</span>
       </Radio.Content>
     </Radio>
   );

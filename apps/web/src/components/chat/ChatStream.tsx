@@ -153,7 +153,7 @@ export function ChatStream(props: ChatStreamProps) {
         </div>
       ) : null}
       <ScrollShadow className="min-h-0 flex-1 overflow-hidden" orientation="vertical">
-        <div ref={parentRef} className="h-full overflow-auto" tabIndex={0}>
+        <div ref={parentRef} className="h-full overflow-auto" tabIndex={0} onClick={() => props.onSelectMessage(undefined)}>
           {showFirstConnectSkeleton ? (
             <div className="mx-auto flex max-w-[920px] flex-col gap-3 p-4" aria-label="Loading messages">
               {Array.from({ length: 5 }).map((_, i) => (
