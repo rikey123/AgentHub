@@ -235,7 +235,7 @@ CREATE INDEX idx_runs_agent_started ON runs (agent_id, started_at);
 #### Scenario: 用户取消 Run
 
 - **WHEN** 用户 `POST /runs/:id/cancel`
-- **THEN** HTTP layer dispatch `CancelRun` Command；RunService 调 `RunLifecycleService.markCancelling(null, runId)`（事务 1：UPDATE runs.status='cancelling'，无 durable event），随后**同步**调 `AdapterManager.cancelRun(runId)`（不订阅 `agent.run.cancelled`，避免事件回环）；adapter session 实际结束后 AdapterBridge 调 `RunLifecycleService.cancelFinalized(null, runId)`（事务 2：UPDATE runs.status='cancelled' + INSERT events(`agent.run.cancelled`) + outbox）；RunQueue Worker 订阅该事件释放锁；MessageService 把对应 assistant message status 转 `cancelled` 并发 `message.cancelled`
+- **THEN** HTTP layer dispatch `CancelRun` Command；RunService 调 `RunLifecycleService.markCancelling(null, runId)`（事务 1：UPDATE runs.status='cancelling' + INSERT events(`agent.run.cancelling`) + outbox），随后**同步**调 `AdapterManager.cancelRun(runId)`（不订阅 `agent.run.cancelled`，避免事件回环）；adapter session 实际结束后 AdapterBridge 调 `RunLifecycleService.cancelFinalized(null, runId)`（事务 2：UPDATE runs.status='cancelled' + INSERT events(`agent.run.cancelled`) + outbox）；RunQueue Worker 订阅该事件释放锁；MessageService 把对应 assistant message status 转 `cancelled` 并发 `message.cancelled`
 
 ### Requirement: 内置 Agent（MVP 必带）
 
@@ -491,4 +491,3 @@ The system SHALL expose REST endpoints for AgentBinding management.
 - **WHEN** Settings UI 调 `GET /agent-bindings?workspaceId=w_1`
 - **THEN** 返回列表，每行含 `role: { id, name, avatar }` + `runtime: { id, kind, name, detectedVersion }` + `modelConfig?: { id, name, provider, model, apiKeyFingerprint }`
 - **AND** 不含 API key 明文
-

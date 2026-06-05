@@ -253,7 +253,7 @@ describe("NativeAgentAdapter", () => {
   it("maps cached tokens and cost fields from usage", async () => {
     const lifecycle = createLifecycle();
     streamTextMock.mockReturnValue({
-      fullStream: asyncGenerator([]),
+      fullStream: asyncGenerator([{ type: "text-delta", text: "done" }]),
       usage: Promise.resolve({ inputTokens: 10, outputTokens: 20, inputTokenDetails: { cacheReadTokens: 3 } })
     });
 

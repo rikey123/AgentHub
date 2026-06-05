@@ -242,6 +242,42 @@ describe("useProjector replay handling", () => {
     ]);
   });
 
+  it("removes deleted messages and pending turn entries from live state", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "assisted" }));
+    projector.apply(makeEvent("message.created", roomId, {
+      messageId: "msg-delete-1",
+      role: "user",
+      text: "Please remove me"
+    }));
+    projector.apply(makeEvent("pending_turn.created", roomId, {
+      messageId: "msg-delete-1",
+      pendingTurnId: "turn-delete-1"
+    }));
+
+    expect(emittedState.rooms.get(roomId)?.messages.map((item) => item.id)).toEqual(["msg-delete-1"]);
+    expect(emittedState.rooms.get(roomId)?.pendingTurns.map((item) => item.id)).toEqual(["msg-delete-1"]);
+
+    projector.apply(makeEvent("message.deleted", roomId, { messageId: "msg-delete-1" }));
+
+    expect(emittedState.rooms.get(roomId)?.messages).toEqual([]);
+    expect(emittedState.rooms.get(roomId)?.pendingTurns).toEqual([]);
+  });
+
+  it("projects cancelling runs so stop discussion gives immediate feedback", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "assisted" }));
+    projector.apply(makeAgentEvent("agent.joined", roomId, "agent-builder", { agentId: "agent-builder", agentName: "Builder", role: "teammate" }));
+    projector.apply(makeAgentEvent("agent.run.started", roomId, "agent-builder", { runId: "run-cancel-1" }));
+
+    projector.apply(makeAgentEvent("agent.run.cancelling", roomId, "agent-builder", { runId: "run-cancel-1" }));
+
+    const run = emittedState.rooms.get(roomId)?.runs.find((item) => item.id === "run-cancel-1");
+    expect(run).toMatchObject({ id: "run-cancel-1", agentName: "Builder", status: "cancelling" });
+  });
+
   it("stores worktree review state and conflicts for task cards", () => {
     const roomId = `room-${randomUUID()}`;
     const projector = getProjector();

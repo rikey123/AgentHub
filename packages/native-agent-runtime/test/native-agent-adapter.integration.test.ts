@@ -291,6 +291,59 @@ describe("NativeAgentAdapter integration", () => {
     expect(eventPayload("permission.run_summary", run.id)).toMatchObject({ decisions: [{ decision: "denied", modelConfigId: "model_anthropic" }] });
   });
 
+  test("publishes a visible safe assistant message when the provider fails before any text", async () => {
+    const run = createStartingRun("run_native_pre_output_403");
+    streamTextMock.mockReturnValue({
+      fullStream: asyncGenerator([{ type: "error", error: new Error("403 Forbidden: invalid API key sk-test-secret") }]),
+      usage: Promise.reject(new Error("No output generated. Check the stream for errors."))
+    });
+
+    await new NativeAgentAdapter({
+      database: currentDatabase(),
+      eventBus: currentBus() as unknown as import("../../bus/src/index.ts").EventBus,
+      lifecycle: currentLifecycle(),
+      permissions: currentPermissions(),
+      modelConfig: openAiModelConfig(),
+      now: () => now
+    }).runManaged(run);
+
+    expect(currentLifecycle().read(run.id)).toMatchObject({ status: "failed", failure_class: "configuration" });
+    expect(assistantMessage(run.id)).toMatchObject({ role: "assistant", status: "completed", sender_id: "agent_1" });
+    expect(assistantMessageText(run.id)).toBe("Model call failed before producing a reply. Check this agent's model configuration and API key.");
+    expect(eventTypesForRun(run.id)).toContain("message.created");
+    expect(eventTypesForRun(run.id)).toContain("message.completed");
+    expect(eventPayload("message.completed", run.id)).toMatchObject({
+      messageId: `msg_${run.id}`,
+      text: "Model call failed before producing a reply. Check this agent's model configuration and API key."
+    });
+    expect(eventPayload("agent.run.failed", run.id)).toMatchObject({ failureClass: "configuration" });
+  });
+
+  test("fails visibly when the provider completes without any assistant output", async () => {
+    const run = createStartingRun("run_native_empty_output");
+    streamTextMock.mockReturnValue({
+      fullStream: asyncGenerator([]),
+      usage: Promise.resolve({ inputTokens: 10, outputTokens: 0 })
+    });
+
+    await new NativeAgentAdapter({
+      database: currentDatabase(),
+      eventBus: currentBus() as unknown as import("../../bus/src/index.ts").EventBus,
+      lifecycle: currentLifecycle(),
+      permissions: currentPermissions(),
+      modelConfig: openAiModelConfig(),
+      now: () => now
+    }).runManaged(run);
+
+    expect(currentLifecycle().read(run.id)).toMatchObject({ status: "failed", failure_class: "retryable_visible", error: "native agent completed without producing a reply" });
+    expect(assistantMessage(run.id)).toMatchObject({ role: "assistant", status: "completed", sender_id: "agent_1" });
+    expect(assistantMessageText(run.id)).toBe("The agent finished without producing a reply. Check the run details or try again.");
+    expect(eventTypesForRun(run.id)).toContain("message.created");
+    expect(eventTypesForRun(run.id)).toContain("message.completed");
+    expect(eventTypesForRun(run.id)).not.toContain("agent.run.completed");
+    expect(eventPayload("agent.run.failed", run.id)).toMatchObject({ failureClass: "retryable_visible" });
+  });
+
   test("CancelRun aborts the active native stream and finalizes cancellation", async () => {
     const run = createStartingRun("run_native_cancel");
     let abortSignal: AbortSignal | undefined;

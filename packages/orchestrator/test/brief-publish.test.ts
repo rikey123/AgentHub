@@ -83,7 +83,8 @@ describe("RunLifecycleService brief publishing", () => {
     });
     expect(eventPayload("message.brief.published", "run_cancel")).toEqual({ kind: "run_cancelled", text: "Cancel brief" });
     expect(eventTypes("run_fail")).toEqual(["agent.run.queued", "agent.run.failed", "message.brief.published"]);
-    expect(eventTypes("run_cancel")).toEqual(["agent.run.queued", "agent.run.started", "agent.run.cancelled", "message.brief.published"]);
+    expect(eventTypes("run_cancel")).toEqual(["agent.run.queued", "agent.run.started", "agent.run.cancelling", "agent.run.cancelled", "message.brief.published"]);
+    expect(eventPayload("agent.run.cancelling", "run_cancel")).toEqual({ runId: "run_cancel" });
   });
 
   test("missing completed assistant message does not prevent brief publication", () => {
