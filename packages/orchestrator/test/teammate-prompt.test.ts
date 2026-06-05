@@ -47,5 +47,8 @@ describe("buildTeammatePrompt", () => {
     expect(prompt).toContain("briefly reference the concrete request, result, or review point you are answering");
     expect(prompt).toContain("Avoid generic \"done\" messages");
     expect(prompt).toContain("one concrete outcome, blocker, or next decision");
+    expect(prompt).toContain("room.complete_task");
+    expect(prompt).toContain("automatically mirrors your start and completion into short public room messages");
+    expect(prompt).toContain("Do not send a second duplicate status message");
   });
 });

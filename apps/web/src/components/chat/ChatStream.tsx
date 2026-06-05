@@ -52,7 +52,7 @@ export function buildChatFeedItems(room: RoomViewModel): FeedItem[] {
 }
 
 export function activeRunIndicatorProps(room: RoomViewModel): { readonly runId: string; readonly agentName: string; readonly status: string; readonly mode?: string; readonly turnIndex?: number } | undefined {
-  const activeRun = room.runs.find((r) => r.status === "running" || r.status === "starting" || r.status === "queued");
+  const activeRun = room.runs.find((r) => r.status === "running" || r.status === "starting" || r.status === "queued" || r.status === "cancelling");
   if (activeRun === undefined) return undefined;
   const sameMessageRuns = activeRun.messageId !== undefined
     ? room.runs.filter((run) => run.messageId === activeRun.messageId && run.wakeReason === activeRun.wakeReason)

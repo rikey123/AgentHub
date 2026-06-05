@@ -510,7 +510,7 @@ type CreateRunInput = {
 
 **契约**：
 
-- 每个方法 SHALL 在**单事务**内完成 UPDATE runs（含 status / waiting_reason / started_at / ended_at / cost / adapter_session_id / failure_class / pid_at_start 字段）；**会发出 durable event 的方法**（见下方对照表）必须在同一事务内 INSERT 对应 events 行（分配 seq）+ INSERT outbox 行；**不发 durable event 的方法**（`markCancelling` / `updateSessionState`）只 UPDATE runs 一张表。
+- 每个方法 SHALL 在**单事务**内完成 UPDATE runs（含 status / waiting_reason / started_at / ended_at / cost / adapter_session_id / failure_class / pid_at_start 字段）；**会发出 durable event 的方法**（见下方对照表）必须在同一事务内 INSERT 对应 events 行（分配 seq）+ INSERT outbox 行；**不发 durable event 的方法**（`updateSessionState`）只 UPDATE runs 一张表。
 - 状态机校验在方法内：
   - `markWaiting`：仅允许从 `queued` 进入；同 reason 重复视为幂等无副作用
   - `markClaimed`：允许从 `queued | waiting → claimed`（`waiting` 是因锁被占用而入队，锁释放后 RunQueue Worker 重新调度 → 直接走 `markClaimed`，无需先 `markRunning` / 退回 `queued`）
@@ -533,7 +533,7 @@ type CreateRunInput = {
   | `markStarting` | `agent.run.started` |
   | `markRunning` | （无 durable event 当 prevState='starting'；prevState='waiting_permission' 时 INSERT `agent.run.resumed`；UPDATE runs.status='running' + adapter_session_id） |
   | `markWaitingPermission` | `agent.run.waiting_permission`（payload 含 permissionId） |
-  | `markCancelling` | （无 durable event；仅 UPDATE runs.status='cancelling'；最终 cancelFinalized 发 `agent.run.cancelled`） |
+  | `markCancelling` | `agent.run.cancelling` |
   | `complete` | `agent.run.completed`（payload 含完整 cost） |
   | `fail` | `agent.run.failed`（payload 含 `failureClass / reason / error?`） |
   | `cancelFinalized` | `agent.run.cancelled` |
@@ -808,8 +808,8 @@ The system SHALL document a single canonical "publisher / subscriber" matrix bel
 | MessageService | `message.created` / `message.completed` / `message.cancelled` / `message.deleted` / `message.updated` / `message.brief.published` / `pending_turn.created` / `pending_turn.cancelled` / `pending_turn.scheduled` / `pending_turn.consumed` / `message.part.delta`（ephemeral） |
 | Orchestrator | `agent.state.changed`（仅 presence 状态机驱动）；**不发任何 `agent.run.*`**，统一通过 dispatch `WakeAgent` Command（origin='internal'）触发模型调用；运行状态推进由 RunLifecycleService 完成。**MVP 没有 StartRun Command** |
 | WakeAgent handler | （不直接 publish 事件；通过 `RunLifecycleService.create` 间接产生 `agent.run.queued`） |
-| RunService（`CancelRun` Command handler） | （不直接 publish 事件；通过 `RunLifecycleService.markCancelling` 间接 UPDATE runs；adapter session 实际结束后 AdapterBridge 调 `cancelFinalized` 发 `agent.run.cancelled`） |
-| RunLifecycleService | `agent.run.queued` / `agent.run.waiting` / `agent.run.started` / `agent.run.waiting_permission` / `agent.run.resumed` / `agent.run.completed` / `agent.run.failed` / `agent.run.cancelled`（**所有 `agent.run.*` durable 事件的唯一发布者**；其它模块只能调它的方法） |
+| RunService（`CancelRun` Command handler） | （不直接 publish 事件；通过 `RunLifecycleService.markCancelling` 间接 UPDATE runs + 发 `agent.run.cancelling`；adapter session 实际结束后 AdapterBridge 调 `cancelFinalized` 发 `agent.run.cancelled`） |
+| RunLifecycleService | `agent.run.queued` / `agent.run.waiting` / `agent.run.started` / `agent.run.waiting_permission` / `agent.run.resumed` / `agent.run.cancelling` / `agent.run.completed` / `agent.run.failed` / `agent.run.cancelled`（**所有 `agent.run.*` durable 事件的唯一发布者**；其它模块只能调它的方法） |
 | RunQueue Worker | （不直接 publish 任何 `agent.run.*`；通过调 `RunLifecycleService.markClaimed / markStarting / markWaiting` 间接发出） |
 | AdapterBridge | `tool.call.requested` / `tool.call.completed` / `tool.update.diverted`（ephemeral） / `subagent.started` / `subagent.completed` / `file.changed` / `context.snapshot`（这些非 run 状态事件由 AdapterBridge 自身在事务内 publish；`agent.run.completed/failed/cancelled` 必须经 `RunLifecycleService`） |
 | AdapterManager | `adapter.registered` / `adapter.session.created` / `.session.ended` / `.session.disposed` / `.crashed` / `adapter.liveness.changed` / `adapter.config.updated` / `adapter.raw.stdout`（ephemeral） / `adapter.raw.stderr`（ephemeral） |
@@ -832,7 +832,7 @@ The system SHALL document a single canonical "publisher / subscriber" matrix bel
 | Orchestrator | `message.created` (role=user, turn_dispatch_mode='immediate') | 解析 mention / 决定调度 → dispatch `WakeAgent` Command（origin='internal'）；turn_dispatch_mode='pending' 的 message.created 不触发 wake |
 | Orchestrator | `agent.run.completed` / `.failed` / `.cancelled` | 三步顺序处理（**next_turn 优先于 pending_turn**）：① 更新 presence、决定是否回到 observing → emit `agent.state.changed`；② 查 `run_next_turns WHERE run_id=:runId AND consumed_at IS NULL`；命中 → 派发 `WakeAgent({ ..., carryNextTurnIds: <ids>, sourceRunId: <runId>, reason: <next_turn.source_reason>, idempotencyKey: hash(runId + nt_ids) })`（**`sourceRunId` 必须填**，rebind SQL 依赖它做防御约束，详见 `orchestrator/run_next_turns 表`）；③ 否则若该 (room, primary) 还有 PendingTurn 'queued' → 派发 `ConsumePendingTurn`（内部转 dispatch WakeAgent reason='consume_pending_turn'）；④ 否则不再 wake。**优先级理由**：next_turn 是用户 / rule 在当前 run 期间追加给同一上下文的输入（"继续当前任务"），pending_turn 是新一轮 user message（"开始下一任务"）；先消费上下文延续，再开新一轮 |
 | Orchestrator | `intervention.approved` | dispatch `InjectContext` 内部 Command（具体在 interventions capability）；**不直接调 adapter** |
-| RunService | `CancelRun` Command | 调 `RunLifecycleService.markCancelling(null, runId)`（同步 UPDATE runs.status='cancelling'）；`markCancelling` 成功后**直接同步**调 `AdapterManager.cancelRun(runId)`（不等待 event 回环）；adapter session 实际结束后 AdapterBridge 调 `RunLifecycleService.cancelFinalized(null, runId)` 发 `agent.run.cancelled` |
+| RunService | `CancelRun` Command | 调 `RunLifecycleService.markCancelling(null, runId)`（同步 UPDATE runs.status='cancelling' + 发 `agent.run.cancelling`）；`markCancelling` 成功后**直接同步**调 `AdapterManager.cancelRun(runId)`（不等待 event 回环）；adapter session 实际结束后 AdapterBridge 调 `RunLifecycleService.cancelFinalized(null, runId)` 发 `agent.run.cancelled` |
 | RunQueue Worker | `agent.run.queued` | 申请锁；获得 → 调 `RunLifecycleService.markClaimed(null, runId)` → `markStarting(null, runId, pid)` 发 `agent.run.started`；阻塞 → 调 `RunLifecycleService.markWaiting(null, runId, reason)` |
 | RunQueue Worker | `agent.run.completed` / `.failed` / `.cancelled` | 释放锁，唤醒等待队列 |
 | AdapterBridge | Adapter 内部 `Stream<AdapterEvent>` | 直接发布非 run 类 durable event（`tool.call.*` / `subagent.*` / `file.changed` / `context.snapshot`）；run 终结类（completed / failed / cancelFinalized）必须通过 `RunLifecycleService` 而非 `eventBus.publish`；**不订阅 `agent.run.cancelled`**，cancel 触发由 CancelRun handler 同步驱动 |

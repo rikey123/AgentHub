@@ -14,6 +14,7 @@ import type { PermissionEngine, PermissionResource } from "../../../permissions/
 import { nameToSlug } from "../mention-parser.ts";
 import { MailboxService } from "../mailbox-service.ts";
 import { TaskService, normalizeStatus, normalizeTaskPriority, type TaskRow } from "../task-service.ts";
+import type { TaskModeGroupChatPresenter } from "../task-mode-group-chat-presenter.ts";
 import { writeTcpMessage, createTcpMessageReader } from "./tcp-helpers.ts";
 
 const execFileAsync = promisify(execFile);
@@ -97,7 +98,7 @@ export class RoomMcpServer {
   private readonly authToken = randomUUID();
   private readonly sessionRegistrations = new Map<string, RoomMcpSessionRegistration>();
 
-  constructor(private readonly options: { readonly commandBus: CommandBus; readonly taskService: TaskService; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly permissionEngine?: PermissionEngine; readonly artifactFs?: { readonly readTextFile?: (input: { readonly runId: string; readonly path: string }) => string | undefined; readonly writeTextFile: (input: { readonly runId: string; readonly path: string; readonly content: string }) => void }; readonly artifactService?: RoomMcpArtifactService; readonly now?: () => number }) {}
+  constructor(private readonly options: { readonly commandBus: CommandBus; readonly taskService: TaskService; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly taskModeGroupChatPresenter?: TaskModeGroupChatPresenter; readonly permissionEngine?: PermissionEngine; readonly artifactFs?: { readonly readTextFile?: (input: { readonly runId: string; readonly path: string }) => string | undefined; readonly writeTextFile: (input: { readonly runId: string; readonly path: string; readonly content: string }) => void }; readonly artifactService?: RoomMcpArtifactService; readonly now?: () => number }) {}
 
   /**
    * Start the TCP server. Must be called once before getStdioConfig().
@@ -1076,6 +1077,13 @@ export class RoomMcpServer {
         });
 
         delegateResult = { taskId: taskResult.data.taskId, runId: (dispatched.data as { readonly runId: string }).runId };
+        this.options.taskModeGroupChatPresenter?.publishDelegationCreated({
+          roomId: session.roomId,
+          leaderAgentId: session.agentId,
+          taskId: taskResult.data.taskId,
+          ...(taskResult.data.task.assigneeAgentId !== undefined ? { teammateAgentId: taskResult.data.task.assigneeAgentId } : {}),
+          runId
+        });
       })();
     } catch (error) {
       if (error instanceof DelegateAbort) return error.result;

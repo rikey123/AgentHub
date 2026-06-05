@@ -40,7 +40,7 @@ export function createCsrfFetch(fetchImpl: typeof fetch = fetch): typeof fetch {
     }
     const headers = new Headers(init.headers ?? (input instanceof Request ? input.headers : undefined));
     headers.set("x-agenthub-csrf", token);
-    if (!headers.has("content-type")) headers.set("content-type", "application/json");
+    if (!headers.has("content-type") && !isFormDataBody(init.body)) headers.set("content-type", "application/json");
     if (!headers.has("accept")) headers.set("accept", "application/json");
     return fetchImpl(input, { ...init, method, credentials: init.credentials ?? "same-origin", headers });
   };
@@ -58,4 +58,8 @@ function isAuthSessionRequest(input: RequestInfo | URL): boolean {
   const url = typeof input === "string" || input instanceof URL ? String(input) : input.url;
   const baseUrl = typeof window === "undefined" ? "http://agenthub.local" : window.location.href;
   return new URL(url, baseUrl).pathname === "/auth/session";
+}
+
+function isFormDataBody(body: BodyInit | null | undefined): boolean {
+  return typeof FormData !== "undefined" && body instanceof FormData;
 }

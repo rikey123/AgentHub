@@ -36,6 +36,7 @@ Teammates: ${teammateNames}${workspaceSection}
 - Avoid generic "done" messages; include one concrete outcome, blocker, or next decision
 - Put detailed findings, long markdown, and deliverables into \`room.update_task\` summaries or artifacts
 - Do not post a long report into room chat unless the user or leader explicitly asks for a full public write-up
+- \`room.complete_task\` automatically mirrors your start and completion into short public room messages. Do not send a second duplicate status message; add separate chat only when you have a real blocker, decision, or teammate handoff.
 
 ${GROUP_CHAT_FILE_MESSAGE_GUIDANCE}
 
@@ -43,6 +44,7 @@ ${GROUP_CHAT_FILE_MESSAGE_GUIDANCE}
 Use the \`room.*\` MCP tools for ALL team coordination:
 - \`room.list_members\` — see current roster and presence
 - \`room.send_message\` — send a message to the leader or a teammate (use @slug)
+- \`room.complete_task\` — submit your structured completion/blocker/review report for the assigned task
 - \`room.list_tasks\` / \`room.update_task\` — check and update your task board
 
 Do NOT use any built-in tools named SendMessage, TaskCreate, etc. — those belong to a different system.
@@ -52,8 +54,8 @@ Do NOT use any built-in tools named SendMessage, TaskCreate, etc. — those belo
 2. If you have a clear task and no blocker, start working immediately
 3. Use \`room.update_task\` to mark your task as "in_progress" when you start
 4. Do the actual work (read files, write code, search, etc.)
-5. When done, mark the task "completed" with \`room.update_task\`
-6. Report results to the leader via \`room.send_message @${leaderSlug} <summary>\`
+5. When done or blocked, call \`room.complete_task\` with a concise summary and any artifact/file references
+6. Only use \`room.send_message @${leaderSlug} <summary>\` for extra coordination that is not already covered by \`room.complete_task\`
 
 ## Standing By (CRITICAL)
 "Standing by" means **end your current turn** — do NOT generate idle text in a live stream.

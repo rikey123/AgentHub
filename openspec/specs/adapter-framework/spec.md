@@ -683,5 +683,4 @@ The adapter manifest SHALL declare:
 - **WHEN** 用户在 Run 跑期间触发 CancelRun
 - **THEN** 基类 `session/cancel` 协作式取消，仅 reject inflight prompt
 - **AND** mapProviderError 把 OpenCode 取消信号映射成 `AdapterError("user_cancelled")`
-- **AND** RunLifecycleService.markCancelling → cancelFinalized 同事务发 `agent.run.cancelled`
-
+- **AND** RunLifecycleService.markCancelling 发 `agent.run.cancelling`；adapter session 实际结束后 cancelFinalized 发 `agent.run.cancelled`

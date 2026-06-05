@@ -85,6 +85,7 @@ The canonical event registry SHALL be extended with the following V1.0 event typ
 | `agent.run.started` | run | durable | both | run-lifecycle | 需要 projector handler |
 | `agent.run.completed` | run | durable | both | run-lifecycle | 需要 projector handler |
 | `agent.run.failed` | run | durable | both | run-lifecycle | 需要 projector handler |
+| `agent.run.cancelling` | run | durable | both | run-lifecycle | 需要 projector handler |
 | `agent.run.cancelled` | run | durable | both | run-lifecycle | 需要 projector handler |
 | `agent.run.waiting_permission` | run | durable | both | run-lifecycle | 需要 projector handler |
 | `agent.run.resumed` | run | durable | detail | run-lifecycle | Run Detail only |

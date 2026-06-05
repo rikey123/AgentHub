@@ -31,4 +31,19 @@ describe("TypingIndicator", () => {
     expect(html).toContain("Reviewer is speaking");
     expect(html).toContain("Group turn 4");
   });
+
+  it("renders cancelling feedback instead of another stop action", () => {
+    const html = renderToStaticMarkup(createElement(TypingIndicator, {
+      agentName: "Builder",
+      status: "cancelling",
+      mode: "assisted",
+      turnIndex: 1,
+      runId: "run-1",
+      onStopDiscussion: () => undefined
+    }));
+
+    expect(html).toContain("Builder is stopping");
+    expect(html).toContain("Stopping discussion");
+    expect(html).not.toContain("Stop discussion");
+  });
 });

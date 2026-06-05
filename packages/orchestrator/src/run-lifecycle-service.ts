@@ -302,6 +302,7 @@ export class RunLifecycleService {
       if (run.status === "cancelling") return;
       this.requireStatus(run, ["queued", "waiting", "claimed", "starting", "running", "waiting_permission"], "markCancelling");
       this.updateStatus(db, runId, "cancelling", { waiting_reason: null });
+      this.publishRunEvent(db, "agent.run.cancelling", runId, run.workspace_id, run.room_id, run.agent_id, { runId });
     });
   }
 

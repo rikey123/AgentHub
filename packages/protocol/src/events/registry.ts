@@ -102,6 +102,7 @@ export const EVENT_REGISTRY = [
   { type: "agent.run.started", category: "run", durability: "durable", visibility: "both", schemaVersion: 1 },
   { type: "agent.run.completed", category: "run", durability: "durable", visibility: "both", schemaVersion: 1 },
   { type: "agent.run.failed", category: "run", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "agent.run.cancelling", category: "run", durability: "durable", visibility: "both", schemaVersion: 1 },
   { type: "agent.run.cancelled", category: "run", durability: "durable", visibility: "both", schemaVersion: 1 },
   { type: "agent.run.waiting_permission", category: "run", durability: "durable", visibility: "both", schemaVersion: 1 },
   { type: "agent.run.resumed", category: "run", durability: "durable", visibility: "detail", schemaVersion: 1 },

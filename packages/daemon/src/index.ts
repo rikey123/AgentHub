@@ -12,7 +12,7 @@ import { ContextLedger, createContextCommandHandlers, HeuristicBriefGenerator } 
 import { createDatabase, type AgentHubDatabase } from "@agenthub/db";
 import { MockAdapterManager } from "@agenthub/adapter-mock";
 import { createInterventionCommandHandlers, InterventionEngine } from "@agenthub/interventions";
-import { ActiveWakesRegistry, AssistedSelectorGroupChatManager, checkTaskTimeouts, createCancelRunHandler, createCompleteTaskHandler, createConsumePendingTurnHandler, createCreateTaskHandler, createUpdateTaskHandler, createWakeAgentHandler, handleTeamDispatchReviewTerminal, MailboxService, maybePublishTeamDispatchCompleted, PendingTurnService, ReclaimStaleClaimedRun, reconcileTerminalDelegatedTaskRuns, RoomMcpServer, RunLifecycleService, RunQueue, StartupRecovery, TaskService, WELL_KNOWN_CAPABILITY_TOKENS, type BriefResolver } from "@agenthub/orchestrator";
+import { ActiveWakesRegistry, AssistedSelectorGroupChatManager, checkTaskTimeouts, createCancelRunHandler, createCompleteTaskHandler, createConsumePendingTurnHandler, createCreateTaskHandler, createUpdateTaskHandler, createWakeAgentHandler, handleTeamDispatchReviewTerminal, MailboxService, maybePublishTeamDispatchCompleted, PendingTurnService, ReclaimStaleClaimedRun, reconcileTerminalDelegatedTaskRuns, RoomMcpServer, RunLifecycleService, RunQueue, StartupRecovery, TaskModeGroupChatPresenter, TaskService, WELL_KNOWN_CAPABILITY_TOKENS, type BriefResolver } from "@agenthub/orchestrator";
 import { createPermissionCommandHandlers, PermissionEngine, seedBuiltInPermissionProfiles } from "@agenthub/permissions";
 import type { EventEnvelope } from "@agenthub/protocol/events";
 import { SkillRegistry, listRuntimeLocalSkills, loadRuntimeLocalSkillBundle } from "@agenthub/skills";
@@ -264,7 +264,14 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
         });
       });
     };
-    const taskService = new TaskService({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}), onTaskCompleted: (task) => maybePublishTeamDispatchCompleted({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) }, task) });
+    const taskModeGroupChatPresenter = new TaskModeGroupChatPresenter({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
+    const taskService = new TaskService({
+      database,
+      eventBus,
+      taskModeGroupChatPresenter,
+      ...(options.now !== undefined ? { now: options.now } : {}),
+      onTaskCompleted: (task) => maybePublishTeamDispatchCompleted({ database, eventBus, taskModeGroupChatPresenter, ...(options.now !== undefined ? { now: options.now } : {}) }, task)
+    });
     const artifactFs = new ArtifactFSRunRegistry({
       database,
       service: artifactService,
@@ -421,7 +428,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
           activeWakes.releaseRun(runId);
           runQueueRef.current?.releaseLocks(runId);
           pendingTurns.handleTerminal(runId);
-          void handleTeamDispatchReviewTerminal({ database, eventBus, commandBus: commandBusRef.current ?? commandBus, taskService, ...(options.now !== undefined ? { now: options.now } : {}) }, runId);
+          void handleTeamDispatchReviewTerminal({ database, eventBus, commandBus: commandBusRef.current ?? commandBus, taskService, taskModeGroupChatPresenter, ...(options.now !== undefined ? { now: options.now } : {}) }, runId);
           void continueAssistedSelectorAfterRun({ database, getCommandBus: () => commandBusRef.current, assistedSelector }, runId).catch(() => undefined);
         },
         finalizeNextTurns: (tx: AgentHubDatabase["sqlite"], runId: string, failureClass: Parameters<MailboxService["finalizeForRun"]>[2], now: number) => mailbox.finalizeForRun(tx, runId, failureClass, now),
@@ -582,13 +589,13 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
       }
     });
     commandBusRef.current = commandBus;
-    const roomMcpServer = new RoomMcpServer({ commandBus, taskService, database, eventBus, permissionEngine, artifactFs, artifactService, ...(options.now !== undefined ? { now: options.now } : {}) });
+    const roomMcpServer = new RoomMcpServer({ commandBus, taskService, database, eventBus, taskModeGroupChatPresenter, permissionEngine, artifactFs, artifactService, ...(options.now !== undefined ? { now: options.now } : {}) });
     // Start the TCP server so agents can reach room.* MCP tools via the stdio bridge.
     await roomMcpServer.startTcp();
     roomMcpServerRef.current = roomMcpServer;
     const delegatedTaskReconciliation = reconcileTerminalDelegatedTaskRuns({ database, eventBus, taskService, ...(options.now !== undefined ? { now: options.now } : {}) });
     for (const runId of delegatedTaskReconciliation.reviewDispatchRunIds) {
-      await handleTeamDispatchReviewTerminal({ database, eventBus, commandBus, taskService, ...(options.now !== undefined ? { now: options.now } : {}) }, runId);
+      await handleTeamDispatchReviewTerminal({ database, eventBus, commandBus, taskService, taskModeGroupChatPresenter, ...(options.now !== undefined ? { now: options.now } : {}) }, runId);
     }
     const runTaskTimeoutSweep = () => {
       const wakes = checkTaskTimeouts(database, eventBus, options.now?.() ?? Date.now());

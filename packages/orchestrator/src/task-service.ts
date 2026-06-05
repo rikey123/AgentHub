@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import type { Command, CommandErrorCode, CommandHandler, CommandMeta, CommandResult, EventBus, PublishInput } from "@agenthub/bus";
 import type { AgentHubDatabase } from "@agenthub/db";
+import type { TaskModeGroupChatPresenter } from "./task-mode-group-chat-presenter.ts";
 
 export type TaskStatus = "pending" | "in_progress" | "blocked" | "review" | "completed" | "cancelled";
 
@@ -139,7 +140,7 @@ export type AddTaskActivityInput = {
 };
 
 export class TaskService {
-  constructor(private readonly options: { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly now?: () => number; readonly onTaskCompleted?: (task: TaskRow) => void }) {}
+  constructor(private readonly options: { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly taskModeGroupChatPresenter?: TaskModeGroupChatPresenter; readonly now?: () => number; readonly onTaskCompleted?: (task: TaskRow) => void }) {}
 
   create(input: CreateTaskInput): CommandResult<{ readonly task: TaskView; readonly taskId: string }> {
     return this.options.database.sqlite.transaction(() => this.createInTransaction(input))();
@@ -333,6 +334,15 @@ export class TaskService {
 
     const task = this.task(input.taskId);
     if (!task) return failed("internal_error", `Task '${input.taskId}' was not persisted`);
+    this.options.taskModeGroupChatPresenter?.publishTaskOutcome({
+      roomId: input.roomId,
+      taskId: input.taskId,
+      teammateAgentId: input.callerAgentId,
+      finalStatus: nextStatus,
+      summary: input.summary,
+      ...(input.blockerReason !== undefined ? { blockerReason: input.blockerReason } : {}),
+      ...(input.byRunId !== undefined ? { runId: input.byRunId } : {})
+    });
     return { ok: true, data: { task: taskView(task), taskId: input.taskId }, emittedEvents: latestTaskEvents(this.options.database, input.taskId) };
   }
 
@@ -351,7 +361,15 @@ export class TaskService {
   }
 
   startDelegatedRun(taskId: string, byRunId: string): CommandResult<{ readonly task: TaskView; readonly taskId: string }> {
-    return this.transitionDelegatedTask(taskId, "in_progress", { reason: "delegated_run_started", byRunId, activityKind: "status_change", activityPayload: { fromStatus: "pending", nextStatus: "in_progress", byRunId } });
+    const before = this.task(taskId);
+    const result = this.transitionDelegatedTask(taskId, "in_progress", { reason: "delegated_run_started", byRunId, activityKind: "status_change", activityPayload: { fromStatus: "pending", nextStatus: "in_progress", byRunId } });
+    if (result.ok && before !== undefined && before.status !== "in_progress") {
+      const task = this.task(taskId);
+      if (task !== undefined && task.room_id !== null && task.assignee_agent_id !== null) {
+        this.options.taskModeGroupChatPresenter?.publishTaskStarted({ roomId: task.room_id, taskId, teammateAgentId: task.assignee_agent_id, runId: byRunId });
+      }
+    }
+    return result;
   }
 
   completeDelegatedRun(taskId: string, byRunId: string): CommandResult<{ readonly task: TaskView; readonly taskId: string }> {
@@ -374,11 +392,22 @@ export class TaskService {
 
     const task = this.task(taskId);
     if (!task) return failed("internal_error", `Task '${taskId}' was not persisted`);
+    if (task.room_id !== null && task.assignee_agent_id !== null) {
+      this.options.taskModeGroupChatPresenter?.publishTaskOutcome({ roomId: task.room_id, taskId, teammateAgentId: task.assignee_agent_id, finalStatus: "completed", runId: byRunId });
+    }
     return { ok: true, data: { task: taskView(task), taskId }, emittedEvents: latestTaskEvents(this.options.database, taskId) };
   }
 
   blockDelegatedRun(taskId: string, byRunId: string, blockerReason?: string): CommandResult<{ readonly task: TaskView; readonly taskId: string }> {
-    return this.transitionDelegatedTask(taskId, "blocked", { reason: "delegated_run_failed", byRunId, ...(blockerReason !== undefined ? { blockerReason } : {}), activityKind: "status_change", activityPayload: { fromStatus: "in_progress", nextStatus: "blocked", byRunId } });
+    const before = this.task(taskId);
+    const result = this.transitionDelegatedTask(taskId, "blocked", { reason: "delegated_run_failed", byRunId, ...(blockerReason !== undefined ? { blockerReason } : {}), activityKind: "status_change", activityPayload: { fromStatus: "in_progress", nextStatus: "blocked", byRunId } });
+    if (result.ok && before !== undefined && before.status !== "blocked") {
+      const task = this.task(taskId);
+      if (task !== undefined && task.room_id !== null && task.assignee_agent_id !== null) {
+        this.options.taskModeGroupChatPresenter?.publishTaskOutcome({ roomId: task.room_id, taskId, teammateAgentId: task.assignee_agent_id, finalStatus: "blocked", ...(blockerReason !== undefined ? { blockerReason } : {}), runId: byRunId });
+      }
+    }
+    return result;
   }
 
   addTaskActivity(input: AddTaskActivityInput): CommandResult<{ readonly task: TaskView; readonly taskId: string; readonly activityId: string }> {

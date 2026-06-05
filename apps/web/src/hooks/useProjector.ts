@@ -310,6 +310,19 @@ class Projector {
         }
         break;
       }
+      case "message.deleted": {
+        if (payload && typeof payload.messageId === "string") {
+          this.flushDeltaBatch(payload.messageId);
+          room = {
+            ...room,
+            messages: room.messages.filter((m) => m.id !== payload.messageId),
+            pendingTurns: room.pendingTurns.filter((m) => m.id !== payload.messageId)
+          };
+          this.rooms.set(roomId, room);
+          changed = true;
+        }
+        break;
+      }
       case "message.brief.published": {
         if (payload) {
           const runId = typeof event.runId === "string" ? event.runId : typeof payload.runId === "string" ? payload.runId : "";
@@ -409,6 +422,7 @@ class Projector {
       case "agent.run.waiting_permission":
       case "agent.run.completed":
       case "agent.run.failed":
+      case "agent.run.cancelling":
       case "agent.run.cancelled": {
         if (payload && typeof payload.runId === "string") {
           const runIndex = room.runs.findIndex((r) => r.id === payload.runId);
@@ -418,6 +432,7 @@ class Projector {
             "agent.run.waiting_permission": "waiting_permission",
             "agent.run.completed": "completed",
             "agent.run.failed": "failed",
+            "agent.run.cancelling": "cancelling",
             "agent.run.cancelled": "cancelled"
           };
           const existing = runIndex >= 0 ? room.runs[runIndex] : undefined;

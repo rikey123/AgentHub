@@ -4,12 +4,14 @@ import type { CommandBus, EventBus } from "@agenthub/bus";
 import type { AgentHubDatabase } from "@agenthub/db";
 
 import { TaskService, type TaskRow, type TeamDispatchScope } from "./task-service.ts";
+import type { TaskModeGroupChatPresenter } from "./task-mode-group-chat-presenter.ts";
 
 type TeamDispatchRuntime = {
   readonly database: AgentHubDatabase;
   readonly eventBus: EventBus;
   readonly commandBus: CommandBus;
   readonly taskService: TaskService;
+  readonly taskModeGroupChatPresenter?: TaskModeGroupChatPresenter;
   readonly now?: () => number;
 };
 
@@ -72,9 +74,15 @@ export async function handleTeamDispatchReviewTerminal(runtime: TeamDispatchRunt
     payload: { dispatchId, leaderRunId, targetTaskIds: siblingState.taskIds, sourceRunId: scope.value },
     createdAt: runtime.now?.() ?? Date.now()
   });
+  runtime.taskModeGroupChatPresenter?.publishTeamReviewStarted({
+    roomId: task.room_id,
+    leaderAgentId: room.primary_agent_id,
+    taskIds: siblingState.taskIds,
+    runId: leaderRunId
+  });
 }
 
-export function maybePublishTeamDispatchCompleted(runtime: Pick<TeamDispatchRuntime, "database" | "eventBus" | "now">, task: TaskRow): void {
+export function maybePublishTeamDispatchCompleted(runtime: Pick<TeamDispatchRuntime, "database" | "eventBus" | "taskModeGroupChatPresenter" | "now">, task: TaskRow): void {
   if (task.status !== "completed" || task.expects_review === 0) return;
   const scope = taskDispatchScope(task);
   if (scope === undefined) return;
@@ -100,6 +108,12 @@ export function maybePublishTeamDispatchCompleted(runtime: Pick<TeamDispatchRunt
     taskId: task.id,
     payload: { dispatchId, leaderRunId: task.source_run_id ?? scope.value, taskIds, sourceRunId: scope.value, summary: `All ${taskIds.length} review tasks completed` },
     createdAt: runtime.now?.() ?? Date.now()
+  });
+  runtime.taskModeGroupChatPresenter?.publishTeamReviewCompleted({
+    roomId: task.room_id,
+    leaderAgentId: room.primary_agent_id,
+    taskIds,
+    runId: task.source_run_id ?? scope.value
   });
 }
 

@@ -180,6 +180,11 @@ export class NativeAgentAdapter {
       }
 
       const finalText = this.completeAssistantText(run, messageId);
+      if (finalText === undefined && run.wake_reason !== "plan") {
+        this.persistEmptyOutputMessage(run, messageId);
+        this.options.lifecycle.fail(null, run.id, "native_agent_empty_output", "retryable_visible", "native agent completed without producing a reply");
+        return;
+      }
       const usage = await usagePromise;
       bridge.handle({ type: "session.ended", sessionId, reason: "completed", cost: costFromUsage(usage, modelConfig.model) });
       if (run.wake_reason === "plan") void Promise.resolve(this.options.onPlanPhaseEnded?.(run.id, finalText));
@@ -190,8 +195,12 @@ export class NativeAgentAdapter {
         bridge.handle({ type: "session.ended", sessionId, reason: "cancelled", cost: zeroCost(modelConfig.model) });
         return;
       }
-      this.completeAssistantText(run, `msg_${run.id}`);
-      this.options.lifecycle.fail(null, run.id, "native_agent_runtime_error", classifyFailureClass(error), error instanceof Error ? error.message : String(error));
+      const failureClass = classifyFailureClass(error);
+      const messageId = `msg_${run.id}`;
+      if (this.completeAssistantText(run, messageId) === undefined) {
+        this.persistVisibleFailureMessage(run, messageId, failureClass);
+      }
+      this.options.lifecycle.fail(null, run.id, "native_agent_runtime_error", failureClass, error instanceof Error ? error.message : String(error));
     } finally {
       this.publishPermissionSummary(run.id);
       this.activeRuns.delete(run.id);
@@ -311,6 +320,20 @@ export class NativeAgentAdapter {
     });
   }
 
+  private persistVisibleFailureMessage(run: RunRow, messageId: string, failureClass: ReturnType<typeof classifyFailureClass>): void {
+    if (run.wake_reason === "plan") return;
+    const text = failureClass === "configuration"
+      ? "Model call failed before producing a reply. Check this agent's model configuration and API key."
+      : "The agent failed before producing a reply. Open the run details for the error.";
+    this.persistAssistantMessageStart(run, messageId);
+    this.persistAssistantMessageEnd(run, messageId, text);
+  }
+
+  private persistEmptyOutputMessage(run: RunRow, messageId: string): void {
+    this.persistAssistantMessageStart(run, messageId);
+    this.persistAssistantMessageEnd(run, messageId, "The agent finished without producing a reply. Check the run details or try again.");
+  }
+
   private publishRunEvent(run: RunRow, type: PublishInput["type"], payload: Record<string, unknown>): void {
     this.options.eventBus.publish({
       id: randomUUID(),
@@ -414,7 +437,7 @@ function isAbortError(error: unknown): boolean {
 
 function classifyFailureClass(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
-  if (/api key|auth|credentials|unsupported-provider|not found|model_not_found|no available channel|unknown model|does not exist/i.test(message)) return "configuration" as const;
+  if (/403|forbidden|unauthori[sz]ed|api key|auth|credentials|unsupported-provider|not found|model_not_found|no available channel|unknown model|does not exist/i.test(message)) return "configuration" as const;
   return "retryable_visible" as const;
 }
 

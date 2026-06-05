@@ -132,6 +132,23 @@ describe("ChatStream task notification feed", () => {
       turnIndex: 2
     });
   });
+
+  it("keeps cancelling assisted runs visible as active stop feedback", () => {
+    const room = roomFixture({
+      mode: "assisted",
+      runs: [
+        { id: "run-builder", agentId: "builder", agentName: "Builder", status: "cancelling", wakeReason: "primary_turn", messageId: "msg-1" }
+      ]
+    });
+
+    expect(activeRunIndicatorProps(room)).toEqual({
+      runId: "run-builder",
+      agentName: "Builder",
+      status: "cancelling",
+      mode: "assisted",
+      turnIndex: 1
+    });
+  });
 });
 
 function roomFixture(patch: Partial<RoomViewModel>): RoomViewModel {
