@@ -36,72 +36,53 @@ export function MessageItem(props: MessageItemProps) {
     <div
       role="button"
       tabIndex={0}
-      onClick={onSelect}
+      onClick={(e) => {
+        e.stopPropagation();
+        onSelect?.();
+      }}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
+          e.stopPropagation();
           onSelect?.();
         }
       }}
       className={[
-        "group mx-auto my-1.5 w-full max-w-[920px] px-4 py-1 transition-colors",
+        "group mx-auto my-1.5 w-full max-w-[1280px] px-6 py-1 transition-colors",
         isSelected ? "rounded-2xl bg-accent-soft" : ""
       ].join(" ")}
       data-message-id={message.id}
       data-speaker-type={isUser ? "user" : isSystem ? "system" : "agent"}
       data-testid={testId}
     >
-      <div className={["flex items-end gap-2", isUser ? "justify-end" : "justify-start"].join(" ")}>
+      <div className={["flex items-end gap-2.5", isUser ? "justify-end" : "justify-start"].join(" ")}>
         {!isUser ? (
-          <Avatar size="sm" className="mb-1 shrink-0 shadow-sm ring-2 ring-background">
+          <Avatar size="sm" className="mb-6 shrink-0 shadow-sm ring-2 ring-background">
             <Avatar.Fallback>{initials(message.senderName)}</Avatar.Fallback>
           </Avatar>
         ) : null}
 
-        <div className={["flex min-w-0 max-w-[min(78%,760px)] flex-col", isUser ? "items-end" : "items-start"].join(" ")}>
-          <header className={["mb-1 flex max-w-full items-center gap-2 text-xs", isUser ? "justify-end" : "justify-start"].join(" ")}>
-            {!isUser ? <span className="truncate font-semibold text-foreground">{message.senderName}</span> : null}
-            {!isUser ? <Chip size="sm" variant="soft" color={senderColor}>{message.role}</Chip> : null}
-            {message.pendingTurnStatus ? (
-              <Chip
-                size="sm"
-                variant="soft"
-                color={pendingTurnColor(message.pendingTurnStatus)}
-                aria-label={`Pending turn: ${message.pendingTurnStatus}${message.pendingTurnPosition ? ` position ${message.pendingTurnPosition}` : ""}`}
-              >
-                {message.pendingTurnStatus}{message.pendingTurnPosition ? ` #${message.pendingTurnPosition}` : ""}
-              </Chip>
-            ) : null}
-            <span className="shrink-0 text-muted">{formatTime(message.createdAt)}</span>
-            <Dropdown>
-              <Dropdown.Trigger
-                className="inline-flex h-7 w-7 items-center justify-center rounded-full text-muted opacity-0 transition-opacity hover:bg-default group-hover:opacity-100 focus:opacity-100"
-                aria-label="Message actions"
-                data-testid={`message-menu-${message.id}`}
-              >
-                ...
-              </Dropdown.Trigger>
-              <Dropdown.Popover>
-                <Dropdown.Menu aria-label="Message actions">
-                  {onQuote ? <Dropdown.Item onAction={onQuote}>Quote</Dropdown.Item> : null}
-                  {onRegenerate && message.senderType === "agent" && message.status === "completed" ? (
-                    <Dropdown.Item onAction={onRegenerate}>Regenerate</Dropdown.Item>
-                  ) : null}
-                  {onPin && message.status === "completed" ? <Dropdown.Item onAction={onPin}>Pin</Dropdown.Item> : null}
-                  {message.runId && onOpenRun ? (
-                    <Dropdown.Item onAction={() => onOpenRun(message.runId!)}>Open run</Dropdown.Item>
-                  ) : null}
-                  {onDelete ? (
-                    <Dropdown.Item onAction={onDelete} className="text-danger">Delete</Dropdown.Item>
-                  ) : null}
-                </Dropdown.Menu>
-              </Dropdown.Popover>
-            </Dropdown>
-          </header>
+        <div className={["flex min-w-0 max-w-[min(88%,900px)] flex-col", isUser ? "items-end" : "items-start"].join(" ")}>
+          {!isUser ? (
+            <header className="mb-1 flex max-w-full items-center gap-2 text-xs justify-start">
+              <span className="truncate font-semibold text-foreground">{message.senderName}</span>
+              <Chip size="sm" variant="soft" color={senderColor}>{message.role}</Chip>
+              {message.pendingTurnStatus ? (
+                <Chip
+                  size="sm"
+                  variant="soft"
+                  color={pendingTurnColor(message.pendingTurnStatus)}
+                  aria-label={`Pending turn: ${message.pendingTurnStatus}${message.pendingTurnPosition ? ` position ${message.pendingTurnPosition}` : ""}`}
+                >
+                  {message.pendingTurnStatus}{message.pendingTurnPosition ? ` #${message.pendingTurnPosition}` : ""}
+                </Chip>
+              ) : null}
+            </header>
+          ) : null}
 
           <div
             className={[
-              "relative min-w-24 rounded-[20px] px-4 py-3 text-sm leading-6 shadow-sm",
+              "relative w-fit rounded-[20px] px-4 py-3 text-sm leading-6 shadow-sm",
               isUser
                 ? "rounded-br-md bg-accent text-accent-foreground"
                 : isSystem
@@ -156,10 +137,38 @@ export function MessageItem(props: MessageItemProps) {
               </div>
             ) : null}
           </div>
+
+          <footer className={["mt-1 flex items-center gap-1.5 text-xs", isUser ? "justify-end" : "justify-start"].join(" ")}>
+            <span className="shrink-0 text-muted">{formatTime(message.createdAt)}</span>
+            <Dropdown>
+              <Dropdown.Trigger
+                className="inline-flex h-6 w-6 items-center justify-center rounded-full text-muted opacity-0 transition-opacity hover:bg-default group-hover:opacity-100 focus:opacity-100"
+                aria-label="消息操作"
+                data-testid={`message-menu-${message.id}`}
+              >
+                ...
+              </Dropdown.Trigger>
+              <Dropdown.Popover>
+                <Dropdown.Menu aria-label="消息操作">
+                  {onQuote ? <Dropdown.Item onAction={onQuote}>引用</Dropdown.Item> : null}
+                  {onRegenerate && message.senderType === "agent" && message.status === "completed" ? (
+                    <Dropdown.Item onAction={onRegenerate}>Regenerate</Dropdown.Item>
+                  ) : null}
+                  {onPin && message.status === "completed" ? <Dropdown.Item onAction={onPin}>置顶</Dropdown.Item> : null}
+                  {message.runId && onOpenRun ? (
+                    <Dropdown.Item onAction={() => onOpenRun(message.runId!)}>Open run</Dropdown.Item>
+                  ) : null}
+                  {onDelete ? (
+                    <Dropdown.Item onAction={onDelete} className="text-danger">删除</Dropdown.Item>
+                  ) : null}
+                </Dropdown.Menu>
+              </Dropdown.Popover>
+            </Dropdown>
+          </footer>
         </div>
 
         {isUser ? (
-          <Avatar size="sm" className="mb-1 shrink-0 shadow-sm ring-2 ring-background">
+          <Avatar size="sm" className="mb-6 shrink-0 shadow-sm ring-2 ring-background">
             <Avatar.Fallback>{initials(message.senderName)}</Avatar.Fallback>
           </Avatar>
         ) : null}
