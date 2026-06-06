@@ -6,7 +6,7 @@ import { createCommandBus, EventBus } from "@agenthub/bus";
 import { createDatabase, type AgentHubDatabase } from "@agenthub/db";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { ArtifactFS, ArtifactFSError, ArtifactService, SafeWritePolicyMatcher, createArtifactCommandHandlers, sha256, type FileOps } from "../src/index.ts";
+import { ArtifactFS, ArtifactFSError, ArtifactService, SafeWritePolicyMatcher, createArtifactCommandHandlers, parseGitDiffFiles, sha256, type FileOps } from "../src/index.ts";
 
 let dir: string | undefined;
 let workspaceRoot: string | undefined;
@@ -39,6 +39,60 @@ afterEach(() => {
 });
 
 describe("ArtifactService", () => {
+  it("parses git patches into per-file artifact rows", () => {
+    const files = parseGitDiffFiles([
+      "diff --git a/src/a.ts b/src/a.ts",
+      "--- a/src/a.ts",
+      "+++ b/src/a.ts",
+      "@@ -1,2 +1,2 @@",
+      " keep",
+      "-old",
+      "+new",
+      "diff --git a/src/removed.ts b/src/removed.ts",
+      "deleted file mode 100644",
+      "--- a/src/removed.ts",
+      "+++ /dev/null",
+      "@@ -1 +0,0 @@",
+      "-bye",
+      ""
+    ].join("\n"), ["src/a.ts", "src/removed.ts"]);
+
+    expect(files).toEqual([
+      expect.objectContaining({ path: "src/a.ts", fileStatus: "modified", additions: 1, deletions: 1, patch: expect.stringContaining("diff --git a/src/a.ts b/src/a.ts") }),
+      expect.objectContaining({ path: "src/removed.ts", fileStatus: "deleted", additions: 0, deletions: 1, patch: expect.stringContaining("deleted file mode") })
+    ]);
+  });
+
+  it("parses rename, binary, mode-only, and no-newline git patch metadata", () => {
+    const files = parseGitDiffFiles([
+      "diff --git a/src/old.ts b/src/new.ts",
+      "similarity index 92%",
+      "rename from src/old.ts",
+      "rename to src/new.ts",
+      "index 1111111..2222222 100644",
+      "--- a/src/old.ts",
+      "+++ b/src/new.ts",
+      "@@ -1 +1 @@",
+      "-old",
+      "+new",
+      "\\ No newline at end of file",
+      "diff --git a/assets/logo.png b/assets/logo.png",
+      "new file mode 100644",
+      "index 0000000..3333333",
+      "Binary files /dev/null and b/assets/logo.png differ",
+      "diff --git a/scripts/run.sh b/scripts/run.sh",
+      "old mode 100644",
+      "new mode 100755",
+      ""
+    ].join("\n"), ["src/new.ts", "assets/logo.png", "scripts/run.sh"]);
+
+    expect(files).toEqual([
+      expect.objectContaining({ path: "src/new.ts", fileStatus: "renamed", oldPath: "src/old.ts", additions: 1, deletions: 1, binary: false, noNewlineAtEnd: true }),
+      expect.objectContaining({ path: "assets/logo.png", fileStatus: "added", additions: 0, deletions: 0, binary: true }),
+      expect.objectContaining({ path: "scripts/run.sh", fileStatus: "mode_changed", additions: 0, deletions: 0, binary: false })
+    ]);
+  });
+
   it("creates and reads diff/file/document artifacts and files", () => {
     const diff = currentService().create(baseDiffInput("src/a.ts", "old", "new"));
     const file = currentService().create({ workspaceId: "ws_1", roomId: "room_1", type: "file", title: "chart", createdBy: "agent", files: [{ path: ".agenthub/attachments/chart.png", newContent: "png", additions: 1, deletions: 0, fileStatus: "added", contentPath: ".agenthub/attachments/chart.png" }] });
@@ -61,6 +115,94 @@ describe("ArtifactService", () => {
     expect(rejected.status).toBe("rejected");
     expect(readWorkspace("src/a.ts")).toBe("old");
     expect(artifactEvents()).toEqual(["artifact.diff.created", "artifact.reviewing", "artifact.rejected"]);
+    expect(currentService().reviews(diff.id)).toEqual([
+      expect.objectContaining({ artifactId: diff.id, decision: "reviewing", reviewerKind: "system", reviewerId: "system" }),
+      expect.objectContaining({ artifactId: diff.id, decision: "rejected", reason: "not wanted", reviewerKind: "system", reviewerId: "system" })
+    ]);
+  });
+
+  it("records line-level artifact review comments as durable audit events", () => {
+    const diff = currentService().create(baseDiffInput("src/a.ts", "old", "new"));
+
+    const review = currentService().addReview({
+      artifactId: diff.id,
+      decision: "comment",
+      reviewerKind: "user",
+      reviewerId: "local",
+      reason: "Please keep this helper private.",
+      filePath: "src/a.ts",
+      lineNumber: 12
+    });
+
+    expect(review).toMatchObject({
+      artifactId: diff.id,
+      decision: "comment",
+      reviewerKind: "user",
+      reviewerId: "local",
+      reason: "Please keep this helper private.",
+      filePath: "src/a.ts",
+      lineNumber: 12
+    });
+    expect(currentService().reviews(diff.id)).toEqual([
+      expect.objectContaining({ id: review.id, decision: "comment", filePath: "src/a.ts", lineNumber: 12 })
+    ]);
+    expect(artifactEvents()).toEqual(["artifact.diff.created", "artifact.review.added"]);
+    expect(lastPayload("artifact.review.added")).toMatchObject({
+      artifactId: diff.id,
+      reviewId: review.id,
+      decision: "comment",
+      filePath: "src/a.ts",
+      lineNumber: 12
+    });
+  });
+
+  it("updates, resolves, and soft-deletes artifact review comments with durable events", () => {
+    const diff = currentService().create(baseDiffInput("src/a.ts", "old", "new"));
+    const review = currentService().addReview({
+      artifactId: diff.id,
+      decision: "comment",
+      reviewerKind: "user",
+      reviewerId: "local",
+      reason: "Initial note",
+      filePath: "src/a.ts",
+      lineNumber: 2,
+      side: "new",
+      lineStart: 2,
+      lineEnd: 3
+    });
+
+    now += 1;
+    const updated = currentService().updateReview(diff.id, review.id, { reason: "Updated note", lineNumber: 4, side: "old" });
+    now += 1;
+    const resolved = currentService().resolveReview(diff.id, review.id);
+    now += 1;
+    const deleted = currentService().deleteReview(diff.id, review.id);
+
+    expect(updated).toMatchObject({ reason: "Updated note", lineNumber: 4, side: "old", status: "open", updatedAt: 50_001 });
+    expect(resolved).toMatchObject({ status: "resolved", resolvedAt: 50_002 });
+    expect(deleted).toMatchObject({ status: "deleted", deletedAt: 50_003 });
+    expect(currentService().reviews(diff.id)).toEqual([]);
+    expect(currentService().reviews(diff.id, { includeDeleted: true })).toEqual([
+      expect.objectContaining({ id: review.id, reason: "Updated note", status: "deleted", deletedAt: 50_003 })
+    ]);
+    expect(artifactEvents()).toEqual(["artifact.diff.created", "artifact.review.added", "artifact.review.updated", "artifact.review.resolved", "artifact.review.deleted"]);
+    expect(lastPayload("artifact.review.updated")).toMatchObject({ artifactId: diff.id, reviewId: review.id, reason: "Updated note", side: "old" });
+    expect(lastPayload("artifact.review.deleted")).toMatchObject({ artifactId: diff.id, reviewId: review.id });
+  });
+
+  it("archives and soft-deletes artifacts without returning deleted rows in normal lists", () => {
+    const diff = currentService().create(baseDiffInput("src/a.ts", "old", "new"));
+
+    now += 1;
+    const archived = currentService().archive(diff.id);
+    now += 1;
+    const deleted = currentService().delete(diff.id);
+
+    expect(archived).toMatchObject({ id: diff.id, archivedAt: 50_001 });
+    expect(deleted).toMatchObject({ id: diff.id, deletedAt: 50_002 });
+    expect(currentService().list({ roomId: "room_1" })).toEqual([]);
+    expect(currentService().list({ roomId: "room_1", includeDeleted: true })).toEqual([expect.objectContaining({ id: diff.id, deletedAt: 50_002 })]);
+    expect(artifactEvents()).toEqual(["artifact.diff.created", "artifact.archived", "artifact.deleted"]);
   });
 
   it("applies multiple files after prevalidation in sorted path order", () => {

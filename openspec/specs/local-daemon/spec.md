@@ -283,51 +283,30 @@ type GcConfig = {
 
 ### Requirement: daemon CLI 子命令
 
-The system SHALL provide a CLI binary `agenthub` (in `apps/cli`) with the following subcommands.
+The CLI SHALL support the mature launcher commands:
 
-| Subcommand | 描述 | 输出 |
-|---|---|---|
-| `agenthub start [--port=<n>] [--config=<path>]` | 在前台启动 daemon | 等同直接调 `node packages/daemon/dist/index.js`；ctrl-c 退出 |
-| `agenthub stop [--force] [--timeout=<s>]` | 停止运行中的 daemon | 读 PID 文件 → 发 SIGTERM；`--force` 发 SIGKILL；`--timeout` 默认 30s |
-| `agenthub status` | 检查 daemon 健康 | HTTP `/healthz` 探测，输出 `ready` / `starting` / `shutting_down` / `unreachable` |
-| `agenthub doctor` | 环境诊断 | 检查：① SQLite 文件锁状态 ② 端口是否被占 ③ 凭据存储模式（M0 输出固定 "AES fallback (file-based)"，不实写测 entry；keytar 真接入推到 V1.0）④ migrations 状态（DB schema vs 包内 migration 版本）⑤ config.toml 解析是否成功；每项 ✅ / ❌ 输出 |
-| `agenthub auth issue --description=<s> [--scope=read,write,admin] [--expires-days=<n>]` | 发 token | 调 `/auth/tokens` API，stdout 输出新 token（仅一次显示）+ id |
-| `agenthub auth list` | 列已有 token | 表格显示 id / description / scopes / created_at / expires_at / last_used_at（不显示 token 值本身，只显示 fingerprint） |
-| `agenthub auth revoke <id>` | 吊销 token | 调 `/auth/tokens/:id` DELETE |
-| `agenthub agents reset --id=<agentId>` | 覆盖单个内置 agent 模板（来自 `agents/内置 Agent`） | 复制内置 markdown 到 `~/.agenthub/agents/<id>.md`，覆盖用户改动 |
-| `agenthub --version` | 显示版本 | 读 package.json |
-| `agenthub --help` | 显示 help | 列所有子命令 |
+```text
+agenthub start
+agenthub stop
+agenthub status
+agenthub doctor
+agenthub web
+agenthub -web
+```
 
-PID 文件：daemon 启动时写 `<userhome>/.agenthub/daemon.pid`（含进程 PID + bind host + port），shutdown 时删除；`agenthub stop` / `status` 读此文件定位 daemon。`stop --force` 在 timeout 后发 SIGKILL，warn "可能丢失 in-flight Run 状态"。
+`agenthub web` and `agenthub -web` SHALL be callable from any project directory. The caller directory SHALL become the workspace root passed to the daemon. AgentHub internal scripts and web assets SHALL resolve from the installed/source AgentHub root, not from the caller directory.
 
-`doctor` 子命令的 Keychain 行 M0 固定输出 "Keychain: AES fallback (file-based)"。理由：M0 不依赖 OS keychain，secrets 走文件级 AES（详见 `security` capability）；keytar 接入 + 真写读测试是 V1.0 OS 集成范畴。本行只验证"凭据存储模式被正确选定"，不试探可写性。
+If a daemon is already healthy, `agenthub web` SHALL reuse it. If not, it SHALL start the daemon first. In source/dev mode it SHALL run the web dev server from the AgentHub repo root. In built/packaged mode, if static web assets are available, it SHALL serve them through the daemon and open the daemon URL.
 
-#### Scenario: agenthub status 探测 ready
+#### Scenario: Web launcher from arbitrary project
 
-- **WHEN** daemon 在 :6677 启动完成（startup phase 9 done），用户跑 `agenthub status`
-- **THEN** stdout `daemon: ready (http://127.0.0.1:6677)`，退出码 0
+- **WHEN** the user runs `agenthub web` from `C:\project\test`
+- **THEN** the daemon starts with `C:\project\test` as the workspace root
+- **AND** AgentHub internal pnpm/web commands run from the AgentHub installation/source root
+- **AND** the command does not fail with `ERR_PNPM_RECURSIVE_EXEC_NO_PACKAGE`
 
-#### Scenario: agenthub status 探测 starting
+#### Scenario: Packaged web assets are served by daemon
 
-- **WHEN** daemon 还在 startup phase 5，用户跑 `agenthub status`
-- **THEN** /healthz 返回 503 `service_starting`，CLI 显示 `daemon: starting`，退出码 0
-
-#### Scenario: agenthub stop 默认 timeout
-
-- **WHEN** 用户跑 `agenthub stop`，daemon 有 1 个 in-flight Run
-- **THEN** CLI 发 SIGTERM，等最长 30s
-- **AND** Run 在 20s 完成 → CLI 输出 `daemon stopped`，退出码 0
-- **AND** 30s 超时 → CLI 输出 `daemon did not stop in 30s, use --force to send SIGKILL`，退出码 1
-
-#### Scenario: agenthub doctor 全检
-
-- **WHEN** 用户跑 `agenthub doctor`
-- **THEN** 输出 5 行检查结果（SQLite / 端口 / Keychain / migrations / config）
-- **AND** 任一失败时退出码非 0
-
-#### Scenario: auth issue 一次显示 token
-
-- **WHEN** 用户 `agenthub auth issue --description="ci" --scope=read`
-- **THEN** stdout 显示 `Token (save it now, won't be shown again): <token>` + `Id: <id>`
-- **AND** 调用方应立即把 token 存到 keychain / .env
+- **WHEN** `agenthub web` finds built web assets under the configured or installed web assets root
+- **THEN** it starts/reuses the daemon with `--web-assets-root` and opens the daemon URL instead of requiring a Vite dev server
 

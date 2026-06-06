@@ -26,6 +26,8 @@ export const KANBAN_COLUMNS = [
 ] as const;
 
 const KANBAN_COLUMN_LABELS = KANBAN_COLUMNS.map((column) => column.label);
+const proofActivityKinds = new Set(["run_completed", "artifact", "artifact_linked", "review", "validation", "test", "blocker_set"]);
+const taskDeliveryReportTemplateVersion = 2;
 
 export type KanbanColumnLabel = (typeof KANBAN_COLUMNS)[number]["label"];
 
@@ -62,6 +64,15 @@ export type TaskBoardBrief = {
   readonly standup: string;
   readonly review: string;
   readonly blockers: readonly { readonly id: string; readonly title: string; readonly reason: string }[];
+};
+
+type TaskReportEvidenceCounts = {
+  readonly fileRuns: number;
+  readonly changedFiles: number;
+  readonly worktreeReviews: number;
+  readonly proofActivities: number;
+  readonly reviewDecisions: number;
+  readonly unresolvedComments: number;
 };
 
 type TaskDetail = {
@@ -873,7 +884,8 @@ function TaskDetailDrawer({ roomId, detail, plan, csrfFetch, onOpenArtifact, isO
                   </DetailCard>
 
                   <FileChangesSection runs={task.fileChangeRuns ?? []} fallbackCount={task.fileChangesCount ?? 0} onOpenArtifact={onOpenArtifact} />
-                  <WorktreeSection roomId={roomId} task={task} csrfFetch={csrfFetch} />
+                  <WorktreeSection roomId={roomId} task={task} csrfFetch={csrfFetch} onOpenArtifact={onOpenArtifact} />
+                  <ProofOfWorkSection roomId={roomId} task={task} csrfFetch={csrfFetch} />
 
                   <DetailCard title="Activity timeline">
                     <ActivityTimeline activities={detail.activities} />
@@ -964,7 +976,7 @@ function FileChangesSection({ runs, fallbackCount, onOpenArtifact }: { runs: rea
   );
 }
 
-function WorktreeSection({ roomId, task, csrfFetch }: { roomId: string; task: TaskViewModel; csrfFetch: typeof fetch }) {
+function WorktreeSection({ roomId, task, csrfFetch, onOpenArtifact }: { roomId: string; task: TaskViewModel; csrfFetch: typeof fetch; onOpenArtifact?: ((input: { artifactId: string; runId: string; path: string }) => void) | undefined }) {
   const [pending, setPending] = useState<"apply" | "discard" | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   const review = latestWorktreeReview(task);
@@ -1009,7 +1021,19 @@ function WorktreeSection({ roomId, task, csrfFetch }: { roomId: string; task: Ta
         </div>
         {review.filesChanged && review.filesChanged.length > 0 ? (
           <ul className="flex flex-col gap-1 text-xs">
-            {review.filesChanged.map((path) => <li key={path} className="truncate ah-mono">{path}</li>)}
+            {review.filesChanged.map((path) => (
+              <li key={path} className="truncate ah-mono">
+                {review.artifactId ? (
+                  <a
+                    className="text-accent-soft-foreground"
+                    href={`#artifact:${encodeURIComponent(review.artifactId)}:${encodeURIComponent(path)}`}
+                    onClick={() => onOpenArtifact?.({ artifactId: review.artifactId!, runId: review.runId, path })}
+                  >
+                    {path}
+                  </a>
+                ) : path}
+              </li>
+            ))}
           </ul>
         ) : null}
         {review.conflictDiff ? <pre className="max-h-40 overflow-auto rounded-md bg-surface-secondary p-2 text-xs ah-mono">{review.conflictDiff}</pre> : null}
@@ -1083,6 +1107,158 @@ function ActivityLinks({ activity }: { activity: TaskActivityViewModel }) {
     <div className="mt-2 flex flex-wrap gap-2 text-xs">
       {runId ? <a className="rounded-full bg-accent-soft px-2 py-1 text-accent-soft-foreground" href={`#run:${encodeURIComponent(runId)}`}>Run Detail: {runId}</a> : null}
       {artifact ? <a className="rounded-full bg-surface px-2 py-1 text-muted" href={`#artifact:${encodeURIComponent(artifact)}`}>Artifact: {artifact}</a> : null}
+    </div>
+  );
+}
+
+function ProofOfWorkSection({ roomId, task, csrfFetch }: { roomId: string; task: TaskViewModel; csrfFetch: typeof fetch }) {
+  const counts = taskReportEvidenceCounts(task);
+  const latestReview = latestWorktreeReview(task);
+  const validationActivities = (task.activities ?? []).filter((activity) => proofActivityKinds.has(activity.kind)).slice(0, 5);
+  const [reportPending, setReportPending] = useState(false);
+  const [reportError, setReportError] = useState<string | undefined>(undefined);
+  const [reportArtifact, setReportArtifact] = useState<{ readonly artifactId: string; readonly path: string; readonly evidenceCounts?: TaskReportEvidenceCounts | undefined } | undefined>(undefined);
+
+  const createReport = () => {
+    setReportPending(true);
+    setReportError(undefined);
+    void csrfFetch(`/rooms/${encodeURIComponent(roomId)}/tasks/${encodeURIComponent(task.id)}/report`, { method: "POST" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(await taskBoardResponseError(response, "Create delivery report failed"));
+        return response.json() as Promise<{ readonly artifact?: { readonly id?: string }; readonly path?: string; readonly evidenceCounts?: TaskReportEvidenceCounts }>;
+      })
+      .then((payload) => {
+        const artifactId = payload.artifact?.id;
+        if (typeof artifactId === "string") setReportArtifact({ artifactId, path: payload.path ?? ".agenthub/reports/task-report.md", evidenceCounts: payload.evidenceCounts });
+      })
+      .catch((error: unknown) => setReportError(error instanceof Error ? error.message : String(error)))
+      .finally(() => setReportPending(false));
+  };
+
+  return (
+    <DetailCard title="Proof of work">
+      <div className="flex flex-col gap-2 text-sm">
+        <div className="grid gap-2 sm:grid-cols-3">
+          <ProofMetric label="Files" value={String(counts.changedFiles)} tone={counts.changedFiles > 0 ? "accent" : "default"} />
+          <ProofMetric label="Worktree" value={worktreeLabel(latestReview)} tone={worktreeTone(latestReview)} />
+          <ProofMetric label="Proof" value={String(counts.proofActivities)} tone={counts.proofActivities > 0 ? "success" : "default"} />
+        </div>
+        <div className="grid gap-2 text-xs sm:grid-cols-3">
+          <span className="rounded-md bg-surface-secondary px-2 py-1">File runs: {counts.fileRuns}</span>
+          <span className="rounded-md bg-surface-secondary px-2 py-1">Worktree reviews: {counts.worktreeReviews}</span>
+          <span className="rounded-md bg-surface-secondary px-2 py-1">Template v{taskDeliveryReportTemplateVersion}</span>
+        </div>
+        {validationActivities.length > 0 ? (
+          <ul className="flex flex-col gap-1.5">
+            {validationActivities.map((activity) => (
+              <li key={activity.id} className="rounded-md border border-border bg-surface-secondary px-2 py-1 text-xs">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Chip size="sm" variant="soft" color="default">{activity.kind}</Chip>
+                  {activity.createdAt ? <span className="text-muted">{formatTime(activity.createdAt)}</span> : null}
+                </div>
+                <p className="mt-1">{truncate(summarizeTaskActivityPayload(activity.payload), 220)}</p>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-xs text-muted">No validation evidence has been recorded yet.</p>
+        )}
+        {reportArtifact ? (
+          <div className="rounded-md border border-success/30 bg-success/10 px-2 py-1 text-xs">
+            Report artifact: <span className="ah-mono">{reportArtifact.artifactId}</span> / <span className="ah-mono">{reportArtifact.path}</span>
+            {reportArtifact.evidenceCounts ? <span className="ml-2 text-muted">({reportArtifact.evidenceCounts.changedFiles} files, {reportArtifact.evidenceCounts.proofActivities} proof)</span> : null}
+          </div>
+        ) : null}
+        {reportError ? <p className="text-xs text-danger-700 dark:text-danger-200">{reportError}</p> : null}
+        <div>
+          <Button size="sm" variant="secondary" onPress={createReport} isDisabled={reportPending}>
+            {reportPending ? "Updating..." : "Create/update delivery report"}
+          </Button>
+        </div>
+      </div>
+    </DetailCard>
+  );
+}
+
+export function taskDeliveryReportMarkdown(task: TaskViewModel): string {
+  const counts = taskReportEvidenceCounts(task);
+  const lines = [
+    `# Task Delivery Report: ${task.title}`,
+    "",
+    `- Template version: ${taskDeliveryReportTemplateVersion}`,
+    `- Generated at: ${new Date().toISOString()}`,
+    `- Task: \`${task.id}\``,
+    `- Status: ${task.status}`,
+    `- Assignee: ${task.assigneeRoleId ?? task.assigneeAgentId ?? "Unassigned"}`,
+    `- Source run: ${task.sourceRunId ?? "-"}`,
+    "",
+    "## Evidence Summary",
+    "",
+    `- File runs: ${counts.fileRuns}`,
+    `- Changed files: ${counts.changedFiles}`,
+    `- Worktree reviews: ${counts.worktreeReviews}`,
+    `- Proof activities: ${counts.proofActivities}`,
+    `- Review decisions: ${counts.reviewDecisions}`,
+    `- Unresolved comments: ${counts.unresolvedComments}`,
+    "",
+    "## Description",
+    "",
+    task.description?.trim() || "No description provided.",
+    "",
+    "## File Changes"
+  ];
+  const fileRuns = task.fileChangeRuns ?? [];
+  if (fileRuns.length === 0) {
+    lines.push("", "No file changes recorded.");
+  } else {
+    for (const run of fileRuns) {
+      lines.push("", `### Run ${run.runId}${run.artifactId ? ` / artifact ${run.artifactId}` : ""}`);
+      for (const file of run.files) lines.push(`- \`${file.path}\` (${file.change}, +${file.linesAdded ?? 0} / -${file.linesRemoved ?? 0})`);
+    }
+  }
+  lines.push("", "## Worktree Reviews");
+  const worktreeReviews = task.worktreeReviews ?? [];
+  if (worktreeReviews.length === 0) {
+    lines.push("", "No worktree review records.");
+  } else {
+    for (const review of worktreeReviews) {
+      lines.push("", `- run \`${review.runId}\`: ${review.status}${review.artifactId ? ` / artifact ${review.artifactId}` : ""}`);
+      for (const path of review.filesChanged ?? []) lines.push(`  - \`${path}\``);
+      if (review.conflictDiff) lines.push(`  - conflict: ${review.conflictDiff.slice(0, 500)}`);
+    }
+  }
+  lines.push("", "## Proof And Validation");
+  const proof = (task.activities ?? []).filter((activity) => proofActivityKinds.has(activity.kind));
+  if (proof.length === 0) {
+    lines.push("", "No validation evidence has been recorded yet.");
+  } else {
+    lines.push("");
+    for (const activity of proof) lines.push(`- ${activity.kind}: ${summarizeTaskActivityPayload(activity.payload)}`);
+  }
+  return `${lines.join("\n").trimEnd()}\n`;
+}
+
+function taskReportEvidenceCounts(task: TaskViewModel): TaskReportEvidenceCounts {
+  const proof = (task.activities ?? []).filter((activity) => proofActivityKinds.has(activity.kind) && !isDeliveryReportActivity(activity.payload));
+  return {
+    fileRuns: task.fileChangeRuns?.length ?? 0,
+    changedFiles: aggregateFileChanges(task),
+    worktreeReviews: task.worktreeReviews?.length ?? 0,
+    proofActivities: proof.length,
+    reviewDecisions: 0,
+    unresolvedComments: 0
+  };
+}
+
+function isDeliveryReportActivity(payload: unknown): boolean {
+  return isRecord(payload) && payload.artifactKind === "delivery_report";
+}
+
+function ProofMetric({ label, value, tone }: { label: string; value: string; tone: ChipColor }) {
+  return (
+    <div className="rounded-lg border border-border bg-surface-secondary px-2 py-2">
+      <div className="text-xs font-semibold uppercase text-muted">{label}</div>
+      <Chip size="sm" variant="soft" color={tone}>{value}</Chip>
     </div>
   );
 }

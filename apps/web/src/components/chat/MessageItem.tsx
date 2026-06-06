@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { Avatar, Button, Card, Chip, Dropdown, Modal } from "@heroui/react";
+import { Avatar, Button, Card, Chip, Dropdown } from "@heroui/react";
 import type { MessageViewModel } from "../../types.ts";
 import { formatBytes, formatTime, initials } from "../../lib/format.ts";
 import { pendingTurnColor } from "../../lib/status.ts";
 import { CardRenderer } from "../cards/CardRenderer.tsx";
+import { ArtifactPreviewModal, normalizePreviewKind } from "../artifacts/ArtifactPreviewModal.tsx";
 
 interface MessageItemProps {
   message: MessageViewModel;
@@ -255,8 +256,10 @@ function PartView({ part, csrfFetch }: { part: MessageViewModel["parts"][number]
 function ArtifactAttachmentCard({ part, csrfFetch }: { part: Extract<MessageViewModel["parts"][number], { type: "attachment" }>; csrfFetch: typeof fetch }) {
   const [preview, setPreview] = useState<{ readonly title: string; readonly content: string; readonly error?: string | undefined } | undefined>();
   const [loading, setLoading] = useState(false);
-  const canPreview = part.artifactId !== undefined && part.path !== undefined && (part.previewKind === "markdown" || part.previewKind === "text" || part.previewKind === "code");
+  const canPreview = part.artifactId !== undefined && part.path !== undefined;
   const previewLabel = previewLabelFor(part.previewKind, part.mimeType);
+  const previewKind = normalizePreviewKind(part.previewKind, part.mimeType, part.name);
+  const downloadUrl = canPreview ? `/artifacts/${encodeURIComponent(part.artifactId!)}/files/${encodeURIComponent(part.path!)}/raw` : undefined;
 
   const openPreview = async () => {
     if (!canPreview) return;
@@ -294,30 +297,21 @@ function ArtifactAttachmentCard({ part, csrfFetch }: { part: Extract<MessageView
             <span>{formatBytes(part.sizeBytes)}</span>
           </span>
         </span>
-        <span className="shrink-0 text-xs font-semibold text-accent">{loading ? "Loading" : canPreview ? "Open" : "Download"}</span>
+        <span className="shrink-0 text-xs font-semibold text-accent">{loading ? "Loading" : canPreview ? "Open" : "Unavailable"}</span>
       </button>
-      <Modal.Backdrop isOpen={preview !== undefined} onOpenChange={(open) => { if (!open) setPreview(undefined); }}>
-        <Modal.Container size="lg">
-          <Modal.Dialog aria-label="File preview" className="max-h-[86vh]">
-            <Modal.CloseTrigger aria-label="Close file preview" />
-            <Modal.Header>
-              <div className="min-w-0">
-                <Modal.Heading>{preview?.title ?? part.name}</Modal.Heading>
-                <p className="mt-1 text-xs text-muted">{previewLabel} - {formatBytes(part.sizeBytes)}</p>
-              </div>
-            </Modal.Header>
-            <Modal.Body>
-              {preview?.error ? (
-                <p className="rounded-lg border border-danger/40 bg-danger/10 p-3 text-sm text-danger">{preview.error}</p>
-              ) : (
-                <pre className="ah-mono max-h-[58vh] overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-surface-secondary p-4 text-xs leading-5 text-foreground">
-                  {preview?.content}
-                </pre>
-              )}
-            </Modal.Body>
-          </Modal.Dialog>
-        </Modal.Container>
-      </Modal.Backdrop>
+      <ArtifactPreviewModal
+        isOpen={preview !== undefined}
+        name={preview?.title ?? part.name}
+        mimeType={part.mimeType}
+        sizeBytes={part.sizeBytes}
+        previewKind={previewKind}
+        content={preview?.content}
+        error={preview?.error}
+        loading={loading}
+        downloadUrl={downloadUrl}
+        onRetry={openPreview}
+        onOpenChange={(open) => { if (!open) setPreview(undefined); }}
+      />
     </>
   );
 }
@@ -325,8 +319,12 @@ function ArtifactAttachmentCard({ part, csrfFetch }: { part: Extract<MessageView
 function previewLabelFor(previewKind: string | undefined, mimeType: string): string {
   if (previewKind === "markdown") return "Markdown";
   if (previewKind === "code") return "Code";
+  if (previewKind === "html") return "HTML";
+  if (previewKind === "pdf") return "PDF";
   if (previewKind === "image") return "Image";
   if (previewKind === "text") return "Text";
+  if (mimeType === "text/html") return "HTML";
+  if (mimeType === "application/pdf") return "PDF";
   if (mimeType === "text/markdown") return "Markdown";
   if (mimeType.startsWith("text/")) return "Text";
   return "File";
@@ -337,5 +335,6 @@ function fileBadgeFor(part: Extract<MessageViewModel["parts"][number], { type: "
   if (extension && extension.length > 0 && extension.length <= 4) return extension.toUpperCase();
   if (part.previewKind === "markdown") return "MD";
   if (part.previewKind === "code") return "CODE";
+  if (part.previewKind === "image") return "IMG";
   return "FILE";
 }

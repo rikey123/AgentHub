@@ -149,17 +149,34 @@ POST   /agents/:id/reload            # 强制重读 markdown
 
 ### Requirement: Agent 能力声明与 Permission 衔接
 
-The system SHALL use `AgentCapability[]` as the high-level intent layer; the `permissionProfileId` is the actual enforcement layer (详见 permissions capability).
+The system SHALL promote `roles.capabilities` from an opaque JSON blob to a validated `string[]` of well-known capability tokens. The daemon SHALL validate capabilities on role create/update. `room.list_members` SHALL return `capabilities: string[]` for each member.
 
-约束：
+**Reference:** Multica `LoadAgentSkills` — agents have declared skill lists surfaced in the squad roster. WenzAgent `spawn_sub_agent_tool.dart` `_defaultToolNames` — explicit capability whitelist per sub-agent invocation.
 
-- Agent 没有声明 `code.edit` 但试图通过 tool 写文件 → Permission Engine deny + 写 audit log
-- Agent 声明 `code.edit` 但 `permissionProfileId` 实际不允许 → 仍然 deny（profile 是唯一真相）
+**Well-known capability tokens (V1.1):**
+```
+chat, code.edit, code.review, file.read, file.write, terminal.run,
+context.read, context.write, intervention.knock, task.delegate
+```
 
-#### Scenario: 能力与权限不一致时以权限为准
+Unknown tokens are rejected with 400 `{ error: "unknown_capability_token", token }`. The leader prompt includes a capabilities summary per teammate: `"@reviewer: code.review, context.read"`.
 
-- **WHEN** Agent.capabilities 含 `file.write`，但 permissionProfile.file.write = "deny"
-- **THEN** 实际写文件请求被 deny；UI 在 Agent 详情页提示"该 Agent 声明了 file.write 能力但当前权限策略禁用"
+**Frontend:** Settings → Roles page shows a capability multi-select editor using the well-known token set. Members panel shows capability badges per agent.
+
+#### Scenario: role.capabilities validated on create
+
+- **WHEN** `POST /roles { capabilities: ["code.edit", "magic.power"] }`
+- **THEN** 400 is returned with `{ error: "unknown_capability_token", token: "magic.power" }`; no role is created
+
+#### Scenario: room.list_members returns capabilities
+
+- **WHEN** the leader calls `room.list_members` in a team room
+- **THEN** each member object includes `capabilities: string[]` derived from their role; the leader prompt surfaces these as `"@reviewer: code.review, context.read"`
+
+#### Scenario: Capabilities editor in Settings → Roles
+
+- **WHEN** the user opens Settings → Roles and edits a role
+- **THEN** the capabilities field shows a multi-select with the well-known token set; unknown tokens cannot be added via the UI
 
 ### Requirement: Run 生命周期
 

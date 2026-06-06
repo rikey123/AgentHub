@@ -20,6 +20,11 @@ V1.0 delivered the Role/Runtime/ModelConfig decoupling and Squad/Team orchestrat
 - **Skill system**: standard SKILL.md skill packages with optional supporting files; builtin skills shipped with AgentHub; workspace/imported skills created by users; room-level skill pool; per-agent skill overrides; runtime-native materialization (`.claude/skills/`, `.opencode/skills/`, etc.) with prompt-injection fallback for runtimes without native skill discovery; Settings UI for management.
 - **Security hardening**: path traversal validation on all workspace/file paths; single-flight deduplication on Settings bootstrap fetches; sub-agent leader-only tool isolation.
 - **File change snapshots**: per-run file change list stored in `run_file_changes`; Kanban card shows "N files changed" badge; diff viewer in task detail drawer.
+- **Post-spec artifact and diff parity closure**: V1.1 also closes the high-impact artifact review loop found during implementation review. Diff and `worktree_diff` artifacts share a per-file review viewer; artifact files support preview/download/open actions; review comments and decisions are durable; artifact archive/delete lifecycle actions are evented; task delivery reports aggregate proof-of-work evidence.
+- **Post-spec group chat polish**: assisted mode uses an AutoGen-style selector group chat with bounded continuation, stop controls, and short role-specific turns; squad/team keep their task-first semantics but mirror delegation/start/completion/review milestones as concise public room messages.
+- **Post-spec file-message contract**: agents can publish long deliverables through `room.send_file_message`, producing artifact-backed file cards instead of long essay bubbles in the chat timeline.
+- **Post-spec native room tools**: the room MCP surface now includes mature workspace/query/edit/patch/task/skill/file-message tools needed by real runtimes to participate without invisible manual glue.
+- **Post-spec CLI launch model**: `agenthub web` / `agenthub -web` follow the mature CLI pattern: command may be launched from any project directory, starts/reuses the daemon with that caller directory as workspace root, and runs repo-internal dev/server assets from the AgentHub installation/source root.
 
 ## Capabilities
 
@@ -37,14 +42,17 @@ V1.0 delivered the Role/Runtime/ModelConfig decoupling and Squad/Team orchestrat
 - `task-workflow-core`: adds `blocker_reason`, `max_turns`, `board_column` columns; `task_checkpoints`, `task_plans`, `run_file_changes` tables.
 - `rooms`: adds `POST /rooms/:id/participants { agentBindingId }` endpoint; `room.add_participant` MCP tool.
 - `agents`: `roles.capabilities` promoted to validated token list; `room.list_members` returns `capabilities[]`.
+- `artifacts`: adds mature per-file diff review, file/document preview, durable review comments, local lifecycle actions, raw artifact file serving, and task delivery report artifacts.
+- `messaging`: adds artifact-backed file attachment parts and `message.part.added` live update semantics for `room.send_file_message`.
+- `local-daemon`: adds installation/source-root aware CLI web launch while preserving caller workspace root.
 - `v1-roadmap`: V1.1 task-board foundation fulfilled (Kanban, plan card, dependency arrows, file diff); collab-visualization/timeline remains partial — dependency arrows and plan card are delivered, but full timeline/topology views are deferred; skill-system placeholder moved from V1.2 to V1.1; cron/recurring/dependency-auto-dispatch remain V1.2.
 
 ## Impact
 
 - **New packages**: `packages/skills` (skill registry + lifecycle).
 - **Schema migration**: `0015_v11.sql` — new tables (`task_checkpoints`, `task_plans`, `run_file_changes`, `skills`, `skill_files`, `room_skills`, `agent_skills`) and new columns on `tasks` (`blocker_reason`, `max_turns`, `board_column`), `rooms` (`stalled_at`).
-- **Protocol**: register V1.1 event types in `registry.ts`: `task.column.moved`, `task.plan.created`, `run.file_changes.recorded`, `worktree.diff.ready`, `worktree.applied`, `worktree.discarded`, `worktree.conflict_detected`, `room.stalled`, `room.unstalled`, `skill.created`, `skill.updated`, `skill.deleted`, `skill.imported`, `skill.activated`, `skill.deactivated`, `skill.materialization_failed`. Existing `agent.joined` / `agent.state.changed` are reused with `visibility: both` (no change).
+- **Protocol**: register V1.1 event types in `registry.ts`: `task.column.moved`, `task.plan.created`, `run.file_changes.recorded`, `worktree.diff.ready`, `worktree.applied`, `worktree.discarded`, `worktree.conflict_detected`, `room.stalled`, `room.unstalled`, `skill.created`, `skill.updated`, `skill.deleted`, `skill.imported`, `skill.activated`, `skill.deactivated`, `skill.materialization_failed`. Existing `agent.joined` / `agent.state.changed` are reused with `visibility: both` (no change). Post-spec artifact closure also registers `artifact.review.added`, `artifact.review.updated`, `artifact.review.resolved`, `artifact.review.deleted`, `artifact.archived`, and `artifact.deleted`; `message.part.added` is reused for live artifact-backed file cards.
 - **Orchestrator**: `task-service.ts`, `mailbox-service.ts`, `team-dispatch.ts`, `commands.ts`, `adapter-bridge.ts`, `run-lifecycle-service.ts`, all prompt files, `mcp/room-mcp-server.ts`.
 - **Daemon**: new HTTP routes for participants, skills, Kanban/worktree apply-discard flows.
-- **Web**: new Kanban component tree, Members panel add-participant flow, Skill settings tab, task detail diff viewer, room stalled banner, worktree apply/discard UI.
+- **Web**: new Kanban component tree, Members panel add-participant flow, Skill settings tab, artifact workspace, artifact preview modal, task proof-of-work panel, diff review viewer, room stalled banner, worktree apply/discard UI.
 - **No breaking changes** to existing EventBus contract, SSE envelope schema, or `AgentRuntimeAdapter` interface.

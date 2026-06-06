@@ -19,78 +19,82 @@ The system SHALL define Artifact `type=deployment` with subkind enum and route t
 
 ### Requirement: V1.1 Task Board 占位（task-board）
 
-The system SHALL expose `tasks` table (per `orchestrator/最小 Task 数据模型` Requirement) and task lifecycle events (`task.created`, `task.assigned`, `task.status.changed` 已在 MVP 注册，其中 `task.status.changed { nextStatus: "completed" }` 是任务完成的唯一权威信号) so V1.1 can build a Trello/Linear-style Kanban board purely as a view-layer capability. The `task-board` capability is **a new capability** independent from `messaging` to avoid polluting card protocol.
+The V1.1 task-board capability SHALL be considered fulfilled. The Side Panel Tasks tab SHALL keep a clear default task list and expose the Kanban board from an "Open Kanban" control/modal. The system SHALL NOT return 404 for board-related operations.
 
-V1.1 SHALL add new durable events:
+**What V1.1 delivers:**
+- Clear default task list plus Kanban board modal
+- Drag-to-move columns with `task.column.moved` event
+- Priority badge UI (priority changes use existing `task.activity.added { kind: "priority_change" }` — no new `task.priority.changed` event)
+- Dependency arrows (visualization only; auto-dispatch is V1.2)
+- File-change badge from `run_file_changes` via `run.file_changes.recorded` event
+- Worktree apply/discard UI in task detail drawer
+- "Execution Plan" card from `task_plans`
 
-- `task.column.moved`：列变更（Backlog / In Progress / Waiting / Review / Done）；`board_column` 是 view-layer 字段，与 `Task.status` **派生映射**（默认 `pending→Backlog`, `in_progress→In Progress`, `blocked→Waiting`, `review→Review`, `completed→Done`），用户可在 Board 拖卡覆盖默认映射，被覆盖的 column 持久化在新增字段 `tasks.board_column`（**V1.1 新加列**，MVP 不存在），但不修改底层 `Task.status`
-- `task.priority.changed`：优先级变更（`priority` 列已由 MVP 预留，默认 0；**V1.1 只启用此事件和 UI 操作**，不新加列）
-- `task.assigned.changed`：assignee 变更（区别于 MVP 的 `task.assigned` 创建/初次分配事件）
+**What remains deferred:**
+- `task.assigned.changed` event (V1.2)
+- Topology / Dependency DAG views (V1.2)
+- Full collaboration timeline (V1.2)
 
-These events SHALL NOT introduce new internal state machines on top of MVP `Task.status`；它们是 projection 层的 metadata event，consumer 乐观应用，不参与 orchestrator 调度。
+#### Scenario: V1.1 Kanban board is accessible
 
-#### Scenario: MVP 没有 Kanban
+- **WHEN** the user opens the Side Panel Tasks tab in V1.1
+- **THEN** the task list is displayed with an "Open Kanban" control; opening the board no longer returns the V1.0 placeholder 404
 
-- **WHEN** 用户访问 `/board`
-- **THEN** MVP 返回 404；V1.1 起返回 Kanban view
+#### Scenario: V1.1 drag-to-move works
 
-#### Scenario: V1.1 列变更事件
-
-- **WHEN** （V1.1）用户在 Kanban 拖卡到 In Progress
-- **THEN** （V1.1）daemon 发 `task.column.moved` durable event，所有客户端通过 SSE 同步
+- **WHEN** the user drags a card to a different column
+- **THEN** `task.column.moved` is published; all connected clients update without refresh
 
 ### Requirement: V1.1 多 Agent 协作可视化占位（collab-visualization）
 
-The system SHALL preserve `traceId / causationId / correlationId` in event envelope (per event-system capability) and `agent.run.*` lineage so V1.1 can build collaboration views without new internal events. V1.1 SHALL ship two views first（Topology / Dependency 顺延到 V1.2）:
+V1.1 SHALL deliver the task-board foundation and dependency arrows. The system SHALL render dependency arrows between Kanban cards. The full collaboration timeline and topology views SHALL remain deferred to V1.2 and SHALL return 404 when accessed.
 
-- **Timeline**：按时间轴展示各 agent 的 wake/run/complete（类 Jaeger trace 视图），traceId 串联
-- **Kanban**：见 `task-board`
+**What V1.1 delivers:**
+- Dependency arrows between Kanban cards (visualization only)
+- "Execution Plan" card in the side panel
+- File-change badge per task
 
-V1.2 SHALL add:
+**What remains deferred to V1.2:**
+- Timeline view (Jaeger-style agent wake/run/complete visualization)
+- Topology view (who-waked-whom causation graph)
+- Dependency DAG view (Task → SubTask → Run tree)
 
-- **Topology**：当前活跃 agent 之间的 wake 因果图（who-waked-whom，箭头标 wakeReason）
-- **Dependency**：Task → SubTask → Run 树形依赖
+#### Scenario: V1.1 dependency arrows visible
 
-#### Scenario: MVP 无可视化
+- **WHEN** Task B depends on Task A and both are in the Kanban board
+- **THEN** a dependency arrow is rendered from A to B; no 404 is returned for the board view
 
-- **WHEN** 用户访问 `/timeline`
-- **THEN** MVP 返回 404；V1.1 起渲染 timeline
+#### Scenario: Timeline view still returns 404 in V1.1
 
-#### Scenario: V1.1 traceId 串联
-
-- **WHEN** （V1.1）用户在 timeline 选中某 trace
-- **THEN** （V1.1）展示该 traceId 下所有 `agent.run.*` 事件，时间轴 + 因果箭头
+- **WHEN** the user navigates to `/timeline`
+- **THEN** 404 is returned; the timeline view is V1.2
 
 ### Requirement: V1.2 Skill System 占位（skill-system）
 
-The system SHALL define `Skill` schema (declarative, no code execution) and a loader interface so V1.2 can plug skills under `~/.agenthub/skills/` for hot-loading.
+The skill system placeholder SHALL be considered fulfilled in V1.1 (moved forward from V1.2). The system SHALL load skills from the `skills` table and SHALL NOT emit the V1.2 rejection warning. The V1.2 placeholder rejection (`"Skill <id> not loaded: skill system is V1.2"`) SHALL be removed.
 
-```ts
-type Skill = {
-  id: string                              // kebab-case
-  name: string
-  version: string
-  description: string
-  prompt: string                          // 注入 agent system prompt 的片段
-  tools: string[]                         // 工具白名单（MCP tool id）
-  triggers: SkillTrigger[]                // 触发条件（@mention / pattern / explicit）
-  visibility: "global" | "workspace" | "agent"
-}
+**What V1.1 delivers:**
+- Standard SKILL.md package format (compatible with Claude Code, OpenCode, AionUi, Multica)
+- Builtin / workspace / imported skill origins
+- Room-level skill pool and per-agent overrides
+- Runtime-native materialization into `.claude/skills/`, `.opencode/skills/`, etc.
+- Prompt-injection fallback for runtimes without native skill discovery
+- Settings UI for skill management
 
-type SkillTrigger =
-  | { kind: "mention"; pattern: string }
-  | { kind: "context"; match: string }
-  | { kind: "explicit" }                  // 仅显式调用
-```
+**What remains deferred:**
+- Skills marketplace / skills.sh integration (V1.3)
+- Skill version management and update notifications (V1.3)
+- Skill trust review workflow (V1.3)
 
-Skill 与 Plugin 区别：Skill **无代码执行**，纯声明 + prompt + tool 白名单；Plugin（V1.3）含代码执行 + 进程隔离。
+#### Scenario: V1.1 skill system is active
 
-MVP / V0.5 / V1.0 / V1.1 阶段 skill loader 全部拒绝；V1.2 起加载。
+- **WHEN** the user opens Settings → Skills in V1.1
+- **THEN** the Skills tab is shown with builtin skills pre-loaded; the V1.2 placeholder rejection is no longer active
 
-#### Scenario: MVP 加载 skill
+#### Scenario: Skill loader no longer rejects in V1.1
 
-- **WHEN** 启动时 `~/.agenthub/skills/` 含一个 skill 文件
-- **THEN** stderr 警告 `Skill <id> not loaded: skill system is V1.2`，不阻断 daemon 启动
+- **WHEN** the daemon starts with skills in `~/.agenthub/skills/`
+- **THEN** skills are loaded normally; the V1.2 warning `"Skill <id> not loaded: skill system is V1.2"` is no longer emitted
 
 ### Requirement: V1.2 BM25 召回占位（bm25-recall）
 

@@ -124,6 +124,12 @@ The canonical event registry SHALL be extended with the following V1.0 event typ
 | `artifact.diff.detected` | artifact | ephemeral | detail | artifacts | 检测通知 |
 | `artifact.file.created` | artifact | durable | both | artifacts | 需要 projector handler |
 | `artifact.reviewing` | artifact | durable | both | artifacts | 需要 projector handler |
+| `artifact.review.added` | artifact | durable | detail | artifacts | Run Detail audit/review comment |
+| `artifact.review.updated` | artifact | durable | detail | artifacts | Run Detail audit/review comment |
+| `artifact.review.resolved` | artifact | durable | detail | artifacts | Run Detail audit/review comment |
+| `artifact.review.deleted` | artifact | durable | detail | artifacts | Run Detail audit/review comment |
+| `artifact.archived` | artifact | durable | detail | artifacts | Run Detail lifecycle audit |
+| `artifact.deleted` | artifact | durable | detail | artifacts | Run Detail lifecycle audit |
 | `artifact.accepted` | artifact | durable | both | artifacts | 需要 projector handler |
 | `artifact.applying` | artifact | durable | both | artifacts | 需要 projector handler |
 | `artifact.applied` | artifact | durable | both | artifacts | 需要 projector handler |

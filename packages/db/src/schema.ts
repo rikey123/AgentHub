@@ -400,7 +400,9 @@ export const artifacts = sqliteTable("artifacts", {
   metadata: text("metadata").notNull(),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
-  appliedAt: integer("applied_at")
+  appliedAt: integer("applied_at"),
+  archivedAt: integer("archived_at"),
+  deletedAt: integer("deleted_at")
 });
 
 export const artifactFiles = sqliteTable(
@@ -414,6 +416,9 @@ export const artifactFiles = sqliteTable(
     additions: integer("additions"),
     deletions: integer("deletions"),
     fileStatus: text("file_status").notNull(),
+    oldPath: text("old_path"),
+    binary: integer("binary").notNull().default(0),
+    noNewlineAtEnd: integer("no_newline_at_end").notNull().default(0),
     oldSha256: text("old_sha256"),
     newSha256: text("new_sha256"),
     appliedState: text("applied_state"),
@@ -422,6 +427,25 @@ export const artifactFiles = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.artifactId, table.path] })]
 );
+
+export const artifactReviews = sqliteTable("artifact_reviews", {
+  id: text("id").primaryKey(),
+  artifactId: text("artifact_id").notNull(),
+  decision: text("decision").notNull(),
+  reviewerKind: text("reviewer_kind").notNull(),
+  reviewerId: text("reviewer_id").notNull(),
+  reason: text("reason"),
+  filePath: text("file_path"),
+  lineNumber: integer("line_number"),
+  side: text("side"),
+  lineStart: integer("line_start"),
+  lineEnd: integer("line_end"),
+  status: text("status").notNull().default("open"),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at"),
+  resolvedAt: integer("resolved_at"),
+  deletedAt: integer("deleted_at")
+});
 
 export const mailboxMessages = sqliteTable("mailbox_messages", {
   id: text("id").primaryKey(),

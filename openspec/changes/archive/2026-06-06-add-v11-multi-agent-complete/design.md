@@ -267,6 +267,43 @@ Dev C owns: `apps/web/`, `daemon/routes/kanban.ts`, `daemon/routes/participants.
 
 Dev C's Kanban projector requires `task.created` replay payloads to include the task fields used for first-paint board rendering: `{ taskId, roomId, title, status, description?, parentTaskId?, assigneeRoleId?, assigneeBindingId?, assigneeAgentId?, expectsReview?, sourceRunId?, dependencies?, priority?, createdBy? }`. This expands a Dev A-owned publisher in `task-service.ts`; the PR must cross-tag Dev A for review.
 
+### D15 - Post-spec artifact/diff parity closure
+
+After V1.1 implementation review, AgentHub closed additional artifact and diff gaps against OpenCode, multica, AionUi, wenzagent, Symphony, and hermes-kanban. This closure is part of V1.1 even though it was discovered after the initial tasks were written.
+
+**Reference boundary:**
+- OpenCode is the reference for session-level diff review: per-file diff rows, unified/split rendering, line comments, patch metadata, and explicit apply/reject flows.
+- multica and AionUi are the references for attachment/artifact preview: modal preview, type routing, sandboxed HTML, raw/open/download actions, loading/error/too-large states.
+- wenzagent is the reference for precise file edit ergonomics: multi-patch `oldText`/`newText`, missing-text hints, multiple-match rejection, and atomic patch application.
+- Symphony and hermes-kanban are the references for proof-of-work: completed tasks should expose evidence, validation notes, review decisions, and readable Markdown delivery reports.
+
+**AgentHub decision:** keep the existing local ArtifactService and EventBus architecture, but upgrade the product loop:
+- `diff` and `worktree_diff` artifacts normalize into per-file review data and render through one `DiffReviewViewer`.
+- Artifact review comments/decisions are durable rows, not transient UI state.
+- Artifact preview uses a shared preview contract for markdown, text/code, sandboxed HTML, image, PDF, audio, video, unsupported, too-large, open, download, and retry states.
+- Task proof-of-work aggregates file runs, worktree reviews, proof activities, artifact review decisions, unresolved comments, and generated Markdown delivery reports.
+- Artifact archive/delete are local lifecycle actions with durable audit events. Retention/GC enforcement and remote object storage stay deferred.
+
+### D16 - Post-spec group-chat experience polish
+
+V1.1 also tightened the group-chat experience after real user testing showed that agents could coordinate correctly while still feeling invisible or essay-like.
+
+**Assisted mode:** follows AutoGen `SelectorGroupChat` shape. A selector chooses one speaker at a time from eligible participants, uses the shared room transcript as the group thread, rejects repeated speakers by default, retries invalid selector output, supports fallback, and stops on bounded termination rules (`max_turns`, no candidate, explicit `NO_SPEAKER`/`STOP`, superseding user message, empty/ack-only output). Assisted does not use team/squad task semantics.
+
+**Squad/team modes:** remain AionUi-style task coordination modes. The leader delegates through tools, teammates execute bounded tasks, and team review gates still apply. To improve visibility, task lifecycle milestones are mirrored as concise public assistant messages: delegation, teammate start, completion/block/review, review start, and review completion. These presentation messages do not replace task rows, mailbox messages, `room.complete_task`, or Kanban state.
+
+### D17 - Post-spec file-message contract for long deliverables
+
+Long agent output SHALL be separated from conversational chat. AgentHub implements a Wenzagent-style `room.send_file_message` MCP tool backed by `ArtifactService`, rather than relying on prompt-only length limits.
+
+The tool creates a `file` artifact and an attachment message part with artifact metadata. The chat message stays short and conversational; the file card opens through the artifact preview surface. Live UI updates use durable `message.part.added` or a completed message payload inside the same transaction as the artifact write. `artifact.file.created` alone is not sufficient to update the message timeline because the projector needs the message-part mapping.
+
+### D18 - Post-spec CLI launch model
+
+`agenthub web` and `agenthub -web` SHALL work from any caller directory. The CLI preserves the caller directory as the AgentHub workspace root, but runs AgentHub-internal daemon/web child processes from the installed/source AgentHub root. This mirrors mature CLI launchers: user commands are workspace-oriented, while package scripts/assets resolve from the product installation.
+
+In source/dev mode, the CLI locates the AgentHub repo root and launches `pnpm --filter @agenthub/web dev` from that root. In built/packaged mode, if web assets exist, it serves static assets through the daemon and opens the daemon URL. This prevents `ERR_PNPM_RECURSIVE_EXEC_NO_PACKAGE` when the user runs `agenthub web` from an arbitrary project.
+
 ## Risks / Trade-offs
 
 **[Risk] Worktree apply conflicts require user action, adding friction** → Mitigation: the apply/discard UI is surfaced prominently in the task detail drawer; the Kanban card shows a "Conflict" badge. For non-conflicting applies, the operation is one click.

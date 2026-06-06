@@ -165,20 +165,28 @@ CREATE INDEX idx_mb_to_room_unread ON mailbox_messages (to_agent_id, room_id, re
 
 ### Requirement: Room MCP Tools
 
-The system SHALL add `room.delegate` to the Room MCP Server tool list for V1.0 Squad/Team modes. All other existing tools remain unchanged.
+The system SHALL add the following tools to the Room MCP Server for V1.1. All existing V1.0 tools remain unchanged.
 
-新增工具（V1.0）：
+**V1.1 新增工具：**
 
 | Tool | 描述 | 权限要求 |
 |---|---|---|
-| `room.delegate` | Leader 派发 Task 给 teammate（Squad/Team mode 专用）| role=leader |
+| `room.complete_task` | Teammate 提交结构化完成报告（权威路径）| 非 leader（teammate 专用）|
+| `room.add_participant` | 向当前 room 添加 agent binding | leader-only |
+| `room.apply_worktree` | 应用 worktree diff artifact | leader-only |
+| `room.discard_worktree` | 丢弃 worktree diff artifact | leader-only |
 
-`room.delegate` 完整规范见 `squad-mode/Squad 模式调度` Requirement。
+`room.delegate` 的 `maxTurns` 参数 SHALL be added (optional, sets `tasks.max_turns`).
 
-#### Scenario: room.delegate 仅 leader 可调
+#### Scenario: room.complete_task 仅 teammate 可调
 
-- **WHEN** observer agent 调 `room.delegate`
-- **THEN** 返回 `{ error: "delegate_requires_leader_role" }`；不创建 Task
+- **WHEN** leader agent 调 `room.complete_task`
+- **THEN** 返回 `{ error: "complete_task_not_for_leader" }`（leader 用 `room.update_task` 管理任务状态）
+
+#### Scenario: room.add_participant 仅 leader 可调
+
+- **WHEN** observer agent 调 `room.add_participant`
+- **THEN** 返回 `{ error: "tool_not_permitted", tool: "room.add_participant" }`
 
 ### Requirement: Mention 解析
 
@@ -383,94 +391,26 @@ The system SHALL remove the Squad and Team mode placeholders from this requireme
 
 ### Requirement: Observing 是被动状态 + WakeAgent 是模型调用唯一入口
 
-The system SHALL treat `observing` as a **passive scheduling-eligibility state**, never as an active model session. While in `observing`, an Agent SHALL NOT consume any LLM / API call merely because the room received a new event. The only path that triggers an actual model call SHALL be a `WakeAgent` Command dispatched by Orchestrator (or its delegated rule engine). This is the canonical contract; `agents/spec.md` and `rooms/spec.md` reference it.
+The system SHALL extend `WakeReason` with V1.1 values. All other constraints remain unchanged.
 
-> **Why**：参考实现（AionUi team 模式、opencode background agent）一致表明：让 observer 后台轮询消息流会以接近 N×primary 的速度烧 token，且把"该 review 还是不该 review"的判断成本压给模型，最终产物质量也不稳定。把 wake 收紧成显式 Command 既降低成本，又让阶段触发可调试可回放。
-
-```ts
+**V1.1 新增 WakeReason 值：**
+```typescript
 type WakeReason =
-  | "primary_turn"            // 普通用户消息唤醒 primary（Solo / Assisted 默认路径）
-  | "user_mention"            // 用户消息含 @<agent>
-  | "delegated_task"          // primary 通过 room.create_task 派发
-  | "rule_review"             // rule.trigger 配置规则匹配
-  | "knock_approved"          // 用户 approve 一个 intervention 后 Agent 转 active
-  | "group_review"            // 用户显式 /review @all
-  | "phase_completed"         // 上游 Run 阶段终结，触发下游 reviewer
-  | "agent_crashed"           // 兜底：被监督 agent 崩溃，触发 supervisor
-  | "consume_pending_turn"    // 上一轮 Run 终结后消费排队消息
-
-type WakeAgentInput = {
-  roomId: string
-  agentId: string
-  workspaceId: string                // 用户工作区 id（用于 RunLifecycleService.create 与 events envelope）
-  reason: WakeReason
-  triggerEventId?: string             // 触发本次 wake 的 durable event id（causationId）
-  promptDelta?: AgentPromptDelta      // 见下文 prompt delta 协议
-  // —— 调度相关字段（最终落到 RunLifecycleService.create）——
-  targetFiles?: string[]              // best-effort 文件锁声明；未知时 RunQueue 退化为 workspace 级写锁
-  workspaceMode?: "isolated_worktree" | "isolated_copy" | "shadow_buffer" | "shared" | "external"
-  parentRunId?: string                // Run reuse；非空时 RunLifecycleService.create 复用 prior session
-  messageId?: string                  // 关联的 user message
-  pendingTurnId?: string              // 关联的 PendingTurn（consume_pending_turn 路径填）
-  carryNextTurnIds?: string[]         // 来自旧 run 的未消费 run_next_turns ids；旧 run complete/fail 后由 hook 派发的新 wake 携带；RunLifecycleService.create 在事务内 rebind 这些 rows 到新 runId（详见 run_next_turns Requirement）；视为 hasInput 的一种合法输入源
-  sourceRunId?: string                // carryNextTurnIds 来源的旧 run id；rebind SQL 加 AND run_id=:sourceRunId 防止跨 run 误绑定；与 carryNextTurnIds 同时填或同时不填
-  idempotencyKey: string              // 默认 `${roomId}:${agentId}:${reason}:${triggerEventId ?? ulid()}`
-  // 注：mailboxClaimIds 不在 WakeAgentInput 中 — handler 在 IMMEDIATE 事务内自己 claim 并把结果传给 RunLifecycleService.create
-}
-
-type AgentPromptDelta =
-  | { kind: "first_wake"; fullRolePrompt: string }   // 第一次 wake 注入完整 role / system prompt
-  | { kind: "delta_only"; instructions: string }     // 后续 wake 仅注入"该做什么"，role prompt 已在 session 里
+  // ... existing V1.0 values ...
+  | "plan"              // 新增：squad/team room 第一条消息触发 leader 规划阶段
+  | "execute"           // 新增：规划完成后立即触发 leader 执行阶段
+  | "agent_stalled"     // 新增：watchdog 90s 静默触发（Level-1 升级）
 ```
 
-**Stage Boundary 协议**：
+#### Scenario: plan wake reason triggers planning prompt
 
-下游 wake 的最佳触发点不是"消息流变了"，而是显式阶段边界。MVP 至少识别这五个：
+- **WHEN** WakeAgent is dispatched with `reason: "plan"` for the leader
+- **THEN** the leader prompt instructs the leader to produce ONLY a PlanDocument JSON block; no tool calls or delegation are permitted in this turn
 
-```ts
-type StageBoundary =
-  | "plan.completed"           // primary 完成 plan 阶段，邀请 reviewer 评估方案
-  | "run.completed"             // primary Run 终结，下游 reviewer 评估 diff / cost
-  | "artifact.diff.created"     // DiffArtifact 出现，触发 security-reviewer / linter
-  | "tests.failed"              // CI / 本地测试失败，触发 fixer
-  | "user.review_requested"     // 用户 /review @all 或 approve knock
-```
+#### Scenario: execute wake reason triggers normal execution
 
-Orchestrator 的 rule engine MUST 把 wake rule 绑定到 StageBoundary 之一，不允许绑定到任意 ephemeral 事件流（如 message.part.delta、tool.update）。
-
-**强制约束**：
-
-1. observing Agent MUST NOT 因 `message.created` / `message.completed` / `agent.run.*` / `tool.call.*` / `artifact.*` 等 durable event 直接进入 LLM 调用；这些事件可以**触发 rule.trigger 评估**，但 rule 的产物只能是 `WakeAgent` Command，由 Orchestrator dispatch。
-2. WakeAgent Command 是 model 调用的唯一入口；adapter `startRun` MUST 由 RunQueue Worker 在收到 `agent.run.queued`（由 WakeAgent handler 调 `RunLifecycleService.create` 时发出）后才发起；即 wake → RunLifecycleService.create → queued → worker → adapter。MVP 没有 StartRun Command。
-3. `wakeReason` MUST 写入 `runs.wake_reason` 字段（agents capability schema 增补）便于 Run Replay 时追溯触发链。
-4. `promptDelta.kind=first_wake` 仅在该 (room, agent) 在本 session 没有过 wake 时使用；后续 MUST 用 `delta_only` 避免重复发送 role prompt（这是 AionUi 优化文档明确踩过的成本坑）。
-5. 同 (room, agent) 的并发 WakeAgent MUST 通过 `idempotencyKey` 与 `activeWakes` 双重去重（详见 `orchestrator/唤醒去重` + P2-8）。
-6. 当 Run 因 wake 而启动后，Run 终结（completed / failed / cancelled）时 Agent presence 自动回 `observing`（不是 `active`），除非有新的 wake 入站。
-
-#### Scenario: observer 不因 message 流自动调用模型
-
-- **WHEN** Assisted Room 中 primary 正在跑 run，输出 100 条 message.part.delta，security-reviewer 处于 observing
-- **THEN** 期间 security-reviewer 子进程 / API 调用次数 = 0；只有当 primary run 终结触发 `phase_completed` rule 后，Orchestrator dispatch `WakeAgent { agentId: security-reviewer, reason: "phase_completed" }`，才发生第一次 LLM 调用
-
-#### Scenario: 第一次 wake 注入完整 role prompt
-
-- **WHEN** security-reviewer 在 Room r_1 第一次被 wake（由 phase_completed 触发）
-- **THEN** Orchestrator 构造 `promptDelta = { kind: "first_wake", fullRolePrompt: <完整 role + safety + style> }`；后续同 session 再 wake 用 `kind: "delta_only"`
-
-#### Scenario: rule 只能产出 WakeAgent
-
-- **WHEN** 用户配置 rule `match: { artifact.files: ["auth.ts"] }, action: { type: "speak", agentId: "security-reviewer", text: "..." }`
-- **THEN** daemon 在加载规则时校验 action.type 必须是 `wake`；非 `wake` 类型规则注册失败 + audit log；用户在 settings UI 看到错误提示"rule action 必须是 wake"
-
-#### Scenario: 同源 wake 去重
-
-- **WHEN** 一个 phase_completed 事件因总线 retry 被 rule engine 评估两次，各自 dispatch WakeAgent
-- **THEN** 两次 WakeAgent 的 idempotencyKey 相同（基于 triggerEventId）；CommandBus 命中幂等 → 第二次返回已存在 commandId 与已存在 runId；不创建第二个 Run
-
-#### Scenario: knock 被 approve 走 knock_approved wake
-
-- **WHEN** 用户 approve 一个 reviewer 的 intervention
-- **THEN** intervention handler dispatch `WakeAgent { reason: "knock_approved" }`；Run 启动；Run 终结后 reviewer 回到 observing 而非保持 active
+- **WHEN** WakeAgent is dispatched with `reason: "execute"` for the leader
+- **THEN** the leader prompt uses the standard execution instructions; the leader proceeds with delegation
 
 ### Requirement: Mailbox 原子认领 + activeWakes 防重入
 
@@ -960,4 +900,192 @@ The system SHALL enforce chat discipline at the `RoomMcpServer.handleSendMessage
 
 - **WHEN** primary builder 在 `presence='working'` 中（active wake 内）调 `room.send_message`
 - **THEN** 直发主流，无降级
+
+### Requirement: room.complete_task MCP tool registration (complete-task-registration)
+
+The system SHALL register `room.complete_task` as a new tool in the Room MCP Server. This tool is **teammate-only**:
+- Non-leader task assignees MAY call it for their assigned task.
+- Leader sessions MUST receive `{ error: "complete_task_not_for_leader" }`.
+- Leaders use `room.update_task` to review, approve, or manage tasks.
+
+`room.complete_task` is NOT in `LEADER_ONLY_TOOLS` — it is in a separate `TEAMMATE_ONLY_TOOLS` set enforced at the same MCP dispatch layer.
+
+**Reference:** Multica `server/internal/handler/squad.go` — task completion is a structured API call. AionUi `TaskManager.ts` — explicit status update triggers `checkUnblocks()`. The pattern: task state transitions must go through a structured tool call, not be inferred from message content.
+
+See `multi-agent-intelligence/spec.md` for the full tool schema and behavior.
+
+#### Scenario: room.complete_task is available to teammates
+
+- **WHEN** a teammate agent's MCP session is established
+- **THEN** `room.complete_task` appears in the tool list; the teammate can call it to report task completion
+
+#### Scenario: room.complete_task is NOT leader-only
+
+- **WHEN** a non-leader agent calls `room.complete_task`
+- **THEN** the call is accepted (it is not in `LEADER_ONLY_TOOLS`); the task status is updated
+
+### Requirement: Sub-agent tool isolation and recursive spawn prevention (sub-agent-isolation)
+
+The system SHALL enforce a leader-only tool whitelist at the Room MCP Server level. Non-leader sessions that call a leader-only tool SHALL receive `{ error: "tool_not_permitted", tool }` without executing. Sub-agents spawned via `room.spawn_agent` SHALL always be non-leader.
+
+**Reference:** WenzAgent `spawn_sub_agent_tool.dart` `_defaultToolNames` — explicit tool whitelist for sub-agents; `spawn_sub_agent` excluded to prevent recursion. Multica squad leader pattern — only the leader can delegate tasks.
+
+```typescript
+const LEADER_ONLY_TOOLS = new Set([
+  'room.delegate',
+  'room.spawn_agent',
+  'room.add_participant'
+])
+```
+
+`room.spawn_agent` additionally checks `session.spawnDepth`; depth ≥ 1 returns `{ error: "recursive_spawn_not_permitted" }`.
+
+**Frontend:** No direct UI for this — it is enforced at the protocol level. The Run Detail drawer shows tool call errors including `tool_not_permitted`.
+
+#### Scenario: Non-leader calls leader-only tool
+
+- **WHEN** a teammate agent calls `room.delegate`
+- **THEN** the MCP server returns `{ error: "tool_not_permitted", tool: "room.delegate" }` without creating any task or dispatching any wake
+
+#### Scenario: Sub-agent cannot recursively spawn
+
+- **WHEN** an agent spawned via `room.spawn_agent` (spawnDepth=1) calls `room.spawn_agent`
+- **THEN** the MCP server returns `{ error: "recursive_spawn_not_permitted" }`
+
+### Requirement: MissionBrief assembly and injection (mission-brief-assembly)
+
+The system SHALL call `assembleMissionBrief(roomId, agentId, taskId?)` before constructing the prompt for any teammate run in a squad or team room. The result is prepended as a `<mission-brief>` XML block.
+
+See `multi-agent-intelligence/spec.md` for the full MissionBrief structure and Room Memory semantics.
+
+**Reference:** Multica `squad_briefing.go` — leader receives full briefing on every wake. AionUi `teammatePrompt.ts` line 47 — teammate receives workspace context and team roster.
+
+#### Scenario: MissionBrief injected for teammate wake
+
+- **WHEN** a teammate is woken for a delegated task in a squad room
+- **THEN** the run's system prompt begins with `<mission-brief>...</mission-brief>` containing goal, leader name, sibling tasks, and room memory
+
+#### Scenario: Solo room has no MissionBrief
+
+- **WHEN** a run starts in a solo room
+- **THEN** no `<mission-brief>` block is injected; the prompt starts with the role system prompt as before
+
+### Requirement: Visible planning phase for squad and team rooms (planning-phase-orchestration)
+
+The system SHALL implement the visible-only planning phase. When a squad/team room receives its first user message, the leader's first wake SHALL use `reason: "plan"`. After the leader produces a `PlanDocument`, the daemon stores it and immediately triggers a second wake with `reason: "execute"`.
+
+See `multi-agent-intelligence/spec.md` for the full PlanDocument schema and frontend behavior.
+
+**Reference:** AionUi `agent-team-guide-flow.md` — solo agent analyzes task before team execution begins. Multica `squad_briefing.go` — leader re-evaluates on each trigger with full context.
+
+`WakeReason` enum SHALL be extended with `"plan"` and `"execute"` values.
+
+#### Scenario: First message triggers plan wake
+
+- **WHEN** a user sends the first message in a squad room
+- **THEN** the leader is woken with `reason: "plan"`; after producing a PlanDocument, the leader is immediately woken again with `reason: "execute"`
+
+#### Scenario: Subsequent messages skip planning phase
+
+- **WHEN** a user sends a second message in a squad room that already has a plan
+- **THEN** the leader is woken with `reason: "primary_turn"` (no planning phase)
+
+### Requirement: Assisted selector group chat (assisted-selector-groupchat)
+
+The system SHALL implement assisted mode as an AutoGen-style selector group chat. For each user message in an assisted room, the orchestrator SHALL create a bounded group turn and select one speaker at a time from eligible room participants.
+
+**Reference:** AutoGen `SelectorGroupChat` / `BaseGroupChatManager` / `ChatAgentContainer` patterns: shared message thread, selector override, candidate filtering, repeated-speaker guard, retry/fallback, termination before next speaker selection. AionUi remains the reference for mailbox and wake lifecycle, not for assisted speaker selection.
+
+The selector flow SHALL:
+1. use deterministic selector overrides for explicit `@agent` mentions;
+2. filter candidates to enabled participants with available runtime/model configuration;
+3. include role description, declared capabilities, and effective skill summaries in selector participant descriptions;
+4. call the selector model when more than one candidate remains;
+5. reject unknown, ambiguous, or repeated-speaker outputs and retry up to `max_selector_attempts`;
+6. default `allow_repeated_speaker` to false for the immediately previous speaker;
+7. allow a speaker to return after another participant has spoken;
+8. update selector history with the completed speaker's public output before choosing the next speaker;
+9. stop on `max_turns`, no valid candidate, explicit `NO_SPEAKER`/`STOP`, superseding user message, empty output, or ack-only output.
+
+Selector/debug status SHALL NOT be rendered as ordinary chat bubbles. Public agent messages remain durable room messages; selector details belong in run detail/debug surfaces.
+
+#### Scenario: Selector chooses the next assisted speaker
+
+- **WHEN** a user message arrives in an assisted room with three eligible agents and no explicit mention
+- **THEN** the selector receives participant descriptions and shared conversation history
+- **AND** exactly one selected agent is woken
+
+#### Scenario: Mention overrides selector model
+
+- **WHEN** the user writes `@Builder can you sanity-check this?`
+- **THEN** Builder is selected without a selector model call
+
+#### Scenario: Assisted continuation sees prior speaker output
+
+- **WHEN** Builder completes a public assisted turn and the group turn has remaining budget
+- **THEN** the next selector call includes Builder's latest public output and any file-backed reply excerpts in the shared history
+
+#### Scenario: Assisted group turn stops
+
+- **WHEN** the selector returns `NO_SPEAKER` or the turn reaches its configured maximum speaker count
+- **THEN** no additional agent is woken for that user message
+
+### Requirement: Task-mode group chat presentation (task-mode-groupchat-presentation)
+
+The system SHALL make squad and team rooms visibly conversational without changing their task-driven semantics. Squad and team rooms SHALL continue to use leader delegation, mailbox delivery, `room.complete_task`, review gates, and Kanban state as the source of truth.
+
+The orchestrator MAY mirror key task lifecycle milestones into concise public assistant messages:
+- delegation
+- teammate task start
+- teammate completion, block, or review report
+- team review start
+- team review completion
+
+These public messages SHALL be normal durable room messages written in the same transaction as the lifecycle event they represent. They SHALL NOT replace task rows, mailbox messages, or state transition events. Raw task event names SHALL NOT be shown as chat bubbles.
+
+#### Scenario: Delegation is visible as a group-chat handoff
+
+- **WHEN** the leader delegates a task to Builder
+- **THEN** the room shows a short public message that Builder is taking the task
+- **AND** the task is still persisted through `task.delegation.created`
+
+#### Scenario: Team review gate remains authoritative
+
+- **WHEN** a teammate in team mode reports completion
+- **THEN** a short public completion/review message may be shown
+- **AND** the task still enters `review` until the leader approves it
+
+### Requirement: Room MCP mature tool surface (room-mcp-mature-tools)
+
+The Room MCP Server SHALL expose a mature workspace and collaboration tool surface for real runtimes. In addition to the original V1.1 tools, the tool list SHALL include:
+- `room.send_file_message`
+- `room.list_skills`
+- `room.load_skill`
+- `room.query_tasks`
+- `room.get_board`
+- `room.move_task`
+- `room.set_blocker`
+- `room.clear_blocker`
+- `room.list_blockers`
+- `room.standup`
+- `room.review`
+- `file.list`
+- `file.glob`
+- `file.grep`
+- `file.edit`
+- `file.apply_patch`
+- `todo.write`
+
+File and shell tools SHALL continue to use workspace path traversal guards and permission/capability checks. `file.edit` SHALL support exact `oldText`/`newText` replacement and multi-patch mode with missing-text hints and multiple-match rejection. Skill tools SHALL expose only selected/effective skill packages for the room/agent scope and SHALL NOT expose keychain secrets.
+
+#### Scenario: Agent can inspect workspace through guarded tools
+
+- **WHEN** a capable agent calls `file.glob`, `file.grep`, or `file.list`
+- **THEN** the tool returns workspace-scoped results only
+- **AND** absolute paths or `..` traversal are rejected
+
+#### Scenario: Agent can use skill packages explicitly
+
+- **WHEN** an agent calls `room.list_skills { scope: "effective" }` and then `room.load_skill`
+- **THEN** it receives only the effective skill package content and supporting files selected for that room/agent
 

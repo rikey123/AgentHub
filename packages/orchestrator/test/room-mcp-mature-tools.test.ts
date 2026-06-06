@@ -64,15 +64,128 @@ describe("RoomMcpServer mature tool handlers", () => {
 
     await expect(call("file.edit", { path: "src/app.ts", oldText: "'old'", newText: "'new'" })).resolves.toMatchObject({
       ok: true,
-      data: { path: "src/app.ts", replacements: 1 }
+      data: { path: "src/app.ts", replacements: 1, file: { path: "src/app.ts", status: "modified", additions: 1, deletions: 1, patch: expect.stringContaining("-'old'") } }
     });
     expect(readFileSync(join(tempDir!, "src", "app.ts"), "utf8")).toContain("'new'");
 
     await expect(call("file.apply_patch", { patch: "diff --git a/src/app.ts b/src/app.ts\nindex 0000000..1111111 100644\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-export const value = 'new';\n+export const value = 'patched';\n" })).resolves.toMatchObject({
       ok: true,
-      data: { applied: true }
+      data: { applied: true, files: [expect.objectContaining({ path: "src/app.ts", status: "modified", additions: 1, deletions: 1 })] }
     });
     expect(readFileSync(join(tempDir!, "src", "app.ts"), "utf8")).toContain("'patched'");
+  });
+
+  test("routes file.edit through ArtifactFS when the run has isolated artifact storage", async () => {
+    mkdirSync(join(tempDir!, "src"), { recursive: true });
+    writeFileSync(join(tempDir!, "src", "shadow.ts"), "export const value = 'old';\n", "utf8");
+    const writes: Array<{ readonly runId: string; readonly path: string; readonly content: string }> = [];
+    server = new RoomMcpServer({
+      commandBus: new CommandBus({ database: currentDatabase(), handlers: {} as never }),
+      taskService: currentTaskService(),
+      database: currentDatabase(),
+      eventBus: currentBus(),
+      artifactFs: {
+        readTextFile: ({ path }) => path === "src/shadow.ts" ? "export const value = 'old';\n" : undefined,
+        writeTextFile: (input) => { writes.push(input); }
+      },
+      now: () => now
+    });
+
+    await expect(call("file.edit", { path: "src/shadow.ts", oldText: "'old'", newText: "'new'" })).resolves.toMatchObject({
+      ok: true,
+      data: { path: "src/shadow.ts", replacements: 1 }
+    });
+    expect(writes).toEqual([{ runId: "run_1", path: "src/shadow.ts", content: "export const value = 'new';\n" }]);
+    expect(readFileSync(join(tempDir!, "src", "shadow.ts"), "utf8")).toContain("'old'");
+  });
+
+  test("returns structured file metadata for added and deleted apply_patch files", async () => {
+    mkdirSync(join(tempDir!, "docs"), { recursive: true });
+    writeFileSync(join(tempDir!, "docs", "old.md"), "Remove me\n", "utf8");
+
+    await expect(call("file.apply_patch", {
+      patch: [
+        "diff --git a/docs/new.md b/docs/new.md",
+        "new file mode 100644",
+        "index 0000000..1111111",
+        "--- /dev/null",
+        "+++ b/docs/new.md",
+        "@@ -0,0 +1 @@",
+        "+Add me",
+        "diff --git a/docs/old.md b/docs/old.md",
+        "deleted file mode 100644",
+        "index 1111111..0000000",
+        "--- a/docs/old.md",
+        "+++ /dev/null",
+        "@@ -1 +0,0 @@",
+        "-Remove me",
+        ""
+      ].join("\n")
+    })).resolves.toMatchObject({
+      ok: true,
+      data: {
+        applied: true,
+        files: [
+          expect.objectContaining({ path: "docs/new.md", status: "added", additions: 1, deletions: 0 }),
+          expect.objectContaining({ path: "docs/old.md", status: "deleted", additions: 0, deletions: 1 })
+        ]
+      }
+    });
+    expect(readFileSync(join(tempDir!, "docs", "new.md"), "utf8").replace(/\r\n/gu, "\n")).toBe("Add me\n");
+  });
+
+  test("applies multiple file.edit patches atomically and reports line numbers", async () => {
+    mkdirSync(join(tempDir!, "src"), { recursive: true });
+    writeFileSync(join(tempDir!, "src", "multi.ts"), "const first = 'old';\nconst second = 'old';\n", "utf8");
+
+    await expect(call("file.edit", {
+      path: "src/multi.ts",
+      patches: [
+        { oldText: "const first = 'old';", newText: "const first = 'new';" },
+        { oldText: "const second = 'old';", newText: "const second = 'new';" }
+      ]
+    })).resolves.toMatchObject({
+      ok: true,
+      data: {
+        path: "src/multi.ts",
+        replacements: 2,
+        patches: [
+          expect.objectContaining({ index: 1, line: 1 }),
+          expect.objectContaining({ index: 2, line: 2 })
+        ]
+      }
+    });
+    expect(readFileSync(join(tempDir!, "src", "multi.ts"), "utf8")).toBe("const first = 'new';\nconst second = 'new';\n");
+  });
+
+  test("creates missing files with file.edit createIfMissing", async () => {
+    await expect(call("file.edit", {
+      path: "docs/new.md",
+      patches: [{ oldText: "", newText: "# New document\n" }],
+      createIfMissing: true
+    })).resolves.toMatchObject({
+      ok: true,
+      data: { path: "docs/new.md", created: true, replacements: 1 }
+    });
+    expect(readFileSync(join(tempDir!, "docs", "new.md"), "utf8")).toBe("# New document\n");
+  });
+
+  test("returns a nearby-match hint when file.edit oldText is missing", async () => {
+    mkdirSync(join(tempDir!, "src"), { recursive: true });
+    writeFileSync(join(tempDir!, "src", "hint.ts"), "function greet() {\n  return 'hello';\n}\n", "utf8");
+
+    await expect(call("file.edit", {
+      path: "src/hint.ts",
+      oldText: "function greet() {\n  return 'hi';\n}",
+      newText: "function greet() {\n  return 'hello world';\n}"
+    })).resolves.toMatchObject({
+      ok: false,
+      error: {
+        code: "not_found",
+        details: expect.objectContaining({ line: 1, preview: expect.stringContaining("function greet()") })
+      }
+    });
+    expect(readFileSync(join(tempDir!, "src", "hint.ts"), "utf8")).toContain("return 'hello';");
   });
 
   test("supports board query, blocker, review, and todo tools using task events", async () => {

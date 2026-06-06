@@ -2194,6 +2194,128 @@ describe("daemon M1.4 composition", () => {
     expect(activitiesAfterCommentPayload.activities[0]).toMatchObject({ kind: "comment", payload: JSON.stringify({ text: "Looks good" }) });
   });
 
+  it("serves artifact raw files inline for preview and as attachments for explicit downloads", async () => {
+    const client = new AgentHubClient({ baseUrl });
+    const room = await client.createRoom({ title: "Artifact raw", mode: "solo", primaryAgentId: "mock-builder" }) as { readonly data: { readonly roomId: string } };
+    const created = await fetch(`${baseUrl}/artifacts`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        workspaceId: "default-workspace",
+        roomId: room.data.roomId,
+        typeName: "file",
+        title: "Preview image",
+        files: [{ path: "images/diagram.png", newContent: "png-bytes", additions: 1, deletions: 0, fileStatus: "added" }]
+      })
+    });
+    const createdPayload = await created.json() as { readonly data: { readonly id: string } };
+    expect(created.status).toBe(200);
+
+    const preview = await fetch(`${baseUrl}/artifacts/${createdPayload.data.id}/files/images%2Fdiagram.png/raw`);
+    expect(preview.status).toBe(200);
+    expect(preview.headers.get("content-type")).toBe("image/png");
+    expect(preview.headers.get("content-disposition")).toBe("inline; filename=\"diagram.png\"");
+
+    const download = await fetch(`${baseUrl}/artifacts/${createdPayload.data.id}/files/images%2Fdiagram.png/raw?download=1`);
+    expect(download.status).toBe(200);
+    expect(download.headers.get("content-disposition")).toBe("attachment; filename=\"diagram.png\"");
+  });
+
+  it("updates, resolves, deletes, archives, and soft-deletes artifacts over HTTP", async () => {
+    const client = new AgentHubClient({ baseUrl });
+    const room = await client.createRoom({ title: "Artifact review lifecycle", mode: "solo", primaryAgentId: "mock-builder" }) as { readonly data: { readonly roomId: string } };
+    const created = await fetch(`${baseUrl}/artifacts`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        workspaceId: "default-workspace",
+        roomId: room.data.roomId,
+        typeName: "diff",
+        title: "Patch",
+        files: [{ path: "src/a.ts", oldContent: "old", newContent: "new", patch: "--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-old\n+new", additions: 1, deletions: 1, fileStatus: "modified" }]
+      })
+    });
+    const createdPayload = await created.json() as { readonly data: { readonly id: string } };
+    const artifactId = createdPayload.data.id;
+
+    const added = await fetch(`${baseUrl}/artifacts/${artifactId}/reviews`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ decision: "comment", reason: "Initial", filePath: "src/a.ts", lineNumber: 1, side: "new" })
+    });
+    const addedPayload = await added.json() as { readonly review: { readonly id: string } };
+    const reviewId = addedPayload.review.id;
+
+    const updated = await fetch(`${baseUrl}/artifacts/${artifactId}/reviews/${reviewId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ reason: "Updated", lineNumber: 2, side: "old" })
+    });
+    const resolved = await fetch(`${baseUrl}/artifacts/${artifactId}/reviews/${reviewId}/resolve`, { method: "POST" });
+    const deletedReview = await fetch(`${baseUrl}/artifacts/${artifactId}/reviews/${reviewId}`, { method: "DELETE" });
+    const archived = await fetch(`${baseUrl}/artifacts/${artifactId}/archive`, { method: "POST" });
+    const deletedArtifact = await fetch(`${baseUrl}/artifacts/${artifactId}`, { method: "DELETE" });
+    const listed = await fetch(`${baseUrl}/artifacts?roomId=${room.data.roomId}`);
+    const listedWithDeleted = await fetch(`${baseUrl}/artifacts?roomId=${room.data.roomId}&includeDeleted=1`);
+
+    expect(updated.status).toBe(200);
+    await expect(updated.json()).resolves.toMatchObject({ review: { reason: "Updated", side: "old", status: "open" } });
+    expect(resolved.status).toBe(200);
+    await expect(resolved.json()).resolves.toMatchObject({ review: { status: "resolved" } });
+    expect(deletedReview.status).toBe(200);
+    await expect(deletedReview.json()).resolves.toMatchObject({ review: { status: "deleted" } });
+    expect(archived.status).toBe(200);
+    await expect(archived.json()).resolves.toMatchObject({ artifact: { id: artifactId } });
+    expect(deletedArtifact.status).toBe(200);
+    await expect(deletedArtifact.json()).resolves.toMatchObject({ artifact: { id: artifactId } });
+    await expect(listed.json()).resolves.toMatchObject({ artifacts: [] });
+    await expect(listedWithDeleted.json()).resolves.toMatchObject({ artifacts: [expect.objectContaining({ id: artifactId })] });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type IN ('artifact.review.updated', 'artifact.review.resolved', 'artifact.review.deleted', 'artifact.archived', 'artifact.deleted')").get()).toMatchObject({ count: 5 });
+  });
+
+  it("refreshes task delivery reports with evidence metadata instead of accumulating stale copies", async () => {
+    const client = new AgentHubClient({ baseUrl });
+    const room = await client.createRoom({ title: "Task report refresh", mode: "solo", primaryAgentId: "mock-builder" }) as { readonly data: { readonly roomId: string } };
+    const created = await fetch(`${baseUrl}/rooms/${room.data.roomId}/tasks`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Refresh report", description: "Collect proof.", assigneeAgentId: "mock-builder", idempotencyKey: "task-report-refresh-1" })
+    });
+    const createdPayload = await created.json() as { readonly data: { readonly taskId: string } };
+    const taskId = createdPayload.data.taskId;
+
+    daemon.database.sqlite.prepare("INSERT INTO run_file_changes (id, run_id, task_id, files_changed, created_at) VALUES ('rfc_report_1', 'run_report_1', ?, ?, 10)").run(taskId, JSON.stringify([{ path: "src/report.ts", change: "modified", linesAdded: 6, linesRemoved: 2 }]));
+    daemon.database.sqlite.prepare("INSERT INTO task_activities (id, task_id, kind, by_kind, by, payload, created_at) VALUES ('act_report_validation', ?, 'run_completed', 'role', 'mock-builder', ?, 20)").run(taskId, JSON.stringify({ summary: "pnpm check:all passed" }));
+    daemon.eventBus.publish({
+      id: "evt_report_worktree_ready",
+      type: "worktree.diff.ready",
+      schemaVersion: 1,
+      workspaceId: "default-workspace",
+      roomId: room.data.roomId,
+      taskId,
+      runId: "run_report_1",
+      payload: { runId: "run_report_1", artifactId: "artifact_worktree_report", filesChanged: ["src/report.ts"] },
+      createdAt: 30
+    });
+
+    const first = await fetch(`${baseUrl}/rooms/${room.data.roomId}/tasks/${taskId}/report`, { method: "POST" });
+    const firstPayload = await first.json() as { readonly artifact: { readonly id: string; readonly metadata: Record<string, unknown> }; readonly markdown: string; readonly evidenceCounts?: Record<string, number> };
+    const second = await fetch(`${baseUrl}/rooms/${room.data.roomId}/tasks/${taskId}/report`, { method: "POST" });
+    const secondPayload = await second.json() as { readonly artifact: { readonly id: string; readonly metadata: Record<string, unknown> }; readonly markdown: string; readonly evidenceCounts?: Record<string, number> };
+
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(200);
+    expect(secondPayload.artifact.id).not.toBe(firstPayload.artifact.id);
+    expect(firstPayload.artifact.metadata).toMatchObject({ templateVersion: 2, source: "task_proof_of_work" });
+    expect(secondPayload.artifact.metadata).toMatchObject({ templateVersion: 2, source: "task_proof_of_work" });
+    expect(secondPayload.evidenceCounts).toMatchObject({ fileRuns: 1, changedFiles: 1, worktreeReviews: 1, proofActivities: 1 });
+    expect(secondPayload.markdown).toContain("Template version: 2");
+    expect(secondPayload.markdown).toContain("Changed files: 1");
+    expect(secondPayload.markdown).toContain("pnpm check:all passed");
+    expect(daemon.database.sqlite.prepare("SELECT deleted_at FROM artifacts WHERE id = ?").get(firstPayload.artifact.id)).toMatchObject({ deleted_at: expect.any(Number) });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM artifacts WHERE task_id = ? AND json_extract(metadata, '$.artifactKind') = 'delivery_report' AND deleted_at IS NULL").get(taskId)).toMatchObject({ count: 1 });
+  });
+
   it("serves V1.1 skill CRUD routes and protects builtin skills", async () => {
     const listed = await fetch(`${baseUrl}/skills`);
     const listedPayload = await listed.json() as { readonly skills: readonly { readonly id: string; readonly name: string; readonly origin: string; readonly content?: string }[] };

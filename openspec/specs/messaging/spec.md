@@ -5,82 +5,24 @@ TBD - created by archiving change add-agenthub-mvp. Update Purpose after archive
 ## Requirements
 ### Requirement: Message + MessagePart 数据模型
 
-The system SHALL persist Message and MessagePart as separate tables, with a Message owning N MessagePart entries ordered by `seq`.
+The message part model SHALL support artifact-backed attachment parts for file messages produced by agents.
 
-```ts
-type Message = {
-  id: string                              // ULID
-  roomId: string
-  sender:
-    | { type: "user"; id: string }
-    | { type: "agent"; id: string; runId?: string }
-    | { type: "system"; id: "system" }
-  role: "user" | "assistant" | "system" | "tool"
-  status: "streaming" | "completed" | "failed" | "cancelled" | "deleted"
-  quotedMessageId?: string                // 引用
-  // 控制 message.created handler 是否触发自动调度（详见 messaging/用户 Turn 排队 + orchestrator/Solo 模式调度）
-  // 'immediate'：Orchestrator handler 直接 dispatch WakeAgent
-  // 'pending'：Orchestrator handler MUST 不 wake；调度由后续 ConsumePendingTurn 内部触发
-  turnDispatchMode?: "immediate" | "pending"
-  pendingTurnId?: string                   // 当 turnDispatchMode='pending' 时引用对应 PendingTurn
-  createdAt: number
-  updatedAt: number
-}
+An artifact-backed attachment part SHALL include:
+- `fileId`
+- `name`
+- `mimeType`
+- `sizeBytes`
+- `artifactId`
+- `path`
+- optional `previewKind`
 
-type MessagePart =
-  | TextPart
-  | CodePart
-  | ToolCallPart
-  | ToolResultPart
-  | CardPart
-  | AttachmentPart
+Existing attachment parts without `artifactId` SHALL remain valid and render as ordinary attachment cards/chips.
 
-type TextPart       = { type: "text"; seq: number; text: string }
-type CodePart       = { type: "code"; seq: number; lang: string; text: string }
-type ToolCallPart   = { type: "tool_call"; seq: number; name: string; input: unknown }
-type ToolResultPart = { type: "tool_result"; seq: number; toolCallId: string; output: unknown; ok: boolean }
-type AttachmentPart = { type: "attachment"; seq: number; fileId: string; name: string; mimeType: string; sizeBytes: number }
-type CardPart       = { type: "card"; seq: number; card: Card }
-```
+#### Scenario: Artifact-backed attachment survives replay
 
-```sql
-CREATE TABLE messages (
-  id                    TEXT PRIMARY KEY,
-  room_id               TEXT NOT NULL,
-  sender_type           TEXT NOT NULL,
-  sender_id             TEXT NOT NULL,
-  run_id                TEXT,
-  role                  TEXT NOT NULL,
-  status                TEXT NOT NULL,
-  quoted_message_id     TEXT,
-  turn_dispatch_mode    TEXT,                      -- 'immediate' | 'pending'
-  pending_turn_id       TEXT,
-  created_at            INTEGER NOT NULL,
-  updated_at            INTEGER NOT NULL,
-  FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE
-);
-CREATE INDEX idx_messages_room_created ON messages (room_id, created_at);
-CREATE INDEX idx_messages_pending      ON messages (room_id, turn_dispatch_mode);
-
-CREATE TABLE message_parts (
-  message_id   TEXT NOT NULL,
-  seq          INTEGER NOT NULL,
-  part_type    TEXT NOT NULL,
-  payload      TEXT NOT NULL,         -- JSON
-  PRIMARY KEY (message_id, seq),
-  FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
-);
-```
-
-#### Scenario: 写入 user 消息
-
-- **WHEN** 用户 `POST /rooms/:id/messages` body `{ text: "Refactor auth.ts to use jwt" }`
-- **THEN** daemon 创建 Message（role=user, status=completed）+ 一个 TextPart，发 `message.created` durable 事件，返回 201 + Message
-
-#### Scenario: assistant message 流式追加
-
-- **WHEN** Agent run 输出第一个 token
-- **THEN** daemon 若该 message 不存在则创建（status=streaming），发 `message.created` durable 事件；后续每个 token 走 `message.part.delta` ephemeral，最终 `message.completed` durable 事件携带最终全文
+- **WHEN** an agent sends a file message backed by artifact `artifact_1`
+- **THEN** the persisted message part includes `artifactId = "artifact_1"` and the artifact file path
+- **AND** reconnect/replay reconstructs the same clickable file card in the chat timeline
 
 ### Requirement: Card 类型清单
 
@@ -442,4 +384,39 @@ type MailboxDeliveryFailedPayload = {
 - **WHEN** 同 mailbox 在 60 秒内连续被 retry 失败 10 次
 - **THEN** 仅第一次发 `mailbox.delivery.failed`，后续 9 次按 `(mailboxMessageId, reason)` LRU 命中跳过事件
 - **AND** `attempt_count` 字段照常累加；daemon 内部 metric counter `mailbox_delivery_failed_dedupe_suppressed` +1（**不**进 EventBus，不是 event 类型）
+
+### Requirement: Agent file message tool
+
+The system SHALL expose `room.send_file_message` as a Room MCP tool for publishing long deliverables as artifact-backed file cards.
+
+The tool SHALL accept either inline `content` plus `fileName`, or a workspace-relative `path`, and optional `title`, `summary`, and `mimeType`. The tool SHALL:
+1. validate the caller and input;
+2. sanitize the file name/path;
+3. enforce file read and sensitive-file rules for path mode;
+4. create a `file` artifact through `ArtifactService`;
+5. insert or append an attachment message part that references the artifact;
+6. publish the required durable message/artifact events in the same SQLite transaction;
+7. return metadata only, not full file content.
+
+#### Scenario: Agent publishes long report as file card
+
+- **WHEN** an agent calls `room.send_file_message { fileName: "architecture.md", content: "# Architecture\n..." }`
+- **THEN** the room receives a short assistant message with a file card for `architecture.md`
+- **AND** the full content is stored as a `file` artifact and opens through the artifact preview surface
+
+#### Scenario: Path mode respects workspace safety
+
+- **WHEN** an agent calls `room.send_file_message { path: "../../secret.env" }`
+- **THEN** the tool rejects the request without reading the file
+
+### Requirement: Live attachment part update
+
+The system SHALL update chat file cards live without relying on page refresh. When a file message appends an attachment to an existing message, the daemon SHALL publish `message.part.added` with `visibility = both` or publish a completed message payload containing the final parts. The projector SHALL update the message parts from that durable event.
+
+`artifact.file.created` alone SHALL NOT be used as the only chat timeline update because it does not identify which message part to append.
+
+#### Scenario: File card appears without refresh
+
+- **WHEN** `room.send_file_message` creates an artifact-backed attachment while the room SSE stream is connected
+- **THEN** the chat timeline shows the file card without a manual refresh
 

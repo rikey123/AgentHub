@@ -59,12 +59,27 @@ afterEach(() => {
 let now = 1_000;
 
 describe("ArtifactFSRunRegistry.buildWorktreeDiffArtifact", () => {
-  test("isolated_worktree with file changes creates worktree_diff artifact and publishes event", () => {
+  test("isolated_worktree with file changes creates per-file worktree_diff artifact and publishes event", () => {
     const runId = "run_worktree_diff";
     currentRegistry().beginRun({ runId, workspaceId: "ws_1", agentId: "agent_1", mode: "isolated_worktree", workDir: currentWorktreeRoot() });
     execFileSyncMock
-      .mockReturnValueOnce("diff --git a/src/app.ts b/src/app.ts\n--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-old\n+new\n")
-      .mockReturnValueOnce("src/app.ts\n");
+      .mockReturnValueOnce([
+        "diff --git a/src/app.ts b/src/app.ts",
+        "--- a/src/app.ts",
+        "+++ b/src/app.ts",
+        "@@ -1 +1 @@",
+        "-old",
+        "+new",
+        "diff --git a/docs/notes.md b/docs/notes.md",
+        "new file mode 100644",
+        "--- /dev/null",
+        "+++ b/docs/notes.md",
+        "@@ -0,0 +1,2 @@",
+        "+# Notes",
+        "+Ship it",
+        ""
+      ].join("\n"))
+      .mockReturnValueOnce("src/app.ts\ndocs/notes.md\n");
 
     const artifact = currentRegistry().buildWorktreeDiffArtifact({ runId, title: "Worktree changes" });
 
@@ -76,10 +91,27 @@ describe("ArtifactFSRunRegistry.buildWorktreeDiffArtifact", () => {
       workspace_id: "ws_1",
       title: "Worktree changes"
     });
-    expect(currentDatabase().sqlite.prepare("SELECT path, patch, file_status FROM artifact_files WHERE artifact_id = ?").get(artifact?.id)).toMatchObject({
-      path: "worktree.patch",
-      patch: expect.stringContaining("diff --git a/src/app.ts b/src/app.ts"),
-      file_status: "modified"
+    const files = currentDatabase().sqlite.prepare("SELECT path, patch, additions, deletions, file_status FROM artifact_files WHERE artifact_id = ? ORDER BY path ASC").all(artifact?.id);
+    expect(files).toEqual([
+      {
+        path: "docs/notes.md",
+        patch: expect.stringContaining("diff --git a/docs/notes.md b/docs/notes.md"),
+        additions: 2,
+        deletions: 0,
+        file_status: "added"
+      },
+      {
+        path: "src/app.ts",
+        patch: expect.stringContaining("diff --git a/src/app.ts b/src/app.ts"),
+        additions: 1,
+        deletions: 1,
+        file_status: "modified"
+      }
+    ]);
+    expect(currentService().get(artifact!.id)?.metadata).toMatchObject({
+      filesChanged: ["src/app.ts", "docs/notes.md"],
+      artifactFsMode: "isolated_worktree",
+      fullPatch: expect.stringContaining("diff --git a/src/app.ts b/src/app.ts")
     });
     expect(currentDatabase().sqlite.prepare("SELECT type, payload FROM events WHERE type = 'worktree.diff.ready' AND run_id = ?").get(runId)).toMatchObject({
       type: "worktree.diff.ready"

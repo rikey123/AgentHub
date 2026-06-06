@@ -15,6 +15,7 @@ import { createInterventionCommandHandlers, InterventionEngine } from "@agenthub
 import { ActiveWakesRegistry, AssistedSelectorGroupChatManager, checkTaskTimeouts, createCancelRunHandler, createCompleteTaskHandler, createConsumePendingTurnHandler, createCreateTaskHandler, createUpdateTaskHandler, createWakeAgentHandler, handleTeamDispatchReviewTerminal, MailboxService, maybePublishTeamDispatchCompleted, PendingTurnService, ReclaimStaleClaimedRun, reconcileTerminalDelegatedTaskRuns, RoomMcpServer, RunLifecycleService, RunQueue, StartupRecovery, TaskModeGroupChatPresenter, TaskService, WELL_KNOWN_CAPABILITY_TOKENS, type BriefResolver } from "@agenthub/orchestrator";
 import { createPermissionCommandHandlers, PermissionEngine, seedBuiltInPermissionProfiles } from "@agenthub/permissions";
 import type { EventEnvelope } from "@agenthub/protocol/events";
+import { artifactContentTypeFor as protocolArtifactContentTypeFor } from "@agenthub/protocol/preview";
 import { SkillRegistry, listRuntimeLocalSkills, loadRuntimeLocalSkillBundle } from "@agenthub/skills";
 import { attachmentMaxBytes, authenticateBrowserRequest, createKeychain, createKeychainAccount, issueBrowserSession, redactAndTruncate, storeAttachment, type BrowserAuthResult, type KeychainBridge } from "@agenthub/security";
 import { Effect } from "effect";
@@ -1023,6 +1024,7 @@ async function route(ctx: RouteContext): Promise<void> {
     const column = typeof input.column === "string" ? input.column : undefined;
     return dispatch(ctx, { roomId: parts[1], taskId: parts[3], boardColumn: column }, "UpdateTask");
   }
+  if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "tasks" && parts[4] === "report") return createTaskDeliveryReport(ctx, parts[1] as string, parts[3] as string);
   if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "tasks") return dispatchCreated(ctx, { ...(await body(ctx)), roomId: parts[1] }, "CreateTask");
   if (ctx.req.method === "POST" && parts[0] === "tasks" && parts[2] === "complete") return dispatch(ctx, { taskId: parts[1] }, "CompleteTask");
   if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "archive") return dispatch(ctx, { roomId: parts[1] }, "ArchiveRoom");
@@ -1083,11 +1085,19 @@ async function route(ctx: RouteContext): Promise<void> {
   if (ctx.req.method === "GET" && url.pathname === "/artifacts") return artifacts(ctx, url);
   if (ctx.req.method === "POST" && url.pathname === "/artifacts") return dispatch(ctx, await body(ctx), "CreateArtifact");
   if (ctx.req.method === "GET" && parts[0] === "artifacts" && parts.length === 2) return json(ctx.res, 200, { artifact: ctx.artifactService.get(parts[1] as string) ?? null });
+  if (ctx.req.method === "GET" && parts[0] === "artifacts" && parts[2] === "reviews" && parts.length === 3) return json(ctx.res, 200, { reviews: ctx.artifactService.reviews(parts[1] as string) });
+  if (ctx.req.method === "POST" && parts[0] === "artifacts" && parts[2] === "reviews" && parts.length === 3) return addArtifactReview(ctx, parts[1] as string, await body(ctx));
+  if (ctx.req.method === "PATCH" && parts[0] === "artifacts" && parts[2] === "reviews" && parts.length === 4) return updateArtifactReview(ctx, parts[1] as string, parts[3] as string, await body(ctx));
+  if (ctx.req.method === "POST" && parts[0] === "artifacts" && parts[2] === "reviews" && parts[4] === "resolve") return resolveArtifactReview(ctx, parts[1] as string, parts[3] as string);
+  if (ctx.req.method === "DELETE" && parts[0] === "artifacts" && parts[2] === "reviews" && parts.length === 4) return deleteArtifactReview(ctx, parts[1] as string, parts[3] as string);
   if (ctx.req.method === "POST" && parts[0] === "artifacts" && parts[2] === "review") return dispatch(ctx, { artifactId: parts[1] }, "ReviewArtifact");
   if (ctx.req.method === "POST" && parts[0] === "artifacts" && parts[2] === "apply") return dispatch(ctx, { ...(await body(ctx)), artifactId: parts[1] }, "ApplyDiff");
   if (ctx.req.method === "POST" && parts[0] === "artifacts" && parts[2] === "reject") return dispatch(ctx, { ...(await body(ctx)), artifactId: parts[1] }, "RejectDiff");
   if (ctx.req.method === "POST" && parts[0] === "artifacts" && parts[2] === "revert") return dispatch(ctx, { artifactId: parts[1] }, "RevertArtifact");
+  if (ctx.req.method === "POST" && parts[0] === "artifacts" && parts[2] === "archive") return archiveArtifact(ctx, parts[1] as string);
+  if (ctx.req.method === "DELETE" && parts[0] === "artifacts" && parts.length === 2) return deleteArtifact(ctx, parts[1] as string);
   if (ctx.req.method === "GET" && parts[0] === "artifacts" && parts[2] === "files" && parts.length === 3) return json(ctx.res, 200, { files: ctx.artifactService.files(parts[1] as string) });
+  if (ctx.req.method === "GET" && parts[0] === "artifacts" && parts[2] === "files" && parts.at(-1) === "raw" && parts.length >= 5) return artifactFileRaw(ctx, parts[1] as string, decodeURIComponent(parts.slice(3, -1).join("/")), url.searchParams.get("download") === "1");
   if (ctx.req.method === "GET" && parts[0] === "artifacts" && parts[2] === "files" && parts.length >= 4) return json(ctx.res, 200, { content: ctx.artifactService.fileContent(parts[1] as string, decodeURIComponent(parts.slice(3).join("/"))) ?? null });
   if (ctx.req.method === "GET" && url.pathname === "/debug/events") return debugEvents(ctx, url, auth);
   if (ctx.req.method === "GET" && url.pathname === "/debug/stats") return debugStats(ctx, auth);
@@ -1439,9 +1449,286 @@ async function attachments(ctx: RouteContext): Promise<void> {
 function artifacts(ctx: RouteContext, url: URL): void {
   const roomId = url.searchParams.get("roomId") ?? undefined;
   const taskId = url.searchParams.get("taskId") ?? undefined;
+  const includeDeleted = url.searchParams.get("includeDeleted") === "1" || url.searchParams.get("includeDeleted") === "true";
   const statusParam = url.searchParams.get("status");
   const status = statusParam === null ? undefined : statusParam.split(",").filter(Boolean) as NonNullable<Parameters<ArtifactService["list"]>[0]>["status"];
-  json(ctx.res, 200, { artifacts: ctx.artifactService.list({ ...(roomId !== undefined ? { roomId } : {}), ...(taskId !== undefined ? { taskId } : {}), ...(status !== undefined ? { status } : {}) }) });
+  json(ctx.res, 200, { artifacts: ctx.artifactService.list({ ...(roomId !== undefined ? { roomId } : {}), ...(taskId !== undefined ? { taskId } : {}), ...(status !== undefined ? { status } : {}), includeDeleted }) });
+}
+
+function artifactFileRaw(ctx: RouteContext, artifactId: string, path: string, download: boolean): void {
+  const content = ctx.artifactService.fileContent(artifactId, path);
+  if (content === undefined || content.content === undefined) return json(ctx.res, 404, { error: "artifact_file_not_found" });
+  const buffer = Buffer.from(content.content, "utf8");
+  ctx.res.writeHead(200, {
+    "content-type": artifactContentTypeFor(path),
+    "content-length": String(buffer.byteLength),
+    "content-disposition": `${download ? "attachment" : "inline"}; filename="${safeDownloadName(path)}"`,
+    "cache-control": "no-cache",
+    "x-content-type-options": "nosniff"
+  });
+  ctx.res.end(buffer);
+}
+
+const taskDeliveryReportTemplateVersion = 2;
+
+type TaskReportFileRun = {
+  readonly runId: string;
+  readonly artifactId?: string | undefined;
+  readonly files: readonly { readonly path: string; readonly change: string; readonly linesAdded?: number | undefined; readonly linesRemoved?: number | undefined }[];
+};
+
+type TaskReportWorktreeReview = {
+  readonly runId: string;
+  readonly artifactId?: string | undefined;
+  readonly status: string;
+  readonly filesChanged?: readonly string[] | undefined;
+  readonly conflictDiff?: string | undefined;
+};
+
+type TaskReportProofActivity = {
+  readonly kind: string;
+  readonly payload?: unknown;
+};
+
+type TaskReportArtifactReview = {
+  readonly artifactId: string;
+  readonly reviewId: string;
+  readonly decision: string;
+  readonly reviewerKind: string;
+  readonly reviewerId: string;
+  readonly reason?: string | undefined;
+  readonly filePath?: string | undefined;
+  readonly lineNumber?: number | undefined;
+  readonly side?: string | undefined;
+  readonly status: string;
+  readonly createdAt: number;
+  readonly resolvedAt?: number | undefined;
+};
+
+type TaskReportEvidenceCounts = {
+  readonly fileRuns: number;
+  readonly changedFiles: number;
+  readonly worktreeReviews: number;
+  readonly proofActivities: number;
+  readonly reviewDecisions: number;
+  readonly unresolvedComments: number;
+};
+
+function taskDeliveryReportMarkdown(task: ReturnType<TaskService["list"]>[number]): string {
+  return taskDeliveryReportMarkdownFromEvidence({
+    id: task.id,
+    title: task.title,
+    description: task.description,
+    status: task.status,
+    assignee: task.assigneeRoleId ?? task.assigneeAgentId ?? "Unassigned",
+    sourceRunId: task.sourceRunId
+  });
+}
+
+function taskDeliveryReportMarkdownFromEvidence(input: {
+  readonly id: string;
+  readonly title: string;
+  readonly description?: string | undefined;
+  readonly status: string;
+  readonly assignee: string;
+  readonly sourceRunId?: string | undefined;
+  readonly fileRuns?: readonly TaskReportFileRun[] | undefined;
+  readonly worktreeReviews?: readonly TaskReportWorktreeReview[] | undefined;
+  readonly proofActivities?: readonly TaskReportProofActivity[] | undefined;
+  readonly artifactReviews?: readonly TaskReportArtifactReview[] | undefined;
+  readonly generatedAt?: number | undefined;
+  readonly templateVersion?: number | undefined;
+}): string {
+  const fileRuns = input.fileRuns ?? [];
+  const worktreeReviews = input.worktreeReviews ?? [];
+  const proof = input.proofActivities ?? [];
+  const artifactReviews = input.artifactReviews ?? [];
+  const counts = taskReportEvidenceCounts({ fileRuns, worktreeReviews, proofActivities: proof, artifactReviews });
+  const templateVersion = input.templateVersion ?? taskDeliveryReportTemplateVersion;
+  const lines: string[] = [
+    `# Task Delivery Report: ${input.title}`,
+    "",
+    `- Template version: ${templateVersion}`,
+    `- Generated at: ${formatReportTimestamp(input.generatedAt ?? Date.now())}`,
+    `- Task: \`${input.id}\``,
+    `- Status: ${input.status}`,
+    `- Assignee: ${input.assignee}`,
+    `- Source run: ${input.sourceRunId ?? "-"}`,
+    "",
+    "## Evidence Summary",
+    "",
+    `- File runs: ${counts.fileRuns}`,
+    `- Changed files: ${counts.changedFiles}`,
+    `- Worktree reviews: ${counts.worktreeReviews}`,
+    `- Proof activities: ${counts.proofActivities}`,
+    `- Review decisions: ${counts.reviewDecisions}`,
+    `- Unresolved comments: ${counts.unresolvedComments}`,
+    "",
+    "## Description",
+    "",
+    input.description?.trim() || "No description provided.",
+    "",
+    "## File Changes"
+  ];
+  if (fileRuns.length === 0) {
+    lines.push("", "No file changes recorded.");
+  } else {
+    for (const run of fileRuns) {
+      lines.push("", `### Run ${run.runId}${run.artifactId ? ` / artifact ${run.artifactId}` : ""}`);
+      for (const file of run.files) lines.push(`- \`${file.path}\` (${file.change}, +${file.linesAdded ?? 0} / -${file.linesRemoved ?? 0})`);
+    }
+  }
+  lines.push("", "## Worktree Reviews");
+  if (worktreeReviews.length === 0) {
+    lines.push("", "No worktree review records.");
+  } else {
+    for (const review of worktreeReviews) {
+      lines.push("", `- run \`${review.runId}\`: ${review.status}${review.artifactId ? ` / artifact ${review.artifactId}` : ""}`);
+      if (review.filesChanged && review.filesChanged.length > 0) for (const path of review.filesChanged) lines.push(`  - \`${path}\``);
+      if (review.conflictDiff) lines.push(`  - conflict: ${review.conflictDiff.slice(0, 500)}`);
+    }
+  }
+  lines.push("", "## Review Decisions");
+  if (artifactReviews.length === 0) {
+    lines.push("", "No artifact review decisions or line comments recorded.");
+  } else {
+    for (const review of artifactReviews) {
+      const location = review.filePath !== undefined ? ` at \`${review.filePath}\`${review.lineNumber !== undefined ? `:${review.lineNumber}` : ""}${review.side !== undefined ? ` (${review.side})` : ""}` : "";
+      const status = review.status === "open" ? "" : ` [${review.status}]`;
+      lines.push("", `- ${review.decision}${status} by ${review.reviewerKind}:${review.reviewerId}${location}`);
+      lines.push(`  - artifact \`${review.artifactId}\` / review \`${review.reviewId}\``);
+      if (review.reason !== undefined) lines.push(`  - ${review.reason}`);
+    }
+  }
+  lines.push("", "## Proof And Validation");
+  if (proof.length === 0) {
+    lines.push("", "No validation evidence has been recorded yet.");
+  } else {
+    lines.push("");
+    for (const activity of proof) lines.push(`- ${activity.kind}: ${taskReportPayloadSummary(activity.payload)}`);
+  }
+  return lines.join("\n").trimEnd() + "\n";
+}
+
+function taskReportEvidenceCounts(input: {
+  readonly fileRuns: readonly TaskReportFileRun[];
+  readonly worktreeReviews: readonly TaskReportWorktreeReview[];
+  readonly proofActivities: readonly TaskReportProofActivity[];
+  readonly artifactReviews?: readonly TaskReportArtifactReview[] | undefined;
+}): TaskReportEvidenceCounts {
+  const artifactReviews = input.artifactReviews ?? [];
+  return {
+    fileRuns: input.fileRuns.length,
+    changedFiles: input.fileRuns.reduce((total, run) => total + run.files.length, 0),
+    worktreeReviews: input.worktreeReviews.length,
+    proofActivities: input.proofActivities.length,
+    reviewDecisions: artifactReviews.length,
+    unresolvedComments: artifactReviews.filter((review) => review.decision === "comment" && review.status === "open").length
+  };
+}
+
+function formatReportTimestamp(value: number): string {
+  return new Date(Number.isFinite(value) ? value : Date.now()).toISOString();
+}
+
+function taskReportPayloadSummary(payload: unknown): string {
+  if (payload === null || payload === undefined) return "No payload";
+  if (typeof payload === "string") return payload;
+  if (typeof payload === "number" || typeof payload === "boolean") return String(payload);
+  if (typeof payload !== "object" || Array.isArray(payload)) return "Payload recorded";
+  const record = payload as Record<string, unknown>;
+  for (const key of ["summary", "comment", "message", "reason", "artifactPath", "artifactId", "runId"]) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim().length > 0) return value;
+  }
+  return Object.entries(record).slice(0, 3).map(([key, value]) => `${key}: ${String(value)}`).join(" / ") || "Payload recorded";
+}
+
+function taskReportFileRuns(ctx: RouteContext, taskId: string): readonly TaskReportFileRun[] {
+  const rows = all(ctx.database, "SELECT run_id, files_changed FROM run_file_changes WHERE task_id = ? ORDER BY created_at ASC, id ASC", taskId) as Array<{ readonly run_id: string; readonly files_changed: string }>;
+  return rows.map((row) => ({
+    runId: row.run_id,
+    files: parseJsonField(row.files_changed, []) as readonly { readonly path: string; readonly change: string; readonly linesAdded?: number | undefined; readonly linesRemoved?: number | undefined }[]
+  }));
+}
+
+function taskReportWorktreeReviews(ctx: RouteContext, taskId: string): readonly TaskReportWorktreeReview[] {
+  const rows = all(ctx.database, "SELECT type, run_id, payload FROM events WHERE task_id = ? AND type IN ('worktree.diff.ready', 'worktree.applied', 'worktree.discarded', 'worktree.conflict_detected') ORDER BY created_at ASC, seq ASC", taskId) as Array<{ readonly type: string; readonly run_id: string | null; readonly payload: string }>;
+  const reviews = new Map<string, TaskReportWorktreeReview>();
+  for (const row of rows) {
+    const payload = parseJsonField(row.payload, {}) as Record<string, unknown>;
+    const runId = typeof payload.runId === "string" ? payload.runId : row.run_id ?? "";
+    if (runId.length === 0) continue;
+    const existing = reviews.get(runId);
+    const artifactId = typeof payload.artifactId === "string" ? payload.artifactId : existing?.artifactId;
+    const filesChanged = Array.isArray(payload.filesChanged) ? payload.filesChanged.filter((item): item is string => typeof item === "string") : existing?.filesChanged;
+    const conflictDiff = typeof payload.conflictDiff === "string" ? payload.conflictDiff : existing?.conflictDiff;
+    const status = row.type === "worktree.applied" ? "applied" : row.type === "worktree.discarded" ? "discarded" : row.type === "worktree.conflict_detected" ? "conflict" : "ready_for_review";
+    reviews.set(runId, { runId, ...(artifactId !== undefined ? { artifactId } : {}), status, ...(filesChanged !== undefined ? { filesChanged } : {}), ...(conflictDiff !== undefined ? { conflictDiff } : {}) });
+  }
+  return [...reviews.values()];
+}
+
+function taskReportProofActivities(ctx: RouteContext, taskId: string): readonly TaskReportProofActivity[] {
+  const rows = all(ctx.database, "SELECT kind, payload FROM task_activities WHERE task_id = ? ORDER BY created_at ASC, id ASC", taskId) as Array<{ readonly kind: string; readonly payload: string | null }>;
+  const activities: TaskReportProofActivity[] = [];
+  for (const row of rows) {
+    if (!["run_completed", "artifact", "artifact_linked", "review", "validation", "test", "blocker_set"].includes(row.kind)) continue;
+    const payload = row.payload !== null ? parseJsonField(row.payload, undefined) : undefined;
+    if (isDeliveryReportActivity(payload)) continue;
+    activities.push({ kind: row.kind, ...(payload !== undefined ? { payload } : {}) });
+  }
+  return activities;
+}
+
+function taskReportArtifactReviews(ctx: RouteContext, taskId: string): readonly TaskReportArtifactReview[] {
+  const rows = all(ctx.database, `
+    SELECT r.id, r.artifact_id, r.decision, r.reviewer_kind, r.reviewer_id, r.reason, r.file_path, r.line_number, r.side, r.status, r.created_at, r.resolved_at
+    FROM artifact_reviews r
+    JOIN artifacts a ON a.id = r.artifact_id
+    WHERE a.task_id = ? AND a.deleted_at IS NULL AND r.deleted_at IS NULL
+    ORDER BY r.created_at ASC, r.rowid ASC
+  `, taskId) as Array<{ readonly id: string; readonly artifact_id: string; readonly decision: string; readonly reviewer_kind: string; readonly reviewer_id: string; readonly reason: string | null; readonly file_path: string | null; readonly line_number: number | null; readonly side: string | null; readonly status: string | null; readonly created_at: number; readonly resolved_at: number | null }>;
+  return rows.map((row) => ({
+    artifactId: row.artifact_id,
+    reviewId: row.id,
+    decision: row.decision,
+    reviewerKind: row.reviewer_kind,
+    reviewerId: row.reviewer_id,
+    ...(row.reason !== null ? { reason: row.reason } : {}),
+    ...(row.file_path !== null ? { filePath: row.file_path } : {}),
+    ...(row.line_number !== null ? { lineNumber: row.line_number } : {}),
+    ...(row.side !== null ? { side: row.side } : {}),
+    status: row.status ?? "open",
+    createdAt: row.created_at,
+    ...(row.resolved_at !== null ? { resolvedAt: row.resolved_at } : {})
+  }));
+}
+
+function isDeliveryReportActivity(payload: unknown): boolean {
+  return typeof payload === "object" && payload !== null && !Array.isArray(payload) && (payload as Record<string, unknown>).artifactKind === "delivery_report";
+}
+
+function artifactReviewDecision(value: unknown): import("@agenthub/artifacts").ArtifactReviewDecision {
+  if (value === "reviewing" || value === "accepted" || value === "applied" || value === "rejected" || value === "failed" || value === "conflict" || value === "discarded" || value === "comment") return value;
+  return "comment";
+}
+
+function artifactReviewSide(value: unknown): import("@agenthub/artifacts").ArtifactReviewSide | undefined {
+  if (value === "old" || value === "new") return value;
+  return undefined;
+}
+
+function optionalNumberField(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function safeReportName(value: string): string {
+  return value.replace(/[^A-Za-z0-9_.-]/gu, "-").slice(0, 80) || "task";
+}
+
+function markdownLineCount(value: string): number {
+  return value.length === 0 ? 0 : value.split(/\r?\n/u).length;
 }
 
 function tasks(ctx: RouteContext, roomId: string, url: URL): void {
@@ -1470,6 +1757,156 @@ function taskActivities(ctx: RouteContext, taskId: string): void {
   if (task === null) return json(ctx.res, 404, { error: "task_not_found" });
   const activities = all(ctx.database, "SELECT * FROM task_activities WHERE task_id = ? ORDER BY created_at DESC, id DESC", taskId);
   json(ctx.res, 200, { activities });
+}
+
+async function createTaskDeliveryReport(ctx: RouteContext, roomId: string, taskId: string): Promise<void> {
+  const task = ctx.taskService.list({ roomId }).find((item) => item.id === taskId);
+  if (task === undefined) return json(ctx.res, 404, { error: "task_not_found" });
+  const generatedAt = ctx.now?.() ?? Date.now();
+  const fileRuns = taskReportFileRuns(ctx, taskId);
+  const worktreeReviews = taskReportWorktreeReviews(ctx, taskId);
+  const proofActivities = taskReportProofActivities(ctx, taskId);
+  const artifactReviews = taskReportArtifactReviews(ctx, taskId);
+  const evidenceCounts = taskReportEvidenceCounts({ fileRuns, worktreeReviews, proofActivities, artifactReviews });
+  const markdown = taskDeliveryReportMarkdownFromEvidence({
+    id: task.id,
+    title: task.title,
+    description: task.description,
+    status: task.status,
+    assignee: task.assigneeRoleId ?? task.assigneeAgentId ?? "Unassigned",
+    sourceRunId: task.sourceRunId,
+    fileRuns,
+    worktreeReviews,
+    proofActivities,
+    artifactReviews,
+    generatedAt,
+    templateVersion: taskDeliveryReportTemplateVersion
+  });
+  const path = `.agenthub/reports/task-${safeReportName(task.id)}.md`;
+  const previousReports = ctx.artifactService.list({ taskId, includeDeleted: false }).filter((artifact) => artifact.metadata.artifactKind === "delivery_report");
+  for (const previous of previousReports) ctx.artifactService.delete(previous.id, { traceId: `task-report-refresh:${taskId}` });
+  const artifact = ctx.artifactService.create({
+    workspaceId: task.workspaceId,
+    roomId,
+    taskId,
+    type: "file",
+    title: `Delivery report: ${task.title}`,
+    status: "draft",
+    createdBy: "local",
+    metadata: {
+      artifactKind: "delivery_report",
+      markdown,
+      source: "task_proof_of_work",
+      templateVersion: taskDeliveryReportTemplateVersion,
+      generatedAt,
+      evidenceCounts
+    },
+    files: [{
+      path,
+      newContent: markdown,
+      patch: `--- /dev/null\n+++ b/${path}\n@@\n+${markdown.replace(/\n/gu, "\n+")}`,
+      additions: markdownLineCount(markdown),
+      deletions: 0,
+      fileStatus: "added"
+    }]
+  }, { traceId: `task-report:${taskId}` });
+  const activity = ctx.taskService.addTaskActivity({
+    taskId,
+    kind: "artifact_linked",
+    byKind: "user",
+    by: "local",
+    payload: {
+      artifactId: artifact.id,
+      artifactPath: path,
+      artifactKind: "delivery_report",
+      templateVersion: taskDeliveryReportTemplateVersion,
+      generatedAt,
+      evidenceCounts,
+      summary: previousReports.length > 0 ? "Markdown delivery report refreshed." : "Markdown delivery report generated."
+    }
+  });
+  if (!activity.ok) return json(ctx.res, statusForError(activity.error.code), activity);
+  await ctx.outbox.drainPending();
+  json(ctx.res, previousReports.length > 0 ? 200 : 201, { artifact, path, markdown, evidenceCounts, refreshed: previousReports.length > 0 });
+}
+
+async function addArtifactReview(ctx: RouteContext, artifactId: string, input: Record<string, unknown>): Promise<void> {
+  try {
+    const decision = artifactReviewDecision(input.decision);
+    const review = ctx.artifactService.addReview({
+      artifactId,
+      decision,
+      reviewerKind: stringField(input.reviewerKind) ?? "user",
+      reviewerId: stringField(input.reviewerId) ?? "local",
+      reason: stringField(input.reason),
+      filePath: stringField(input.filePath),
+      lineNumber: optionalNumberField(input.lineNumber),
+      side: artifactReviewSide(input.side),
+      lineStart: optionalNumberField(input.lineStart),
+      lineEnd: optionalNumberField(input.lineEnd)
+    }, { traceId: `artifact-review:${artifactId}` });
+    await ctx.outbox.drainPending();
+    json(ctx.res, 201, { review });
+  } catch (error) {
+    json(ctx.res, error instanceof Error && error.name === "ArtifactConflictError" ? 404 : 400, { error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
+async function updateArtifactReview(ctx: RouteContext, artifactId: string, reviewId: string, input: Record<string, unknown>): Promise<void> {
+  try {
+    const review = ctx.artifactService.updateReview(artifactId, reviewId, {
+      reason: stringField(input.reason),
+      filePath: stringField(input.filePath),
+      lineNumber: optionalNumberField(input.lineNumber),
+      side: artifactReviewSide(input.side),
+      lineStart: optionalNumberField(input.lineStart),
+      lineEnd: optionalNumberField(input.lineEnd)
+    }, { traceId: `artifact-review-update:${artifactId}:${reviewId}` });
+    await ctx.outbox.drainPending();
+    json(ctx.res, 200, { review });
+  } catch (error) {
+    json(ctx.res, error instanceof Error && error.name === "ArtifactConflictError" ? 404 : 400, { error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
+async function resolveArtifactReview(ctx: RouteContext, artifactId: string, reviewId: string): Promise<void> {
+  try {
+    const review = ctx.artifactService.resolveReview(artifactId, reviewId, { traceId: `artifact-review-resolve:${artifactId}:${reviewId}` });
+    await ctx.outbox.drainPending();
+    json(ctx.res, 200, { review });
+  } catch (error) {
+    json(ctx.res, error instanceof Error && error.name === "ArtifactConflictError" ? 404 : 400, { error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
+async function deleteArtifactReview(ctx: RouteContext, artifactId: string, reviewId: string): Promise<void> {
+  try {
+    const review = ctx.artifactService.deleteReview(artifactId, reviewId, { traceId: `artifact-review-delete:${artifactId}:${reviewId}` });
+    await ctx.outbox.drainPending();
+    json(ctx.res, 200, { review });
+  } catch (error) {
+    json(ctx.res, error instanceof Error && error.name === "ArtifactConflictError" ? 404 : 400, { error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
+async function archiveArtifact(ctx: RouteContext, artifactId: string): Promise<void> {
+  try {
+    const artifact = ctx.artifactService.archive(artifactId, { traceId: `artifact-archive:${artifactId}` });
+    await ctx.outbox.drainPending();
+    json(ctx.res, 200, { artifact });
+  } catch (error) {
+    json(ctx.res, error instanceof Error && error.name === "ArtifactConflictError" ? 404 : 400, { error: error instanceof Error ? error.message : String(error) });
+  }
+}
+
+async function deleteArtifact(ctx: RouteContext, artifactId: string): Promise<void> {
+  try {
+    const artifact = ctx.artifactService.delete(artifactId, { traceId: `artifact-delete:${artifactId}` });
+    await ctx.outbox.drainPending();
+    json(ctx.res, 200, { artifact });
+  } catch (error) {
+    json(ctx.res, error instanceof Error && error.name === "ArtifactConflictError" ? 404 : 400, { error: error instanceof Error ? error.message : String(error) });
+  }
 }
 
 function skills(ctx: RouteContext, url: URL): void {
@@ -2326,7 +2763,6 @@ function stringOrNull(value: unknown): string | null { return typeof value === "
 function stringOrJson(value: unknown, fallback: string): string;
 function stringOrJson(value: unknown, fallback: string | null): string | null;
 function stringOrJson(value: unknown, fallback: string | null): string | null { if (value === undefined) return fallback; if (value === null) return null; return typeof value === "string" ? value : JSON.stringify(value); }
-
 function normalizeCapabilitiesInput(value: unknown): unknown {
   if (typeof value !== "string") return value;
   try {
@@ -2897,11 +3333,29 @@ function contentTypeFor(filePath: string): string {
   if (ext === ".png") return "image/png";
   if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg";
   if (ext === ".gif") return "image/gif";
+  if (ext === ".webp") return "image/webp";
+  if (ext === ".mp3") return "audio/mpeg";
+  if (ext === ".wav") return "audio/wav";
+  if (ext === ".ogg") return "audio/ogg";
+  if (ext === ".m4a") return "audio/mp4";
+  if (ext === ".flac") return "audio/flac";
+  if (ext === ".mp4" || ext === ".m4v") return "video/mp4";
+  if (ext === ".webm") return "video/webm";
+  if (ext === ".mov") return "video/quicktime";
   if (ext === ".ico") return "image/x-icon";
   if (ext === ".webmanifest") return "application/manifest+json; charset=utf-8";
   if (ext === ".woff2") return "font/woff2";
   if (ext === ".woff") return "font/woff";
   return "application/octet-stream";
+}
+
+function artifactContentTypeFor(filePath: string): string {
+  return protocolArtifactContentTypeFor(filePath);
+}
+
+function safeDownloadName(path: string): string {
+  const name = path.split(/[\\/]/u).filter(Boolean).at(-1) ?? "artifact";
+  return name.replace(/["\r\n]/gu, "_");
 }
 
 function modelConfigFingerprint(apiKey: string): string {

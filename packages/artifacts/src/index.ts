@@ -8,9 +8,53 @@ import type { AgentHubDatabase } from "@agenthub/db";
 
 export type ArtifactType = "diff" | "file" | "preview" | "document" | "terminal" | "deployment" | "worktree_diff";
 export type ArtifactStatus = "draft" | "reviewing" | "accepted" | "applying" | "applied" | "rejected" | "failed" | "ready_for_review" | "conflict" | "discarded";
-export type ArtifactFileStatus = "added" | "modified" | "deleted";
+export type ArtifactFileStatus = "added" | "modified" | "deleted" | "renamed" | "copied" | "mode_changed";
 export type AppliedState = "original" | "new" | "unknown";
-export type ArtifactEventType = "artifact.diff.created" | "artifact.file.created" | "artifact.reviewing" | "artifact.accepted" | "artifact.applying" | "artifact.applied" | "artifact.rejected" | "artifact.failed" | "artifact.preview.started" | "artifact.preview.stopped" | "worktree.diff.ready";
+export type ArtifactEventType = "artifact.diff.created" | "artifact.file.created" | "artifact.reviewing" | "artifact.review.added" | "artifact.review.updated" | "artifact.review.resolved" | "artifact.review.deleted" | "artifact.accepted" | "artifact.applying" | "artifact.applied" | "artifact.rejected" | "artifact.failed" | "artifact.archived" | "artifact.deleted" | "artifact.preview.started" | "artifact.preview.stopped" | "worktree.diff.ready";
+export type ArtifactReviewDecision = "reviewing" | "accepted" | "applied" | "rejected" | "failed" | "conflict" | "discarded" | "comment";
+export type ArtifactReviewStatus = "open" | "resolved" | "deleted";
+export type ArtifactReviewSide = "old" | "new";
+
+export type ArtifactReview = {
+  readonly id: string;
+  readonly artifactId: string;
+  readonly decision: ArtifactReviewDecision;
+  readonly reviewerKind: string;
+  readonly reviewerId: string;
+  readonly reason?: string | undefined;
+  readonly filePath?: string | undefined;
+  readonly lineNumber?: number | undefined;
+  readonly side?: ArtifactReviewSide | undefined;
+  readonly lineStart?: number | undefined;
+  readonly lineEnd?: number | undefined;
+  readonly status: ArtifactReviewStatus;
+  readonly createdAt: number;
+  readonly updatedAt?: number | undefined;
+  readonly resolvedAt?: number | undefined;
+  readonly deletedAt?: number | undefined;
+};
+
+export type AddArtifactReviewInput = {
+  readonly artifactId: string;
+  readonly decision: ArtifactReviewDecision;
+  readonly reviewerKind?: string | undefined;
+  readonly reviewerId?: string | undefined;
+  readonly reason?: string | undefined;
+  readonly filePath?: string | undefined;
+  readonly lineNumber?: number | undefined;
+  readonly side?: ArtifactReviewSide | undefined;
+  readonly lineStart?: number | undefined;
+  readonly lineEnd?: number | undefined;
+};
+
+export type UpdateArtifactReviewInput = {
+  readonly reason?: string | undefined;
+  readonly filePath?: string | undefined;
+  readonly lineNumber?: number | undefined;
+  readonly side?: ArtifactReviewSide | undefined;
+  readonly lineStart?: number | undefined;
+  readonly lineEnd?: number | undefined;
+};
 
 export type Artifact = {
   readonly id: string;
@@ -27,6 +71,8 @@ export type Artifact = {
   readonly createdAt: number;
   readonly updatedAt: number;
   readonly appliedAt?: number;
+  readonly archivedAt?: number;
+  readonly deletedAt?: number;
 };
 
 export type ArtifactFile = {
@@ -38,6 +84,9 @@ export type ArtifactFile = {
   readonly additions: number;
   readonly deletions: number;
   readonly fileStatus: ArtifactFileStatus;
+  readonly oldPath?: string;
+  readonly binary?: boolean;
+  readonly noNewlineAtEnd?: boolean;
   readonly oldSha256?: string;
   readonly newSha256?: string;
   readonly appliedState?: AppliedState;
@@ -97,6 +146,9 @@ export type ArtifactFSRunRegistryBeginInput = {
 
 type ArtifactRow = { readonly id: string; readonly workspace_id: string; readonly room_id: string | null; readonly task_id: string | null; readonly run_id: string | null; readonly message_id: string | null; readonly type: string; readonly title: string; readonly status: string; readonly created_by: string | null; readonly metadata: string; readonly created_at: number; readonly updated_at: number; readonly applied_at: number | null };
 type ArtifactFileRow = { readonly artifact_id: string; readonly path: string; readonly old_content: string | null; readonly new_content: string | null; readonly patch: string | null; readonly additions: number | null; readonly deletions: number | null; readonly file_status: string; readonly old_sha256: string | null; readonly new_sha256: string | null; readonly applied_state: string | null; readonly content_path: string | null; readonly created_at: number };
+type ArtifactRowV18 = ArtifactRow & { readonly archived_at?: number | null; readonly deleted_at?: number | null };
+type ArtifactFileRowV18 = ArtifactFileRow & { readonly old_path?: string | null; readonly binary?: number | null; readonly no_newline_at_end?: number | null };
+type ArtifactReviewRow = { readonly id: string; readonly artifact_id: string; readonly decision: string; readonly reviewer_kind: string; readonly reviewer_id: string; readonly reason: string | null; readonly file_path: string | null; readonly line_number: number | null; readonly side?: string | null; readonly line_start?: number | null; readonly line_end?: number | null; readonly status?: string | null; readonly created_at: number; readonly updated_at?: number | null; readonly resolved_at?: number | null; readonly deleted_at?: number | null };
 
 const defaultFileOps: FileOps = { read: (path) => readFileSync(path, "utf8"), write: (path, content) => writeFileSync(path, content, "utf8"), rename: (from, to) => renameSync(from, to), remove: (path) => rmSync(path, { force: true }), exists: (path) => existsSync(path), mkdirp: (path) => mkdirSync(path, { recursive: true }) };
 const defaultSensitiveGlobs = [".env", ".env.*", "*.pem", "*.key", "id_rsa", "id_ed25519", ".aws/**", ".gcp/**", ".ssh/**", ".netrc", "**/credentials.json", "**/service-account*.json"] as const;
@@ -131,12 +183,13 @@ export class ArtifactService {
     return row ? rowToArtifact(row) : undefined;
   }
 
-  list(filter: { readonly roomId?: string; readonly taskId?: string; readonly status?: readonly ArtifactStatus[] } = {}): Artifact[] {
+  list(filter: { readonly roomId?: string; readonly taskId?: string; readonly status?: readonly ArtifactStatus[]; readonly includeDeleted?: boolean } = {}): Artifact[] {
     const clauses: string[] = [];
     const params: unknown[] = [];
     if (filter.roomId !== undefined) { clauses.push("room_id = ?"); params.push(filter.roomId); }
     if (filter.taskId !== undefined) { clauses.push("task_id = ?"); params.push(filter.taskId); }
     if (filter.status !== undefined && filter.status.length > 0) { clauses.push(`status IN (${filter.status.map(() => "?").join(", ")})`); params.push(...filter.status); }
+    if (filter.includeDeleted !== true) clauses.push("deleted_at IS NULL");
     const where = clauses.length > 0 ? ` WHERE ${clauses.join(" AND ")}` : "";
     return (this.options.database.sqlite.prepare(`SELECT * FROM artifacts${where} ORDER BY created_at DESC, id ASC`).all(...params) as ArtifactRow[]).map(rowToArtifact);
   }
@@ -151,18 +204,100 @@ export class ArtifactService {
     return { file, content: file.newContent ?? file.oldContent };
   }
 
+  reviews(artifactId: string, options: { readonly includeDeleted?: boolean } = {}): ArtifactReview[] {
+    const where = options.includeDeleted === true ? "artifact_id = ?" : "artifact_id = ? AND deleted_at IS NULL";
+    return (this.options.database.sqlite.prepare(`SELECT * FROM artifact_reviews WHERE ${where} ORDER BY created_at ASC, rowid ASC`).all(artifactId) as ArtifactReviewRow[]).map(rowToReview);
+  }
+
+  private reviewById(artifactId: string, reviewId: string): ArtifactReview | undefined {
+    const row = this.options.database.sqlite.prepare("SELECT * FROM artifact_reviews WHERE artifact_id = ? AND id = ?").get(artifactId, reviewId) as ArtifactReviewRow | undefined;
+    return row ? rowToReview(row) : undefined;
+  }
+
+  addReview(input: AddArtifactReviewInput, trace: EventTrace = {}): ArtifactReview {
+    const artifact = requiredArtifact(this.get(input.artifactId), input.artifactId);
+    const now = this.now();
+    const review: ArtifactReview = {
+      id: randomUUID(),
+      artifactId: artifact.id,
+      decision: input.decision,
+      reviewerKind: normalizeReviewer(input.reviewerKind, "user"),
+      reviewerId: normalizeReviewer(input.reviewerId, "local"),
+      ...(input.reason !== undefined ? { reason: input.reason } : {}),
+      ...(input.filePath !== undefined ? { filePath: normalizePath(input.filePath) } : {}),
+      ...(input.lineNumber !== undefined ? { lineNumber: input.lineNumber } : {}),
+      ...(input.side !== undefined ? { side: input.side } : {}),
+      ...(input.lineStart !== undefined ? { lineStart: input.lineStart } : {}),
+      ...(input.lineEnd !== undefined ? { lineEnd: input.lineEnd } : {}),
+      status: "open",
+      createdAt: now
+    };
+    this.options.database.sqlite.transaction(() => {
+      this.insertReviewRow(review);
+      this.publish(artifact, "artifact.review.added", artifactReviewPayload(review), now, trace);
+    })();
+    return review;
+  }
+
+  updateReview(artifactId: string, reviewId: string, input: UpdateArtifactReviewInput, trace: EventTrace = {}): ArtifactReview {
+    const artifact = requiredArtifact(this.get(artifactId), artifactId);
+    const existing = requiredReview(this.reviewById(artifactId, reviewId), reviewId);
+    if (existing.deletedAt !== undefined || existing.status === "deleted") throw new ArtifactConflictError("cannot update deleted artifact review");
+    const now = this.now();
+    const next: ArtifactReview = {
+      ...existing,
+      ...(input.reason !== undefined ? { reason: input.reason } : {}),
+      ...(input.filePath !== undefined ? { filePath: normalizePath(input.filePath) } : {}),
+      ...(input.lineNumber !== undefined ? { lineNumber: input.lineNumber } : {}),
+      ...(input.side !== undefined ? { side: input.side } : {}),
+      ...(input.lineStart !== undefined ? { lineStart: input.lineStart } : {}),
+      ...(input.lineEnd !== undefined ? { lineEnd: input.lineEnd } : {}),
+      updatedAt: now
+    };
+    this.options.database.sqlite.transaction(() => {
+      this.options.database.sqlite.prepare("UPDATE artifact_reviews SET reason = ?, file_path = ?, line_number = ?, side = ?, line_start = ?, line_end = ?, updated_at = ? WHERE artifact_id = ? AND id = ?").run(next.reason ?? null, next.filePath ?? null, next.lineNumber ?? null, next.side ?? null, next.lineStart ?? null, next.lineEnd ?? null, now, artifactId, reviewId);
+      this.publish(artifact, "artifact.review.updated", artifactReviewPayload(next), now, trace);
+    })();
+    return requiredReview(this.reviewById(artifactId, reviewId), reviewId);
+  }
+
+  resolveReview(artifactId: string, reviewId: string, trace: EventTrace = {}): ArtifactReview {
+    const artifact = requiredArtifact(this.get(artifactId), artifactId);
+    const existing = requiredReview(this.reviewById(artifactId, reviewId), reviewId);
+    if (existing.deletedAt !== undefined || existing.status === "deleted") throw new ArtifactConflictError("cannot resolve deleted artifact review");
+    const now = this.now();
+    const next: ArtifactReview = { ...existing, status: "resolved", updatedAt: now, resolvedAt: now };
+    this.options.database.sqlite.transaction(() => {
+      this.options.database.sqlite.prepare("UPDATE artifact_reviews SET status = 'resolved', updated_at = ?, resolved_at = ? WHERE artifact_id = ? AND id = ?").run(now, now, artifactId, reviewId);
+      this.publish(artifact, "artifact.review.resolved", artifactReviewPayload(next), now, trace);
+    })();
+    return requiredReview(this.reviewById(artifactId, reviewId), reviewId);
+  }
+
+  deleteReview(artifactId: string, reviewId: string, trace: EventTrace = {}): ArtifactReview {
+    const artifact = requiredArtifact(this.get(artifactId), artifactId);
+    const existing = requiredReview(this.reviewById(artifactId, reviewId), reviewId);
+    const now = this.now();
+    const next: ArtifactReview = { ...existing, status: "deleted", updatedAt: now, deletedAt: now };
+    this.options.database.sqlite.transaction(() => {
+      this.options.database.sqlite.prepare("UPDATE artifact_reviews SET status = 'deleted', updated_at = ?, deleted_at = ? WHERE artifact_id = ? AND id = ?").run(now, now, artifactId, reviewId);
+      this.publish(artifact, "artifact.review.deleted", artifactReviewPayload(next), now, trace);
+    })();
+    return requiredReview(this.reviewById(artifactId, reviewId), reviewId);
+  }
+
   review(id: string, trace: EventTrace = {}): Artifact {
     const artifact = requiredArtifact(this.get(id), id);
     if (artifact.type !== "diff") throw new ArtifactConflictError("only diff artifacts can enter review");
     if (artifact.status !== "draft" && artifact.status !== "reviewing") throw new ArtifactConflictError(`cannot review artifact in ${artifact.status}`);
     if (artifact.status === "reviewing") return artifact;
-    return this.transition(artifact, "reviewing", "artifact.reviewing", { artifactId: id, status: "reviewing" }, trace);
+    return this.transition(artifact, "reviewing", "artifact.reviewing", { artifactId: id, status: "reviewing" }, trace, { decision: "reviewing" });
   }
 
   reject(id: string, reason: string | undefined, trace: EventTrace = {}): Artifact {
     const artifact = requiredArtifact(this.get(id), id);
     if (artifact.status !== "draft" && artifact.status !== "reviewing") throw new ArtifactConflictError(`cannot reject artifact in ${artifact.status}`);
-    return this.transition(artifact, "rejected", "artifact.rejected", { artifactId: id, reason }, trace);
+    return this.transition(artifact, "rejected", "artifact.rejected", { artifactId: id, reason }, trace, { decision: "rejected", reason });
   }
 
   apply(id: string, trace: EventTrace = {}): Artifact {
@@ -170,7 +305,7 @@ export class ArtifactService {
     if (artifact.type !== "diff") throw new ArtifactConflictError("only diff artifacts can be applied");
     if (artifact.status !== "reviewing" && artifact.status !== "accepted") throw new ArtifactConflictError(`cannot apply artifact in ${artifact.status}`);
     const workspaceRoot = this.workspaceRoot(artifact.workspaceId);
-    const accepted = artifact.status === "accepted" ? artifact : this.transition(artifact, "accepted", "artifact.accepted", { artifactId: id, status: "accepted" }, trace);
+    const accepted = artifact.status === "accepted" ? artifact : this.transition(artifact, "accepted", "artifact.accepted", { artifactId: id, status: "accepted" }, trace, { decision: "accepted" });
     const files = this.files(id).sort((a, b) => a.path.localeCompare(b.path));
     const validation = this.prevalidate(accepted, files, workspaceRoot);
     if (!validation.ok) return this.fail(accepted, validation.payload, trace);
@@ -223,6 +358,7 @@ export class ArtifactService {
       this.options.database.sqlite.transaction(() => {
         this.options.database.sqlite.prepare("UPDATE artifacts SET status = 'applied', updated_at = ?, applied_at = ? WHERE id = ?").run(now, now, artifact.id);
         for (const file of files) this.options.database.sqlite.prepare("UPDATE artifact_files SET applied_state = 'new' WHERE artifact_id = ? AND path = ?").run(artifact.id, file.path);
+        this.insertReview(artifact.id, "applied", undefined, now);
         this.publish(artifact, "artifact.applied", { artifactId: artifact.id, status: "applied", files: files.map((file) => file.path) }, now, trace);
       })();
       return requiredArtifact(this.get(artifact.id), artifact.id);
@@ -261,30 +397,62 @@ export class ArtifactService {
     this.options.database.sqlite.transaction(() => {
       this.options.database.sqlite.prepare("UPDATE artifacts SET status = 'failed', updated_at = ? WHERE id = ?").run(now, artifact.id);
       if (states) for (const [path, state] of states) this.options.database.sqlite.prepare("UPDATE artifact_files SET applied_state = ? WHERE artifact_id = ? AND path = ?").run(state, artifact.id, path);
+      this.insertReview(artifact.id, "failed", typeof payload.reason === "string" ? payload.reason : undefined, now);
       this.publish(artifact, "artifact.failed", payload, now, trace);
     })();
     return requiredArtifact(this.get(artifact.id), artifact.id);
   }
 
-  private transition(artifact: Artifact, status: ArtifactStatus, eventType: ArtifactEventType, payload: Record<string, unknown>, trace: EventTrace): Artifact {
+  private transition(artifact: Artifact, status: ArtifactStatus, eventType: ArtifactEventType, payload: Record<string, unknown>, trace: EventTrace, review?: { readonly decision: ArtifactReviewDecision; readonly reason?: string | undefined }): Artifact {
     const now = this.now();
     this.options.database.sqlite.transaction(() => {
       this.options.database.sqlite.prepare("UPDATE artifacts SET status = ?, updated_at = ? WHERE id = ?").run(status, now, artifact.id);
+      if (review !== undefined) this.insertReview(artifact.id, review.decision, review.reason, now);
       this.publish(artifact, eventType, payload, now, trace);
     })();
     return requiredArtifact(this.get(artifact.id), artifact.id);
   }
 
+  archive(id: string, trace: EventTrace = {}): Artifact {
+    const artifact = requiredArtifact(this.get(id), id);
+    if (artifact.deletedAt !== undefined) throw new ArtifactConflictError("cannot archive deleted artifact");
+    const now = this.now();
+    this.options.database.sqlite.transaction(() => {
+      this.options.database.sqlite.prepare("UPDATE artifacts SET archived_at = ?, updated_at = ? WHERE id = ?").run(now, now, id);
+      this.publish(artifact, "artifact.archived", { artifactId: id, archivedAt: now }, now, trace);
+    })();
+    return requiredArtifact(this.get(id), id);
+  }
+
+  delete(id: string, trace: EventTrace = {}): Artifact {
+    const artifact = requiredArtifact(this.get(id), id);
+    const now = this.now();
+    this.options.database.sqlite.transaction(() => {
+      this.options.database.sqlite.prepare("UPDATE artifacts SET deleted_at = ?, updated_at = ? WHERE id = ?").run(now, now, id);
+      this.publish(artifact, "artifact.deleted", { artifactId: id, deletedAt: now }, now, trace);
+    })();
+    return requiredArtifact(this.get(id), id);
+  }
+
   private insertArtifact(artifact: Artifact): void {
-    this.options.database.sqlite.prepare(`INSERT INTO artifacts (id, workspace_id, room_id, task_id, run_id, message_id, type, title, status, created_by, metadata, created_at, updated_at, applied_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`).run(artifact.id, artifact.workspaceId, artifact.roomId ?? null, artifact.taskId ?? null, artifact.runId ?? null, artifact.messageId ?? null, artifact.type, artifact.title, artifact.status, artifact.createdBy, JSON.stringify(artifact.metadata), artifact.createdAt, artifact.updatedAt);
+    this.options.database.sqlite.prepare(`INSERT INTO artifacts (id, workspace_id, room_id, task_id, run_id, message_id, type, title, status, created_by, metadata, created_at, updated_at, applied_at, archived_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL)`).run(artifact.id, artifact.workspaceId, artifact.roomId ?? null, artifact.taskId ?? null, artifact.runId ?? null, artifact.messageId ?? null, artifact.type, artifact.title, artifact.status, artifact.createdBy, JSON.stringify(artifact.metadata), artifact.createdAt, artifact.updatedAt);
   }
 
   private insertFile(file: ArtifactFile): void {
-    this.options.database.sqlite.prepare(`INSERT INTO artifact_files (artifact_id, path, old_content, new_content, patch, additions, deletions, file_status, old_sha256, new_sha256, applied_state, content_path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(file.artifactId, file.path, file.oldContent ?? null, file.newContent ?? null, file.patch ?? null, file.additions, file.deletions, file.fileStatus, file.oldSha256 ?? null, file.newSha256 ?? null, file.appliedState ?? null, file.contentPath ?? null, file.createdAt);
+    this.options.database.sqlite.prepare(`INSERT INTO artifact_files (artifact_id, path, old_content, new_content, patch, additions, deletions, file_status, old_path, binary, no_newline_at_end, old_sha256, new_sha256, applied_state, content_path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(file.artifactId, file.path, file.oldContent ?? null, file.newContent ?? null, file.patch ?? null, file.additions, file.deletions, file.fileStatus, file.oldPath ?? null, file.binary === true ? 1 : 0, file.noNewlineAtEnd === true ? 1 : 0, file.oldSha256 ?? null, file.newSha256 ?? null, file.appliedState ?? null, file.contentPath ?? null, file.createdAt);
+  }
+
+  private insertReview(artifactId: string, decision: ArtifactReviewDecision, reason: string | undefined, createdAt: number): void {
+    this.insertReviewRow({ id: randomUUID(), artifactId, decision, reviewerKind: "system", reviewerId: "system", ...(reason !== undefined ? { reason } : {}), status: "open", createdAt });
+  }
+
+  private insertReviewRow(review: ArtifactReview): void {
+    this.options.database.sqlite.prepare("INSERT INTO artifact_reviews (id, artifact_id, decision, reviewer_kind, reviewer_id, reason, file_path, line_number, side, line_start, line_end, status, created_at, updated_at, resolved_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(review.id, review.artifactId, review.decision, review.reviewerKind, review.reviewerId, review.reason ?? null, review.filePath ?? null, review.lineNumber ?? null, review.side ?? null, review.lineStart ?? review.lineNumber ?? null, review.lineEnd ?? review.lineNumber ?? null, review.status, review.createdAt, review.updatedAt ?? null, review.resolvedAt ?? null, review.deletedAt ?? null);
   }
 
   private publishCreated(artifact: Artifact, files: readonly ArtifactFile[], createdAt: number, trace: EventTrace): void {
     if (artifact.type === "diff") this.publish(artifact, "artifact.diff.created", { artifactId: artifact.id, status: artifact.status, files: files.map((file) => file.path) }, createdAt, trace);
+    else if (artifact.type === "worktree_diff") this.publish(artifact, "artifact.diff.created", { artifactId: artifact.id, status: artifact.status, files: files.map((file) => file.path), worktree: true }, createdAt, trace);
     else if (artifact.type === "file") this.publish(artifact, "artifact.file.created", { artifactId: artifact.id, fileCount: files.length, files: files.map((file) => file.path) }, createdAt, trace);
     else if (artifact.type === "preview") this.publish(artifact, "artifact.preview.started", { artifactId: artifact.id, tokenExpiresAt: artifact.metadata.tokenExpiresAt }, createdAt, trace);
   }
@@ -513,9 +681,9 @@ export class ArtifactFSRunRegistry {
       if (patch.length === 0) return;
       const filesChanged = execFileSync("git", ["diff", "--name-only", "HEAD"], { cwd: options.isolatedRoot as string, encoding: "utf8" }).split(/\r?\n/).map((path) => path.trim()).filter((path) => path.length > 0);
       if (filesChanged.length === 0) return;
-      const additions = patch.split("\n").filter((line) => line.startsWith("+") && !line.startsWith("+++" )).length;
-      const deletions = patch.split("\n").filter((line) => line.startsWith("-") && !line.startsWith("---" )).length;
-      artifact = this.options.service.create({ workspaceId: options.workspaceId, ...(options.roomId !== undefined ? { roomId: options.roomId } : {}), ...(options.taskId !== undefined ? { taskId: options.taskId } : {}), runId: options.runId, ...(options.messageId !== undefined ? { messageId: options.messageId } : {}), type: "worktree_diff", title: input.title ?? `Run ${options.runId} worktree diff`, status: "ready_for_review", createdBy: options.createdBy, metadata: { filesChanged, artifactFsMode: options.mode }, files: [{ path: "worktree.patch", oldContent: "", newContent: patch, patch, additions, deletions, fileStatus: "modified" as const }] }, {});
+      const files = parseGitDiffFiles(patch, filesChanged);
+      if (files.length === 0) return;
+      artifact = this.options.service.create({ workspaceId: options.workspaceId, ...(options.roomId !== undefined ? { roomId: options.roomId } : {}), ...(options.taskId !== undefined ? { taskId: options.taskId } : {}), runId: options.runId, ...(options.messageId !== undefined ? { messageId: options.messageId } : {}), type: "worktree_diff", title: input.title ?? `Run ${options.runId} worktree diff`, status: "ready_for_review", createdBy: options.createdBy, metadata: { filesChanged, artifactFsMode: options.mode, baseRef: "HEAD", worktreeRoot: options.isolatedRoot, fullPatch: patch }, files }, {});
       this.options.eventBus.publish({ id: randomUUID(), type: "worktree.diff.ready", schemaVersion: 1, workspaceId: options.workspaceId, ...(options.roomId !== undefined ? { roomId: options.roomId } : {}), ...(options.taskId !== undefined ? { taskId: options.taskId } : {}), runId: options.runId, payload: { runId: options.runId, ...(options.taskId !== undefined ? { taskId: options.taskId } : {}), artifactId: artifact.id, filesChanged }, createdAt: now() });
     })();
     // Only consume the run from registry if we actually created a worktree diff artifact.
@@ -589,7 +757,8 @@ function fileInput(value: unknown): Omit<ArtifactFile, "artifactId" | "createdAt
   const oldSha256 = stringField(value, "oldSha256");
   const newSha256 = stringField(value, "newSha256");
   const contentPath = stringField(value, "contentPath");
-  return { path: requiredString(value, "path"), ...(oldContent !== undefined ? { oldContent } : {}), ...(newContent !== undefined ? { newContent } : {}), ...(patch !== undefined ? { patch } : {}), additions: numberField(value, "additions") ?? 0, deletions: numberField(value, "deletions") ?? 0, fileStatus: fileStatus(value.fileStatus ?? value.status), ...(oldSha256 !== undefined ? { oldSha256 } : {}), ...(newSha256 !== undefined ? { newSha256 } : {}), ...(contentPath !== undefined ? { contentPath } : {}) };
+  const oldPath = stringField(value, "oldPath");
+  return { path: requiredString(value, "path"), ...(oldContent !== undefined ? { oldContent } : {}), ...(newContent !== undefined ? { newContent } : {}), ...(patch !== undefined ? { patch } : {}), additions: numberField(value, "additions") ?? 0, deletions: numberField(value, "deletions") ?? 0, fileStatus: fileStatus(value.fileStatus ?? value.status), ...(oldPath !== undefined ? { oldPath } : {}), ...(value.binary === true ? { binary: true } : {}), ...(value.noNewlineAtEnd === true ? { noNewlineAtEnd: true } : {}), ...(oldSha256 !== undefined ? { oldSha256 } : {}), ...(newSha256 !== undefined ? { newSha256 } : {}), ...(contentPath !== undefined ? { contentPath } : {}) };
 }
 
 function metadataFor(input: CreateArtifactInput, now: number): Record<string, unknown> {
@@ -616,15 +785,135 @@ function artifactEvent(type: ArtifactEventType, artifact: Artifact, payload: Rec
   return { id: randomUUID(), type, schemaVersion: 1, workspaceId: artifact.workspaceId, ...(artifact.roomId !== undefined ? { roomId: artifact.roomId } : {}), ...(artifact.taskId !== undefined ? { taskId: artifact.taskId } : {}), ...(artifact.runId !== undefined ? { runId: artifact.runId } : {}), ...(trace.traceId !== undefined ? { traceId: trace.traceId } : {}), ...(trace.causationId !== undefined ? { causationId: trace.causationId } : {}), ...(trace.correlationId !== undefined ? { correlationId: trace.correlationId } : {}), payload, createdAt };
 }
 
-function rowToArtifact(row: ArtifactRow): Artifact {
-  return { id: row.id, workspaceId: row.workspace_id, ...(row.room_id !== null ? { roomId: row.room_id } : {}), ...(row.task_id !== null ? { taskId: row.task_id } : {}), ...(row.run_id !== null ? { runId: row.run_id } : {}), ...(row.message_id !== null ? { messageId: row.message_id } : {}), type: row.type as ArtifactType, title: row.title, status: row.status as ArtifactStatus, createdBy: row.created_by ?? "unknown", metadata: JSON.parse(row.metadata) as Record<string, unknown>, createdAt: row.created_at, updatedAt: row.updated_at, ...(row.applied_at !== null ? { appliedAt: row.applied_at } : {}) };
+function rowToArtifact(row: ArtifactRowV18): Artifact {
+  return { id: row.id, workspaceId: row.workspace_id, ...(row.room_id !== null ? { roomId: row.room_id } : {}), ...(row.task_id !== null ? { taskId: row.task_id } : {}), ...(row.run_id !== null ? { runId: row.run_id } : {}), ...(row.message_id !== null ? { messageId: row.message_id } : {}), type: row.type as ArtifactType, title: row.title, status: row.status as ArtifactStatus, createdBy: row.created_by ?? "unknown", metadata: JSON.parse(row.metadata) as Record<string, unknown>, createdAt: row.created_at, updatedAt: row.updated_at, ...(row.applied_at !== null ? { appliedAt: row.applied_at } : {}), ...(row.archived_at !== null && row.archived_at !== undefined ? { archivedAt: row.archived_at } : {}), ...(row.deleted_at !== null && row.deleted_at !== undefined ? { deletedAt: row.deleted_at } : {}) };
 }
 
-function rowToFile(row: ArtifactFileRow): ArtifactFile {
-  return { artifactId: row.artifact_id, path: row.path, ...(row.old_content !== null ? { oldContent: row.old_content } : {}), ...(row.new_content !== null ? { newContent: row.new_content } : {}), ...(row.patch !== null ? { patch: row.patch } : {}), additions: row.additions ?? 0, deletions: row.deletions ?? 0, fileStatus: row.file_status as ArtifactFileStatus, ...(row.old_sha256 !== null ? { oldSha256: row.old_sha256 } : {}), ...(row.new_sha256 !== null ? { newSha256: row.new_sha256 } : {}), ...(row.applied_state !== null ? { appliedState: row.applied_state as AppliedState } : {}), ...(row.content_path !== null ? { contentPath: row.content_path } : {}), createdAt: row.created_at };
+function rowToFile(row: ArtifactFileRowV18): ArtifactFile {
+  return { artifactId: row.artifact_id, path: row.path, ...(row.old_content !== null ? { oldContent: row.old_content } : {}), ...(row.new_content !== null ? { newContent: row.new_content } : {}), ...(row.patch !== null ? { patch: row.patch } : {}), additions: row.additions ?? 0, deletions: row.deletions ?? 0, fileStatus: row.file_status as ArtifactFileStatus, ...(row.old_path !== null && row.old_path !== undefined ? { oldPath: row.old_path } : {}), ...(row.binary === 1 ? { binary: true } : {}), ...(row.no_newline_at_end === 1 ? { noNewlineAtEnd: true } : {}), ...(row.old_sha256 !== null ? { oldSha256: row.old_sha256 } : {}), ...(row.new_sha256 !== null ? { newSha256: row.new_sha256 } : {}), ...(row.applied_state !== null ? { appliedState: row.applied_state as AppliedState } : {}), ...(row.content_path !== null ? { contentPath: row.content_path } : {}), createdAt: row.created_at };
+}
+
+function rowToReview(row: ArtifactReviewRow): ArtifactReview {
+  return { id: row.id, artifactId: row.artifact_id, decision: row.decision as ArtifactReviewDecision, reviewerKind: row.reviewer_kind, reviewerId: row.reviewer_id, ...(row.reason !== null ? { reason: row.reason } : {}), ...(row.file_path !== null ? { filePath: row.file_path } : {}), ...(row.line_number !== null ? { lineNumber: row.line_number } : {}), ...(row.side === "old" || row.side === "new" ? { side: row.side } : {}), ...(row.line_start !== null && row.line_start !== undefined ? { lineStart: row.line_start } : {}), ...(row.line_end !== null && row.line_end !== undefined ? { lineEnd: row.line_end } : {}), status: reviewStatus(row.status), createdAt: row.created_at, ...(row.updated_at !== null && row.updated_at !== undefined ? { updatedAt: row.updated_at } : {}), ...(row.resolved_at !== null && row.resolved_at !== undefined ? { resolvedAt: row.resolved_at } : {}), ...(row.deleted_at !== null && row.deleted_at !== undefined ? { deletedAt: row.deleted_at } : {}) };
+}
+
+function artifactReviewPayload(review: ArtifactReview): Record<string, unknown> {
+  return {
+    artifactId: review.artifactId,
+    reviewId: review.id,
+    decision: review.decision,
+    reviewerKind: review.reviewerKind,
+    reviewerId: review.reviewerId,
+    ...(review.reason !== undefined ? { reason: review.reason } : {}),
+    ...(review.filePath !== undefined ? { filePath: review.filePath } : {}),
+    ...(review.lineNumber !== undefined ? { lineNumber: review.lineNumber } : {}),
+    ...(review.side !== undefined ? { side: review.side } : {}),
+    ...(review.lineStart !== undefined ? { lineStart: review.lineStart } : {}),
+    ...(review.lineEnd !== undefined ? { lineEnd: review.lineEnd } : {}),
+    status: review.status,
+    ...(review.updatedAt !== undefined ? { updatedAt: review.updatedAt } : {}),
+    ...(review.resolvedAt !== undefined ? { resolvedAt: review.resolvedAt } : {}),
+    ...(review.deletedAt !== undefined ? { deletedAt: review.deletedAt } : {})
+  };
+}
+
+function normalizeReviewer(value: string | undefined, fallback: string): string {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : fallback;
 }
 
 export function sha256(content: string): string { return createHash("sha256").update(content).digest("hex"); }
+export function parseGitDiffFiles(patch: string, filesChanged: readonly string[] = []): Omit<ArtifactFile, "artifactId" | "createdAt">[] {
+  const normalizedPatch = patch.replace(/\r\n/gu, "\n");
+  const lines = normalizedPatch.split("\n");
+  const startIndexes = lines.reduce<number[]>((indexes, line, index) => {
+    if (line.startsWith("diff --git ")) indexes.push(index);
+    return indexes;
+  }, []);
+  if (startIndexes.length === 0) {
+    return [{
+      path: filesChanged[0] ?? "worktree.patch",
+      oldContent: "",
+      newContent: normalizedPatch,
+      patch: normalizedPatch,
+      additions: countPatchLines(normalizedPatch, "+"),
+      deletions: countPatchLines(normalizedPatch, "-"),
+      fileStatus: "modified"
+    }];
+  }
+
+  return startIndexes.map((start, itemIndex) => {
+    const nextStart = startIndexes[itemIndex + 1] ?? lines.length;
+    const section = lines.slice(start, nextStart).join("\n").trimEnd();
+    const fallbackPath = filesChanged[itemIndex] ?? `file-${itemIndex + 1}`;
+    return gitDiffSectionFile(section, fallbackPath);
+  });
+}
+
+function gitDiffSectionFile(section: string, fallbackPath: string): Omit<ArtifactFile, "artifactId" | "createdAt"> {
+  const lines = section.split("\n");
+  const diffHeader = lines.find((line) => line.startsWith("diff --git "));
+  const oldMarker = lines.find((line) => line.startsWith("--- "));
+  const newMarker = lines.find((line) => line.startsWith("+++ "));
+  const renameFrom = lineValue(lines, "rename from ");
+  const renameTo = lineValue(lines, "rename to ");
+  const copyFrom = lineValue(lines, "copy from ");
+  const copyTo = lineValue(lines, "copy to ");
+  const binary = lines.some((line) => line.startsWith("Binary files ") || line.startsWith("GIT binary patch"));
+  const modeOnly = lines.some((line) => line.startsWith("old mode ") || line.startsWith("new mode ")) && !lines.some((line) => line.startsWith("@@ "));
+  const noNewlineAtEnd = lines.some((line) => line === "\\ No newline at end of file");
+  const path = diffPath(newMarker, diffHeader, fallbackPath);
+  const oldPath = oldMarker ? markerPath(oldMarker.slice(4)) : undefined;
+  const newPath = newMarker ? markerPath(newMarker.slice(4)) : undefined;
+  const fileStatus: ArtifactFileStatus =
+    renameTo !== undefined ? "renamed" :
+    copyTo !== undefined ? "copied" :
+    oldPath === "/dev/null" || lines.some((line) => line.startsWith("new file mode ")) ? "added" :
+    newPath === "/dev/null" || lines.some((line) => line.startsWith("deleted file mode ")) ? "deleted" :
+    modeOnly ? "mode_changed" :
+    "modified";
+  return {
+    path: normalizePath(renameTo ?? copyTo ?? path),
+    oldContent: "",
+    newContent: "",
+    patch: section,
+    additions: countPatchLines(section, "+"),
+    deletions: countPatchLines(section, "-"),
+    fileStatus,
+    ...(renameFrom !== undefined || copyFrom !== undefined ? { oldPath: normalizePath(renameFrom ?? copyFrom ?? "") } : {}),
+    binary,
+    noNewlineAtEnd
+  };
+}
+
+function lineValue(lines: readonly string[], prefix: string): string | undefined {
+  const line = lines.find((candidate) => candidate.startsWith(prefix));
+  return line ? normalizePath(line.slice(prefix.length).trim()) : undefined;
+}
+
+function diffPath(newMarker: string | undefined, diffHeader: string | undefined, fallbackPath: string): string {
+  if (newMarker !== undefined) {
+    const path = markerPath(newMarker.slice(4));
+    if (path !== "/dev/null") return path;
+  }
+  if (diffHeader !== undefined) {
+    const parts = diffHeader.slice("diff --git ".length).trim().split(/\s+/u);
+    const candidate = parts[1] ?? parts[0];
+    if (candidate !== undefined) return markerPath(candidate);
+  }
+  return normalizePath(fallbackPath);
+}
+
+function markerPath(raw: string): string {
+  const value = raw.trim().replace(/^"(.+)"$/u, "$1");
+  if (value === "/dev/null") return value;
+  return normalizePath(value.replace(/^[ab]\//u, ""));
+}
+
+function countPatchLines(section: string, marker: "+" | "-"): number {
+  return section.split("\n").filter((line) => line.startsWith(marker) && !line.startsWith(`${marker}${marker}${marker}`)).length;
+}
+
 function reverseStatus(status: ArtifactFileStatus): ArtifactFileStatus { return status === "added" ? "deleted" : status === "deleted" ? "added" : "modified"; }
 function reversePatch(path: string, oldContent: string, newContent: string): string { return `--- a/${path}\n+++ b/${path}\n@@\n-${oldContent}\n+${newContent}\n`; }
 function simplePatch(path: string, oldContent: string, newContent: string): string { return `--- a/${path}\n+++ b/${path}\n@@\n-${oldContent}\n+${newContent}\n`; }
@@ -656,7 +945,9 @@ function requiredString(command: Record<string, unknown>, ...keys: readonly stri
 function artifactType(value: string): ArtifactType { if (["diff", "file", "preview", "document", "terminal", "deployment", "worktree_diff"].includes(value)) return value as ArtifactType; throw new Error("artifact type is invalid"); }
 function artifactStatus(value: string | undefined): ArtifactStatus | undefined { if (value === undefined) return undefined; if (["draft", "reviewing", "accepted", "applying", "applied", "rejected", "failed", "ready_for_review", "conflict", "discarded"].includes(value)) return value as ArtifactStatus; throw new Error("artifact status is invalid"); }
 function artifactFsMode(value: string | undefined, terminalEnabled: boolean): ArtifactFSMode { if (value === "isolated_worktree" || value === "isolated_copy" || value === "shadow_buffer") return value; return terminalEnabled ? "isolated_worktree" : "shadow_buffer"; }
-function fileStatus(value: unknown): ArtifactFileStatus { if (value === "added" || value === "modified" || value === "deleted") return value; return "modified"; }
+function fileStatus(value: unknown): ArtifactFileStatus { if (value === "added" || value === "modified" || value === "deleted" || value === "renamed" || value === "copied" || value === "mode_changed") return value; return "modified"; }
+function reviewStatus(value: unknown): ArtifactReviewStatus { if (value === "resolved" || value === "deleted") return value; return "open"; }
+function requiredReview(review: ArtifactReview | undefined, id: string): ArtifactReview { if (!review) throw new ArtifactConflictError(`artifact review '${id}' not found`); return review; }
 function normalizePath(path: string): string { return normalize(path).replaceAll("\\", "/").replace(/^\.\//, ""); }
 function globMatch(glob: string, path: string): boolean { return new RegExp(`^${globToRegExp(normalizePath(glob).replace(/^\//, ""))}$`).test(normalizePath(path)); }
 function globToRegExp(glob: string): string {

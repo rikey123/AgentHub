@@ -43,6 +43,7 @@ const drizzleTables = [
   { exportName: "interventions", table: schema.interventions },
   { exportName: "artifacts", table: schema.artifacts },
   { exportName: "artifactFiles", table: schema.artifactFiles },
+  { exportName: "artifactReviews", table: schema.artifactReviews },
   { exportName: "mailboxMessages", table: schema.mailboxMessages },
   { exportName: "pendingTurns", table: schema.pendingTurns },
   { exportName: "runNextTurns", table: schema.runNextTurns },
@@ -253,6 +254,7 @@ const drizzleSmokeRows = {
     updatedAt: 1
   },
   artifactFiles: { artifactId: "art_drizzle", path: "src/a.ts", fileStatus: "modified", createdAt: 1 },
+  artifactReviews: { id: "ar_drizzle", artifactId: "art_drizzle", decision: "comment", reviewerKind: "user", reviewerId: "local", createdAt: 1 },
   mailboxMessages: {
     id: "mb_drizzle",
     workspaceId: "ws_drizzle",
@@ -384,7 +386,10 @@ function applyAllMigrations(): void {
     "0012_v05.sql",
     "0013_messages_pinned.sql",
     "0014_v10.sql",
-    "0015_v11.sql"
+    "0015_v11.sql",
+    "0016_artifact_reviews.sql",
+    "0017_artifact_review_comments.sql",
+    "0018_artifact_lifecycle.sql"
   ]);
 }
 
@@ -471,7 +476,7 @@ describe("SQLite pragmas and migrations", () => {
 
   test("applies all migrations once and records them", () => {
     applyAllMigrations();
-    expect(countRows("__agenthub_migrations")).toBe(15);
+    expect(countRows("__agenthub_migrations")).toBe(18);
     expect(applyMigrations(currentDb())).toEqual([]);
 
     expect(tableNames()).toEqual([
@@ -481,6 +486,7 @@ describe("SQLite pragmas and migrations", () => {
       "agent_profiles",
       "agent_skills",
       "artifact_files",
+      "artifact_reviews",
       "artifacts",
       "attachments",
       "auth_tokens",
@@ -760,6 +766,10 @@ describe("table-family CRUD smoke", () => {
     smokeCrud(
       "artifact_files",
       "INSERT INTO artifact_files (artifact_id, path, file_status, created_at) VALUES ('art_1', 'src/a.ts', 'modified', 1)"
+    );
+    smokeCrud(
+      "artifact_reviews",
+      "INSERT INTO artifact_reviews (id, artifact_id, decision, reviewer_kind, reviewer_id, created_at) VALUES ('ar_1', 'art_1', 'comment', 'user', 'local', 1)"
     );
   });
 

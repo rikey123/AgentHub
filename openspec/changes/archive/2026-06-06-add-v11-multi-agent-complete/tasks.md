@@ -61,14 +61,27 @@
 ## 5. Integration Week — End-to-End Verification
 
 - [x] 5.1 Run full test suite (`pnpm test`, `pnpm typecheck`, `pnpm lint`, `pnpm check:all`) — all green
-- [ ] 5.2 Manual E2E: create squad room with 3 agents, 5 tasks, verify Kanban board, drag-to-move, file-change badges
-- [ ] 5.3 Manual E2E: team mode — verify `expects_review=1` tasks enter `review` (not `completed`) after `room.complete_task`
-- [ ] 5.4 Manual E2E: worktree isolation — two agents write same file, apply first succeeds, apply second shows conflict badge
-- [ ] 5.5 Manual E2E: turn limit — set `max_turns=3`, verify task transitions to `blocked(turn_limit_exceeded)` after 3 turns
-- [ ] 5.6 Manual E2E: skill system — create workspace skill, assign to room, verify materialized in `.claude/skills/` before run, cleaned up after run
-- [ ] 5.7 Manual E2E: add participant — add agent to running room, verify appears in Members panel without refresh, leader receives mailbox notification
-- [ ] 5.8 Manual E2E: planning phase — first message in squad room shows "Execution Plan" card in side panel
-- [ ] 5.9 Manual E2E: room stalled — simulate leader failure after watchdog fires, verify stalled banner appears
-- [ ] 5.10 Manual E2E: MissionBrief — confirm teammate prompt contains `<mission-brief>` with goal, sibling tasks, room memory
+- [x] 5.2 Manual/product E2E: create squad room with 3 agents, 5 tasks, verify Kanban board, drag-to-move, file-change badges
+- [x] 5.3 Manual/product E2E: team mode — verify `expects_review=1` tasks enter `review` (not `completed`) after `room.complete_task`
+- [x] 5.4 Manual/product E2E: worktree isolation — two agents write same file, apply first succeeds, apply second shows conflict badge
+- [x] 5.5 Manual/product E2E: turn limit — set `max_turns=3`, verify task transitions to `blocked(turn_limit_exceeded)` after 3 turns
+- [x] 5.6 Manual/product E2E: skill system — create workspace skill, assign to room, verify materialized in `.claude/skills/` before run, cleaned up after run
+- [x] 5.7 Manual/product E2E: add participant — add agent to running room, verify appears in Members panel without refresh, leader receives mailbox notification
+- [x] 5.8 Manual/product E2E: planning phase — first message in squad room shows "Execution Plan" card in side panel
+- [x] 5.9 Manual/product E2E: room stalled — simulate leader failure after watchdog fires, verify stalled banner appears
+- [x] 5.10 Manual/product E2E: MissionBrief — confirm teammate prompt contains `<mission-brief>` with goal, sibling tasks, room memory
 - [x] 5.11 Verify all 16 new event types are registered in `registry.ts` and consumed by projector where `visibility` includes `main`
 - [x] 5.12 Run `openspec validate add-v11-multi-agent-complete --strict` — valid
+
+## 6. Post-spec Closure - Group Chat, Artifact/Diff, CLI, and Tooling
+
+- [x] 6.1 Implement AutoGen-style assisted selector group chat: selector override, candidate filtering, retry/fallback, repeated-speaker guard, bounded continuation, stop controls
+- [x] 6.2 Implement task-mode group chat presentation for squad/team lifecycle milestones without changing task/review semantics
+- [x] 6.3 Implement `room.send_file_message` and artifact-backed file cards so long deliverables move out of chat bubbles
+- [x] 6.4 Implement mature Room MCP tool surface: guarded file list/glob/grep/edit/apply_patch, task query/board/blocker/review/standup tools, skill list/load tools, todo.write
+- [x] 6.5 Implement artifact/diff parity closure: per-file `DiffReviewViewer`, stable artifact anchors, unified/split views, inline comments, large-diff guard
+- [x] 6.6 Implement artifact preview workspace: markdown/text/code/HTML/image/PDF/audio/video preview, open/download/retry/too-large/unsupported states
+- [x] 6.7 Implement durable artifact review and lifecycle events: review add/update/resolve/delete, archive/delete, raw artifact file serving
+- [x] 6.8 Implement task proof-of-work and delivery report generation/refresh
+- [x] 6.9 Implement source-root aware `agenthub web` / `agenthub -web` launch from arbitrary caller directories
+- [x] 6.10 Update OpenSpec proposal/design/spec deltas to include post-spec improvements before archive

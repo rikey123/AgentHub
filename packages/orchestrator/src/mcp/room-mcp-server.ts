@@ -426,21 +426,41 @@ export class RoomMcpServer {
   }
 
   private async handleFileEdit(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): Promise<RoomMcpToolResult> {
-    if (!isRecord(input) || typeof input.path !== "string" || typeof input.oldText !== "string" || typeof input.newText !== "string") return failure("validation_failed", "path, oldText, and newText are required");
-    if (input.oldText.length === 0) return failure("validation_failed", "oldText must not be empty");
+    if (!isRecord(input) || typeof input.path !== "string") return failure("validation_failed", "path is required");
+    const patches = fileEditPatches(input);
+    if (!patches.ok) return patches.result;
     const root = this.workspaceRootFor(session.roomId);
     if (root === undefined) return failure("not_found", `Workspace for room '${session.roomId}' not found`);
-    const target = resolveWorkspacePath(root, input.path, { existing: true });
+    const createIfMissing = input.createIfMissing === true || input.create_if_missing === true;
+    const target = resolveWorkspacePath(root, input.path, { existing: !createIfMissing });
     if (!target.ok) return target.result;
     const permission = await this.checkPermissionAsync(session, context, { type: "file", path: input.path, operation: "write" });
     if (!permission.ok) return permission;
-    const content = readFileSync(target.path, "utf8");
-    const occurrences = countOccurrences(content, input.oldText);
-    if (occurrences === 0) return failure("not_found", "oldText not found");
-    if (occurrences > 1 && input.replaceAll !== true) return failure("conflict", "oldText occurs multiple times; pass replaceAll=true");
-    const next = input.replaceAll === true ? content.split(input.oldText).join(input.newText) : content.replace(input.oldText, input.newText);
-    writeFileSync(target.path, next, "utf8");
-    return { ok: true, data: { path: input.path, replacements: input.replaceAll === true ? occurrences : 1 } };
+    const runId = this.resolveRunId(session, context);
+    const existing = readEditableContent({ path: input.path, target: target.path, runId, artifactFs: this.options.artifactFs });
+    if (!existing.ok && !createIfMissing) return failure("file_not_found", existing.message);
+    if (!existing.ok && patches.value[0]?.oldText !== "") return failure("file_not_found", existing.message);
+    const original = existing.ok ? existing.content : "";
+    if (!existing.ok && createIfMissing) {
+      const next = patches.value[0]?.newText ?? "";
+      if (this.options.artifactFs !== undefined) {
+        this.options.artifactFs.writeTextFile({ runId: this.requireRunId(session, context), path: input.path, content: next });
+      } else {
+        mkdirSync(dirname(target.path), { recursive: true });
+        writeFileSync(target.path, next, "utf8");
+      }
+      return { ok: true, data: { path: input.path, created: true, replacements: 1, patches: [{ index: 1, line: 1, replacements: 1 }], file: editFileMetadata(input.path, "", next) } };
+    }
+    const applied = applyFileEditPatches(original, patches.value, input.replaceAll === true);
+    if (!applied.ok) return applied.result;
+    if (this.options.artifactFs !== undefined) {
+      this.options.artifactFs.writeTextFile({ runId: this.requireRunId(session, context), path: input.path, content: applied.content });
+    } else {
+      writeFileSync(target.path, applied.content, "utf8");
+    }
+    const metadataOld = patches.value.length === 1 ? patches.value[0]!.oldText : original;
+    const metadataNew = patches.value.length === 1 ? patches.value[0]!.newText : applied.content;
+    return { ok: true, data: { path: input.path, replacements: applied.replacements, patches: applied.patches, file: editFileMetadata(input.path, metadataOld, metadataNew) } };
   }
 
   private async handleFileApplyPatch(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): Promise<RoomMcpToolResult> {
@@ -455,7 +475,8 @@ export class RoomMcpServer {
     try {
       await execFileAsync("git", ["apply", "--check", patchPath], { cwd: root, timeout: 60_000, windowsHide: true });
       if (input.checkOnly !== true) await execFileAsync("git", ["apply", patchPath], { cwd: root, timeout: 60_000, windowsHide: true });
-      return { ok: true, data: { applied: input.checkOnly === true ? false : true, checkOnly: input.checkOnly === true } };
+      const files = parsePatchFilesForTool(input.patch);
+      return { ok: true, data: { applied: input.checkOnly === true ? false : true, checkOnly: input.checkOnly === true, files } };
     } catch (error) {
       return failure("patch_failed", error instanceof Error ? error.message : String(error));
     } finally {
@@ -1368,8 +1389,12 @@ export class RoomMcpServer {
     const patchFile = this.options.database.sqlite
       .prepare("SELECT patch FROM artifact_files WHERE artifact_id = ? LIMIT 1")
       .get(artifact.id) as { patch: string | null } | undefined;
-    const artifactMetadata = JSON.parse(artifact.metadata) as { readonly patch?: string };
-    const patchText = patchFile?.patch?.trim().length ? patchFile.patch : artifactMetadata.patch;
+    const artifactMetadata = JSON.parse(artifact.metadata) as { readonly fullPatch?: string; readonly patch?: string };
+    const patchText = artifactMetadata.fullPatch?.trim().length
+      ? artifactMetadata.fullPatch
+      : artifactMetadata.patch?.trim().length
+        ? artifactMetadata.patch
+        : patchFile?.patch;
 
     const room = this.options.database.sqlite
       .prepare("SELECT workspace_id, workspace_path FROM rooms r LEFT JOIN workspaces w ON w.id = r.workspace_id WHERE r.id = ?")
@@ -1585,8 +1610,8 @@ function toolNotFound(name: string): RoomMcpToolResult {
   return { ok: false, error: { code: "tool_not_found", message: `Tool '${name}' is not implemented in this MCP slice` } };
 }
 
-function failure(code: string, message: string): RoomMcpToolResult {
-  return { ok: false, error: { code, message } };
+function failure(code: string, message: string, details?: unknown): RoomMcpToolResult {
+  return { ok: false, error: { code, message, ...(details !== undefined ? { details } : {}) } };
 }
 
 function commandFailure<T>(code: CommandErrorCode, message: string, details?: unknown): CommandResult<T> {
@@ -1858,11 +1883,140 @@ function previewKindFor(path: string, mimeType: string): "markdown" | "text" | "
   return "download";
 }
 
+type FileEditPatch = { readonly oldText: string; readonly newText: string; readonly replaceAll?: boolean };
+type FileEditPatchResult = { readonly index: number; readonly line: number; readonly replacements: number };
+
+function fileEditPatches(input: Record<string, unknown>): { readonly ok: true; readonly value: FileEditPatch[] } | { readonly ok: false; readonly result: RoomMcpToolResult } {
+  if (Array.isArray(input.patches)) {
+    const patches: FileEditPatch[] = [];
+    for (let index = 0; index < input.patches.length; index += 1) {
+      const raw = input.patches[index];
+      if (!isRecord(raw)) return { ok: false, result: failure("validation_failed", `patch ${index + 1} must be an object`) };
+      const oldText = typeof raw.oldText === "string" ? raw.oldText : typeof raw.old_text === "string" ? raw.old_text : undefined;
+      const newText = typeof raw.newText === "string" ? raw.newText : typeof raw.new_text === "string" ? raw.new_text : undefined;
+      if (oldText === undefined || newText === undefined) return { ok: false, result: failure("validation_failed", `patch ${index + 1} requires oldText and newText`) };
+      if (oldText.length === 0 && !(input.createIfMissing === true || input.create_if_missing === true)) return { ok: false, result: failure("validation_failed", "oldText must not be empty") };
+      patches.push({ oldText, newText, ...(raw.replaceAll === true || raw.replace_all === true ? { replaceAll: true } : {}) });
+    }
+    if (patches.length === 0) return { ok: false, result: failure("validation_failed", "patches must not be empty") };
+    return { ok: true, value: patches };
+  }
+  if (typeof input.oldText !== "string" || typeof input.newText !== "string") return { ok: false, result: failure("validation_failed", "path, oldText, and newText are required") };
+  if (input.oldText.length === 0) return { ok: false, result: failure("validation_failed", "oldText must not be empty") };
+  return { ok: true, value: [{ oldText: input.oldText, newText: input.newText, ...(input.replaceAll === true ? { replaceAll: true } : {}) }] };
+}
+
+function readEditableContent(input: { readonly path: string; readonly target: string; readonly runId: string | undefined; readonly artifactFs: { readonly readTextFile?: (input: { readonly runId: string; readonly path: string }) => string | undefined } | undefined }): { readonly ok: true; readonly content: string } | { readonly ok: false; readonly message: string } {
+  try {
+    if (input.runId !== undefined && input.artifactFs?.readTextFile !== undefined) {
+      const content = input.artifactFs.readTextFile({ runId: input.runId, path: input.path });
+      if (content !== undefined) return { ok: true, content };
+    }
+    return { ok: true, content: readFileSync(input.target, "utf8") };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+function applyFileEditPatches(content: string, patches: readonly FileEditPatch[], replaceAll: boolean): { readonly ok: true; readonly content: string; readonly replacements: number; readonly patches: readonly FileEditPatchResult[] } | { readonly ok: false; readonly result: RoomMcpToolResult } {
+  let next = content;
+  let replacements = 0;
+  const results: FileEditPatchResult[] = [];
+  for (let index = 0; index < patches.length; index += 1) {
+    const patch = patches[index]!;
+    const occurrences = countOccurrences(next, patch.oldText);
+    if (occurrences === 0) {
+      const hint = closestTextHint(next, patch.oldText);
+      return { ok: false, result: failure("not_found", `oldText not found for patch ${index + 1}`, hint) };
+    }
+    const shouldReplaceAll = replaceAll || patch.replaceAll === true;
+    if (occurrences > 1 && !shouldReplaceAll) return { ok: false, result: failure("conflict", `oldText occurs multiple times for patch ${index + 1}; provide more context or pass replaceAll=true`) };
+    const offset = next.indexOf(patch.oldText);
+    const line = lineNumberAt(next, offset);
+    next = shouldReplaceAll ? next.split(patch.oldText).join(patch.newText) : next.replace(patch.oldText, patch.newText);
+    const appliedCount = shouldReplaceAll ? occurrences : 1;
+    replacements += appliedCount;
+    results.push({ index: index + 1, line, replacements: appliedCount });
+  }
+  return { ok: true, content: next, replacements, patches: results };
+}
+
+function closestTextHint(content: string, oldText: string): { readonly line: number; readonly preview: string } | undefined {
+  const firstLine = oldText.split(/\r?\n/u).map((line) => line.trim()).find((line) => line.length >= 5);
+  if (firstLine === undefined) return undefined;
+  const offset = content.indexOf(firstLine);
+  if (offset < 0) return undefined;
+  const line = lineNumberAt(content, offset);
+  const preview = content.split(/\r?\n/u).slice(Math.max(0, line - 2), line + 2).join("\n");
+  return { line, preview };
+}
+
+function lineNumberAt(content: string, offset: number): number {
+  if (offset <= 0) return 1;
+  let line = 1;
+  for (let index = 0; index < offset && index < content.length; index += 1) {
+    if (content[index] === "\n") line += 1;
+  }
+  return line;
+}
+
 function lineCount(value: string): number {
   return value.length === 0 ? 0 : value.split(/\r?\n/u).length;
 }
 
+function editFileMetadata(path: string, oldContent: string, newContent: string): { readonly path: string; readonly status: "added" | "modified" | "deleted"; readonly additions: number; readonly deletions: number; readonly patch: string } {
+  return {
+    path,
+    status: "modified",
+    additions: lineCount(newContent),
+    deletions: lineCount(oldContent),
+    patch: `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@\n-${oldContent}\n+${newContent}\n`
+  };
+}
+
+function parsePatchFilesForTool(patch: string): Array<{ readonly path: string; readonly status: "added" | "modified" | "deleted"; readonly additions: number; readonly deletions: number; readonly patch: string }> {
+  const lines = patch.replace(/\r\n/gu, "\n").split("\n");
+  const starts = lines.reduce<number[]>((acc, line, index) => {
+    if (line.startsWith("diff --git ")) acc.push(index);
+    return acc;
+  }, []);
+  const sections = starts.length === 0 ? [patch] : starts.map((start, index) => lines.slice(start, starts[index + 1] ?? lines.length).join("\n").trimEnd());
+  return sections.map((section, index) => {
+    const sectionLines = section.split("\n");
+    const newMarker = sectionLines.find((line) => line.startsWith("+++ "));
+    const oldMarker = sectionLines.find((line) => line.startsWith("--- "));
+    const header = sectionLines.find((line) => line.startsWith("diff --git "));
+    const path = toolPatchPath(newMarker, header, `file-${index + 1}`);
+    const oldPath = oldMarker ? toolMarkerPath(oldMarker.slice(4)) : undefined;
+    const newPath = newMarker ? toolMarkerPath(newMarker.slice(4)) : undefined;
+    const status = oldPath === "/dev/null" || sectionLines.some((line) => line.startsWith("new file mode ")) ? "added" : newPath === "/dev/null" || sectionLines.some((line) => line.startsWith("deleted file mode ")) ? "deleted" : "modified";
+    return {
+      path,
+      status,
+      additions: sectionLines.filter((line) => line.startsWith("+") && !line.startsWith("+++")).length,
+      deletions: sectionLines.filter((line) => line.startsWith("-") && !line.startsWith("---")).length,
+      patch: section
+    };
+  });
+}
+
+function toolPatchPath(newMarker: string | undefined, header: string | undefined, fallback: string): string {
+  if (newMarker !== undefined) {
+    const path = toolMarkerPath(newMarker.slice(4));
+    if (path !== "/dev/null") return path;
+  }
+  const candidate = header?.slice("diff --git ".length).trim().split(/\s+/u)[1];
+  return candidate ? toolMarkerPath(candidate) : fallback;
+}
+
+function toolMarkerPath(raw: string): string {
+  const value = raw.trim().replace(/^"(.+)"$/u, "$1");
+  if (value === "/dev/null") return value;
+  return toPosixPath(value.replace(/^[ab]\//u, ""));
+}
+
 function countOccurrences(content: string, needle: string): number {
+  if (needle.length === 0) return 0;
   let count = 0;
   let offset = 0;
   while (true) {

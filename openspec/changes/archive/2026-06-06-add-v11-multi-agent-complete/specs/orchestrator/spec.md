@@ -89,6 +89,105 @@ See `multi-agent-intelligence/spec.md` for the full PlanDocument schema and fron
 - **WHEN** a user sends a second message in a squad room that already has a plan
 - **THEN** the leader is woken with `reason: "primary_turn"` (no planning phase)
 
+### Requirement: Assisted selector group chat (assisted-selector-groupchat)
+
+The system SHALL implement assisted mode as an AutoGen-style selector group chat. For each user message in an assisted room, the orchestrator SHALL create a bounded group turn and select one speaker at a time from eligible room participants.
+
+**Reference:** AutoGen `SelectorGroupChat` / `BaseGroupChatManager` / `ChatAgentContainer` patterns: shared message thread, selector override, candidate filtering, repeated-speaker guard, retry/fallback, termination before next speaker selection. AionUi remains the reference for mailbox and wake lifecycle, not for assisted speaker selection.
+
+The selector flow SHALL:
+1. use deterministic selector overrides for explicit `@agent` mentions;
+2. filter candidates to enabled participants with available runtime/model configuration;
+3. include role description, declared capabilities, and effective skill summaries in selector participant descriptions;
+4. call the selector model when more than one candidate remains;
+5. reject unknown, ambiguous, or repeated-speaker outputs and retry up to `max_selector_attempts`;
+6. default `allow_repeated_speaker` to false for the immediately previous speaker;
+7. allow a speaker to return after another participant has spoken;
+8. update selector history with the completed speaker's public output before choosing the next speaker;
+9. stop on `max_turns`, no valid candidate, explicit `NO_SPEAKER`/`STOP`, superseding user message, empty output, or ack-only output.
+
+Selector/debug status SHALL NOT be rendered as ordinary chat bubbles. Public agent messages remain durable room messages; selector details belong in run detail/debug surfaces.
+
+#### Scenario: Selector chooses the next assisted speaker
+
+- **WHEN** a user message arrives in an assisted room with three eligible agents and no explicit mention
+- **THEN** the selector receives participant descriptions and shared conversation history
+- **AND** exactly one selected agent is woken
+
+#### Scenario: Mention overrides selector model
+
+- **WHEN** the user writes `@Builder can you sanity-check this?`
+- **THEN** Builder is selected without a selector model call
+
+#### Scenario: Assisted continuation sees prior speaker output
+
+- **WHEN** Builder completes a public assisted turn and the group turn has remaining budget
+- **THEN** the next selector call includes Builder's latest public output and any file-backed reply excerpts in the shared history
+
+#### Scenario: Assisted group turn stops
+
+- **WHEN** the selector returns `NO_SPEAKER` or the turn reaches its configured maximum speaker count
+- **THEN** no additional agent is woken for that user message
+
+### Requirement: Task-mode group chat presentation (task-mode-groupchat-presentation)
+
+The system SHALL make squad and team rooms visibly conversational without changing their task-driven semantics. Squad and team rooms SHALL continue to use leader delegation, mailbox delivery, `room.complete_task`, review gates, and Kanban state as the source of truth.
+
+The orchestrator MAY mirror key task lifecycle milestones into concise public assistant messages:
+- delegation
+- teammate task start
+- teammate completion, block, or review report
+- team review start
+- team review completion
+
+These public messages SHALL be normal durable room messages written in the same transaction as the lifecycle event they represent. They SHALL NOT replace task rows, mailbox messages, or state transition events. Raw task event names SHALL NOT be shown as chat bubbles.
+
+#### Scenario: Delegation is visible as a group-chat handoff
+
+- **WHEN** the leader delegates a task to Builder
+- **THEN** the room shows a short public message that Builder is taking the task
+- **AND** the task is still persisted through `task.delegation.created`
+
+#### Scenario: Team review gate remains authoritative
+
+- **WHEN** a teammate in team mode reports completion
+- **THEN** a short public completion/review message may be shown
+- **AND** the task still enters `review` until the leader approves it
+
+### Requirement: Room MCP mature tool surface (room-mcp-mature-tools)
+
+The Room MCP Server SHALL expose a mature workspace and collaboration tool surface for real runtimes. In addition to the original V1.1 tools, the tool list SHALL include:
+- `room.send_file_message`
+- `room.list_skills`
+- `room.load_skill`
+- `room.query_tasks`
+- `room.get_board`
+- `room.move_task`
+- `room.set_blocker`
+- `room.clear_blocker`
+- `room.list_blockers`
+- `room.standup`
+- `room.review`
+- `file.list`
+- `file.glob`
+- `file.grep`
+- `file.edit`
+- `file.apply_patch`
+- `todo.write`
+
+File and shell tools SHALL continue to use workspace path traversal guards and permission/capability checks. `file.edit` SHALL support exact `oldText`/`newText` replacement and multi-patch mode with missing-text hints and multiple-match rejection. Skill tools SHALL expose only selected/effective skill packages for the room/agent scope and SHALL NOT expose keychain secrets.
+
+#### Scenario: Agent can inspect workspace through guarded tools
+
+- **WHEN** a capable agent calls `file.glob`, `file.grep`, or `file.list`
+- **THEN** the tool returns workspace-scoped results only
+- **AND** absolute paths or `..` traversal are rejected
+
+#### Scenario: Agent can use skill packages explicitly
+
+- **WHEN** an agent calls `room.list_skills { scope: "effective" }` and then `room.load_skill`
+- **THEN** it receives only the effective skill package content and supporting files selected for that room/agent
+
 ## MODIFIED Requirements
 
 ### Requirement: Room MCP Tools

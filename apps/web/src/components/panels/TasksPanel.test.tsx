@@ -9,6 +9,7 @@ import {
   dependencyLines,
   fileArtifactTarget,
   filterTasksForBoard,
+  taskDeliveryReportMarkdown,
   getTaskDetail,
   groupTasksByKanbanColumn,
   hydrateExecutionPlanFromLatest,
@@ -253,6 +254,35 @@ describe("TasksPanel V1.1 Kanban task view contract", () => {
     });
 
     await expect(taskBoardResponseError(response, "Move task failed")).resolves.toBe("invalid board column");
+  });
+
+  it("builds a readable Markdown delivery report from task proof-of-work", () => {
+    const report = taskDeliveryReportMarkdown(task({
+      id: "task-report",
+      title: "Ship artifact review",
+      description: "Close artifact and diff review gaps.",
+      status: "completed",
+      assigneeRoleId: "builder",
+      fileChangeRuns: [{ runId: "run-files", artifactId: "artifact-files", createdAt: 20, files: [{ path: "src/a.ts", change: "modified", linesAdded: 4, linesRemoved: 1 }] }],
+      worktreeReviews: [{ runId: "run-worktree", artifactId: "artifact-worktree", status: "applied", filesChanged: ["src/a.ts"], updatedAt: 30 }],
+      activities: [
+        activity({ id: "proof", kind: "validation", payload: { summary: "pnpm check:all passed" }, createdAt: 40 }),
+        activity({ id: "note", kind: "comment", payload: { comment: "Non-proof chatter" }, createdAt: 50 })
+      ]
+    }));
+
+    expect(report).toContain("# Task Delivery Report: Ship artifact review");
+    expect(report).toContain("Template version: 2");
+    expect(report).toContain("Generated at:");
+    expect(report).toContain("Changed files: 1");
+    expect(report).toContain("Worktree reviews: 1");
+    expect(report).toContain("Proof activities: 1");
+    expect(report).toContain("Status: completed");
+    expect(report).toContain("Assignee: builder");
+    expect(report).toContain("- `src/a.ts` (modified, +4 / -1)");
+    expect(report).toContain("- run `run-worktree`: applied");
+    expect(report).toContain("- validation: pnpm check:all passed");
+    expect(report).not.toContain("Non-proof chatter");
   });
 });
 
