@@ -19,12 +19,12 @@ web_page | web_app | document | presentation | presentation_pptx | source_code |
 `deployment` 不再是 `artifact.kind`，而是独立的 `deployments` 表（`0019_v12.sql`）。`workflow` 不在 V1.2 中。
 
 **内容存储模型：**
-- 文本产物（web_page / web_app / document / presentation / source_code）：内容存储在 `artifact_files.new_content`（TEXT），`is_binary = 0`。
-- 二进制产物（presentation_pptx / generic_file with binary）：文件复制到 `{workspace}/.agenthub/artifacts/<artifactId>/v<version>/<filename>`，`artifact_files.content_path` 指向该路径，`artifact_files.new_content = NULL`，`is_binary = 1`，记录 `mime_type` / `size_bytes` / `sha256`。
+- 文本产物（web_page / web_app / document / presentation / source_code）：内容存储在 `artifact_files.new_content`（TEXT），`binary = 0`（复用已有列，`0018_artifact_lifecycle.sql`）。
+- 二进制产物（presentation_pptx / generic_file with binary）：文件复制到 `{workspace}/.agenthub/artifacts/<artifactId>/v<version>/<filename>`，`artifact_files.content_path` 指向该路径（复用已有列），`artifact_files.new_content = NULL`，`binary = 1`（复用），`new_sha256 = file hash`（复用），`mime_type`，`size_bytes`。
 - `artifacts` 表不新增 `content` 列。
 
-**`artifact_files` V1.2 新增列：** `mime_type TEXT`、`size_bytes INTEGER`、`sha256 TEXT`、`is_binary INTEGER NOT NULL DEFAULT 0`。
-**`artifact_versions` V1.2 新增列：** `storage_path TEXT`（binary artifact 的受控文件路径）、`content_encoding TEXT`（'text' | 'binary'）。
+**`artifact_files` V1.2 新增列（其余复用已有）：** `mime_type TEXT`、`size_bytes INTEGER`。（`content_path` / `binary` / `new_sha256` 已存在于 `0008_artifacts.sql` / `0018_artifact_lifecycle.sql`，不重复添加。）
+**`artifact_versions`：** 列定义已在 CREATE TABLE 中完整声明（含 `content_encoding` / `storage_path`），无需单独 ALTER。
 
 #### Scenario: kind 字段驱动 Card 渲染
 
@@ -46,16 +46,28 @@ The system SHALL record a new `artifact_versions` snapshot each time an artifact
 
 ```sql
 artifact_versions (
-  id          TEXT PRIMARY KEY,
-  artifact_id TEXT NOT NULL REFERENCES artifacts(id),
-  version     INTEGER NOT NULL,
-  content     TEXT NOT NULL,    -- snapshot of artifact_files.new_content at save time
-  metadata    TEXT,             -- JSON snapshot of artifact metadata
-  created_at  INTEGER NOT NULL,
-  created_by  TEXT,             -- 'user' | 'system' | agentId
-  message     TEXT,
-  UNIQUE(artifact_id, version)
+  id               TEXT PRIMARY KEY,
+  artifact_id      TEXT NOT NULL REFERENCES artifacts(id),
+  version          INTEGER NOT NULL,
+  content          TEXT,                   -- text artifacts only; NULL for binary
+  storage_path     TEXT,                   -- binary artifacts only; NULL for text
+  content_encoding TEXT NOT NULL DEFAULT 'text',  -- 'text' | 'binary'
+  metadata         TEXT,
+  created_at       INTEGER NOT NULL,
+  created_by       TEXT,
+  message          TEXT,
+  UNIQUE(artifact_id, version),
+  CHECK (
+    (content_encoding = 'text'   AND content IS NOT NULL AND storage_path IS NULL) OR
+    (content_encoding = 'binary' AND content IS NULL     AND storage_path IS NOT NULL)
+  )
 )
+```
+
+**`artifact_files` V1.2 新增列（复用已有：`content_path`、`binary`、`old_sha256`、`new_sha256`）：**
+```sql
+ALTER TABLE artifact_files ADD COLUMN mime_type   TEXT;
+ALTER TABLE artifact_files ADD COLUMN size_bytes  INTEGER;
 ```
 
 版本创建触发点：
@@ -64,9 +76,17 @@ artifact_versions (
 3. 执行 `POST /artifacts/:id/versions/:version/restore`
 
 版本创建流程（同一 SQLite 事务）：
+
+文本产物：
 1. 更新 `artifact_files.new_content`
-2. 写 `artifact_versions` 行（version 递增）
+2. 写 `artifact_versions` 行（version 递增，`content_encoding='text'`，`content = 内容快照`）
 3. 发 `artifact.version.created`（durable, both）
+
+二进制产物（presentation_pptx）：
+1. 复制文件到新版本路径 `.agenthub/artifacts/<id>/v<n>/<filename>`
+2. 更新 `artifact_files.content_path`、`new_sha256`、`size_bytes`
+3. 写 `artifact_versions` 行（version 递增，`content_encoding='binary'`，`storage_path = 新路径`，`content = NULL`）
+4. 发 `artifact.version.created`（durable, both）
 
 回滚语义：始终向前，不支持 in-place 覆盖——恢复即创建新版本。
 
@@ -107,6 +127,7 @@ The system SHALL provide a unified preview contract that derives preview behavio
 |-------------|---------|---------|
 | `web_page`, `web_app` | sandbox iframe（`allow-scripts`，无 same-origin）| too-large（> 500KB）→ download fallback |
 | `presentation` | HTML slides viewer，方向键/触控翻页 | 同上 |
+| `presentation_pptx` | officecli watch iframe（`/api/ppt-proxy`）| install/startFailed → Download fallback |
 | `document` | sanitized Markdown renderer | 同上 |
 | `source_code` | Monaco syntax highlight（只读）| 同上 |
 | `generic_file`, type=`file` | raw text 或 download | unsupported → download only |

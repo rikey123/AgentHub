@@ -7,7 +7,7 @@
   - `deployments` 含 `pid` / `started_at` / `finished_at` / `cancelled_at` / `artifact_version` / `last_error`
   - `artifact_versions` 含 `storage_path` / `content_encoding`
   - 新列：`rooms.pinned_at` / `rooms.last_activity_at` / `artifacts.kind`（含 `presentation_pptx`）/ `tasks.last_unblocked_at` / `agent_bindings.avatar_url` / `agent_bindings.contact_name` / `agent_bindings.contact_description`
-  - `artifact_files` 新列：`mime_type` / `size_bytes` / `sha256` / `is_binary`
+  - `artifact_files` 新增列：`mime_type` / `size_bytes`（复用已有：`content_path` / `binary` / `new_sha256`，不重复添加）
   - 不重复添加：`rooms.archived_at`（`0001_init.sql`）、`messages.pinned_at`（`0013_messages_pinned.sql`）
 
 - [ ] **1.2** 注册 V1.2 新事件类型

@@ -19,15 +19,28 @@ The system SHALL support generating web page, document, and presentation artifac
 | `one-pager-builder` | `web_page` | 商业简报 one-pager，固定布局，可打印 |
 | `html-slides-builder` | `presentation` | HTML 幻灯片，内联 CSS/JS，键盘方向键/触控翻页 |
 | `document-builder` | `document` | Markdown 文档，带 YAML frontmatter（title/date/author/tags）|
+| `officecli-pptx` | `presentation_pptx` | 使用 officecli 生成/编辑真实 `.pptx`；输出通过 `room.publish_artifact({ kind: "presentation_pptx", filePath })` 提交 |
 
 每个 skill 的 SKILL.md frontmatter 包含 `artifact_kind` 字段。当 Agent 调用 `room.publish_artifact` 时，daemon 依据 skill 的 `artifact_kind` 设置 `artifacts.kind`。
 
 **publish_artifact 流程（同一 SQLite 事务）：**
-1. 写 `artifacts` 行（type 按内容类型，kind 按 skill 或显式参数）
-2. 写 `artifact_versions` 行（version=1）
-3. 发 `artifact.version.created`（durable, both）
-4. 写 message part（type='artifact', partRef=artifactId）
-5. 发 `message.part.added`（durable, both）— projector 凭此插入对应 Card
+
+文本产物（web_page / web_app / document / presentation / source_code）：
+1. 写 `artifacts` 行
+2. 写 / 更新 `artifact_files` 行（`new_content = 内容`，`binary = 0`）
+3. 写 `artifact_versions` 行（`version=1`，`content = 内容快照`，`content_encoding='text'`）
+4. 发 `artifact.version.created`（durable, both）
+5. 写 message part（type='artifact', partRef=artifactId）
+6. 发 `message.part.added`（durable, both）
+
+二进制产物（presentation_pptx）：
+1. 写 `artifacts` 行
+2. 将文件从 workspace 复制到 `.agenthub/artifacts/<id>/v1/<filename>`
+3. 写 `artifact_files` 行（`content_path = 受控路径`，`binary = 1`，`new_sha256`，`mime_type`，`size_bytes`，`new_content = NULL`）
+4. 写 `artifact_versions` 行（`storage_path = 受控路径`，`content_encoding='binary'`，`content = NULL`）
+5. 发 `artifact.version.created`（durable, both）
+6. 写 message part
+7. 发 `message.part.added`（durable, both）
 
 **Card 路由：**
 
@@ -35,6 +48,7 @@ The system SHALL support generating web page, document, and presentation artifac
 |------|------|
 | `web_page`, `web_app` | PreviewCard（sandbox iframe）|
 | `presentation` | PresentationCard（HTML slides viewer）|
+| `presentation_pptx` | PresentationCard（PptViewer / officecli watch iframe）|
 | `document` | DocumentCard（Markdown renderer）|
 | `source_code` | ArtifactCard（Monaco / syntax highlight）|
 | `generic_file` | ArtifactCard（raw / download）|
@@ -233,7 +247,7 @@ The system SHALL support read-only preview of real `.ppt` / `.pptx` / `.odp` fil
 
 | 步骤 | 说明 |
 |------|------|
-| 检测 `officecli` | `which officecli`；缺失时自动安装一次（Windows: PowerShell irm install script；macOS/Linux: curl/sh）|
+| 检测 `officecli` | 执行 `officecli --version`；Windows 可用 `where.exe officecli`；macOS/Linux 可用 `command -v officecli`；`ENOENT` / command not found 时触发自动安装，安装后 retry once，失败后设置 `installFailed`（同 session 内不再重复安装）|
 | 启动预览进程 | `officecli watch <filePath> --port <port>`，为每个文件分配独立空闲端口 |
 | 等待就绪 | 等待 stdout 出现 `Watch:` 或端口响应 HTTP 200 |
 | Web 模式 | 通过 `/api/ppt-proxy/:port/*` 代理（MUST 验证端口属于活跃 preview session，防 SSRF）|

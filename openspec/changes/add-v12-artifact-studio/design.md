@@ -39,15 +39,21 @@ V1.1 交付了多 Agent 协作基础设施。V1.2 的单一目标是全面实现
 
 ```sql
 artifact_versions (
-  id          TEXT    PRIMARY KEY,
-  artifact_id TEXT    NOT NULL REFERENCES artifacts(id),
-  version     INTEGER NOT NULL,
-  content     TEXT    NOT NULL,
-  metadata    TEXT,                   -- JSON snapshot of artifact metadata at save time
-  created_at  INTEGER NOT NULL,
-  created_by  TEXT,                   -- 'user' | 'system' | agentId
-  message     TEXT,                   -- optional commit-like label
-  UNIQUE(artifact_id, version)
+  id               TEXT    PRIMARY KEY,
+  artifact_id      TEXT    NOT NULL REFERENCES artifacts(id),
+  version          INTEGER NOT NULL,
+  content          TEXT,                   -- text artifacts only; NULL for binary
+  storage_path     TEXT,                   -- binary artifacts only; NULL for text
+  content_encoding TEXT    NOT NULL DEFAULT 'text',  -- 'text' | 'binary'
+  metadata         TEXT,                   -- JSON snapshot of artifact metadata at save time
+  created_at       INTEGER NOT NULL,
+  created_by       TEXT,                   -- 'user' | 'system' | agentId
+  message          TEXT,                   -- optional commit-like label
+  UNIQUE(artifact_id, version),
+  CHECK (
+    (content_encoding = 'text'   AND content IS NOT NULL AND storage_path IS NULL) OR
+    (content_encoding = 'binary' AND content IS NULL     AND storage_path IS NOT NULL)
+  )
 )
 
 deployments (
@@ -252,27 +258,21 @@ room.publish_artifact({
 
 **Daemon 处理流程：**
 1. 将文件从 `{workspace}/{filePath}` 复制到受控 artifact storage：`{workspace}/.agenthub/artifacts/<artifactId>/v1/<filename>`。
-2. `artifact_files` 行写法：`path = filename`，`new_content = NULL`，`content_path = 受控 storage 路径`，新增字段：`mime_type`、`size_bytes`、`sha256`、`is_binary = 1`。
-3. `artifact_versions` 行：`content = NULL`（binary 不存文本快照），新增字段：`storage_path = 受控路径`、`content_encoding = 'binary'`。
-4. Download / officecli watch / 部署打包 均从 `artifact_files.content_path` 或 `artifact_versions.storage_path` 读取文件路径。
+2. `artifact_files` 行写法：`path = filename`，`new_content = NULL`，`content_path = 受控 storage 路径`（复用已有列），`binary = 1`（复用 `0018_artifact_lifecycle.sql` 已有列），`new_sha256 = sha256 of file`（复用已有列），`mime_type = mimeType`，`size_bytes = file size`。
+3. `artifact_versions` 行：`content = NULL`，`storage_path = 受控路径`，`content_encoding = 'binary'`（均为本次新增列，见上方 CREATE TABLE）。
+4. Download / officecli watch / 部署打包 均从 `artifact_files.content_path` 读取文件路径。
 
-**`0019_v12.sql` 需补充的 artifact_files 新列：**
-
-```sql
-ALTER TABLE artifact_files ADD COLUMN mime_type      TEXT;
-ALTER TABLE artifact_files ADD COLUMN size_bytes     INTEGER;
-ALTER TABLE artifact_files ADD COLUMN sha256         TEXT;
-ALTER TABLE artifact_files ADD COLUMN is_binary      INTEGER NOT NULL DEFAULT 0;
-```
-
-**`artifact_versions` 需补充的新列：**
+**`0019_v12.sql` 对 `artifact_files` 只需新增两列（其余已存在）：**
 
 ```sql
-ALTER TABLE artifact_versions ADD COLUMN storage_path     TEXT;   -- binary artifact 的受控文件路径
-ALTER TABLE artifact_versions ADD COLUMN content_encoding TEXT;   -- 'text' | 'binary'
+-- 已存在（不重复添加）：content_path, binary, old_sha256, new_sha256
+ALTER TABLE artifact_files ADD COLUMN mime_type   TEXT;
+ALTER TABLE artifact_files ADD COLUMN size_bytes  INTEGER;
 ```
 
-**Editor tab 对二进制 artifact 行为：** `presentation_pptx` / `is_binary=1` 的产物隐藏 Editor tab（不可文本编辑）；History tab 显示版本列表（filename / size / sha256 / created_at）+ Download / Restore。Restore 二进制版本：从 `artifact_versions.storage_path` 复制回 `artifact_files.content_path`，写新 `artifact_versions` 行。
+**`artifact_versions` 列已在上方 CREATE TABLE 中定义**（含 `storage_path`、`content_encoding`），无需单独 ALTER。
+
+**Editor tab 对二进制 artifact 行为：** `presentation_pptx` / `binary=1` 的产物隐藏 Editor tab（不可文本编辑）；History tab 显示版本列表（filename / size / new_sha256 / created_at）+ Download / Restore。Restore 二进制版本：从 `artifact_versions.storage_path` 复制文件到新路径，写新 `artifact_versions` 行（`content_encoding='binary'`），更新 `artifact_files.content_path`。
 
 **参考（AionUi `pptPreviewBridge.ts`）：** `officecli watch <filePath>` 接受磁盘文件路径，不接受内存 buffer；因此 `content_path` 是 PPTX 预览的必要入口，不能用 TEXT 列替代。
 
@@ -387,7 +387,7 @@ type AgentContact = {
 2. 同一事务：写 `deployments` 行（`status='queued'`）+ 发 `deployment.created`（durable, main）+ 写 message part + 发 `message.part.added`（durable, both）。
 3. `DeploymentService` 异步：颁发 30 分钟 token，更新 `status='ready'`，`url` 设置，发 `deployment.ready`（durable, main）。
 4. `DeploymentCard` 显示 "Open Preview" + 倒计时 + "Redeploy"。
-5. Token 到期前 `CleanupScheduler` 更新 `status='expired'`，发 `deployment.expired`（durable, main）。
+5. `DeploymentExpirySweeper`（内部维护循环，不是用户可见 scheduler/cron）更新 `status='expired'`，发 `deployment.expired`（durable, main）。
 
 **`static-site`**（持久静态站点）
 
@@ -454,8 +454,8 @@ type AgentContact = {
 契约周单 PR 合并到 `main`：
 1. `packages/db/migrations/0019_v12.sql`
 2. `packages/protocol/src/events/registry.ts` 新增全部 V1.2 事件（含 `"deployment"` EventCategory）
-3. Stub 服务文件：`wake-outbox-dispatcher.ts` / `deployment-service.ts`
-4. 新路由类型 stub
+3. Stub 服务文件：`wake-outbox-dispatcher.ts` / `deployment-service.ts` / `ppt-preview-bridge.ts`
+4. 新路由类型 stub（含 `ppt-proxy.ts`）
 
 **Dev A 负责：** `wake-outbox-dispatcher.ts`，`run-lifecycle-service.ts`（restart recovery），`task-service.ts`（dependency unblock），`team-dispatch.ts`（分派公告 + 汇总 wake + 失败降级消息），`deployment-service.ts`（container-build + CapRover adapter + WebSocket log）。
 

@@ -88,7 +88,7 @@ The system SHALL serve artifact content at a short-lived local URL using the exi
 1. `POST /deployments { artifactId, kind: "preview-url" }` 触发。
 2. 复用现有 preview server（独立端口，token 机制）：颁发 30 分钟 token，URL 格式 `http://127.0.0.1:<previewPort>/preview/<token>`。
 3. `deployments.status='ready'`，`url` 设置，`expires_at = now + 30min`，发 `deployment.ready`。
-4. CleanupScheduler 在 token 到期时更新 `status='expired'`，发 `deployment.expired`。
+4. `DeploymentExpirySweeper`（内部维护循环，不是用户可见 scheduler/cron）在 token 到期时更新 `status='expired'`，发 `deployment.expired`。
 5. DeploymentCard 倒计时显示剩余有效时间；到期后显示"已过期 — 重新部署"。
 
 #### Scenario: 预览 URL 30 分钟后过期
