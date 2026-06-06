@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Button, Card, Checkbox, Chip, Input, Label, Modal, TextArea, TextField } from "@heroui/react";
 import { RoleGeneratorModal } from "./RoleGeneratorModal.tsx";
+import { roleDisplayDescription, roleDisplayName } from "../../lib/roles.ts";
 
 export interface RoleConfig {
   id: string;
@@ -175,11 +176,11 @@ export function RolesTab({ roles: initialRoles, modelConfigs, fetchImpl = fetch,
                       <Card.Header>
                         <div className="min-w-0">
                           <div className="flex min-w-0 items-center gap-2">
-                            <Card.Title className="truncate text-sm">{role.name}</Card.Title>
+                            <Card.Title className="truncate text-sm">{roleDisplayName(role.name)}</Card.Title>
                             {role.is_builtin ? <Chip size="sm" variant="soft" color="accent">builtin</Chip> : null}
                           </div>
                           <Card.Description className="line-clamp-2 text-xs">
-                            {role.description || "No description."}
+                            {roleDisplayDescription(role) || "No description."}
                           </Card.Description>
                         </div>
                       </Card.Header>
@@ -207,7 +208,7 @@ export function RolesTab({ roles: initialRoles, modelConfigs, fetchImpl = fetch,
           <Card.Header>
             <div className="flex items-start justify-between gap-3">
               <div>
-                <Card.Title>{mode === "edit" && selectedRole ? `Edit ${selectedRole.name}` : "Create role"}</Card.Title>
+                <Card.Title>{mode === "edit" && selectedRole ? `Edit ${roleDisplayName(selectedRole.name)}` : "Create role"}</Card.Title>
                 <Card.Description>Save with REST; no SSE subscription is attached.</Card.Description>
               </div>
               <Chip size="sm" variant="soft" color={mode === "edit" ? "accent" : "success"}>{mode === "edit" ? "PATCH" : "POST"}</Chip>
