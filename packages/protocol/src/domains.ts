@@ -37,6 +37,8 @@ export const RoomSchema = Schema.Struct({
   defaultContextScope: Schema.Literal("conversation", "task", "workspace"),
   primaryAgentId: Schema.optional(IdSchema),
   participants: Schema.Array(RoomParticipantSchema),
+  pinnedAt: Schema.optional(EpochMillisSchema),
+  lastActivityAt: Schema.optional(EpochMillisSchema),
   archivedAt: Schema.optional(EpochMillisSchema),
   createdAt: EpochMillisSchema,
   updatedAt: EpochMillisSchema
@@ -285,6 +287,7 @@ export const ArtifactSchema = Schema.Struct({
   runId: Schema.optional(IdSchema),
   messageId: Schema.optional(IdSchema),
   type: Schema.Literal("diff", "file", "preview", "document", "terminal", "deployment", "worktree_diff"),
+  kind: Schema.optional(Schema.Literal("web_page", "web_app", "document", "presentation", "presentation_pptx", "source_code", "generic_file")),
   title: Schema.String,
   status: Schema.Literal("draft", "reviewing", "accepted", "applying", "applied", "rejected", "failed", "ready_for_review", "conflict", "discarded"),
   createdBy: IdSchema,
@@ -293,3 +296,62 @@ export const ArtifactSchema = Schema.Struct({
   appliedAt: Schema.optional(EpochMillisSchema)
 });
 export type Artifact = typeof ArtifactSchema.Type;
+
+export const ArtifactVersionSchema = Schema.Struct({
+  id: IdSchema,
+  artifactId: IdSchema,
+  version: Schema.Number,
+  contentEncoding: Schema.Literal("text", "binary"),
+  createdAt: EpochMillisSchema
+});
+export type ArtifactVersion = typeof ArtifactVersionSchema.Type;
+
+export const DeploymentProviderSchema = Schema.Struct({
+  id: IdSchema,
+  workspaceId: IdSchema,
+  kind: Schema.Literal("caprover", "dokploy", "coolify"),
+  name: Schema.String,
+  baseUrl: Schema.String,
+  credentialRef: IdSchema,
+  createdAt: EpochMillisSchema,
+  updatedAt: EpochMillisSchema
+});
+export type DeploymentProvider = typeof DeploymentProviderSchema.Type;
+
+export const DeploymentSchema = Schema.Struct({
+  id: IdSchema,
+  artifactId: IdSchema,
+  roomId: Schema.optional(IdSchema),
+  workspaceId: IdSchema,
+  kind: Schema.Literal("preview-url", "static-site", "source-zip", "container-export", "container-build", "self-hosted"),
+  provider: Schema.Literal("agenthub-local", "caprover"),
+  status: Schema.Literal("queued", "in_progress", "ready", "failed", "cancelled", "expired", "unpublished"),
+  createdAt: EpochMillisSchema,
+  updatedAt: EpochMillisSchema
+});
+export type Deployment = typeof DeploymentSchema.Type;
+
+export const WakeOutboxSchema = Schema.Struct({
+  id: IdSchema,
+  roomId: IdSchema,
+  agentId: IdSchema,
+  reason: Schema.String,
+  status: Schema.Literal("pending", "dispatching", "dispatched", "failed"),
+  attemptCount: Schema.Number,
+  maxAttempts: Schema.Number,
+  createdAt: EpochMillisSchema
+});
+export type WakeOutbox = typeof WakeOutboxSchema.Type;
+
+export const AgentContactSchema = Schema.Struct({
+  agentBindingId: IdSchema,
+  displayName: Schema.String,
+  avatarUrl: Schema.optional(Schema.String),
+  roleId: IdSchema,
+  runtimeKind: Schema.String,
+  capabilities: Schema.Array(Schema.String),
+  status: Schema.Literal("available", "busy", "offline"),
+  description: Schema.optional(Schema.String),
+  lastUsedAt: Schema.optional(EpochMillisSchema)
+});
+export type AgentContact = typeof AgentContactSchema.Type;

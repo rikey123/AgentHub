@@ -17,6 +17,8 @@ export const rooms = sqliteTable("rooms", {
   primaryAgentId: text("primary_agent_id"),
   leaderRoleId: text("leader_role_id"),
   archivedAt: integer("archived_at"),
+  pinnedAt: integer("pinned_at"),
+  lastActivityAt: integer("last_activity_at"),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull(),
   // V1.1: set when Level-2 timeout fires (D4)
@@ -120,6 +122,9 @@ export const agentBindings = sqliteTable("agent_bindings", {
   runtimeId: text("runtime_id").notNull(),
   modelConfigId: text("model_config_id"),
   overridePermissionProfileId: text("override_permission_profile_id"),
+  avatarUrl: text("avatar_url"),
+  contactName: text("contact_name"),
+  contactDescription: text("contact_description"),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull()
 });
@@ -222,7 +227,8 @@ export const tasks = sqliteTable("tasks", {
   // V1.1 additions
   blockerReason: text("blocker_reason"),
   maxTurns: integer("max_turns"),
-  boardColumn: text("board_column")
+  boardColumn: text("board_column"),
+  lastUnblockedAt: integer("last_unblocked_at")
 });
 
 export const roleDrafts = sqliteTable("role_drafts", {
@@ -394,6 +400,7 @@ export const artifacts = sqliteTable("artifacts", {
   runId: text("run_id"),
   messageId: text("message_id"),
   type: text("type").notNull(),
+  kind: text("kind"),
   title: text("title").notNull(),
   status: text("status").notNull(),
   createdBy: text("created_by"),
@@ -423,10 +430,86 @@ export const artifactFiles = sqliteTable(
     newSha256: text("new_sha256"),
     appliedState: text("applied_state"),
     contentPath: text("content_path"),
+    mimeType: text("mime_type"),
+    sizeBytes: integer("size_bytes"),
     createdAt: integer("created_at").notNull()
   },
   (table) => [primaryKey({ columns: [table.artifactId, table.path] })]
 );
+
+export const artifactVersions = sqliteTable(
+  "artifact_versions",
+  {
+    id: text("id").primaryKey(),
+    artifactId: text("artifact_id").notNull(),
+    version: integer("version").notNull(),
+    content: text("content"),
+    storagePath: text("storage_path"),
+    contentEncoding: text("content_encoding").notNull().default("text"),
+    metadata: text("metadata"),
+    createdAt: integer("created_at").notNull(),
+    createdBy: text("created_by"),
+    message: text("message")
+  },
+  (table) => [uniqueIndex("idx_artifact_versions_artifact_version").on(table.artifactId, table.version)]
+);
+
+export const deploymentProviders = sqliteTable("deployment_providers", {
+  id: text("id").primaryKey(),
+  workspaceId: text("workspace_id").notNull(),
+  kind: text("kind").notNull(),
+  name: text("name").notNull(),
+  baseUrl: text("base_url").notNull(),
+  credentialRef: text("credential_ref").notNull(),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull()
+});
+
+export const deployments = sqliteTable("deployments", {
+  id: text("id").primaryKey(),
+  artifactId: text("artifact_id").notNull(),
+  roomId: text("room_id"),
+  workspaceId: text("workspace_id").notNull(),
+  kind: text("kind").notNull(),
+  provider: text("provider").notNull().default("agenthub-local"),
+  status: text("status").notNull().default("queued"),
+  url: text("url"),
+  downloadUrl: text("download_url"),
+  imageTag: text("image_tag"),
+  providerResourceId: text("provider_resource_id"),
+  providerConfigId: text("provider_config_id"),
+  sourcePath: text("source_path"),
+  zipPath: text("zip_path"),
+  dockerfilePath: text("dockerfile_path"),
+  logPath: text("log_path"),
+  error: text("error"),
+  pid: text("pid"),
+  artifactVersion: integer("artifact_version"),
+  lastError: text("last_error"),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+  startedAt: integer("started_at"),
+  finishedAt: integer("finished_at"),
+  cancelledAt: integer("cancelled_at"),
+  expiresAt: integer("expires_at"),
+  publishedAt: integer("published_at"),
+  unpublishedAt: integer("unpublished_at")
+});
+
+export const wakeOutbox = sqliteTable("wake_outbox", {
+  id: text("id").primaryKey(),
+  roomId: text("room_id").notNull(),
+  agentId: text("agent_id").notNull(),
+  reason: text("reason").notNull(),
+  payload: text("payload"),
+  status: text("status").notNull().default("pending"),
+  attemptCount: integer("attempt_count").notNull().default(0),
+  maxAttempts: integer("max_attempts").notNull().default(3),
+  lastError: text("last_error"),
+  createdAt: integer("created_at").notNull(),
+  dispatchAfter: integer("dispatch_after"),
+  dispatchedAt: integer("dispatched_at")
+});
 
 export const artifactReviews = sqliteTable("artifact_reviews", {
   id: text("id").primaryKey(),

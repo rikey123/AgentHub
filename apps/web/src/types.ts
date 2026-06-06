@@ -1,5 +1,56 @@
 import type { MessagePart, PermissionResource } from "@agenthub/protocol/domains";
 
+export type ArtifactVersionViewModel = {
+  readonly id: string;
+  readonly artifactId: string;
+  readonly version: number;
+  readonly contentEncoding: "text" | "binary";
+  readonly createdAt: number;
+  readonly createdBy?: string | undefined;
+  readonly message?: string | undefined;
+  readonly storagePath?: string | undefined;
+};
+
+export type DeploymentProviderViewModel = {
+  readonly id: string;
+  readonly workspaceId: string;
+  readonly kind: "caprover" | "dokploy" | "coolify";
+  readonly name: string;
+  readonly baseUrl: string;
+  readonly credentialRef: string;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+};
+
+export type DeploymentViewModel = {
+  readonly id: string;
+  readonly artifactId: string;
+  readonly roomId?: string | undefined;
+  readonly workspaceId: string;
+  readonly kind: "preview-url" | "static-site" | "source-zip" | "container-export" | "container-build" | "self-hosted";
+  readonly provider: "agenthub-local" | "caprover";
+  readonly status: "queued" | "in_progress" | "ready" | "failed" | "cancelled" | "expired" | "unpublished";
+  readonly url?: string | undefined;
+  readonly downloadUrl?: string | undefined;
+  readonly imageTag?: string | undefined;
+  readonly artifactVersion?: number | undefined;
+  readonly lastError?: string | undefined;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+};
+
+export type AgentContactViewModel = {
+  readonly agentBindingId: string;
+  readonly displayName: string;
+  readonly avatarUrl?: string | undefined;
+  readonly roleId: string;
+  readonly runtimeKind: string;
+  readonly capabilities: readonly string[];
+  readonly status: "available" | "busy" | "offline";
+  readonly description?: string | undefined;
+  readonly lastUsedAt?: number | undefined;
+};
+
 export type ParticipantViewModel = {
   readonly id: string;
   readonly name: string;
@@ -152,6 +203,7 @@ export type TaskViewModel = {
   readonly worktreeReviews?: readonly WorktreeReviewViewModel[] | undefined;
   readonly fileChangesCount?: number | undefined;      // aggregate file-change badge (D12)
   readonly fileChangeRuns?: readonly TaskFileChangeRunViewModel[] | undefined;
+  readonly lastUnblockedAt?: number | undefined;
 };
 
 export type RunViewModel = {
@@ -197,6 +249,8 @@ export type RoomViewModel = {
   readonly title: string;
   readonly mode: string;
   readonly primaryAgentId?: string | undefined;
+  readonly pinnedAt?: number | undefined;
+  readonly lastActivityAt?: number | undefined;
   readonly participants: ParticipantViewModel[];
   readonly messages: MessageViewModel[];
   readonly briefs: BriefViewModel[];
