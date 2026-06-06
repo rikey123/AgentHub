@@ -5,7 +5,7 @@ import { truncate } from "../../lib/format.ts";
 
 export function ContextPanel({ items }: { items: ReadonlyArray<ContextItemViewModel> }) {
   if (items.length === 0) {
-    return <div className="p-6 text-center text-sm text-muted">No context items yet.</div>;
+    return <div className="p-6 text-center text-sm text-muted">暂无上下文条目。</div>;
   }
   const draft = items.filter((i) => i.status === "draft");
   const confirmed = items.filter((i) => i.status === "confirmed");
