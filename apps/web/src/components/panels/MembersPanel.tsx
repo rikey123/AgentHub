@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Avatar, Button, Chip, Input, Label, Modal, ScrollShadow, TextField } from "@heroui/react";
 import type { ParticipantViewModel, TaskViewModel } from "../../types.ts";
 import { initials } from "../../lib/format.ts";
+import { roleDisplayName } from "../../lib/roles.ts";
+import { skillDisplayDescription, skillDisplayName } from "../../lib/skills.ts";
 import { presenceColor } from "../../lib/status.ts";
 
 type AgentBindingOption = {
@@ -78,7 +80,7 @@ export function MembersPanel({
       .filter((binding) => !memberBindingIds.has(binding.id))
       .filter((binding) => {
         if (!normalizedQuery) return true;
-        return [binding.roleName, binding.runtimeName, binding.runtimeKind, binding.modelName ?? ""]
+        return [binding.roleName, roleDisplayName(binding.roleName), binding.runtimeName, binding.runtimeKind, binding.modelName ?? ""]
           .join(" ")
           .toLowerCase()
           .includes(normalizedQuery);
@@ -96,7 +98,7 @@ export function MembersPanel({
       body: JSON.stringify({ agentBindingId })
     })
       .then(async (response) => {
-        if (!response.ok) throw new Error(await responseError(response, "Add teammate failed"));
+        if (!response.ok) throw new Error(await responseError(response, "添加队友失败"));
         setAddOpen(false);
         setQuery("");
       })
@@ -108,17 +110,17 @@ export function MembersPanel({
     <div className="ah-members-panel flex flex-col gap-4 p-3">
       <div className="ah-panel-heading">
         <div className="min-w-0">
-          <h3 className="text-base font-semibold">Members</h3>
-          <p className="text-xs text-muted">{members.length} participant{members.length === 1 ? "" : "s"} in this room</p>
+          <h3 className="text-base font-semibold">成员</h3>
+          <p className="text-xs text-muted">此 Room 中有 {members.length} 名成员</p>
         </div>
-        <Button className="ah-pill-action" size="sm" variant="secondary" onPress={() => setAddOpen(true)} isDisabled={!roomId} aria-label="Add teammate">
+        <Button className="ah-pill-action" size="sm" variant="secondary" onPress={() => setAddOpen(true)} isDisabled={!roomId} aria-label="添加队友">
           <span className="ah-pill-action-plus" aria-hidden="true">+</span>
-          <span className="ah-pill-action-label">Add teammate</span>
+          <span className="ah-pill-action-label">添加队友</span>
         </Button>
       </div>
 
       {members.length === 0 ? (
-        <EmptyState label="No members in this room yet." />
+        <EmptyState label="此 Room 暂无成员。" />
       ) : (
         <ul className="flex flex-col gap-1.5" role="list">
           {members.map((member) => (
@@ -139,23 +141,23 @@ export function MembersPanel({
 
       <Modal.Backdrop isOpen={addOpen} onOpenChange={setAddOpen}>
         <Modal.Container size="lg">
-          <Modal.Dialog aria-label="Add teammate">
-            <Modal.CloseTrigger aria-label="Close add teammate" />
+          <Modal.Dialog aria-label="添加队友">
+            <Modal.CloseTrigger aria-label="关闭添加队友" />
             <Modal.Header>
-              <Modal.Heading>Add teammate</Modal.Heading>
+              <Modal.Heading>添加队友</Modal.Heading>
             </Modal.Header>
             <Modal.Body>
               <div className="grid gap-3">
                 <TextField value={query} onChange={setQuery}>
-                  <Label className="text-sm font-semibold">Search bindings</Label>
-                  <Input placeholder="Role, runtime, or model" />
+                  <Label className="text-sm font-semibold">搜索绑定</Label>
+                  <Input placeholder="角色、runtime 或模型" />
                 </TextField>
-                {loadingBindings ? <p className="text-sm text-muted">Loading bindings...</p> : null}
+                {loadingBindings ? <p className="text-sm text-muted">正在加载绑定...</p> : null}
                 <ScrollShadow className="max-h-80 overflow-auto pr-1" orientation="vertical">
                   <div className="grid gap-2">
                     {visibleBindings.length === 0 && !loadingBindings ? (
                       <div className="rounded-lg border border-dashed border-border bg-surface p-3 text-sm text-muted">
-                        No available bindings.
+                        暂无可用绑定。
                       </div>
                     ) : visibleBindings.map((binding) => (
                       <button
@@ -166,7 +168,7 @@ export function MembersPanel({
                         disabled={pendingBindingId !== undefined}
                       >
                         <span className="flex min-w-0 items-center gap-2">
-                          <span className="min-w-0 flex-1 truncate text-sm font-semibold">{binding.roleName}</span>
+                          <span className="min-w-0 flex-1 truncate text-sm font-semibold">{roleDisplayName(binding.roleName)}</span>
                           <Chip size="sm" variant="soft" color={binding.runtimeKind === "native" ? "success" : "default"}>{binding.runtimeKind}</Chip>
                         </span>
                         <span className="truncate text-xs text-muted">{binding.runtimeName}{binding.modelName ? ` / ${binding.modelName}` : ""}</span>
@@ -177,7 +179,7 @@ export function MembersPanel({
               </div>
             </Modal.Body>
             <Modal.Footer>
-              <Button variant="secondary" onPress={() => setAddOpen(false)}>Close</Button>
+              <Button variant="secondary" onPress={() => setAddOpen(false)}>关闭</Button>
             </Modal.Footer>
           </Modal.Dialog>
         </Modal.Container>
@@ -249,21 +251,21 @@ function RoomSkillPool({ roomId, csrfFetch }: { roomId: string; csrfFetch: typeo
             <span className="ah-skill-toggle-line ah-skill-toggle-line-3" />
           </span>
         </span>
-        <span className="min-w-0 flex-1 truncate">Assigned skills</span>
-        <span className="ah-sr-only">Room skill pool</span>
+        <span className="min-w-0 flex-1 truncate">已分配 skills</span>
+        <span className="ah-sr-only">Room skill 池</span>
         <Chip size="sm" variant="soft" color="accent">{enabledSkills.length}</Chip>
       </summary>
       <div className="mt-3 grid gap-3">
-        {loading ? <p className="text-xs text-muted">Loading room skills...</p> : null}
+        {loading ? <p className="text-xs text-muted">正在加载 Room skills...</p> : null}
         {error ? <p className="text-xs text-danger" role="alert">{error}</p> : null}
         <div className="grid gap-2">
           {enabledSkills.length === 0 ? (
-            <div className="ah-empty-row">No room skills enabled.</div>
+            <div className="ah-empty-row">暂无启用的 Room skills。</div>
           ) : enabledSkills.map((skill) => (
             <SkillRow
               key={skill.id}
               skill={skill}
-              actionLabel={`Disable ${skill.name}`}
+              actionLabel={`停用 ${skillDisplayName(skill)}`}
               actionText="-"
               pending={pendingSkillId !== undefined}
               onAction={() => setEnabled(skill.id, false)}
@@ -273,17 +275,17 @@ function RoomSkillPool({ roomId, csrfFetch }: { roomId: string; csrfFetch: typeo
         {open ? (
           <div className="grid gap-2">
             <div className="ah-subsection-label">
-              <span>Skill pool</span>
+              <span>Skill 池</span>
               <Chip size="sm" variant="soft" color="default">{skills.length}</Chip>
             </div>
-            {skills.length === 0 && !loading ? <p className="text-xs text-muted">No workspace skills found.</p> : null}
+            {skills.length === 0 && !loading ? <p className="text-xs text-muted">未找到工作区 skills。</p> : null}
             {skills.map((skill) => {
               const enabled = enabledIds.has(skill.id);
               return (
                 <SkillRow
                   key={skill.id}
                   skill={skill}
-                  actionLabel={enabled ? `Disable ${skill.name}` : `Enable ${skill.name}`}
+                  actionLabel={enabled ? `停用 ${skillDisplayName(skill)}` : `启用 ${skillDisplayName(skill)}`}
                   actionText={enabled ? "-" : "+"}
                   active={enabled}
                   pending={pendingSkillId !== undefined}
@@ -293,7 +295,7 @@ function RoomSkillPool({ roomId, csrfFetch }: { roomId: string; csrfFetch: typeo
             })}
           </div>
         ) : null}
-        <p className="text-xs text-muted">Enabled here can be used in this room; disable to hide or restrict skills.</p>
+        <p className="text-xs text-muted">在这里启用的 skills 可用于此 Room；停用后会隐藏或限制对应 skills。</p>
       </div>
     </details>
   );
@@ -319,9 +321,9 @@ function MemberRow({
         <Avatar className="ah-agent-avatar"><Avatar.Fallback>{initials(member.name)}</Avatar.Fallback></Avatar>
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <span className="min-w-0 truncate text-sm font-semibold">{member.name}</span>
+            <span className="min-w-0 truncate text-sm font-semibold">{roleDisplayName(member.name)}</span>
             {isLeader ? <Chip size="sm" variant="soft" color="accent">Leader</Chip> : null}
-            <Chip size="sm" variant="soft" color={presenceColor(member.presence)}>{member.presence}</Chip>
+            <Chip size="sm" variant="soft" color={presenceColor(member.presence)}>{presenceLabel(member.presence)}</Chip>
           </div>
           <p className="mt-1 truncate text-xs text-muted">{member.role} / {member.adapterId}</p>
           {task ? (
@@ -335,7 +337,7 @@ function MemberRow({
           ) : null}
           <div className="mt-2 flex flex-wrap gap-1.5">
             {capabilities.length === 0 ? (
-              <Chip size="sm" variant="soft" color="default">no capabilities</Chip>
+              <Chip size="sm" variant="soft" color="default">暂无能力</Chip>
             ) : capabilities.map((capability) => (
               <Chip key={capability} size="sm" variant="soft" color="default">{capability}</Chip>
             ))}
@@ -426,13 +428,13 @@ function MemberSkills({ roomId, participantId, csrfFetch }: { roomId?: string | 
         <Chip size="sm" variant="soft" color="default">{state.effectiveSkills.length}</Chip>
       </summary>
       <div className="mt-3 grid gap-3">
-        {loading ? <p className="text-xs text-muted">Loading skills...</p> : null}
+        {loading ? <p className="text-xs text-muted">正在加载 skills...</p> : null}
         {error ? <p className="text-xs text-danger" role="alert">{error}</p> : null}
         <div className="flex flex-wrap gap-1">
           {state.effectiveSkills.length === 0 ? (
-            <Chip size="sm" variant="soft" color="default">no effective skills</Chip>
+            <Chip size="sm" variant="soft" color="default">暂无生效 skills</Chip>
           ) : state.effectiveSkills.map((skill) => (
-            <Chip key={skill.id} size="sm" variant="soft" color="accent">{skill.name}</Chip>
+            <Chip key={skill.id} size="sm" variant="soft" color="accent">{skillDisplayName(skill)}</Chip>
           ))}
         </div>
         {open ? (
@@ -442,13 +444,13 @@ function MemberSkills({ roomId, participantId, csrfFetch }: { roomId?: string | 
               return (
                 <div key={skill.id} className="ah-skill-override-row">
                   <div className="min-w-0">
-                    <div className="truncate text-xs font-semibold">{skill.name}</div>
-                    <div className="truncate text-xs text-muted">{override?.mode ? `Override: ${override.mode}` : skill.description ?? "No override"}</div>
+                    <div className="truncate text-xs font-semibold">{skillDisplayName(skill)}</div>
+                    <div className="truncate text-xs text-muted">{override?.mode ? `覆盖：${skillOverrideModeLabel(override.mode)}` : skillDisplayDescription(skill) || "无覆盖"}</div>
                   </div>
                   <div className="flex shrink-0 flex-wrap gap-1">
-                    <Button isIconOnly size="sm" variant="secondary" isDisabled={pending !== undefined} onPress={() => writeOverride(skill.id, "add")} aria-label={`Add ${skill.name}`}>+</Button>
-                    <Button isIconOnly size="sm" variant="tertiary" isDisabled={pending !== undefined} onPress={() => writeOverride(skill.id, "restrict")} aria-label={`Restrict ${skill.name}`}>-</Button>
-                    {override ? <Button isIconOnly size="sm" variant="danger" isDisabled={pending !== undefined} onPress={() => removeOverride(skill.id)} aria-label={`Clear ${skill.name}`}>x</Button> : null}
+                    <Button isIconOnly size="sm" variant="secondary" isDisabled={pending !== undefined} onPress={() => writeOverride(skill.id, "add")} aria-label={`添加 ${skillDisplayName(skill)}`}>+</Button>
+                    <Button isIconOnly size="sm" variant="tertiary" isDisabled={pending !== undefined} onPress={() => writeOverride(skill.id, "restrict")} aria-label={`限制 ${skillDisplayName(skill)}`}>-</Button>
+                    {override ? <Button isIconOnly size="sm" variant="danger" isDisabled={pending !== undefined} onPress={() => removeOverride(skill.id)} aria-label={`清除 ${skillDisplayName(skill)}`}>x</Button> : null}
                   </div>
                 </div>
               );
@@ -477,10 +479,10 @@ function SkillRow({
 }) {
   return (
     <div className="ah-skill-row">
-      <span className="ah-skill-icon" aria-hidden="true">{skill.name.slice(0, 1).toUpperCase()}</span>
+      <span className="ah-skill-icon" aria-hidden="true">{skillDisplayName(skill).slice(0, 1).toUpperCase()}</span>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-semibold">{skill.name}</div>
-        <div className="truncate text-xs text-muted">{skill.description ?? skill.origin ?? "No description"}</div>
+        <div className="truncate text-sm font-semibold">{skillDisplayName(skill)}</div>
+        <div className="truncate text-xs text-muted">{skillDisplayDescription(skill) || skill.origin || "无描述"}</div>
       </div>
       <Button
         isIconOnly
@@ -515,20 +517,26 @@ function taskStatusLabel(status: string): string {
   switch (status) {
     case "in_progress":
     case "running":
-      return "Working";
+      return "进行中";
     case "queued":
     case "assigned":
-      return "Queued";
+      return "排队中";
     case "review":
     case "waiting_review":
-      return "Review";
+      return "待评审";
     case "blocked":
-      return "Blocked";
+      return "已阻塞";
     case "failed":
-      return "Failed";
+      return "失败";
     default:
       return status;
   }
+}
+
+function presenceLabel(presence: string): string {
+  if (presence === "active") return "活跃";
+  if (presence === "observing") return "观察中";
+  return presence;
 }
 
 function taskStatusColor(status: string): "default" | "success" | "warning" | "danger" | "accent" {
@@ -549,6 +557,12 @@ function taskStatusColor(status: string): "default" | "success" | "warning" | "d
     default:
       return "default";
   }
+}
+
+function skillOverrideModeLabel(mode: string): string {
+  if (mode === "add") return "添加";
+  if (mode === "restrict") return "限制";
+  return mode;
 }
 
 function normalizeAgentBindings(payload: unknown): AgentBindingOption[] {
