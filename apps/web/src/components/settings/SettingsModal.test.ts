@@ -210,7 +210,7 @@ describe("SettingsModal integration contract", () => {
       onPermissionRulesChange: vi.fn()
     }));
 
-    expect(html).toContain("Builder");
+    expect(html).toContain("构建者");
     expect(html).not.toContain("Failed to fetch");
   });
 
@@ -304,14 +304,14 @@ describe("Skills settings tab contract", () => {
     }));
 
     expect(html).toContain("task-planner");
-    expect(html).toContain("Built-in");
+    expect(html).toContain("内置");
     expect(html).toContain("review-helper");
-    expect(html).toContain("Workspace");
-    expect(html).toContain("New Skill");
-    expect(html).toContain("Import");
-    expect(html).toContain("View");
-    expect(html).toContain("Edit");
-    expect(html).toContain("Delete");
+    expect(html).toContain("工作区");
+    expect(html).toContain("新建 Skill");
+    expect(html).toContain("导入");
+    expect(html).toContain("查看");
+    expect(html).toContain("编辑");
+    expect(html).toContain("删除");
   });
 
   it("renders skill package file counts from REST data", () => {
@@ -338,7 +338,7 @@ describe("Skills settings tab contract", () => {
       onSkillsChange: vi.fn()
     }));
 
-    expect(html).toContain("2 files");
+    expect(html).toContain("2 个文件");
   });
 
   it("renders runtime-local skill import controls when runtimes are available", () => {
@@ -352,10 +352,10 @@ describe("Skills settings tab contract", () => {
       onSkillsChange: vi.fn()
     }));
 
-    expect(html).toContain("Import from local runtime");
+    expect(html).toContain("从本地 Runtime 导入");
     expect(html).toContain("OpenCode");
-    expect(html).toContain("Load local skills");
-    expect(html).toContain("Select all");
+    expect(html).toContain("加载本地 skills");
+    expect(html).toContain("全选");
   });
 
   it("normalizes and imports runtime-local skill packages through runtime endpoints", async () => {
