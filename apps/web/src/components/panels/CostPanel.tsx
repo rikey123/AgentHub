@@ -59,22 +59,22 @@ export function CostPanel({ csrfFetch, workspaceId = "default-workspace" }: Cost
     <div className="flex flex-col gap-3 p-3">
       <Card variant="transparent" className="border border-border">
         <Card.Header>
-          <Card.Title>Cost</Card.Title>
-          <Card.Description>Total {formatUsd(total)}{loading ? " · loading…" : ""}</Card.Description>
+          <Card.Title>计费</Card.Title>
+          <Card.Description>总计 {formatUsd(total)}{loading ? " · 加载中..." : ""}</Card.Description>
         </Card.Header>
         <Card.Content className="flex flex-col gap-2">
-          <div className="text-xs font-semibold uppercase tracking-wide text-muted">Time Window</div>
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted">时间范围</div>
           <ToggleButtonGroup selectionMode="single" selectedKeys={[window]} onSelectionChange={(keys: unknown) => {
             const k = Array.from(keys as Set<string>)[0];
             if (k) setWindow(k as Window);
           }}>
-            <ToggleButton id="today" data-testid="cost-time-today">Today</ToggleButton>
+            <ToggleButton id="today" data-testid="cost-time-today">今天</ToggleButton>
             <ToggleButton id="7d" data-testid="cost-time-7d">7d</ToggleButton>
             <ToggleButton id="30d" data-testid="cost-time-30d">30d</ToggleButton>
           </ToggleButtonGroup>
-          <div className="text-xs font-semibold uppercase tracking-wide text-muted">Group By</div>
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted">分组方式</div>
           <Select
-            aria-label="Group by"
+            aria-label="分组方式"
             selectedKey={groupBy}
             onSelectionChange={(k: unknown) => setGroupBy(String(k) as GroupBy)}
           >
@@ -82,10 +82,10 @@ export function CostPanel({ csrfFetch, workspaceId = "default-workspace" }: Cost
               <Select.Value />
             </Select.Trigger>
             <Select.Popover>
-              <ListBox aria-label="Group by">
-                <ListBox.Item id="agent">Group by agent</ListBox.Item>
-                <ListBox.Item id="model">Group by model</ListBox.Item>
-                <ListBox.Item id="day">Group by day</ListBox.Item>
+              <ListBox aria-label="分组方式">
+                <ListBox.Item id="agent">按 agent 分组</ListBox.Item>
+                <ListBox.Item id="model">按模型分组</ListBox.Item>
+                <ListBox.Item id="day">按日期分组</ListBox.Item>
               </ListBox>
             </Select.Popover>
           </Select>
@@ -95,7 +95,7 @@ export function CostPanel({ csrfFetch, workspaceId = "default-workspace" }: Cost
       {error ? <Chip size="sm" color="danger" variant="soft">{error}</Chip> : null}
 
       {loading && rows.length === 0 ? (
-        <div className="flex flex-col gap-2" aria-label="Loading cost data">
+        <div className="flex flex-col gap-2" aria-label="正在加载计费数据">
           {Array.from({ length: 4 }).map((_, i) => (
             <div key={i} className="flex flex-col gap-1">
               <div className="flex items-center gap-2">
@@ -107,7 +107,7 @@ export function CostPanel({ csrfFetch, workspaceId = "default-workspace" }: Cost
           ))}
         </div>
       ) : rows.length === 0 && !loading ? (
-        <p className="px-3 py-2 text-sm text-muted">No cost data yet.</p>
+        <p className="px-3 py-2 text-sm text-muted">暂无计费数据。</p>
       ) : (
         <div className="flex flex-col gap-1">
           {rows.map((row) => (
