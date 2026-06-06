@@ -15,6 +15,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { RoomExecutionPlanViewModel, TaskActivityViewModel, TaskFileChangeRunViewModel, TaskViewModel, WorktreeReviewViewModel } from "../../types.ts";
 import { formatRelativeTime, formatTime, initials, truncate } from "../../lib/format.ts";
+import { roleDisplayName } from "../../lib/roles.ts";
 import { taskStatusColor, type ChipColor } from "../../lib/status.ts";
 
 export const KANBAN_COLUMNS = [
@@ -385,7 +386,7 @@ export function TasksPanel({ roomId, tasks, csrfFetch, executionPlan, onOpenArti
   };
 
   if (tasks.length === 0) {
-    return <div className="p-6 text-center text-sm text-muted">No tasks yet.</div>;
+    return <div className="p-6 text-center text-sm text-muted">暂无任务。</div>;
   }
 
   return (
@@ -601,6 +602,7 @@ function TaskList({ groups, allTasks, onOpenTask }: { groups: readonly TaskStatu
 function TaskListRow({ task, allTasks, onOpen }: { task: TaskViewModel; allTasks: ReadonlyArray<TaskViewModel>; onOpen: () => void }) {
   const updatedAt = taskUpdatedAt(task);
   const assignee = task.assigneeRoleId ?? task.assigneeAgentId ?? "Unassigned";
+  const assigneeLabel = roleDisplayName(assignee) || assignee;
   const unresolved = unresolvedDependencyCount(task, allTasks);
   const fileCount = aggregateFileChanges(task);
   const worktree = latestWorktreeReview(task);
@@ -625,8 +627,8 @@ function TaskListRow({ task, allTasks, onOpen }: { task: TaskViewModel; allTasks
         {worktree?.status === "ready_for_review" ? <Chip size="sm" variant="soft" color="success">Ready</Chip> : null}
         {worktree?.status === "conflict" ? <Chip size="sm" variant="soft" color="danger">Conflict</Chip> : null}
         <span className="inline-flex min-w-0 items-center gap-1">
-          <Avatar className="h-5 w-5 text-[10px]"><Avatar.Fallback>{initials(assignee)}</Avatar.Fallback></Avatar>
-          <span className="max-w-28 truncate">{assignee}</span>
+          <Avatar className="h-5 w-5 text-[10px]"><Avatar.Fallback>{initials(assigneeLabel)}</Avatar.Fallback></Avatar>
+          <span className="max-w-28 truncate">{assigneeLabel}</span>
         </span>
         <span className="shrink-0">{updatedAt ? formatRelativeTime(updatedAt) : "-"}</span>
       </div>
@@ -659,6 +661,7 @@ function TaskKanbanCard({ task, allTasks, onOpen }: { task: TaskViewModel; allTa
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id });
   const updatedAt = taskUpdatedAt(task);
   const assignee = task.assigneeRoleId ?? task.assigneeAgentId ?? "Unassigned";
+  const assigneeLabel = roleDisplayName(assignee) || assignee;
   const unresolved = unresolvedDependencyCount(task, allTasks);
   const fileCount = aggregateFileChanges(task);
   const worktree = latestWorktreeReview(task);
@@ -711,8 +714,8 @@ function TaskKanbanCard({ task, allTasks, onOpen }: { task: TaskViewModel; allTa
           <TaskCardFact label="Turns" value={task.maxTurns !== undefined ? `${turnCount}/${task.maxTurns}` : String(turnCount)} tone="default" />
         </div>
         <div className="flex items-center gap-2 text-xs text-muted">
-          <Avatar className="h-5 w-5 text-[10px]"><Avatar.Fallback>{initials(assignee)}</Avatar.Fallback></Avatar>
-          <span className="min-w-0 flex-1 truncate">{assignee}</span>
+          <Avatar className="h-5 w-5 text-[10px]"><Avatar.Fallback>{initials(assigneeLabel)}</Avatar.Fallback></Avatar>
+          <span className="min-w-0 flex-1 truncate">{assigneeLabel}</span>
           <span className="shrink-0">{updatedAt ? formatRelativeTime(updatedAt) : "-"}</span>
         </div>
       </div>
@@ -815,6 +818,7 @@ function DependencyArrowOverlay({ lines, layoutVersion, scrollElementRef }: { li
 function TaskDetailDrawer({ roomId, detail, plan, csrfFetch, onOpenArtifact, isOpen, onOpenChange }: { roomId: string; detail: TaskDetail | undefined; plan: ExecutionPlan | null; csrfFetch: typeof fetch; onOpenArtifact?: ((input: { artifactId: string; runId: string; path: string }) => void) | undefined; isOpen: boolean; onOpenChange: (open: boolean) => void }) {
   const task = detail?.task;
   const assignee = task ? task.assigneeRoleId ?? task.assigneeAgentId ?? "Unassigned" : "Unassigned";
+  const assigneeLabel = roleDisplayName(assignee) || assignee;
 
   return (
     <Drawer.Backdrop isOpen={isOpen} onOpenChange={onOpenChange}>
@@ -844,8 +848,8 @@ function TaskDetailDrawer({ roomId, detail, plan, csrfFetch, onOpenArtifact, isO
 
                   <DetailCard title="Assignee">
                     <div className="flex items-center gap-2 text-sm">
-                      <Avatar className="h-7 w-7 text-xs"><Avatar.Fallback>{initials(assignee)}</Avatar.Fallback></Avatar>
-                      <span>{assignee}</span>
+                      <Avatar className="h-7 w-7 text-xs"><Avatar.Fallback>{initials(assigneeLabel)}</Avatar.Fallback></Avatar>
+                      <span>{assigneeLabel}</span>
                     </div>
                   </DetailCard>
 
@@ -909,7 +913,7 @@ function ExecutionPlanCard({ plan, compact = false }: { plan: ExecutionPlan; com
               return (
                 <li key={`${plan.id}:${index}`} className="rounded-md border border-border bg-surface-secondary px-2 py-1 text-xs">
                   <div className="font-medium">{typeof record.title === "string" ? record.title : `Task ${index + 1}`}</div>
-                  {typeof record.assigneeRole === "string" ? <div className="text-muted">{record.assigneeRole}</div> : null}
+                  {typeof record.assigneeRole === "string" ? <div className="text-muted">{roleDisplayName(record.assigneeRole) || record.assigneeRole}</div> : null}
                 </li>
               );
               })}
