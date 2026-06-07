@@ -1,4 +1,5 @@
-import { Card, Chip } from "@heroui/react";
+import { useState } from "react";
+import { Button, Card, Chip } from "@heroui/react";
 import type { Card as ProtocolCard } from "@agenthub/protocol/domains";
 
 type ArtifactCardData = Extract<ProtocolCard, { type: "artifact" }>;
@@ -6,6 +7,8 @@ type DeploymentCardData = Extract<ProtocolCard, { type: "deployment" }> & {
   readonly lastError?: string;
   readonly logs?: readonly string[];
 };
+type DeploymentAction = "redeploy" | "retry" | "cancel" | "unpublish";
+type DeploymentStage = "pending" | "active" | "complete" | "failed" | "muted";
 
 export function PreviewArtifactCard({ card }: { readonly card: ArtifactCardData }) {
   const downloadUrl = artifactDownloadUrl(card.artifactId);
@@ -88,9 +91,47 @@ export function PresentationCard({ card }: { readonly card: ArtifactCardData }) 
   );
 }
 
-export function DeploymentCard({ card }: { readonly card: DeploymentCardData }) {
+export function DeploymentCard({ card, csrfFetch }: { readonly card: DeploymentCardData; readonly csrfFetch: typeof fetch }) {
+  const [pendingAction, setPendingAction] = useState<DeploymentAction | undefined>(undefined);
+  const [actionError, setActionError] = useState<string | undefined>(undefined);
+  const [copyError, setCopyError] = useState<string | undefined>(undefined);
   const logs = card.logs ?? [];
   const error = card.lastError;
+  const deploymentId = encodeURIComponent(card.deploymentId);
+  const logsUrl = `/deployments/${deploymentId}/logs`;
+  const outputReady = card.status === "ready";
+  const previewUrl = outputReady ? card.url : undefined;
+  const downloadUrl = outputReady ? deploymentDownloadUrl(card) : undefined;
+  const imageTag = outputReady ? card.imageTag : undefined;
+  const dockerCommand = imageTag ? `docker run ${imageTag}` : undefined;
+  const actions = deploymentActions(card);
+  const copyText = (value: string) => {
+    setCopyError(undefined);
+    const writer = globalThis.navigator?.clipboard?.writeText;
+    if (writer === undefined) {
+      setCopyError("Clipboard is unavailable.");
+      return;
+    }
+    void writer.call(globalThis.navigator.clipboard, value).catch((err: unknown) => {
+      setCopyError(err instanceof Error ? err.message : String(err));
+    });
+  };
+  const runAction = async (action: DeploymentAction) => {
+    setPendingAction(action);
+    setActionError(undefined);
+    try {
+      const res = await csrfFetch(`/deployments/${deploymentId}/${action}`, {
+        method: "POST",
+        body: "{}"
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPendingAction(undefined);
+    }
+  };
+
   return (
     <Card variant="default" data-testid="deployment-card">
       <Card.Header>
@@ -103,17 +144,64 @@ export function DeploymentCard({ card }: { readonly card: DeploymentCardData }) 
       </Card.Header>
       <Card.Content>
         <div className="grid gap-2 text-sm">
-          {card.url ? <a className="text-accent underline underline-offset-2" href={card.url}>Open</a> : null}
-          {card.downloadUrl ? <a className="text-accent underline underline-offset-2" href={card.downloadUrl}>Download ZIP</a> : null}
-          {card.imageTag ? <div className="ah-mono rounded bg-surface-secondary px-2 py-1 text-xs">{card.imageTag}</div> : null}
+          <p className="text-muted">{deploymentSubtitle(card)}</p>
+          <div className="grid gap-1 rounded border border-border bg-surface-secondary/60 p-2">
+            <DeploymentStageRow label="Build" stage={buildStage(card.status)} />
+            <DeploymentStageRow label="Deploy" stage={deployStage(card.status)} />
+          </div>
+          {previewUrl ? <a className="text-accent underline underline-offset-2" href={previewUrl}>Open Preview</a> : null}
+          {downloadUrl ? <a className="text-accent underline underline-offset-2" href={downloadUrl}>Download ZIP</a> : null}
+          {previewUrl ? (
+            <div className="grid gap-1 rounded bg-surface-secondary px-2 py-1">
+              <span className="text-xs font-semibold text-muted">Copy URL</span>
+              <code className="ah-mono text-xs">{previewUrl}</code>
+            </div>
+          ) : null}
+          {imageTag ? <div className="ah-mono rounded bg-surface-secondary px-2 py-1 text-xs">{imageTag}</div> : null}
+          {dockerCommand ? (
+            <div className="grid gap-1 rounded bg-surface-secondary px-2 py-1">
+              <span className="text-xs font-semibold text-muted">Copy Docker Command</span>
+              <code className="ah-mono text-xs">{dockerCommand}</code>
+            </div>
+          ) : null}
           {error ? <div className="rounded border border-danger/40 bg-danger/10 p-2 text-danger">{error}</div> : null}
           {logs.length > 0 ? (
-            <pre className="ah-mono max-h-32 overflow-auto rounded bg-surface-secondary p-2 text-xs">{logs.join("\n")}</pre>
+            <details className="rounded border border-border bg-surface-secondary">
+              <summary className="cursor-pointer px-2 py-1 text-xs font-semibold text-foreground">View Logs</summary>
+              <pre className="ah-mono max-h-32 overflow-auto p-2 text-xs">{logs.join("\n")}</pre>
+            </details>
           ) : null}
+          <a className="text-xs font-semibold text-accent underline underline-offset-2" href={logsUrl}>View Logs</a>
+          {actionError ? <p className="text-xs text-danger">{actionError}</p> : null}
+          {copyError ? <p className="text-xs text-danger">{copyError}</p> : null}
         </div>
       </Card.Content>
       <Card.Footer className="flex-wrap gap-2">
-        {card.url ? <a className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-semibold text-foreground hover:bg-surface-secondary" href={card.url}>Open</a> : null}
+        {previewUrl ? <a className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-semibold text-foreground hover:bg-surface-secondary" href={previewUrl}>Open</a> : null}
+        {downloadUrl ? <a className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-semibold text-foreground hover:bg-surface-secondary" href={downloadUrl}>Download ZIP</a> : null}
+        {previewUrl ? (
+          <Button size="sm" variant="tertiary" onPress={() => copyText(previewUrl)}>
+            Copy URL
+          </Button>
+        ) : null}
+        {dockerCommand ? (
+          <Button size="sm" variant="tertiary" onPress={() => copyText(dockerCommand)}>
+            Copy Docker Command
+          </Button>
+        ) : null}
+        {actions.map((action) => (
+          <Button
+            key={action}
+            size="sm"
+            variant={action === "cancel" || action === "unpublish" ? "danger" : "secondary"}
+            isPending={pendingAction === action}
+            isDisabled={pendingAction !== undefined}
+            onPress={() => void runAction(action)}
+            data-endpoint={`/deployments/${card.deploymentId}/${action}`}
+          >
+            {actionLabel(action)}
+          </Button>
+        ))}
       </Card.Footer>
     </Card>
   );
@@ -128,4 +216,93 @@ function statusColor(status: DeploymentCardData["status"]): "default" | "success
   if (status === "failed" || status === "cancelled") return "danger";
   if (status === "queued" || status === "in_progress") return "warning";
   return "default";
+}
+
+function deploymentSubtitle(card: DeploymentCardData): string {
+  if (card.status === "queued") return "Queued for deployment.";
+  if (card.status === "in_progress") return card.kind === "container-build" || card.kind === "self-hosted"
+    ? "Build and deploy are in progress."
+    : "Deploy is in progress.";
+  if (card.status === "failed") return "Deployment failed. Review logs, fix the issue, then retry.";
+  if (card.status === "cancelled") return "Deployment was cancelled before completion.";
+  if (card.status === "expired") return "Preview expired. Redeploy to create a fresh URL.";
+  if (card.status === "unpublished") return "Deployment is unpublished.";
+  if (card.downloadUrl && !card.url) return "Ready for download.";
+  if (card.imageTag && !card.url) return "Container image is ready.";
+  return "Deployment is ready.";
+}
+
+function deploymentActions(card: DeploymentCardData): readonly DeploymentAction[] {
+  if (card.status === "queued" || card.status === "in_progress") return ["cancel"];
+  if (card.status === "failed") return ["retry"];
+  if (card.status === "expired" || card.status === "cancelled") return ["redeploy"];
+  if (card.status === "ready") return canUnpublish(card.kind) ? ["redeploy", "unpublish"] : ["redeploy"];
+  if (card.status === "unpublished") return ["redeploy"];
+  return [];
+}
+
+function actionLabel(action: DeploymentAction): string {
+  if (action === "redeploy") return "Redeploy";
+  if (action === "retry") return "Retry";
+  if (action === "cancel") return "Cancel";
+  return "Unpublish";
+}
+
+function deploymentDownloadUrl(card: DeploymentCardData): string | undefined {
+  if (card.kind === "source-zip" || card.kind === "container-export") {
+    return `/deployments/${encodeURIComponent(card.deploymentId)}/download`;
+  }
+  return card.downloadUrl !== undefined && isBrowserUrl(card.downloadUrl) ? card.downloadUrl : undefined;
+}
+
+function canUnpublish(kind: DeploymentCardData["kind"]): boolean {
+  return kind === "static-site" || kind === "self-hosted";
+}
+
+function isBrowserUrl(value: string): boolean {
+  return value.startsWith("http://") || value.startsWith("https://") || value.startsWith("/");
+}
+
+function buildStage(status: DeploymentCardData["status"]): DeploymentStage {
+  if (status === "queued") return "pending";
+  if (status === "in_progress") return "active";
+  if (status === "ready" || status === "unpublished" || status === "expired") return "complete";
+  if (status === "failed") return "failed";
+  return "muted";
+}
+
+function deployStage(status: DeploymentCardData["status"]): DeploymentStage {
+  if (status === "queued") return "pending";
+  if (status === "in_progress") return "active";
+  if (status === "ready") return "complete";
+  if (status === "failed") return "failed";
+  return "muted";
+}
+
+function DeploymentStageRow({ label, stage }: { readonly label: string; readonly stage: DeploymentStage }) {
+  return (
+    <div className="grid grid-cols-[5rem_1fr_auto] items-center gap-2 text-xs">
+      <span className="font-semibold text-foreground">{label}</span>
+      <span className="h-1.5 rounded-full bg-border">
+        <span className={`block h-full rounded-full ${stageBarClass(stage)}`} />
+      </span>
+      <span className="text-muted">{stageLabel(stage)}</span>
+    </div>
+  );
+}
+
+function stageBarClass(stage: DeploymentStage): string {
+  if (stage === "complete") return "w-full bg-success";
+  if (stage === "active") return "w-2/3 bg-warning";
+  if (stage === "failed") return "w-full bg-danger";
+  if (stage === "pending") return "w-1/4 bg-border";
+  return "w-full bg-border";
+}
+
+function stageLabel(stage: DeploymentStage): string {
+  if (stage === "complete") return "done";
+  if (stage === "active") return "running";
+  if (stage === "failed") return "failed";
+  if (stage === "pending") return "queued";
+  return "stopped";
 }

@@ -27,7 +27,7 @@ export function CardRenderer({ card, csrfFetch }: CardRendererProps) {
       if (card.kind === "presentation" || card.kind === "presentation_pptx") return <PresentationCard card={card} />;
       return <UnknownCard card={card as unknown as Record<string, unknown>} />;
     }
-    case "deployment": return <DeploymentCard card={card as never} />;
+    case "deployment": return <DeploymentCard card={card as never} csrfFetch={csrfFetch} />;
     default:
       return <UnknownCard card={card as unknown as Record<string, unknown>} />;
   }
