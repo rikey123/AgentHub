@@ -159,12 +159,18 @@ describe("V1.2 shared domain contracts", () => {
   });
 
   it("defines message.create payloads and normalized RoomViewModel fields", () => {
-    Schema.decodeUnknownSync(MessageCreatePayloadSchema)({
+    const decodedMessage = Schema.decodeUnknownSync(MessageCreatePayloadSchema)({
       messageId: "message-1",
       role: "assistant",
       senderId: "agent-1",
       senderType: "agent",
       text: "Created a deployment card",
+      mentions: ["agent-binding-1"],
+      refs: [
+        { type: "artifact", artifactId: "artifact-1", lineStart: 12, lineEnd: 30 },
+        { type: "artifact", artifactId: "deck-1", slide: 3 },
+        { type: "workspace", path: "src/auth.ts", lineStart: 5, lineEnd: 20 }
+      ],
       parts: [
         {
           type: "card",
@@ -179,7 +185,14 @@ describe("V1.2 shared domain contracts", () => {
           }
         }
       ]
-    });
+    }) as { readonly mentions?: readonly string[]; readonly refs?: readonly unknown[] };
+
+    expect(decodedMessage.mentions).toEqual(["agent-binding-1"]);
+    expect(decodedMessage.refs).toEqual([
+      { type: "artifact", artifactId: "artifact-1", lineStart: 12, lineEnd: 30 },
+      { type: "artifact", artifactId: "deck-1", slide: 3 },
+      { type: "workspace", path: "src/auth.ts", lineStart: 5, lineEnd: 20 }
+    ]);
 
     Schema.decodeUnknownSync(RoomViewModelSchema)({
       id: "room-1",

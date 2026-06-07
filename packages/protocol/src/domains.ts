@@ -194,6 +194,23 @@ export const MessagePartSchema = Schema.Union(
 );
 export type MessagePart = typeof MessagePartSchema.Type;
 
+export const MessageContextRefSchema = Schema.Union(
+  Schema.Struct({
+    type: Schema.Literal("artifact"),
+    artifactId: IdSchema,
+    lineStart: Schema.optional(Schema.Number),
+    lineEnd: Schema.optional(Schema.Number),
+    slide: Schema.optional(Schema.Number)
+  }),
+  Schema.Struct({
+    type: Schema.Literal("workspace"),
+    path: Schema.String,
+    lineStart: Schema.optional(Schema.Number),
+    lineEnd: Schema.optional(Schema.Number)
+  })
+);
+export type MessageContextRef = typeof MessageContextRefSchema.Type;
+
 export const MessageCreatePayloadSchema = Schema.Struct({
   messageId: IdSchema,
   role: Schema.Literal("user", "assistant", "system", "tool"),
@@ -201,6 +218,8 @@ export const MessageCreatePayloadSchema = Schema.Struct({
   senderType: Schema.optional(Schema.Literal("user", "agent", "system")),
   text: Schema.optional(Schema.String),
   parts: Schema.optional(Schema.Array(MessagePartSchema)),
+  mentions: Schema.optional(Schema.Array(IdSchema)),
+  refs: Schema.optional(Schema.Array(MessageContextRefSchema)),
   quotedMessageId: Schema.optional(IdSchema),
   pendingTurnId: Schema.optional(IdSchema)
 });
