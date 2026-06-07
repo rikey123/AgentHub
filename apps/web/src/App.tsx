@@ -53,6 +53,32 @@ export function roomPinRequestFor(roomId: string, isPinned: boolean): { readonly
   };
 }
 
+type MessageDraftState = { text?: string; quotedMessageId?: string; quotePreview?: string };
+
+export function draftWithQuotedMessage(draft: MessageDraftState, messageId: string, preview: string): MessageDraftState {
+  return {
+    ...draft,
+    quotedMessageId: messageId,
+    quotePreview: preview.slice(0, 80)
+  };
+}
+
+export function draftWithQuotedText(draft: MessageDraftState, text: string): MessageDraftState {
+  const { quotedMessageId: _quotedMessageId, quotePreview: _quotePreview, ...baseDraft } = draft;
+  if (text.trim().length === 0) return baseDraft;
+  const quoteText = text
+    .split(/\r?\n/u)
+    .map((line) => `> ${line}`)
+    .join("\n")
+    .trimEnd();
+  if (quoteText.length === 0) return baseDraft;
+  const existingText = baseDraft.text?.trimStart() ?? "";
+  return {
+    ...baseDraft,
+    text: existingText.length > 0 ? `${quoteText}\n\n${existingText}` : quoteText
+  };
+}
+
 export function workbenchCenterModeForRail(rail: RailItem, hasActiveRoom: boolean): "home" | "room" | "contacts" | "artifacts" {
   if (rail === "contacts") return "contacts";
   if (rail === "artifacts") return "artifacts";
@@ -216,21 +242,29 @@ export default function App() {
     }
   }, [activeRoomId, csrfFetch]);
 
-  const handleQuoteMessage = useCallback((id: string) => {
+  const writeMessageDraft = useCallback((updater: (draft: MessageDraftState) => MessageDraftState) => {
     if (!activeRoomId) return;
-    const m = activeRoom?.messages.find((mm) => mm.id === id);
     const draftKey = `agenthub.draft.${activeRoomId}`;
     try {
       const raw = sessionStorage.getItem(draftKey);
-      const next = raw ? JSON.parse(raw) : {};
-      next.quotedMessageId = id;
-      next.quotePreview = m?.text?.slice(0, 80) ?? "";
+      const parsed = raw ? JSON.parse(raw) as MessageDraftState : {};
+      const next = updater(parsed);
       sessionStorage.setItem(draftKey, JSON.stringify(next));
       window.dispatchEvent(new StorageEvent("storage", { key: draftKey, newValue: JSON.stringify(next) }));
     } catch {
       // ignore
     }
-  }, [activeRoom, activeRoomId]);
+  }, [activeRoomId]);
+
+  const handleReplyMessage = useCallback((id: string) => {
+    const message = activeRoom?.messages.find((item) => item.id === id);
+    writeMessageDraft((draft) => draftWithQuotedMessage(draft, id, message?.text ?? ""));
+  }, [activeRoom, writeMessageDraft]);
+
+  const handleQuoteMessage = useCallback((id: string) => {
+    const message = activeRoom?.messages.find((item) => item.id === id);
+    writeMessageDraft((draft) => draftWithQuotedText(draft, message?.text ?? ""));
+  }, [activeRoom, writeMessageDraft]);
 
   const handlePin = useCallback(async (id: string) => {
     if (!activeRoomId) return;
@@ -396,6 +430,7 @@ export default function App() {
               selectedMessageId={selectedMessageId}
               onSelectMessage={setSelectedMessageId}
               onOpenRun={(runId) => setActiveRunId(runId)}
+              onReply={handleReplyMessage}
               onQuote={handleQuoteMessage}
               onPin={(id) => void handlePin(id)}
               onRegenerate={(id) => void handleRegenerate(id)}

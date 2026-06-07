@@ -85,7 +85,7 @@ vi.mock("./components/CommandPalette.tsx", () => ({ CommandPalette: mocks.comman
 vi.mock("./components/KeymapModal.tsx", () => ({ KeymapModal: () => null }));
 vi.mock("./components/NewRoomDialog.tsx", () => ({ NewRoomDialog: mocks.newRoomDialog }));
 
-import App, { ChatRoomLayout, createRoomInputForContactStartChat, messagePinRequestFor, roomPinRequestFor, workbenchCenterModeForRail, workbenchNavigationForRoomOpen } from "./App.tsx";
+import App, { ChatRoomLayout, createRoomInputForContactStartChat, draftWithQuotedMessage, draftWithQuotedText, messagePinRequestFor, roomPinRequestFor, workbenchCenterModeForRail, workbenchNavigationForRoomOpen } from "./App.tsx";
 
 function renderApp() {
   mocks.stateIndex = 0;
@@ -195,6 +195,23 @@ describe("App integration wiring", () => {
     expect(roomPinRequestFor("room-1", false)).toEqual({
       url: "/rooms/room-1/pin",
       method: "POST"
+    });
+  });
+
+  it("keeps Reply and Quote draft mutations distinct", () => {
+    expect(draftWithQuotedMessage({}, "message-1", "Use /api/v2")).toEqual({
+      quotedMessageId: "message-1",
+      quotePreview: "Use /api/v2"
+    });
+
+    expect(draftWithQuotedText({ text: "Please explain" }, "Line one\nLine two")).toEqual({
+      text: "> Line one\n> Line two\n\nPlease explain"
+    });
+    expect(draftWithQuotedText({ text: "Please explain" }, "")).toEqual({
+      text: "Please explain"
+    });
+    expect(draftWithQuotedText({ text: "Please explain", quotedMessageId: "old-message", quotePreview: "old" }, "New source")).toEqual({
+      text: "> New source\n\nPlease explain"
     });
   });
 

@@ -15,6 +15,7 @@ interface ChatStreamProps {
   selectedMessageId?: string | undefined;
   onSelectMessage: (id: string | undefined) => void;
   onOpenRun: (runId: string) => void;
+  onReply: (id: string) => void;
   onQuote: (id: string) => void;
   onPin: (id: string) => void;
   onRegenerate: (id: string) => void;
@@ -207,6 +208,7 @@ export function ChatStream(props: ChatStreamProps) {
                         isSelected={item.id === props.selectedMessageId}
                         onSelect={() => props.onSelectMessage(item.id)}
                         onOpenRun={(runId) => props.onOpenRun(runId)}
+                        onReply={() => props.onReply(item.id)}
                         onQuote={() => props.onQuote(item.id)}
                         onPin={() => props.onPin(item.id)}
                         onRegenerate={item.id === regenerableMessageId ? () => props.onRegenerate(item.id) : undefined}

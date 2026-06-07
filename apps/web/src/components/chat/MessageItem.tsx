@@ -11,6 +11,7 @@ interface MessageItemProps {
   isSelected?: boolean | undefined;
   onSelect?: (() => void) | undefined;
   onOpenRun?: ((runId: string) => void) | undefined;
+  onReply?: (() => void) | undefined;
   onQuote?: (() => void) | undefined;
   onPin?: (() => void) | undefined;
   onRegenerate?: (() => void) | undefined;
@@ -21,7 +22,7 @@ interface MessageItemProps {
 }
 
 export function MessageItem(props: MessageItemProps) {
-  const { message, isSelected, onSelect, onOpenRun, onQuote, onPin, onRegenerate, onDelete, onCancelPending, onEditPending, csrfFetch } = props;
+  const { message, isSelected, onSelect, onOpenRun, onReply, onQuote, onPin, onRegenerate, onDelete, onCancelPending, onEditPending, csrfFetch } = props;
   const [expanded, setExpanded] = useState(false);
 
   const isUser = message.senderType === "user";
@@ -147,7 +148,8 @@ export function MessageItem(props: MessageItemProps) {
               </Dropdown.Trigger>
               <Dropdown.Popover>
                 <Dropdown.Menu aria-label="消息操作">
-                  {onQuote ? <Dropdown.Item onAction={onQuote}>引用</Dropdown.Item> : null}
+                  {onReply ? <Dropdown.Item onAction={onReply}>Reply</Dropdown.Item> : null}
+                  {onQuote ? <Dropdown.Item onAction={onQuote}>Quote</Dropdown.Item> : null}
                   {onRegenerate && message.senderType === "agent" && message.status === "completed" ? (
                     <Dropdown.Item onAction={onRegenerate}>重新生成</Dropdown.Item>
                   ) : null}
