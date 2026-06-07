@@ -169,6 +169,7 @@ export class TaskModeGroupChatPresenter {
     const now = this.nextMessageCreatedAt();
     const messageId = `msg_task_chat_${randomUUID()}`;
     this.options.database.sqlite.transaction(() => {
+      this.options.database.sqlite.prepare("UPDATE rooms SET last_activity_at = ?, updated_at = ? WHERE id = ?").run(now, now, input.roomId);
       this.options.database.sqlite
         .prepare("INSERT INTO messages (id, workspace_id, room_id, sender_type, sender_id, run_id, role, status, quoted_message_id, turn_dispatch_mode, pending_turn_id, created_at, updated_at, deleted_at) VALUES (?, ?, ?, 'agent', ?, ?, 'assistant', 'completed', NULL, 'immediate', NULL, ?, ?, NULL)")
         .run(messageId, input.workspaceId, input.roomId, input.agentId, input.runId ?? null, now, now);

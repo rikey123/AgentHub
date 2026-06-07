@@ -213,6 +213,55 @@ describe("TaskService.completeTask", () => {
       blocker_reason: "missing_completion_report"
     });
   });
+
+  test("onTaskCompleted hook fires for blocked and review terminal states", () => {
+    const terminalTaskIds: string[] = [];
+    service = new TaskService({
+      database: currentDatabase(),
+      eventBus: currentBus(),
+      taskModeGroupChatPresenter: currentPresenter(),
+      now: () => now,
+      onTaskCompleted: (task) => terminalTaskIds.push(task.id)
+    });
+    const blockedTaskId = createTask({ roomId: "room_squad", assigneeAgentId: "agent_worker", expectsReview: false, status: "in_progress" });
+    const reviewTaskId = createTask({ roomId: "room_team", assigneeAgentId: "agent_worker", expectsReview: true, status: "in_progress" });
+
+    expect(currentService().completeTask({
+      taskId: blockedTaskId,
+      roomId: "room_squad",
+      callerAgentId: "agent_worker",
+      status: "blocked",
+      summary: "Blocked",
+      blockerReason: "missing input"
+    })).toMatchObject({ ok: true });
+    expect(currentService().completeTask({
+      taskId: reviewTaskId,
+      roomId: "room_team",
+      callerAgentId: "agent_worker",
+      status: "completed",
+      summary: "Needs review"
+    })).toMatchObject({ ok: true });
+
+    expect(terminalTaskIds).toEqual([blockedTaskId, reviewTaskId]);
+  });
+
+  test("updateStatus terminal hook fires for blocked and review statuses", () => {
+    const terminalTaskIds: string[] = [];
+    service = new TaskService({
+      database: currentDatabase(),
+      eventBus: currentBus(),
+      taskModeGroupChatPresenter: currentPresenter(),
+      now: () => now,
+      onTaskCompleted: (task) => terminalTaskIds.push(task.id)
+    });
+    const blockedTaskId = createTask({ roomId: "room_squad", assigneeAgentId: "agent_worker", expectsReview: false, status: "in_progress" });
+    const reviewTaskId = createTask({ roomId: "room_squad", assigneeAgentId: "agent_worker", expectsReview: false, status: "in_progress", title: "Review task" });
+
+    expect(currentService().updateStatus({ taskId: blockedTaskId, status: "blocked", blockerReason: "missing input" })).toMatchObject({ ok: true });
+    expect(currentService().updateStatus({ taskId: reviewTaskId, status: "review", blockerReason: "needs leader" })).toMatchObject({ ok: true });
+
+    expect(terminalTaskIds).toEqual([blockedTaskId, reviewTaskId]);
+  });
 });
 
 function currentDatabase(): AgentHubDatabase {
@@ -250,8 +299,8 @@ function seedWorkspace(): void {
   currentDatabase().sqlite.prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, default_presence, joined_at) VALUES ('room_squad', 'agent_worker', 'agent', 'primary', 'mock', NULL, 'active', 1)").run();
 }
 
-function createTask(input: { readonly roomId: string; readonly assigneeAgentId: string; readonly expectsReview: boolean; readonly status: "in_progress" | "pending" }): string {
-  const result = currentService().create({ roomId: input.roomId, title: "Task", assigneeAgentId: input.assigneeAgentId, expectsReview: input.expectsReview, createdBy: "agent_system" });
+function createTask(input: { readonly roomId: string; readonly assigneeAgentId: string; readonly expectsReview: boolean; readonly status: "in_progress" | "pending"; readonly title?: string }): string {
+  const result = currentService().create({ roomId: input.roomId, title: input.title ?? "Task", assigneeAgentId: input.assigneeAgentId, expectsReview: input.expectsReview, createdBy: "agent_system" });
   if (!result.ok) throw new Error("expected task create success");
   const taskId = result.data.taskId;
   currentDatabase().sqlite.prepare("UPDATE tasks SET status = ? WHERE id = ?").run(input.status, taskId);

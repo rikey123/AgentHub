@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
@@ -62,6 +62,7 @@ export type DeploymentServiceOptions = {
   readonly spawnImpl?: typeof spawn;
   readonly commandProbe?: (command: "nixpacks" | "docker") => boolean | Promise<boolean>;
   readonly authorizeBuild?: (input: { readonly deploymentId: string; readonly workspaceId: string; readonly command: string }) => Promise<"allow" | "deny"> | "allow" | "deny";
+  readonly capRoverPollIntervalMs?: number;
 };
 
 type ArtifactRow = {
@@ -95,6 +96,7 @@ export function createDeploymentService(options: DeploymentServiceOptions): Depl
   const root = resolvePath(options.deploymentRoot ?? process.cwd(), ".agenthub", "deployments");
   const fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
   const spawnImpl = options.spawnImpl ?? spawn;
+  const capRoverPollIntervalMs = options.capRoverPollIntervalMs ?? 3_000;
   const processes = new Map<string, ChildProcess>();
 
   const createDeployment = async (input: CreateDeploymentInput): Promise<DeploymentRecord> => {
@@ -134,6 +136,7 @@ export function createDeploymentService(options: DeploymentServiceOptions): Depl
       });
       if (roomId !== undefined) {
         const messageId = randomUUID();
+        options.database.sqlite.prepare("UPDATE rooms SET last_activity_at = ?, updated_at = ? WHERE id = ?").run(createdAt, createdAt, roomId);
         options.database.sqlite
           .prepare("INSERT INTO messages (id, workspace_id, room_id, sender_type, sender_id, run_id, role, status, quoted_message_id, turn_dispatch_mode, pending_turn_id, created_at, updated_at, deleted_at) VALUES (?, ?, ?, 'system', 'deployment', NULL, 'system', 'completed', NULL, 'immediate', NULL, ?, ?, NULL)")
           .run(messageId, artifact.workspace_id, roomId, createdAt, createdAt);
@@ -158,8 +161,10 @@ export function createDeploymentService(options: DeploymentServiceOptions): Depl
 
   const markStatus = (deploymentId: string, status: DeploymentStatus, eventType: "deployment.status.changed" | "deployment.ready" | "deployment.failed" | "deployment.cancelled" | "deployment.expired" | "deployment.unpublished", patch: Record<string, unknown> = {}): DeploymentRecord => {
     const existing = readDeploymentOrThrow(options.database, deploymentId);
+    if (existing.status === "cancelled" && status !== "cancelled") return rowToRecord(existing);
     const timestamp = now();
-    const eventPayload = payloadForDeploymentEvent(eventType, deploymentId, status, patch);
+    const nextKind = typeof patch.kind === "string" ? patch.kind as DeploymentKind : existing.kind;
+    const eventPayload = payloadForDeploymentEvent(eventType, deploymentId, status, { ...patch, kind: nextKind });
     options.database.sqlite.transaction(() => {
       const assignments = ["status = ?", "updated_at = ?"];
       const values: unknown[] = [status, timestamp];
@@ -186,6 +191,10 @@ export function createDeploymentService(options: DeploymentServiceOptions): Depl
       if (typeof patch.imageTag === "string") {
         assignments.push("image_tag = ?");
         values.push(patch.imageTag);
+      }
+      if (typeof patch.kind === "string") {
+        assignments.push("kind = ?");
+        values.push(patch.kind);
       }
       if (typeof patch.error === "string") {
         assignments.push("error = ?", "last_error = ?");
@@ -223,7 +232,7 @@ export function createDeploymentService(options: DeploymentServiceOptions): Depl
           schemaVersion: 1,
           workspaceId: existing.workspace_id,
           ...(existing.room_id !== null ? { roomId: existing.room_id } : {}),
-          payload: payloadForDeploymentEvent("deployment.status.changed", deploymentId, status, patch),
+          payload: payloadForDeploymentEvent("deployment.status.changed", deploymentId, status, { ...patch, kind: nextKind }),
           createdAt: timestamp
         });
       }
@@ -307,12 +316,12 @@ export function createDeploymentService(options: DeploymentServiceOptions): Depl
     markStatus(row.id, "ready", "deployment.ready", { downloadUrl: zipPath, zipPath, publishedAt: now() });
   };
 
-  const deployContainerExport = (row: DeploymentRow): void => {
+  const deployContainerExport = (row: DeploymentRow, patch: Record<string, unknown> = {}): void => {
     const dockerfile = "FROM nginx:alpine\nCOPY . /usr/share/nginx/html\n";
     const zipPath = bundleArtifactFiles(row.id, row.artifact_id, "container-export.zip", dockerfile);
     const dockerfilePath = join(root, row.id, "Dockerfile");
     writeFileSync(dockerfilePath, dockerfile, "utf8");
-    markStatus(row.id, "ready", "deployment.ready", { downloadUrl: zipPath, zipPath, dockerfilePath, publishedAt: now() });
+    markStatus(row.id, "ready", "deployment.ready", { ...patch, downloadUrl: zipPath, zipPath, dockerfilePath, publishedAt: now() });
   };
 
   const deployContainerBuild = async (row: DeploymentRow): Promise<void> => {
@@ -320,8 +329,7 @@ export function createDeploymentService(options: DeploymentServiceOptions): Depl
     const imageTag = `agenthub-${row.id}`;
     const buildTool = await detectBuildTool(options.commandProbe);
     if (buildTool === undefined) {
-      options.database.sqlite.prepare("UPDATE deployments SET kind = 'container-export', updated_at = ? WHERE id = ?").run(now(), row.id);
-      deployContainerExport({ ...row, kind: "container-export" });
+      deployContainerExport({ ...row, kind: "container-export" }, { kind: "container-export" });
       return;
     }
     const command = buildTool === "nixpacks" ? "nixpacks" : "docker";
@@ -354,7 +362,8 @@ export function createDeploymentService(options: DeploymentServiceOptions): Depl
       markStatus(row.id, "failed", "deployment.failed", { error: "provider_unavailable" });
       return;
     }
-    const appName = appNameFor(row.kind, row.artifact_id);
+    const artifact = artifactForDeployment(options.database, row.artifact_id);
+    const appName = appNameFor(artifact?.kind ?? row.kind, row.artifact_id);
     const dockerfile = "FROM nginx:alpine\nCOPY . /usr/share/nginx/html\n";
     const captainDefinition = JSON.stringify({ schemaVersion: 2, dockerfilePath: "./Dockerfile" }, null, 2);
     const sourcePath = join(root, row.id, "caprover-source.tar.gz");
@@ -363,21 +372,29 @@ export function createDeploymentService(options: DeploymentServiceOptions): Depl
     const form = new FormData();
     form.set("sourceFile", new File([readFileSync(sourcePath)], "source.tar.gz", { type: "application/gzip" }));
     markStatus(row.id, "in_progress", "deployment.status.changed", { sourcePath });
+    if (isCancelled(options.database, row.id)) return;
     const deployUrl = new URL(`/api/v2/user/apps/appData/${appName}`, provider.base_url);
     deployUrl.searchParams.set("detached", "1");
     const upload = await fetchImpl(deployUrl, { method: "POST", headers: { "x-captain-auth": token }, body: form });
+    if (isCancelled(options.database, row.id)) return;
     if (!upload.ok) {
       markStatus(row.id, "failed", "deployment.failed", { error: `caprover_http_${upload.status}` });
       return;
     }
     for (let attempt = 0; attempt < 100; attempt += 1) {
+      if (isCancelled(options.database, row.id)) return;
       const poll = await fetchImpl(new URL(`/api/v2/user/apps/appData/${appName}`, provider.base_url), { headers: { "x-captain-auth": token } });
+      if (isCancelled(options.database, row.id)) return;
       if (poll.ok) {
         const payload = await poll.json().catch(() => ({})) as { readonly data?: { readonly appDefinition?: { readonly customDomain?: unknown; readonly deployedVersion?: unknown }; readonly customDomain?: unknown; readonly appName?: unknown } };
+        if (!hasCapRoverDeployedVersion(payload)) {
+          await sleep(capRoverPollIntervalMs);
+          continue;
+        }
         markStatus(row.id, "ready", "deployment.ready", { url: capRoverUrl(provider.base_url, appName, payload), publishedAt: now() });
         return;
       }
-      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      await sleep(capRoverPollIntervalMs);
     }
     markStatus(row.id, "failed", "deployment.failed", { error: "caprover_poll_timeout" });
   };
@@ -491,6 +508,15 @@ function readDeploymentOrThrow(database: AgentHubDatabase, deploymentId: string)
   return row;
 }
 
+function artifactForDeployment(database: AgentHubDatabase, artifactId: string): ArtifactRow | undefined {
+  return database.sqlite.prepare("SELECT id, workspace_id, room_id, kind, title FROM artifacts WHERE id = ? AND deleted_at IS NULL").get(artifactId) as ArtifactRow | undefined;
+}
+
+function isCancelled(database: AgentHubDatabase, deploymentId: string): boolean {
+  const row = database.sqlite.prepare("SELECT status FROM deployments WHERE id = ?").get(deploymentId) as { readonly status: string } | undefined;
+  return row?.status === "cancelled";
+}
+
 function rowToRecord(row: DeploymentRow): DeploymentRecord {
   return {
     id: row.id,
@@ -512,6 +538,7 @@ function payloadForDeploymentEvent(eventType: "deployment.status.changed" | "dep
   if (eventType === "deployment.ready") {
     return withoutUndefined({
       deploymentId,
+      kind: patch.kind,
       url: patch.url,
       downloadUrl: patch.downloadUrl,
       imageTag: patch.imageTag
@@ -520,6 +547,7 @@ function payloadForDeploymentEvent(eventType: "deployment.status.changed" | "dep
   return withoutUndefined({
     deploymentId,
     status,
+    kind: patch.kind,
     url: patch.url,
     downloadUrl: patch.downloadUrl,
     imageTag: patch.imageTag
@@ -654,8 +682,18 @@ async function commandExists(command: "nixpacks" | "docker", probe?: DeploymentS
   }
 }
 
-function appNameFor(kind: DeploymentKind, artifactId: string): string {
+function appNameFor(kind: string, artifactId: string): string {
   return `${kind}-${artifactId.slice(0, 8)}`.toLowerCase().replace(/[^a-z0-9-]/gu, "-").replace(/-+/gu, "-").replace(/^-|-$/gu, "");
+}
+
+function hasCapRoverDeployedVersion(payload: { readonly data?: { readonly appDefinition?: { readonly deployedVersion?: unknown }; readonly deployedVersion?: unknown } }): boolean {
+  const deployedVersion = payload.data?.appDefinition?.deployedVersion ?? payload.data?.deployedVersion;
+  return typeof deployedVersion === "string" && deployedVersion.length > 0;
+}
+
+function sleep(ms: number): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function capRoverUrl(baseUrl: string, appName: string, payload: { readonly data?: { readonly appDefinition?: { readonly customDomain?: unknown }; readonly customDomain?: unknown } }): string {

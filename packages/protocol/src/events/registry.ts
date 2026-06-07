@@ -84,6 +84,7 @@ export type DeploymentCreatedPayload = typeof DeploymentCreatedPayloadSchema.Typ
 export const DeploymentStatusChangedPayloadSchema = Schema.Struct({
   deploymentId: IdSchema,
   status: Schema.Literal("queued", "in_progress", "ready", "failed", "cancelled", "expired", "unpublished"),
+  kind: Schema.optional(Schema.Literal("preview-url", "static-site", "source-zip", "container-export", "container-build", "self-hosted")),
   url: Schema.optional(Schema.String),
   downloadUrl: Schema.optional(Schema.String),
   imageTag: Schema.optional(Schema.String)
@@ -98,6 +99,7 @@ export type DeploymentLogAppendedPayload = typeof DeploymentLogAppendedPayloadSc
 
 export const DeploymentReadyPayloadSchema = Schema.Struct({
   deploymentId: IdSchema,
+  kind: Schema.optional(Schema.Literal("preview-url", "static-site", "source-zip", "container-export", "container-build", "self-hosted")),
   url: Schema.optional(Schema.String),
   downloadUrl: Schema.optional(Schema.String),
   imageTag: Schema.optional(Schema.String)

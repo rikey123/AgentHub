@@ -92,6 +92,21 @@ describe("RunLifecycleService", () => {
     expect(eventPayload("agent.run.completed", "run_life")).toMatchObject({ cost: zeroCost() });
   });
 
+  test("run start and completion update room last_activity_at in the run transaction", () => {
+    seedRoom("room_activity_run", "agent_activity");
+    createRun("run_activity", { roomId: "room_activity_run", agentId: "agent_activity" });
+    currentLifecycle().markClaimed(null, "run_activity");
+
+    now = 2_000;
+    currentLifecycle().markStarting(null, "run_activity", 123);
+    expect(currentDatabase().sqlite.prepare("SELECT last_activity_at FROM rooms WHERE id = 'room_activity_run'").get()).toMatchObject({ last_activity_at: 2_000 });
+
+    now = 3_000;
+    currentLifecycle().markRunning(null, "run_activity", "session_activity");
+    currentLifecycle().complete(null, "run_activity", zeroCost());
+    expect(currentDatabase().sqlite.prepare("SELECT last_activity_at FROM rooms WHERE id = 'room_activity_run'").get()).toMatchObject({ last_activity_at: 3_000 });
+  });
+
   test("persists cost fields on run completion", () => {
     const cost = {
       inputTokens: 100,
@@ -633,9 +648,9 @@ describe("TaskService and RoomMcpServer", () => {
     ]);
     const aggregate = currentDatabase().sqlite.prepare("SELECT payload FROM wake_outbox WHERE reason = 'aggregate'").get() as { readonly payload: string };
     expect(JSON.parse(aggregate.payload)).toMatchObject({
-      completedTaskIds: [created.data.taskId],
+      completedTaskIds: [],
       blockedTaskIds: [],
-      reviewTaskIds: [],
+      reviewTaskIds: [created.data.taskId],
       artifactIds: []
     });
   });
@@ -670,6 +685,26 @@ describe("TaskService and RoomMcpServer", () => {
     });
   });
 
+  test("room.complete_task queues review wake through wake_outbox instead of direct WakeAgent dispatch", async () => {
+    seedDelegatedRoom("room_complete_review_outbox", "agent_leader", "role_leader", "role_builder", "binding_leader", "binding_builder", "agent_builder");
+    const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const dispatched: unknown[] = [];
+    const commandBus = { dispatch: (command: unknown) => { dispatched.push(command); return { ok: true, data: { runId: "direct_run" }, emittedEvents: [] }; } } as unknown as CommandBus;
+    const mcp = new RoomMcpServer({ commandBus, taskService: service, database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const leaderSession = { roomId: "room_complete_review_outbox", runId: "run_leader_review_outbox", agentId: "agent_leader" };
+    const created = await mcp.callTool("room.delegate", { toRoleId: "role_builder", title: "Review outbox", expectsReview: true }, leaderSession);
+    if (!created.ok || !isRecord(created.data) || typeof created.data.taskId !== "string") throw new Error("expected delegated task");
+    dispatched.length = 0;
+
+    const result = await mcp.callTool("room.complete_task", { taskId: created.data.taskId, status: "completed", summary: "Ready for review" }, { roomId: "room_complete_review_outbox", runId: "run_builder_review_outbox", agentId: "agent_builder" });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(dispatched.filter((command) => isRecord(command) && command.type === "WakeAgent")).toHaveLength(0);
+    const wake = currentDatabase().sqlite.prepare("SELECT room_id, agent_id, reason, payload, status FROM wake_outbox WHERE room_id = 'room_complete_review_outbox' AND reason = 'task_review'").get() as { readonly room_id: string; readonly agent_id: string; readonly reason: string; readonly payload: string; readonly status: string };
+    expect(wake).toMatchObject({ room_id: "room_complete_review_outbox", agent_id: "agent_leader", reason: "task_review", status: "pending" });
+    expect(JSON.parse(wake.payload)).toMatchObject({ taskId: created.data.taskId, status: "review", summary: "Ready for review" });
+  });
+
   test("team mode wakes leader with task_blocked when a sibling run fails", async () => {
     seedDelegatedRoom("room_team_blocked", "agent_leader", "role_leader", "role_builder", "binding_leader", "binding_builder", "agent_builder");
     const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
@@ -699,6 +734,7 @@ describe("TaskService and RoomMcpServer", () => {
     expect(blockedPayload.sourceRunId).toBe("run_team_blocked");
     expect(blockedPayload.taskIds).toEqual(expect.arrayContaining([task1Result.data.taskId, task2Result.data.taskId]));
     expect(systemMessageTexts("room_team_blocked").join("\n")).toContain("timeout");
+    expect(currentDatabase().sqlite.prepare("SELECT last_activity_at FROM rooms WHERE id = 'room_team_blocked'").get()).toMatchObject({ last_activity_at: now });
   });
 
   test("room.delegate rejects non-leader callers without writes or events", async () => {

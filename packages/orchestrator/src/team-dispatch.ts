@@ -219,6 +219,7 @@ function taskBlockReason(database: AgentHubDatabase, task: TaskRow): string | un
 
 function publishSystemCoordinationMessage(runtime: Pick<TeamDispatchRuntime, "database" | "eventBus">, input: { readonly workspaceId: string; readonly roomId: string; readonly agentId: string; readonly taskId: string; readonly runId: string; readonly text: string; readonly createdAt: number }): void {
   const messageId = `msg_team_coord_${randomUUID()}`;
+  runtime.database.sqlite.prepare("UPDATE rooms SET last_activity_at = ?, updated_at = ? WHERE id = ?").run(input.createdAt, input.createdAt, input.roomId);
   runtime.database.sqlite
     .prepare("INSERT INTO messages (id, workspace_id, room_id, sender_type, sender_id, run_id, role, status, quoted_message_id, turn_dispatch_mode, pending_turn_id, created_at, updated_at, deleted_at) VALUES (?, ?, ?, 'system', 'team-dispatch', ?, 'system', 'completed', NULL, 'immediate', NULL, ?, ?, NULL)")
     .run(messageId, input.workspaceId, input.roomId, input.runId, input.createdAt, input.createdAt);

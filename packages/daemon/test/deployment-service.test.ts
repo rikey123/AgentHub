@@ -40,6 +40,7 @@ describe("DeploymentService", () => {
 
     expect(deployment).toMatchObject({ artifactId: "artifact_1", kind: "preview-url", status: "ready" });
     expect(currentDatabase().sqlite.prepare("SELECT artifact_id, kind, status FROM deployments WHERE id = ?").get(deployment.id)).toMatchObject({ artifact_id: "artifact_1", kind: "preview-url", status: "ready" });
+    expect(currentDatabase().sqlite.prepare("SELECT last_activity_at FROM rooms WHERE id = 'room_1'").get()).toMatchObject({ last_activity_at: now });
     expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'deployment.created' AND json_extract(payload, '$.deploymentId') = ?").get(deployment.id)).toMatchObject({ count: 1 });
     expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'message.part.added' AND json_extract(payload, '$.part.deploymentId') = ?").get(deployment.id)).toMatchObject({ count: 1 });
   });
@@ -62,7 +63,7 @@ describe("DeploymentService", () => {
   });
 
   test("CapRover testConnection uses x-captain-auth header", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => new Response(JSON.stringify({ data: { version: "1.0.0" } }), { status: 200, headers: { "content-type": "application/json" } }));
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data: { version: "1.0.0" } }), { status: 200, headers: { "content-type": "application/json" } }));
     const keychain = { get: vi.fn(async () => "captain-token"), set: vi.fn(), delete: vi.fn() };
     const service = createDeploymentService({ database: currentDatabase(), eventBus: currentBus(), now: () => now, keychain, fetchImpl: fetchMock, deploymentRoot: currentTempDir() });
     currentDatabase().sqlite.prepare("INSERT INTO deployment_providers (id, workspace_id, kind, name, base_url, credential_ref, created_at, updated_at) VALUES ('provider_1', 'ws_1', 'caprover', 'CapRover', 'https://captain.example', 'secret_ref', ?, ?)").run(now, now);
@@ -110,13 +111,13 @@ describe("DeploymentService", () => {
     expect(readZipEntries(containerPath ?? "")).toEqual(expect.arrayContaining(["index.html", "Dockerfile"]));
   });
 
-  test("self-hosted CapRover upload sends spec path, generated app name, and real tar.gz content", async () => {
+  test("self-hosted CapRover upload sends spec path, artifact-kind app name, and real tar.gz content", async () => {
     const calls: Array<{ readonly url: string; readonly init?: RequestInit }> = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = input instanceof URL ? input.toString() : typeof input === "string" ? input : input.url;
       calls.push({ url, ...(init !== undefined ? { init } : {}) });
-      if (url.includes("/api/v2/user/apps/appData/self-hosted-artifa?detached=1")) return new Response(JSON.stringify({ data: { ok: true } }), { status: 200, headers: { "content-type": "application/json" } });
-      if (url.endsWith("/api/v2/user/apps/appData/self-hosted-artifa")) return new Response(JSON.stringify({ data: { appDefinition: { deployedVersion: "v1", customDomain: ["app.example.com"] } } }), { status: 200, headers: { "content-type": "application/json" } });
+      if (url.includes("/api/v2/user/apps/appData/web-page-artifact?detached=1")) return new Response(JSON.stringify({ data: { ok: true } }), { status: 200, headers: { "content-type": "application/json" } });
+      if (url.endsWith("/api/v2/user/apps/appData/web-page-artifact")) return new Response(JSON.stringify({ data: { appDefinition: { deployedVersion: "v1", customDomain: ["app.example.com"] } } }), { status: 200, headers: { "content-type": "application/json" } });
       return new Response("{}", { status: 404, headers: { "content-type": "application/json" } });
     });
     const keychain = { get: vi.fn(async () => "captain-token"), set: vi.fn(), delete: vi.fn() };
@@ -127,13 +128,33 @@ describe("DeploymentService", () => {
 
     expect(deployment).toMatchObject({ status: "ready", url: "https://app.example.com" });
     const upload = calls.find((call) => call.url.includes("?detached=1"));
-    expect(upload?.url).toBe("https://captain.example/api/v2/user/apps/appData/self-hosted-artifa?detached=1");
+    expect(upload?.url).toBe("https://captain.example/api/v2/user/apps/appData/web-page-artifact?detached=1");
     expect(upload?.init?.headers).toMatchObject({ "x-captain-auth": "captain-token" });
     const sourceFile = (upload?.init?.body as FormData | undefined)?.get("sourceFile");
     expect(sourceFile).toBeInstanceOf(File);
     const tarball = Buffer.from(await (sourceFile as File).arrayBuffer());
     expect(tarball.subarray(0, 2)).toEqual(Buffer.from([0x1f, 0x8b]));
     expect(readTarEntries(gunzipSync(tarball))).toEqual(expect.arrayContaining(["index.html", "Dockerfile", "captain-definition.json"]));
+  });
+
+  test("container-build fallback updates kind transactionally and includes final kind in deployment events", async () => {
+    const service = createDeploymentService({
+      database: currentDatabase(),
+      eventBus: currentBus(),
+      now: () => now,
+      deploymentRoot: currentTempDir(),
+      commandProbe: () => false
+    });
+
+    const deployment = await service.createDeployment({ artifactId: "artifact_1", kind: "container-build", roomId: "room_1" });
+
+    expect(deployment).toMatchObject({ kind: "container-export", status: "ready" });
+    const fallbackRow = currentDatabase().sqlite.prepare("SELECT kind, status FROM deployments WHERE id = ?").get(deployment.id);
+    expect(fallbackRow).toMatchObject({ kind: "container-export", status: "ready" });
+    const statusChanged = currentDatabase().sqlite.prepare("SELECT payload FROM events WHERE type = 'deployment.status.changed' AND json_extract(payload, '$.deploymentId') = ? ORDER BY seq DESC LIMIT 1").get(deployment.id) as { readonly payload: string };
+    const ready = currentDatabase().sqlite.prepare("SELECT payload FROM events WHERE type = 'deployment.ready' AND json_extract(payload, '$.deploymentId') = ? ORDER BY seq DESC LIMIT 1").get(deployment.id) as { readonly payload: string };
+    expect(JSON.parse(statusChanged.payload)).toMatchObject({ deploymentId: deployment.id, status: "ready", kind: "container-export" });
+    expect(JSON.parse(ready.payload)).toMatchObject({ deploymentId: deployment.id, kind: "container-export" });
   });
 
   test("container-build prefers Nixpacks, falls back to Docker, and falls back to container export when neither exists", async () => {
@@ -206,12 +227,66 @@ describe("DeploymentService", () => {
     expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'deployment.expired' AND json_extract(payload, '$.deploymentId') = ?").get(deployment.id)).toMatchObject({ count: 1 });
   });
 
+  test("CapRover polling waits for deployedVersion before marking self-hosted deployment ready", async () => {
+    let pollCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input instanceof URL ? input.toString() : typeof input === "string" ? input : input.url;
+      if (url.includes("?detached=1")) return new Response(JSON.stringify({ data: { ok: true } }), { status: 200, headers: { "content-type": "application/json" } });
+      pollCount += 1;
+      if (pollCount === 1) return new Response(JSON.stringify({ data: { appDefinition: { customDomain: ["pending.example.com"] } } }), { status: 200, headers: { "content-type": "application/json" } });
+      return new Response(JSON.stringify({ data: { appDefinition: { deployedVersion: "v2", customDomain: ["ready.example.com"] } } }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    const keychain = { get: vi.fn(async () => "captain-token"), set: vi.fn(), delete: vi.fn() };
+    const service = createDeploymentService({ database: currentDatabase(), eventBus: currentBus(), now: () => now, keychain, fetchImpl: fetchMock, deploymentRoot: currentTempDir() });
+    currentDatabase().sqlite.prepare("INSERT INTO deployment_providers (id, workspace_id, kind, name, base_url, credential_ref, created_at, updated_at) VALUES ('provider_1', 'ws_1', 'caprover', 'CapRover', 'https://captain.example', 'secret_ref', ?, ?)").run(now, now);
+
+    const deployment = await service.createDeployment({ artifactId: "artifact_1", kind: "self-hosted", roomId: "room_1", providerId: "provider_1" });
+
+    expect(pollCount).toBe(2);
+    expect(deployment).toMatchObject({ status: "ready", url: "https://ready.example.com" });
+    expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'deployment.ready' AND json_extract(payload, '$.deploymentId') = ?").get(deployment.id)).toMatchObject({ count: 1 });
+  });
+
+  test("cancelled self-hosted deployments ignore later CapRover poll readiness", async () => {
+    let deploymentId: string | undefined;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input instanceof URL ? input.toString() : typeof input === "string" ? input : input.url;
+      if (url.includes("?detached=1")) return new Response(JSON.stringify({ data: { ok: true } }), { status: 200, headers: { "content-type": "application/json" } });
+      if (deploymentId !== undefined) await service.cancel(deploymentId);
+      return new Response(JSON.stringify({ data: { appDefinition: { deployedVersion: "v3", customDomain: ["cancel-race.example.com"] } } }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    const keychain = { get: vi.fn(async () => "captain-token"), set: vi.fn(), delete: vi.fn() };
+    const service = createDeploymentService({ database: currentDatabase(), eventBus: currentBus(), now: () => now, keychain, fetchImpl: fetchMock, deploymentRoot: currentTempDir() });
+    currentDatabase().sqlite.prepare("INSERT INTO deployment_providers (id, workspace_id, kind, name, base_url, credential_ref, created_at, updated_at) VALUES ('provider_1', 'ws_1', 'caprover', 'CapRover', 'https://captain.example', 'secret_ref', ?, ?)").run(now, now);
+
+    const pending = service.createDeployment({ artifactId: "artifact_1", kind: "self-hosted", roomId: "room_1", providerId: "provider_1" });
+    await eventually(() => {
+      const row = currentDatabase().sqlite.prepare("SELECT id FROM deployments WHERE kind = 'self-hosted' ORDER BY created_at DESC LIMIT 1").get() as { readonly id: string } | undefined;
+      expect(row).toBeDefined();
+      deploymentId = row?.id;
+    });
+    const deployment = await pending;
+
+    expect(deployment.status).toBe("cancelled");
+    expect(currentDatabase().sqlite.prepare("SELECT status, url FROM deployments WHERE id = ?").get(deployment.id)).toMatchObject({ status: "cancelled", url: null });
+    expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'deployment.ready' AND json_extract(payload, '$.deploymentId') = ?").get(deployment.id)).toMatchObject({ count: 0 });
+    expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'deployment.cancelled' AND json_extract(payload, '$.deploymentId') = ?").get(deployment.id)).toMatchObject({ count: 1 });
+  });
+
   test("terminal status events use registry payload shapes", async () => {
-    const service = createDeploymentService({ database: currentDatabase(), eventBus: currentBus(), now: () => now, deploymentRoot: currentTempDir() });
+    const service = createDeploymentService({
+      database: currentDatabase(),
+      eventBus: currentBus(),
+      now: () => now,
+      deploymentRoot: currentTempDir(),
+      commandProbe: () => true,
+      spawnImpl: (() => fakeRunningChild(44)) as never
+    });
     const deployment = await service.createDeployment({ artifactId: "artifact_1", kind: "container-build", roomId: "room_1" });
 
     await service.cancel(deployment.id);
-    await service.unpublish(deployment.id);
+    const staticSite = await service.createDeployment({ artifactId: "artifact_1", kind: "static-site", roomId: "room_1" });
+    await service.unpublish(staticSite.id);
 
     const cancelled = currentDatabase().sqlite.prepare("SELECT payload FROM events WHERE type = 'deployment.cancelled' ORDER BY seq DESC LIMIT 1").get() as { readonly payload: string };
     const unpublished = currentDatabase().sqlite.prepare("SELECT payload FROM events WHERE type = 'deployment.unpublished' ORDER BY seq DESC LIMIT 1").get() as { readonly payload: string };
@@ -225,8 +300,8 @@ describe("DeploymentService", () => {
       const url = input instanceof URL ? input.toString() : typeof input === "string" ? input : input.url;
       calls.push({ url, ...(init !== undefined ? { init } : {}) });
       if (url.endsWith("/api/v2/user/info")) return new Response(JSON.stringify({ data: { version: "1.0.0" } }), { status: 200, headers: { "content-type": "application/json" } });
-      if (url.includes("/api/v2/apps/appData/agenthub/deployment")) return new Response(JSON.stringify({ data: { deploymentId: "caprover-deploy-1" } }), { status: 200, headers: { "content-type": "application/json" } });
-      if (url.includes("/api/v2/apps/appData/agenthub")) return new Response(JSON.stringify({ data: { appName: "agenthub", deployedVersion: "caprover-deploy-1", appDeployTokenConfig: { enabled: true }, notExposeAsWebApp: false } }), { status: 200, headers: { "content-type": "application/json" } });
+      if (url.includes("/api/v2/user/apps/appData/web-page-artifact?detached=1")) return new Response(JSON.stringify({ data: { ok: true } }), { status: 200, headers: { "content-type": "application/json" } });
+      if (url.endsWith("/api/v2/user/apps/appData/web-page-artifact")) return new Response(JSON.stringify({ data: { appDefinition: { deployedVersion: "caprover-deploy-1" } } }), { status: 200, headers: { "content-type": "application/json" } });
       return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
     });
     const keychain = { get: vi.fn(async () => "captain-token"), set: vi.fn(), delete: vi.fn() };
@@ -235,8 +310,8 @@ describe("DeploymentService", () => {
 
     const deployment = await service.createDeployment({ artifactId: "artifact_1", kind: "self-hosted", roomId: "room_1", providerId: "provider_1" });
 
-    expect(deployment).toMatchObject({ status: "ready", url: "https://agenthub.captain.example" });
-    const upload = calls.find((call) => call.url.includes("/deployment"));
+    expect(deployment).toMatchObject({ status: "ready", url: "https://web-page-artifact.captain.example" });
+    const upload = calls.find((call) => call.url.includes("?detached=1"));
     expect(upload?.init?.headers).toMatchObject({ "x-captain-auth": "captain-token" });
     expect(upload?.init?.body).toBeInstanceOf(FormData);
     expect((upload?.init?.body as FormData).get("sourceFile")).toBeInstanceOf(File);
@@ -315,6 +390,15 @@ function fakeSuccessfulChild(pid: number): EventEmitter & { readonly pid: number
     child.stdout.emit("data", "built\n");
     child.emit("exit", 0);
   });
+  return child;
+}
+
+function fakeRunningChild(pid: number): EventEmitter & { readonly pid: number; readonly stdout: EventEmitter; readonly stderr: EventEmitter; kill: () => boolean } {
+  const child = new EventEmitter() as EventEmitter & { pid: number; stdout: EventEmitter; stderr: EventEmitter; kill: () => boolean };
+  child.pid = pid;
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.kill = () => true;
   return child;
 }
 

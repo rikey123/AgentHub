@@ -183,6 +183,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
   let closed = false;
   let stopping = false;
   let taskTimeoutTimer: ReturnType<typeof setInterval> | undefined;
+  let deploymentExpiryTimer: ReturnType<typeof setInterval> | undefined;
   const sseClients = new Set<SseClient>();
   const settingsJobs = new Map<string, SettingsJobRecord>();
   const modelConfigSecrets = createKeychain("agenthub-model-configs");
@@ -272,6 +273,8 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
       }
     });
     deploymentService.recoverInterruptedDeployments();
+    deploymentExpiryTimer = setInterval(() => deploymentService.expirePreviewDeployments(), 60_000);
+    deploymentExpiryTimer.unref?.();
     const onSkillMaterializationFailed = (input: { readonly taskId?: string; readonly skillId: string; readonly skillName: string; readonly workspaceId: string; readonly runId: string; readonly error: string }): void => {
       const now = options.now?.() ?? Date.now();
       database.sqlite.transaction(() => {
@@ -388,23 +391,17 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
       const room = database.sqlite.prepare("SELECT workspace_id, primary_agent_id FROM rooms WHERE id = ? AND archived_at IS NULL").get(task.room_id) as { readonly workspace_id: string; readonly primary_agent_id: string | null } | undefined;
       if (room?.primary_agent_id === undefined || room.primary_agent_id === null) return;
 
-      const result = taskService.updateStatus({ taskId, status: "review", blockerReason: "missing_completion_report" });
-      if (!result.ok) return;
-
-      const now = options.now?.() ?? Date.now();
-      void commandBusRef.current?.dispatch(
-        {
-          type: "WakeAgent",
-          roomId: task.room_id,
+      const result = taskService.updateStatus({
+        taskId,
+        status: "review",
+        blockerReason: "missing_completion_report",
+        leaderWake: {
           agentId: room.primary_agent_id,
-          workspaceId: room.workspace_id,
           reason: "task_review",
-          taskId,
-          promptDelta: { kind: "delta_only", instructions: `Task ${taskId} ended without a completion report. Please review it.` },
-          idempotencyKey: `missing-completion-report:${taskId}:${now}`
-        },
-        { actor: { type: "system" }, traceId: `missing-completion-report:${taskId}`, origin: "internal" }
-      );
+          payload: { taskId, reason: "missing_completion_report" }
+        }
+      });
+      if (!result.ok) return;
     };
     const onPlanPhaseEnded = async (runId: string, planText?: string): Promise<void> => {
       const run = database.sqlite.prepare("SELECT room_id, agent_id, workspace_id, wake_reason FROM runs WHERE id = ?").get(runId) as { readonly room_id: string; readonly agent_id: string; readonly workspace_id: string; readonly wake_reason: string | null } | undefined;
@@ -562,11 +559,8 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
           .prepare("INSERT INTO mailbox_messages (id, workspace_id, room_id, from_type, from_id, to_agent_id, kind, content, files, read, claimed_run_id, claimed_at, delivery_batch_id, delivery_failure_reason, attempt_count, created_at, consumed_at) VALUES (?, ?, ?, 'system', ?, ?, 'message', ?, '[]', 0, NULL, NULL, NULL, NULL, 0, ?, NULL)")
           .run(mailboxMessageId, workspaceId, roomId, taskId, primaryAgentId, JSON.stringify({ text: `[${reason}] Task ${taskId}: ${task.title} (${task.status})` }), now);
         eventBus.publish({ id: randomUUID(), type: "mailbox.message.created", schemaVersion: 1, workspaceId, roomId, agentId: primaryAgentId, payload: { mailboxMessageId, roomId, fromAgentId: taskId, targetAgentId: primaryAgentId, reason }, createdAt: now });
+        enqueueWakeOutbox(database, roomId, primaryAgentId, reason, { taskId, runId, mailboxMessageId, status: task.status }, now);
       })();
-      void commandBusRef.current?.dispatch(
-        { type: "WakeAgent", roomId, agentId: primaryAgentId, workspaceId, reason: "mailbox_message", promptDelta: { kind: "delta_only", instructions: `Task ${reason === "task_completed" ? "completed" : "blocked"}: ${task.title}` }, idempotencyKey: `task-mailbox:${taskId}:${runId}:${reason}` },
-        { actor: { type: "system" }, traceId: `task-mailbox:${taskId}:${runId}`, idempotencyKey: `task-mailbox:${taskId}:${runId}:${reason}`, origin: "internal" }
-      );
     }
 
     emitPhase("startup", PHASE_COMMAND_BUS);
@@ -652,13 +646,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
       await handleTeamDispatchReviewTerminal({ database, eventBus, commandBus, taskService, taskModeGroupChatPresenter, ...(options.now !== undefined ? { now: options.now } : {}) }, runId);
     }
     const runTaskTimeoutSweep = () => {
-      const wakes = checkTaskTimeouts(database, eventBus, options.now?.() ?? Date.now());
-      for (const wake of wakes) {
-        void commandBus.dispatch(
-          { type: "WakeAgent", roomId: wake.roomId, agentId: wake.agentId, workspaceId: wake.workspaceId, reason: "task_blocked", messageId: wake.mailboxMessageId, idempotencyKey: `task-timeout:${wake.taskId}:${wake.mailboxMessageId}` },
-          { actor: { type: "system" }, traceId: `task-timeout:${wake.taskId}`, idempotencyKey: `task-timeout:${wake.taskId}:${wake.mailboxMessageId}`, origin: "internal" }
-        );
-      }
+      checkTaskTimeouts(database, eventBus, options.now?.() ?? Date.now());
     };
     taskTimeoutTimer = setInterval(runTaskTimeoutSweep, 60_000);
     taskTimeoutTimer.unref?.();
@@ -693,6 +681,8 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
         runtime?.eventBus.flushStatusLines?.();
         if (taskTimeoutTimer !== undefined) clearInterval(taskTimeoutTimer);
         taskTimeoutTimer = undefined;
+        if (deploymentExpiryTimer !== undefined) clearInterval(deploymentExpiryTimer);
+        deploymentExpiryTimer = undefined;
         await runtime?.agentProfiles.close();
         runtime?.adapterRegistry.disposeAll();
         runtime?.roomMcpServer.stopTcp();
@@ -801,6 +791,18 @@ function parseWakePayload(payload: string | undefined): Record<string, unknown> 
   } catch {
     return {};
   }
+}
+
+function enqueueWakeOutbox(database: AgentHubDatabase, roomId: string, agentId: string, reason: "task_completed" | "task_blocked" | "task_review", payload: Record<string, unknown>, now: number): void {
+  const wakeReason = reason === "task_completed" ? "task_review" : reason;
+  const payloadJson = JSON.stringify(payload);
+  const existing = database.sqlite
+    .prepare("SELECT id FROM wake_outbox WHERE room_id = ? AND agent_id = ? AND reason = ? AND payload = ? AND status IN ('pending', 'dispatching', 'dispatched') LIMIT 1")
+    .get(roomId, agentId, wakeReason, payloadJson);
+  if (existing !== undefined) return;
+  database.sqlite
+    .prepare("INSERT INTO wake_outbox (id, room_id, agent_id, reason, payload, status, attempt_count, max_attempts, created_at, dispatch_after) VALUES (?, ?, ?, ?, ?, 'pending', 0, 3, ?, NULL)")
+    .run(randomUUID(), roomId, agentId, wakeReason, payloadJson, now);
 }
 
 function promptForWakeOutbox(reason: string, payload: Record<string, unknown>): string {
@@ -1832,17 +1834,6 @@ type TaskReportEvidenceCounts = {
   readonly reviewDecisions: number;
   readonly unresolvedComments: number;
 };
-
-function taskDeliveryReportMarkdown(task: ReturnType<TaskService["list"]>[number]): string {
-  return taskDeliveryReportMarkdownFromEvidence({
-    id: task.id,
-    title: task.title,
-    description: task.description,
-    status: task.status,
-    assignee: task.assigneeRoleId ?? task.assigneeAgentId ?? "Unassigned",
-    sourceRunId: task.sourceRunId
-  });
-}
 
 function taskDeliveryReportMarkdownFromEvidence(input: {
   readonly id: string;

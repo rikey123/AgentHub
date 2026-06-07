@@ -58,6 +58,7 @@ describe("RoomMcpServer room.send_file_message", () => {
         sizeBytes: Buffer.byteLength(content, "utf8")
       }
     });
+    expect(currentDatabase().sqlite.prepare("SELECT last_activity_at FROM rooms WHERE id = 'room_1'").get()).toMatchObject({ last_activity_at: now });
     const artifactId = result.ok && typeof result.data === "object" && result.data !== null ? (result.data as { artifactId: string }).artifactId : "";
     expect(artifactId).toMatch(/[0-9a-f-]{36}/);
 

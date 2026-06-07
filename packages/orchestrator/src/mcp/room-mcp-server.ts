@@ -777,6 +777,7 @@ export class RoomMcpServer {
       const maxSeq = this.options.database.sqlite.prepare("SELECT COALESCE(MAX(seq), -1) AS maxSeq FROM message_parts WHERE message_id = ?").get(messageId) as { readonly maxSeq: number };
       seq = maxSeq.maxSeq + 1;
       const partPayload = { ...payload, fileId: artifactId, artifactId };
+      this.options.database.sqlite.prepare("UPDATE rooms SET last_activity_at = ?, updated_at = ? WHERE id = ?").run(now, now, session.roomId);
       this.options.database.sqlite
         .prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, ?, 'attachment', ?, ?)")
         .run(messageId, seq, JSON.stringify(partPayload), now);
@@ -802,10 +803,13 @@ export class RoomMcpServer {
     const messageId = `msg_${runId}`;
     const byId = this.options.database.sqlite.prepare("SELECT id FROM messages WHERE id = ?").get(messageId) as { readonly id: string } | undefined;
     if (byId !== undefined) return byId.id;
-    this.options.database.sqlite
-      .prepare("INSERT INTO messages (id, workspace_id, room_id, sender_type, sender_id, run_id, role, status, quoted_message_id, turn_dispatch_mode, pending_turn_id, created_at, updated_at, deleted_at) VALUES (?, ?, ?, 'agent', ?, ?, 'assistant', 'streaming', NULL, 'immediate', NULL, ?, ?, NULL)")
-      .run(messageId, workspaceId, session.roomId, session.agentId, runId, now, now);
-    this.options.eventBus.publish({ id: randomUUID(), type: "message.created", schemaVersion: 1, workspaceId, roomId: session.roomId, runId, agentId: session.agentId, payload: { messageId, senderType: "agent", senderId: session.agentId, role: "assistant", status: "streaming" }, createdAt: now });
+    this.options.database.sqlite.transaction(() => {
+      this.options.database.sqlite.prepare("UPDATE rooms SET last_activity_at = ?, updated_at = ? WHERE id = ?").run(now, now, session.roomId);
+      this.options.database.sqlite
+        .prepare("INSERT INTO messages (id, workspace_id, room_id, sender_type, sender_id, run_id, role, status, quoted_message_id, turn_dispatch_mode, pending_turn_id, created_at, updated_at, deleted_at) VALUES (?, ?, ?, 'agent', ?, ?, 'assistant', 'streaming', NULL, 'immediate', NULL, ?, ?, NULL)")
+        .run(messageId, workspaceId, session.roomId, session.agentId, runId, now, now);
+      this.options.eventBus.publish({ id: randomUUID(), type: "message.created", schemaVersion: 1, workspaceId, roomId: session.roomId, runId, agentId: session.agentId, payload: { messageId, senderType: "agent", senderId: session.agentId, role: "assistant", status: "streaming" }, createdAt: now });
+    })();
     return messageId;
   }
 
@@ -1140,6 +1144,8 @@ export class RoomMcpServer {
       }
     }
 
+    const room = this.options.database.sqlite.prepare("SELECT primary_agent_id FROM rooms WHERE id = ? AND archived_at IS NULL").get(session.roomId) as { readonly primary_agent_id: string | null } | undefined;
+
     const result = this.options.taskService.completeTask({
       taskId: input.taskId,
       roomId: session.roomId,
@@ -1149,28 +1155,12 @@ export class RoomMcpServer {
       summary: input.summary,
       ...(typeof input.blockerReason === "string" ? { blockerReason: input.blockerReason } : {}),
       ...(Array.isArray(input.artifactIds) ? { artifactIds: input.artifactIds } : {}),
-      ...(Array.isArray(input.filesChanged) ? { filesChanged: input.filesChanged } : {})
+      ...(Array.isArray(input.filesChanged) ? { filesChanged: input.filesChanged } : {}),
+      ...(room?.primary_agent_id !== undefined && room.primary_agent_id !== null && room.primary_agent_id !== session.agentId
+        ? { leaderWake: { agentId: room.primary_agent_id, payload: { taskId: input.taskId, status: normalizedStatus === "completed" ? "review" : normalizedStatus, summary: input.summary } } }
+        : {})
     });
     if (!result.ok) return commandResult(result);
-
-    if (result.data.task.status === "review" || result.data.task.status === "blocked") {
-      const room = this.options.database.sqlite.prepare("SELECT workspace_id, primary_agent_id FROM rooms WHERE id = ? AND archived_at IS NULL").get(session.roomId) as { readonly workspace_id: string; readonly primary_agent_id: string | null } | undefined;
-      if (room?.primary_agent_id !== undefined && room.primary_agent_id !== null && room.primary_agent_id !== session.agentId) {
-        void this.options.commandBus.dispatch(
-          {
-            type: "WakeAgent",
-            roomId: session.roomId,
-            agentId: room.primary_agent_id,
-            workspaceId: room.workspace_id,
-            reason: result.data.task.status === "blocked" ? "task_blocked" : "task_review",
-            taskId: input.taskId,
-            promptDelta: { kind: "delta_only", instructions: `Task ${input.taskId} reported ${result.data.task.status}: ${input.summary}` },
-            idempotencyKey: `complete-task:${input.taskId}:${result.data.task.status}:${randomUUID()}`
-          },
-          { actor: { type: "system" }, traceId: `complete-task:${input.taskId}`, origin: "internal" }
-        );
-      }
-    }
 
     return commandResult(result);
   }

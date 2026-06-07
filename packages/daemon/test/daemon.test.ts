@@ -143,6 +143,7 @@ describe("daemon M1.4 composition", () => {
 
   afterEach(async () => {
     await daemon.close();
+    vi.useRealTimers();
     currentDaemon = undefined;
     currentModelConfigKeychain = undefined;
   });
@@ -227,6 +228,44 @@ describe("daemon M1.4 composition", () => {
     expect(site.status).toBe(200);
     expect(site.headers.get("content-type")).toContain("text/html");
     expect(await site.text()).toContain("Deploy Route");
+  });
+
+  it("runs preview deployment expiry sweeper from daemon startup and stops it on close", async () => {
+    await daemon.close();
+    currentDaemon = undefined;
+    vi.useFakeTimers();
+    const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-expiry-sweeper-"));
+    let clock = 1_000;
+    daemon = createDaemon({ databasePath: join(dir, "agenthub.sqlite"), port: 0, modelTestFetch: modelTestFetchMock, now: () => clock });
+    currentDaemon = daemon;
+    const server = await daemon.start();
+    const address = server.address();
+    if (typeof address !== "object" || address === null) throw new Error("expected TCP address");
+    baseUrl = `http://127.0.0.1:${address.port}`;
+    daemon.database.sqlite.transaction(() => {
+      daemon.database.sqlite.prepare("INSERT INTO artifacts (id, workspace_id, room_id, task_id, run_id, message_id, type, kind, title, status, created_by, metadata, created_at, updated_at) VALUES ('artifact_expiry_timer', 'default-workspace', NULL, NULL, NULL, NULL, 'file', 'web_page', 'Expiry', 'ready', 'agent_1', '{}', 1, 1)").run();
+      daemon.database.sqlite.prepare("INSERT INTO artifact_files (artifact_id, path, old_content, new_content, patch, additions, deletions, file_status, old_path, binary, no_newline_at_end, old_sha256, new_sha256, applied_state, content_path, created_at) VALUES ('artifact_expiry_timer', 'index.html', NULL, '<h1>Expiry</h1>', NULL, 1, 0, 'added', NULL, 0, 0, NULL, NULL, NULL, NULL, 1)").run();
+    })();
+
+    const created = await fetch(`${baseUrl}/deployments`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ artifactId: "artifact_expiry_timer", kind: "preview-url" })
+    });
+    expect(created.status).toBe(201);
+    const body = await created.json() as { readonly deployment?: { readonly id?: string } };
+    const deploymentId = body.deployment?.id;
+    expect(deploymentId).toBeDefined();
+    clock += 30 * 60 * 1000 + 1;
+
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(daemon.database.sqlite.prepare("SELECT status FROM deployments WHERE id = ?").get(deploymentId)).toMatchObject({ status: "expired" });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'deployment.expired' AND json_extract(payload, '$.deploymentId') = ?").get(deploymentId)).toMatchObject({ count: 1 });
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+    await daemon.close();
+    expect(vi.getTimerCount()).toBe(0);
+    vi.useRealTimers();
   });
 
   it("authorizes daemon container-build commands through the permission engine before spawning", async () => {
@@ -469,6 +508,32 @@ describe("daemon M1.4 composition", () => {
     const searchedPayload = await searched.json() as { readonly rooms: readonly { readonly id: string }[] };
     expect(searchedPayload.rooms.map((room) => room.id)).toEqual(expect.arrayContaining(["room_pinned", "room_active", "room_old"]));
     expect(searchedPayload.rooms.map((room) => room.id)).not.toContain("room_archived");
+  });
+
+  it("updates room last_activity_at on message send and participant join write paths", async () => {
+    const client = new AgentHubClient({ baseUrl });
+    const room = await client.createRoom({ title: "Activity Writes", mode: "solo", primaryAgentId: "mock-builder" }) as { readonly data: { readonly roomId: string } };
+    const initial = daemon.database.sqlite.prepare("SELECT last_activity_at FROM rooms WHERE id = ?").get(room.data.roomId) as { readonly last_activity_at: number | null };
+    expect(initial.last_activity_at).toBeNull();
+
+    await client.sendMessage(room.data.roomId, { text: "touch room activity", idempotencyKey: "touch-room-activity" });
+    const afterMessage = daemon.database.sqlite.prepare("SELECT last_activity_at FROM rooms WHERE id = ?").get(room.data.roomId) as { readonly last_activity_at: number | null };
+    expect(afterMessage.last_activity_at).toEqual(expect.any(Number));
+
+    const roleId = "role_activity_join";
+    const runtimeId = "runtime_activity_join";
+    const bindingId = "binding_activity_join";
+    daemon.database.sqlite.transaction(() => {
+      daemon.database.sqlite.prepare("INSERT OR IGNORE INTO runtimes (id, workspace_id, kind, name, command, args, env, detected_at, detected_path, detected_version, supported_caps, version, status, manifest_json, created_at, updated_at) VALUES (?, 'default-workspace', 'mock', 'Mock', 'mock', '[]', '[]', NULL, NULL, NULL, '[]', NULL, 'ready', '{}', 1, 1)").run(runtimeId);
+      daemon.database.sqlite.prepare("INSERT OR IGNORE INTO roles (id, workspace_id, name, prompt, capabilities, is_builtin, created_at, updated_at) VALUES (?, 'default-workspace', 'Joiner', '', '[]', 0, 1, 1)").run(roleId);
+      daemon.database.sqlite.prepare("INSERT OR IGNORE INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES (?, 'default-workspace', ?, ?, NULL, NULL, 1, 1)").run(bindingId, roleId, runtimeId);
+    })();
+
+    const beforeJoin = afterMessage.last_activity_at ?? 0;
+    const added = daemon.commandBus.dispatch({ type: "AddParticipant", roomId: room.data.roomId, agentBindingId: bindingId }, { actor: { type: "user", id: "local" }, traceId: "activity-join", origin: "http" });
+    expect(added).toMatchObject({ ok: true });
+    const afterJoin = daemon.database.sqlite.prepare("SELECT last_activity_at FROM rooms WHERE id = ?").get(room.data.roomId) as { readonly last_activity_at: number | null };
+    expect(afterJoin.last_activity_at).toBeGreaterThanOrEqual(beforeJoin);
   });
 
   it("pins and unpins a room with durable room events", async () => {
@@ -2352,6 +2417,8 @@ describe("daemon M1.4 composition", () => {
     expect(second).toHaveLength(0);
     expect(activeDaemon().database.sqlite.prepare("SELECT status FROM tasks WHERE id = 'task_timeout_1'").get()).toMatchObject({ status: "blocked" });
     expect(activeDaemon().database.sqlite.prepare("SELECT COUNT(*) AS count FROM mailbox_messages WHERE room_id = 'room_timeout' AND to_agent_id = 'mock-builder' AND kind = 'task_timeout'").get()).toMatchObject({ count: 1 });
+    expect(activeDaemon().database.sqlite.prepare("SELECT COUNT(*) AS count FROM command_records WHERE command_type = 'WakeAgent' AND idempotency_key LIKE 'task-timeout:%'").get()).toMatchObject({ count: 0 });
+    expect(activeDaemon().database.sqlite.prepare("SELECT room_id, agent_id, reason, status FROM wake_outbox WHERE room_id = 'room_timeout' AND reason = 'task_blocked'").get()).toMatchObject({ room_id: "room_timeout", agent_id: "mock-builder", reason: "task_blocked", status: "pending" });
   });
 
   it("returns task activities over HTTP and keeps cancel on task.status.changed", async () => {
