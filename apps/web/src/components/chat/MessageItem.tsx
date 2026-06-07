@@ -160,7 +160,7 @@ export function MessageItem(props: MessageItemProps) {
                   {onReply ? <Dropdown.Item onAction={onReply}>Reply</Dropdown.Item> : null}
                   {onQuote ? <Dropdown.Item onAction={onQuote}>Quote</Dropdown.Item> : null}
                   {onRegenerate && message.senderType === "agent" && message.status === "completed" ? (
-                    <Dropdown.Item onAction={onRegenerate}>重新生成</Dropdown.Item>
+                    <Dropdown.Item onAction={onRegenerate}>{regenerateActionLabel()}</Dropdown.Item>
                   ) : null}
                   {onPin && message.status === "completed" ? <Dropdown.Item onAction={onPin}>{pinActionLabel(message.pinnedAt !== undefined)}</Dropdown.Item> : null}
                   {message.runId && onOpenRun ? (
@@ -357,6 +357,10 @@ export function copyCodeButtonLabel(copied: boolean): string {
 
 export function pinActionLabel(isPinned: boolean): string {
   return isPinned ? "Unpin" : "Pin";
+}
+
+export function regenerateActionLabel(): string {
+  return "Regenerate";
 }
 
 function CodePartView({ part }: { part: Extract<MessageViewModel["parts"][number], { type: "code" }> }) {

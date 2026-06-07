@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { MessageViewModel } from "../../types.ts";
-import { copyCodeButtonLabel, MessageItem, pinActionLabel, shouldSelectMessageFromTarget } from "./MessageItem.tsx";
+import { copyCodeButtonLabel, MessageItem, pinActionLabel, regenerateActionLabel, shouldSelectMessageFromTarget } from "./MessageItem.tsx";
 
 describe("MessageItem public chat rendering", () => {
   it("collapses long completed agent text in the public chat bubble", () => {
@@ -141,6 +141,10 @@ describe("MessageItem public chat rendering", () => {
   it("labels the pin action by current pinned state", () => {
     expect(pinActionLabel(false)).toBe("Pin");
     expect(pinActionLabel(true)).toBe("Unpin");
+  });
+
+  it("labels the regenerate action with the spec text", () => {
+    expect(regenerateActionLabel()).toBe("Regenerate");
   });
 
   it("does not expose the message wrapper as a button when nested actions render", () => {
