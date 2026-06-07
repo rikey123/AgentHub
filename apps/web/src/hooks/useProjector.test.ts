@@ -388,6 +388,173 @@ describe("useProjector replay handling", () => {
     ]);
   });
 
+  it("keeps deployment.created normalized without inserting a chat card by itself", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "assisted" }));
+
+    projector.apply(makeEvent("deployment.created", roomId, {
+      deploymentId: "deployment-1",
+      artifactId: "artifact-1",
+      kind: "preview-url",
+      provider: "agenthub-local",
+      status: "queued"
+    }));
+
+    const room = emittedState.rooms.get(roomId);
+    expect(room?.messages).toEqual([]);
+    expect(room?.deploymentsById?.["deployment-1"]).toMatchObject({
+      id: "deployment-1",
+      artifactId: "artifact-1",
+      kind: "preview-url",
+      provider: "agenthub-local",
+      status: "queued"
+    });
+  });
+
+  it("merges deployment.ready into a later DeploymentCard message part", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "assisted" }));
+    projector.apply(makeEvent("deployment.created", roomId, {
+      deploymentId: "deployment-2",
+      artifactId: "artifact-2",
+      kind: "static-site",
+      provider: "agenthub-local",
+      status: "queued"
+    }, 100));
+    projector.apply(makeEvent("deployment.ready", roomId, {
+      deploymentId: "deployment-2",
+      url: "http://127.0.0.1:4173/sites/deployment-2/",
+      downloadUrl: "/deployments/deployment-2/download"
+    }, 200));
+
+    projector.apply(makeAgentEvent("message.created", roomId, "agent-builder", {
+      messageId: "msg-deployment-2",
+      senderId: "agent-builder",
+      senderType: "agent",
+      role: "assistant",
+      text: "Deployment queued."
+    }, 300));
+    projector.apply(makeEvent("message.part.added", roomId, {
+      messageId: "msg-deployment-2",
+      part: {
+        type: "card",
+        seq: 1,
+        card: {
+          type: "deployment",
+          deploymentId: "deployment-2",
+          artifactId: "artifact-2",
+          kind: "static-site",
+          provider: "agenthub-local",
+          status: "queued"
+        }
+      }
+    }, 400));
+
+    const room = emittedState.rooms.get(roomId);
+    const card = room?.messages.find((item) => item.id === "msg-deployment-2")?.parts[0];
+    expect(room?.deploymentsById?.["deployment-2"]).toMatchObject({
+      status: "ready",
+      url: "http://127.0.0.1:4173/sites/deployment-2/",
+      downloadUrl: "/deployments/deployment-2/download"
+    });
+    expect(card).toMatchObject({
+      type: "card",
+      card: {
+        type: "deployment",
+        deploymentId: "deployment-2",
+        status: "ready",
+        url: "http://127.0.0.1:4173/sites/deployment-2/",
+        downloadUrl: "/deployments/deployment-2/download"
+      }
+    });
+  });
+
+  it("tracks artifact versions without inserting timeline content", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "assisted" }));
+
+    projector.apply(makeEvent("artifact.version.created", roomId, {
+      artifactId: "artifact-3",
+      version: 2,
+      createdBy: "agent-builder",
+      message: "Updated hero"
+    }, 500));
+
+    const room = emittedState.rooms.get(roomId);
+    expect(room?.messages).toEqual([]);
+    expect(room?.artifactVersionsById?.["artifact-3"]).toEqual([
+      expect.objectContaining({
+        artifactId: "artifact-3",
+        version: 2,
+        createdBy: "agent-builder",
+        message: "Updated hero",
+        createdAt: 500
+      })
+    ]);
+  });
+
+  it("projects message pinning, task unblocking, and contact name updates", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "team" }));
+    projector.apply(makeAgentEvent("agent.joined", roomId, "binding-builder", {
+      agentId: "binding-builder",
+      agentBindingId: "binding-builder",
+      agentName: "Old Builder",
+      role: "teammate",
+      adapterId: "native"
+    }));
+    projector.apply(makeEvent("message.created", roomId, {
+      messageId: "message-pin-1",
+      role: "user",
+      text: "Keep this in context"
+    }, 100));
+    projector.apply(makeEvent("task.created", roomId, {
+      taskId: "task-unblock-1",
+      title: "Blocked task",
+      status: "blocked",
+      blockerReason: "waiting_on_dependencies"
+    }, 100));
+
+    projector.apply(makeEvent("message.pinned", roomId, {
+      roomId,
+      messageId: "message-pin-1",
+      pinnedAt: 200
+    }, 200));
+    projector.apply(makeEvent("agent.contact.updated", roomId, {
+      agentBindingId: "binding-builder",
+      displayName: "Builder",
+      avatarUrl: "agenthub://avatar/builder",
+      description: "Frontend builder"
+    }, 300));
+    projector.apply(makeEvent("task.unblocked", roomId, {
+      taskId: "task-unblock-1",
+      roomId,
+      unlockedBy: "task-parent"
+    }, 400));
+
+    let room = emittedState.rooms.get(roomId);
+    expect(room?.messages.find((item) => item.id === "message-pin-1")).toMatchObject({ pinnedAt: 200 });
+    expect(room?.participantContactNames?.["binding-builder"]).toBe("Builder");
+    expect(room?.participants.find((item) => item.id === "binding-builder")).toMatchObject({ name: "Builder" });
+    expect(room?.tasks.find((item) => item.id === "task-unblock-1")).toMatchObject({
+      status: "pending",
+      blockerReason: undefined,
+      lastUnblockedAt: 400
+    });
+
+    projector.apply(makeEvent("message.unpinned", roomId, {
+      roomId,
+      messageId: "message-pin-1"
+    }, 500));
+
+    room = emittedState.rooms.get(roomId);
+    expect(room?.messages.find((item) => item.id === "message-pin-1")?.pinnedAt).toBeUndefined();
+  });
+
   it("recognizes agent-authored message payloads even when replay lacks envelope agentId", () => {
     const roomId = `room-${randomUUID()}`;
     const projector = getProjector();

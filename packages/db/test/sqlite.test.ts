@@ -44,6 +44,7 @@ const drizzleTables = [
   { exportName: "artifacts", table: schema.artifacts },
   { exportName: "artifactFiles", table: schema.artifactFiles },
   { exportName: "artifactReviews", table: schema.artifactReviews },
+  { exportName: "artifactVersions", table: schema.artifactVersions },
   { exportName: "mailboxMessages", table: schema.mailboxMessages },
   { exportName: "pendingTurns", table: schema.pendingTurns },
   { exportName: "runNextTurns", table: schema.runNextTurns },
@@ -55,6 +56,9 @@ const drizzleTables = [
   { exportName: "deadLetterEvents", table: schema.deadLetterEvents },
   { exportName: "runLocks", table: schema.runLocks },
   { exportName: "commandRecords", table: schema.commandRecords },
+  { exportName: "deploymentProviders", table: schema.deploymentProviders },
+  { exportName: "deployments", table: schema.deployments },
+  { exportName: "wakeOutbox", table: schema.wakeOutbox },
   // V1.1 new tables
   { exportName: "agentSkills", table: schema.agentSkills },
   { exportName: "roomSkills", table: schema.roomSkills },
@@ -255,6 +259,16 @@ const drizzleSmokeRows = {
   },
   artifactFiles: { artifactId: "art_drizzle", path: "src/a.ts", fileStatus: "modified", createdAt: 1 },
   artifactReviews: { id: "ar_drizzle", artifactId: "art_drizzle", decision: "comment", reviewerKind: "user", reviewerId: "local", createdAt: 1 },
+  artifactVersions: {
+    id: "av_drizzle",
+    artifactId: "art_drizzle",
+    version: 1,
+    content: "# Patch",
+    contentEncoding: "text",
+    createdAt: 1,
+    createdBy: "system",
+    message: "Initial save"
+  },
   mailboxMessages: {
     id: "mb_drizzle",
     workspaceId: "ws_drizzle",
@@ -307,6 +321,36 @@ const drizzleSmokeRows = {
     status: "succeeded",
     createdAt: 1,
     expiresAt: 2
+  },
+  deploymentProviders: {
+    id: "dp_drizzle",
+    workspaceId: "ws_drizzle",
+    kind: "caprover",
+    name: "CapRover",
+    baseUrl: "https://captain.example.com",
+    credentialRef: "cred_drizzle",
+    createdAt: 1,
+    updatedAt: 1
+  },
+  deployments: {
+    id: "deploy_drizzle",
+    artifactId: "art_drizzle",
+    workspaceId: "ws_drizzle",
+    kind: "preview-url",
+    provider: "agenthub-local",
+    status: "queued",
+    createdAt: 1,
+    updatedAt: 1
+  },
+  wakeOutbox: {
+    id: "wake_drizzle",
+    roomId: "room_drizzle",
+    agentId: "agent_drizzle",
+    reason: "aggregate",
+    status: "pending",
+    attemptCount: 0,
+    maxAttempts: 3,
+    createdAt: 1
   },
   // V1.1 new tables
   taskCheckpoints: {
@@ -389,7 +433,8 @@ function applyAllMigrations(): void {
     "0015_v11.sql",
     "0016_artifact_reviews.sql",
     "0017_artifact_review_comments.sql",
-    "0018_artifact_lifecycle.sql"
+    "0018_artifact_lifecycle.sql",
+    "0019_v12.sql"
   ]);
 }
 
@@ -448,6 +493,33 @@ function smokeCrud(tableName: string, insertSql: string, params: readonly unknow
   expect(countRows(tableName)).toBe(0);
 }
 
+function seedV12ParentRows(sqlite: Database.Database, exportName: keyof typeof schema): void {
+  if (exportName === "artifactVersions" || exportName === "deployments") {
+    sqlite
+      .prepare("INSERT OR IGNORE INTO workspaces (id, name, root_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+      .run("ws_drizzle", "Workspace", "/tmp/ws", 1, 1);
+    sqlite
+      .prepare("INSERT OR IGNORE INTO artifacts (id, workspace_id, type, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run("art_drizzle", "ws_drizzle", "diff", "Patch", "draft", 1, 1);
+  }
+  if (exportName === "deploymentProviders") {
+    sqlite
+      .prepare("INSERT OR IGNORE INTO workspaces (id, name, root_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+      .run("ws_drizzle", "Workspace", "/tmp/ws", 1, 1);
+  }
+  if (exportName === "wakeOutbox") {
+    sqlite
+      .prepare("INSERT OR IGNORE INTO workspaces (id, name, root_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+      .run("ws_drizzle", "Workspace", "/tmp/ws", 1, 1);
+    sqlite
+      .prepare("INSERT OR IGNORE INTO rooms (id, workspace_id, title, mode, default_context_scope, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run("room_drizzle", "ws_drizzle", "Room", "solo", "room", 1, 1);
+    sqlite
+      .prepare("INSERT OR IGNORE INTO agent_profiles (id, name, adapter_id, role_prompt, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
+      .run("agent_drizzle", "Builder", "mock", "Build", 1, 1);
+  }
+}
+
 function drizzleColumnNames(table: DrizzleTable): string[] {
   return Object.values(getTableColumns(table)).map((column) => column.name).sort();
 }
@@ -476,7 +548,7 @@ describe("SQLite pragmas and migrations", () => {
 
   test("applies all migrations once and records them", () => {
     applyAllMigrations();
-    expect(countRows("__agenthub_migrations")).toBe(18);
+    expect(countRows("__agenthub_migrations")).toBe(19);
     expect(applyMigrations(currentDb())).toEqual([]);
 
     expect(tableNames()).toEqual([
@@ -487,6 +559,7 @@ describe("SQLite pragmas and migrations", () => {
       "agent_skills",
       "artifact_files",
       "artifact_reviews",
+      "artifact_versions",
       "artifacts",
       "attachments",
       "auth_tokens",
@@ -494,6 +567,8 @@ describe("SQLite pragmas and migrations", () => {
       "context_items",
       "context_versions",
       "dead_letter_events",
+      "deployment_providers",
+      "deployments",
       "events",
       "handler_cursors",
       "interventions",
@@ -525,6 +600,7 @@ describe("SQLite pragmas and migrations", () => {
       "task_plans",
       "task_runs",
       "tasks",
+      "wake_outbox",
       "workspaces"
     ]);
   });
@@ -649,6 +725,7 @@ describe("Drizzle schema and migration drift contract", () => {
 
     try {
       for (const { exportName, table } of drizzleTables) {
+        seedV12ParentRows(database.sqlite, exportName);
         database.drizzle.insert(table).values(drizzleSmokeRows[exportName]).run();
         const rows = database.drizzle.select().from(table).all();
         expect(rows, `${String(exportName)} select`).toHaveLength(1);

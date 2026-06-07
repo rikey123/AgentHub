@@ -2,7 +2,7 @@
 
 ## Phase 1 — 契约周（所有人，合并到 main 后再分支）
 
-- [ ] **1.1** 写迁移文件 `0019_v12.sql`
+- [x] **1.1** 写迁移文件 `0019_v12.sql`
   - 新表：`artifact_versions` / `deployments` / `deployment_providers` / `wake_outbox`
   - `deployments` 含 `pid` / `started_at` / `finished_at` / `cancelled_at` / `artifact_version` / `last_error`
   - `artifact_versions` 含 `storage_path` / `content_encoding`
@@ -10,17 +10,17 @@
   - `artifact_files` 新增列：`mime_type` / `size_bytes`（复用已有：`content_path` / `binary` / `new_sha256`，不重复添加）
   - 不重复添加：`rooms.archived_at`（`0001_init.sql`）、`messages.pinned_at`（`0013_messages_pinned.sql`）
 
-- [ ] **1.2** 注册 V1.2 新事件类型
+- [x] **1.2** 注册 V1.2 新事件类型
   - 新增 `EventCategory` 值 `"deployment"`
   - 注册：`artifact.version.created`、`deployment.created`、`deployment.status.changed`、`deployment.log.appended`（ephemeral）、`deployment.ready`、`deployment.failed`、`deployment.cancelled`、`deployment.expired`、`deployment.unpublished`、`room.pinned`（both）、`room.unpinned`（both）、`task.unblocked`、`wake_outbox.dispatched`
 
-- [ ] **1.3** 新增 stub 服务文件（空实现 + 类型定义）
+- [x] **1.3** 新增 stub 服务文件（空实现 + 类型定义）
   - `packages/orchestrator/src/wake-outbox-dispatcher.ts`
   - `packages/daemon/src/services/deployment-service.ts`
   - `packages/daemon/src/services/ppt-preview-bridge.ts`
   - `packages/artifacts/src/artifact-versioning-service.ts`
 
-- [ ] **1.4** 新增 REST 路由类型 stub
+- [x] **1.4** 新增 REST 路由类型 stub
   - `packages/daemon/src/routes/deployments.ts`
   - `packages/daemon/src/routes/deployment-providers.ts`
   - `packages/daemon/src/routes/artifact-versions.ts`

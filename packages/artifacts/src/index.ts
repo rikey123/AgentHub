@@ -15,6 +15,8 @@ export type ArtifactReviewDecision = "reviewing" | "accepted" | "applied" | "rej
 export type ArtifactReviewStatus = "open" | "resolved" | "deleted";
 export type ArtifactReviewSide = "old" | "new";
 
+export * from "./artifact-versioning-service.ts";
+
 export type ArtifactReview = {
   readonly id: string;
   readonly artifactId: string;

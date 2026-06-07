@@ -7,6 +7,7 @@ const emptyRoom = (overrides: Partial<RoomViewModel>): RoomViewModel => ({
   title: "Room",
   mode: "solo",
   participants: [],
+  participantContactNames: {},
   messages: [],
   briefs: [],
   unresolvedInterventions: [],
@@ -16,6 +17,9 @@ const emptyRoom = (overrides: Partial<RoomViewModel>): RoomViewModel => ({
   runs: [],
   pendingTurns: [],
   mailboxFailures: [],
+  artifactVersionsById: {},
+  deploymentsById: {},
+  deploymentLogsById: {},
   unreadCount: 0,
   ...overrides
 });
