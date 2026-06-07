@@ -101,7 +101,7 @@
 
 **负责文件：** `packages/skills/`、`packages/artifacts/src/artifact-versioning-service.ts`、`mcp/room-mcp-server.ts`、`context-assembly.ts`（pin 优先级）、context-ref resolver、`packages/daemon/src/routes/agents-contacts.ts`、`packages/daemon/src/routes/artifact-versions.ts`、`packages/daemon/src/services/ppt-preview-bridge.ts`、`packages/daemon/src/routes/ppt-proxy.ts`
 
-- [ ] **3.1** 六个 Builtin Skill（SKILL.md packages）
+- [x] **3.1** 六个 Builtin Skill（SKILL.md packages）
   - `web-page-builder`（kind: web_page）
   - `web-app-builder`（kind: web_app）
   - `one-pager-builder`（kind: web_page）
@@ -109,19 +109,19 @@
   - `document-builder`（kind: document）
   - `officecli-pptx`（kind: presentation_pptx）：参考 AionUi `officecli-pptx/SKILL.md`；有效命令使用 `officecli view "$FILE" text/outline/svg` 和 `officecli get "$FILE" "/slide[N]"`；不使用 `extract-slide`（该命令无 reference 支撑）
 
-- [ ] **3.2** Artifact Versioning Service（文本产物）
+- [x] **3.2** Artifact Versioning Service（文本产物）
   - `createVersion(artifactId, content, options)` — 同事务：写 `artifact_files.new_content` + 写 `artifact_versions`（version++）+ 发 `artifact.version.created`
   - `createBinaryVersion(artifactId, filePath, options)` — 复制文件到 `.agenthub/artifacts/<id>/v<n>/`；写 `artifact_files`（`content_path`、`is_binary=1`、`mime_type`、`size_bytes`、`sha256`）；写 `artifact_versions`（`storage_path`、`content_encoding='binary'`）
   - `GET /artifacts/:id/versions/:from/diff/:to` — unified diff（文本产物）；binary 产物返回 size/hash 比较
   - `POST /artifacts/:id/versions/:version/restore`
   - `GET /artifacts/:id/download`（Content-Disposition attachment；binary 从 `content_path` 读文件）
 
-- [ ] **3.3** room.publish_artifact 更新（binary 支持）
+- [x] **3.3** room.publish_artifact 更新（binary 支持）
   - 接受 `filePath` 参数（二进制产物路径，相对于 workspace root）
   - 路径穿越防护（`path.resolve` 后验证在 workspace 内）
   - 同事务：写 artifacts + `createBinaryVersion` 或 `createVersion` + 写 message part + 发 `message.part.added`
 
-- [ ] **3.4** PPT Preview Bridge（ppt-preview-bridge.ts）
+- [x] **3.4** PPT Preview Bridge（ppt-preview-bridge.ts）
   - 参考 AionUi `pptPreviewBridge.ts`
   - 检测 officecli：Windows 用 `where.exe officecli` 或 `officecli --version`；`ENOENT` 时触发自动安装
   - 自动安装：Windows PowerShell irm script；macOS/Linux curl/sh；安装后 retry once
@@ -132,37 +132,37 @@
   - `isActivePreviewPort(port)` — 验证端口属于活跃 session
   - 组件卸载时 stop；daemon 退出时 stop all
 
-- [ ] **3.5** PPT Proxy Route（/api/ppt-proxy/:port/*）
+- [x] **3.5** PPT Proxy Route（/api/ppt-proxy/:port/*）
   - 参考 AionUi `apiRoutes.ts`（`registerOfficecliWatchProxy`）
   - 每次请求验证 port 属于 `pptPreviewBridge.isActivePreviewPort(port)`；否则返回 403
   - 代理到 `http://localhost:<port>/<path>`
   - 重写 Location header，注入导航守卫 script（防 iframe 跳出 proxy base path）
   - 不能作为通用 localhost 代理
 
-- [ ] **3.6** @artifact / @workspace Context-Ref Resolver
+- [x] **3.6** @artifact / @workspace Context-Ref Resolver
   - 解析 `@artifact:<id>#Lx-Ly`、`@artifact:<id>#slide=N`、`@workspace:<path>#Lx-Ly`
   - 文本产物从 `artifact_files.new_content` 提取行范围
   - binary/pptx 产物 `#slide=N`：使用 `officecli view "$FILE" text --start N --end N` 提取文本
   - 注入 `<context-ref>` XML 块到 context assembly
 
-- [ ] **3.7** Pinned Messages Context Assembly 优先级
+- [x] **3.7** Pinned Messages Context Assembly 优先级
   - 查询 `messages WHERE room_id = ? AND pinned_at IS NOT NULL`
   - 注入为第二优先级（workspace items 之后）
   - binary artifact pin 以 `@artifact:<id>` compact ref 注入，不展开
 
-- [ ] **3.8** Agent Contacts 后端
+- [x] **3.8** Agent Contacts 后端
   - `GET /agents/contacts`（status 推导）
   - `POST /agents/custom`（name 重复校验，创建 roles + agent_bindings）
   - `PATCH /agents/custom/:id`
   - `/create-agent` 自然语言解析：从 slash command 参数提取 name/runtime/skills hint 预填向导
 
-- [ ] **3.9** Orchestrator Prompt 模板更新
+- [x] **3.9** Orchestrator Prompt 模板更新
   - 成员短消息 + publish_artifact 分离指令
   - reason="aggregate" 汇总 prompt（150 词）
   - reason="restart_recovery" wake prompt
   - `officecli-pptx` skill 加入 PPTX 生成 Agent 的默认 skill 推荐列表
 
-- [ ] **3.10** Phase 3 测试
+- [x] **3.10** Phase 3 测试
   - artifact-versioning：文本 save/restore；binary createBinaryVersion、sha256 校验、download
   - ppt-preview-bridge：spawn officecli watch、active port 验证、installFailed guard、stop on unmount
   - ppt-proxy：非活跃 port 返回 403；Location header 重写

@@ -54,7 +54,8 @@ describe("assembleMissionBrief", () => {
       leaderName: "Leader",
       roomMode: "squad",
       siblingTasks: [{ taskId: "task_sibling", title: "Sibling task", assigneeName: "Leader", status: "in_progress", blockerReason: "Missing spec" }],
-      roomMemory: [{ type: "decision", content: "Use TypeScript strict mode" }]
+      roomMemory: [{ type: "decision", content: "Use TypeScript strict mode" }],
+      pinnedMessages: []
     });
   });
 
@@ -84,7 +85,8 @@ describe("assembleMissionBrief", () => {
       roomMode: "team",
       leaderName: "Leader",
       siblingTasks: [{ taskId: "task_1", title: "Do work", assigneeName: "Worker", status: "in_progress", blockerReason: "Waiting" }],
-      roomMemory: [{ type: "fact", content: "Remember this" }]
+      roomMemory: [{ type: "fact", content: "Remember this" }],
+      pinnedMessages: []
     });
 
     expect(xml).toContain("<mission-brief>");
@@ -92,6 +94,23 @@ describe("assembleMissionBrief", () => {
     expect(xml).toContain("<leader>Leader</leader>");
     expect(xml).toContain("<sibling-tasks>");
     expect(xml).toContain("<room-memory>");
+  });
+
+  test("injects pinned messages after room memory", () => {
+    insertRoom({ roomId: "room_pinned", mode: "team", primaryAgentId: "agent_leader" });
+    insertAgent("agent_leader", "Leader");
+    insertAgent("agent_worker", "Worker");
+    insertParticipant("room_pinned", "agent_leader", "primary");
+    insertParticipant("room_pinned", "agent_worker", "teammate");
+    insertContextItem({ roomId: "room_pinned", scope: "conversation", status: "confirmed", type: "fact", content: "Workspace context first" });
+    insertMessage("msg_pin", "room_pinned", "Pinned design decision");
+    currentDatabase().sqlite.prepare("UPDATE messages SET pinned_at = ? WHERE id = 'msg_pin'").run(now + 1);
+
+    const xml = buildMissionBriefBlock(assembleMissionBrief("room_pinned", "agent_worker", currentDatabase())!);
+
+    expect(xml.indexOf("<room-memory>")).toBeLessThan(xml.indexOf("<pinned-messages>"));
+    expect(xml).toContain('<message id="msg_pin"');
+    expect(xml).toContain("Pinned design decision");
   });
 });
 

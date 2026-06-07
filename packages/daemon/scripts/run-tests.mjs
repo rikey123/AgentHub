@@ -8,7 +8,9 @@ const vitestArgs = [
   "run",
   "packages/daemon/test/daemon.test.ts",
   "packages/daemon/test/assisted-selector-continuation.test.ts",
-  "packages/daemon/test/route-stubs.test.ts"
+  "packages/daemon/test/route-stubs.test.ts",
+  "packages/daemon/test/ppt-preview-bridge.test.ts",
+  "packages/daemon/test/v12-artifacts-backend.test.ts"
 ];
 const result = spawnSync(process.platform === "win32" ? "cmd.exe" : vitestBin, process.platform === "win32" ? ["/c", vitestBin, ...vitestArgs] : vitestArgs, { cwd: repoRoot, stdio: "inherit", shell: false });
 if (result.error) throw result.error;

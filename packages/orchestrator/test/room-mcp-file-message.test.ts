@@ -7,7 +7,7 @@ import { createDatabase, type AgentHubDatabase } from "@agenthub/db";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import { RoomMcpServer, TaskService } from "../src/index.ts";
-import { ArtifactService } from "../../artifacts/src/index.ts";
+import { ArtifactService, createArtifactVersioningService } from "../../artifacts/src/index.ts";
 
 let tempDir: string | undefined;
 let database: AgentHubDatabase | undefined;
@@ -38,6 +38,53 @@ afterEach(() => {
 });
 
 describe("RoomMcpServer room.send_file_message", () => {
+  test("publishes text artifacts with an initial version and message part", async () => {
+    const result = await currentServer().callTool("room.publish_artifact", {
+      kind: "document",
+      filename: "brief.md",
+      title: "Brief",
+      content: "# Brief"
+    }, session());
+
+    expect(result).toMatchObject({ ok: true, data: { kind: "document", version: 1, messageId: "msg_run_1" } });
+    const artifactId = result.ok && typeof result.data === "object" && result.data !== null ? (result.data as { artifactId: string }).artifactId : "";
+    expect(currentDatabase().sqlite.prepare("SELECT kind FROM artifacts WHERE id = ?").get(artifactId)).toMatchObject({ kind: "document" });
+    expect(currentDatabase().sqlite.prepare("SELECT version, content FROM artifact_versions WHERE artifact_id = ?").get(artifactId)).toMatchObject({ version: 1, content: "# Brief" });
+    expect(currentDatabase().sqlite.prepare("SELECT type FROM events WHERE type = 'artifact.version.created' AND json_extract(payload, '$.artifactId') = ?").get(artifactId)).toBeDefined();
+    expect(currentDatabase().sqlite.prepare("SELECT type FROM events WHERE type = 'message.part.added' AND json_extract(payload, '$.part.artifactId') = ?").get(artifactId)).toBeDefined();
+  });
+
+  test("rejects publish_artifact filePath traversal before creating artifacts", async () => {
+    const result = await currentServer().callTool("room.publish_artifact", {
+      kind: "presentation_pptx",
+      filename: "deck.pptx",
+      filePath: "../deck.pptx"
+    }, session());
+
+    expect(result).toMatchObject({ ok: false, error: { code: "permission_denied" } });
+    expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM artifacts").get()).toMatchObject({ count: 0 });
+  });
+
+  test("rolls back publish_artifact artifact version when message part publish fails", async () => {
+    const throwingBus = currentBus();
+    const originalPublish = throwingBus.publish.bind(throwingBus);
+    throwingBus.publish = ((input) => {
+      if (input.type === "message.part.added") throw new Error("message part failed");
+      return originalPublish(input);
+    }) as EventBus["publish"];
+
+    await expect(currentServer().callTool("room.publish_artifact", {
+      kind: "document",
+      filename: "brief.md",
+      title: "Brief",
+      content: "# Brief"
+    }, session())).rejects.toThrow("message part failed");
+
+    expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM artifacts").get()).toMatchObject({ count: 0 });
+    expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM artifact_versions").get()).toMatchObject({ count: 0 });
+    expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM message_parts WHERE part_type = 'artifact'").get()).toMatchObject({ count: 0 });
+  });
+
   test("creates an artifact-backed attachment message part from content", async () => {
     const content = "# Architecture\n\nSplit the platform into three planes.\n";
     const result = await currentServer().callTool("room.send_file_message", {
@@ -121,6 +168,7 @@ function createServer(): RoomMcpServer {
     database: currentDatabase(),
     eventBus: currentBus(),
     artifactService: currentArtifactService(),
+    artifactVersioningService: createArtifactVersioningService({ database: currentDatabase(), eventBus: currentBus(), now: () => now }),
     now: () => now
   });
 }

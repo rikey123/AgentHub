@@ -2320,7 +2320,7 @@ describe("daemon M1.4 composition", () => {
     const listed = await fetch(`${baseUrl}/skills`);
     const listedPayload = await listed.json() as { readonly skills: readonly { readonly id: string; readonly name: string; readonly origin: string; readonly content?: string }[] };
     expect(listed.status).toBe(200);
-    expect(listedPayload.skills.map((skill) => skill.name).sort()).toEqual(["skill-creator", "task-planner"]);
+    expect(listedPayload.skills.map((skill) => skill.name).sort()).toEqual(["document-builder", "html-slides-builder", "officecli-pptx", "one-pager-builder", "skill-creator", "task-planner", "web-app-builder", "web-page-builder"]);
     expect(listedPayload.skills.every((skill) => skill.content === undefined)).toBe(true);
 
     const builtinId = listedPayload.skills.find((skill) => skill.name === "task-planner")?.id ?? "";

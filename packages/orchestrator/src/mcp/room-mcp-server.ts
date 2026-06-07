@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import type { CommandBus, CommandResult, EventBus } from "@agenthub/bus";
 import type { CommandErrorCode } from "@agenthub/bus";
 import type { AgentHubDatabase } from "@agenthub/db";
+import type { ArtifactVersioningService } from "@agenthub/artifacts";
 import type { PermissionEngine, PermissionResource } from "../../../permissions/src/index.ts";
 
 import { nameToSlug } from "../mention-parser.ts";
@@ -98,7 +99,7 @@ export class RoomMcpServer {
   private readonly authToken = randomUUID();
   private readonly sessionRegistrations = new Map<string, RoomMcpSessionRegistration>();
 
-  constructor(private readonly options: { readonly commandBus: CommandBus; readonly taskService: TaskService; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly taskModeGroupChatPresenter?: TaskModeGroupChatPresenter; readonly permissionEngine?: PermissionEngine; readonly artifactFs?: { readonly readTextFile?: (input: { readonly runId: string; readonly path: string }) => string | undefined; readonly writeTextFile: (input: { readonly runId: string; readonly path: string; readonly content: string }) => void }; readonly artifactService?: RoomMcpArtifactService; readonly now?: () => number }) {}
+  constructor(private readonly options: { readonly commandBus: CommandBus; readonly taskService: TaskService; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly taskModeGroupChatPresenter?: TaskModeGroupChatPresenter; readonly permissionEngine?: PermissionEngine; readonly artifactFs?: { readonly readTextFile?: (input: { readonly runId: string; readonly path: string }) => string | undefined; readonly writeTextFile: (input: { readonly runId: string; readonly path: string; readonly content: string }) => void }; readonly artifactService?: RoomMcpArtifactService; readonly artifactVersioningService?: ArtifactVersioningService; readonly now?: () => number }) {}
 
   /**
    * Start the TCP server. Must be called once before getStdioConfig().
@@ -274,6 +275,7 @@ export class RoomMcpServer {
     if (name === "room.read_mailbox") return this.handleReadMailbox(input, session, context);
     if (name === "room.send_message") return this.handleSendMessage(input, session, context);
     if (name === "room.send_file_message") return await this.handleSendFileMessage(input, session, context);
+    if (name === "room.publish_artifact") return await this.handlePublishArtifact(input, session, context);
     if (name === "room.list_members") return this.handleListMembers(session);
     if (name === "room.list_runtimes") return this.handleListRuntimes(session);
     if (name === "room.list_models") return this.handleListModels(session);
@@ -699,6 +701,45 @@ export class RoomMcpServer {
   // ---------------------------------------------------------------------------
   // room.send_file_message
   // ---------------------------------------------------------------------------
+
+  private async handlePublishArtifact(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): Promise<RoomMcpToolResult> {
+    void context;
+    if (!isRecord(input)) return failure("validation_failed", "input must be an object");
+    const versioning = this.options.artifactVersioningService;
+    if (versioning === undefined) return failure("not_implemented", "artifact versioning service is not available");
+    const room = this.options.database.sqlite.prepare("SELECT workspace_id FROM rooms WHERE id = ? AND archived_at IS NULL").get(session.roomId) as { readonly workspace_id: string } | undefined;
+    if (room === undefined) return failure("not_found", `Room '${session.roomId}' not found`);
+    const kind = typeof input.kind === "string" ? input.kind : "generic_file";
+    const title = typeof input.title === "string" && input.title.length > 0 ? input.title : typeof input.filename === "string" ? input.filename : "Artifact";
+    const filename = typeof input.filename === "string" && input.filename.length > 0 ? normalizeMessageFilePath(input.filename) : defaultArtifactFilename(kind);
+    if (hasPathTraversal(filename)) return failure("permission_denied", "path_traversal_denied");
+    const content = typeof input.content === "string" ? input.content : undefined;
+    const filePath = typeof input.filePath === "string" ? input.filePath : undefined;
+    if (content === undefined && filePath === undefined) return failure("validation_failed", "content or filePath is required");
+    const runId = this.requireRunId(session, context);
+    const now = this.options.now?.() ?? Date.now();
+    const artifactId = randomUUID();
+    let messageId = "";
+    let version = 0;
+    try {
+      this.options.database.sqlite.transaction(() => {
+        messageId = this.ensureRunMessage(room.workspace_id, session, runId, now);
+        this.options.database.sqlite.prepare("INSERT INTO artifacts (id, workspace_id, room_id, run_id, message_id, type, kind, title, status, created_by, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'file', ?, ?, 'draft', ?, ?, ?, ?)").run(artifactId, room.workspace_id, session.roomId, runId, messageId, kind, title, session.agentId, JSON.stringify({ filename }), now, now);
+        const record = filePath !== undefined
+          ? versioning.createBinaryVersionInTransaction({ artifactId, filePath, filename, mimeType: typeof input.mimeType === "string" ? input.mimeType : undefined, createdBy: session.agentId, message: typeof input.message === "string" ? input.message : undefined })
+          : versioning.createVersionInTransaction({ artifactId, content: content ?? "", filename, createdBy: session.agentId, message: typeof input.message === "string" ? input.message : undefined });
+        version = record.version;
+        const seq = nextMessagePartSeq(this.options.database, messageId);
+        const partPayload = { type: "artifact", artifactId, kind, title, filename, version };
+        this.options.database.sqlite.prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, ?, 'artifact', ?, ?)").run(messageId, seq, JSON.stringify(partPayload), now);
+        this.options.eventBus.publish({ id: randomUUID(), type: "message.part.added", schemaVersion: 1, workspaceId: room.workspace_id, roomId: session.roomId, runId, agentId: session.agentId, payload: { messageId, seq, part: partPayload }, createdAt: now });
+      })();
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("within workspace")) return failure("permission_denied", "path_traversal_denied");
+      throw error;
+    }
+    return { ok: true, data: { artifactId, messageId, kind, version, filename } };
+  }
 
   private async handleSendFileMessage(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): Promise<RoomMcpToolResult> {
     if (!isRecord(input)) return failure("validation_failed", "input must be an object");
@@ -1804,6 +1845,19 @@ function normalizeMessageFilePath(path: string): string {
   const normalized = toPosixPath(path).replace(/^\.\//u, "");
   const segments = normalized.split("/").filter((segment) => segment.length > 0);
   return segments.length > 0 ? segments.join("/") : DEFAULT_FILE_MESSAGE_NAME;
+}
+
+function defaultArtifactFilename(kind: string): string {
+  if (kind === "document") return "content.md";
+  if (kind === "presentation") return "slides.html";
+  if (kind === "web_page" || kind === "web_app") return "index.html";
+  if (kind === "presentation_pptx") return "deck.pptx";
+  return DEFAULT_FILE_MESSAGE_NAME;
+}
+
+function nextMessagePartSeq(database: AgentHubDatabase, messageId: string): number {
+  const row = database.sqlite.prepare("SELECT COALESCE(MAX(seq), 0) + 1 AS seq FROM message_parts WHERE message_id = ?").get(messageId) as { readonly seq: number };
+  return row.seq;
 }
 
 function isSensitiveWorkspacePath(path: string): boolean {
