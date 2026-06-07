@@ -265,8 +265,8 @@ export function SkillsTab({ skills: initialSkills, runtimes: runtimeData, fetchI
         <Card.Header>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <Card.Title>Skills</Card.Title>
-              <Card.Description>Manage standard SKILL.md packages available to rooms and agents.</Card.Description>
+              <Card.Title>skills</Card.Title>
+              <Card.Description>管理可供 rooms 和 agents 使用的标准 SKILL.md 包。</Card.Description>
             </div>
             <div className="flex flex-wrap justify-end gap-2">
               <Button size="sm" variant="secondary" onPress={() => void importFromUrl()} isPending={importing} isDisabled={importUrl.trim().length === 0}>
@@ -280,7 +280,7 @@ export function SkillsTab({ skills: initialSkills, runtimes: runtimeData, fetchI
         </Card.Header>
         <Card.Content className="grid gap-4">
           <TextField value={importUrl} onChange={setImportUrl}>
-            <Label className="text-sm font-semibold">Import URL</Label>
+            <Label className="text-sm font-semibold">导入 URL</Label>
             <Input placeholder="https://example.com/SKILL.md" data-testid="skills-import-url" />
           </TextField>
 
