@@ -108,7 +108,7 @@ Atomic commit rule:
 - Do not mix backend, web, and docs in the same commit unless the slice is a shared contract.
 - Do not stage unrelated dirty files from the main checkout or metadata files.
 
-Required pre-commit commands for every code commit:
+Required pre-commit commands for every commit, including docs-only and merge commits:
 
 ```powershell
 git status --short
@@ -127,6 +127,8 @@ mcp__gitnexus__.detect_changes({
   worktree: "C:\\project\\AgentHub\\.worktrees\\v12-web-studio-composer"
 })
 ```
+
+For integration merges, do not let `git merge` create a commit before this gate runs. Use `git merge --no-ff --no-commit <branch>`, resolve conflicts, stage the merge result, run the commands above plus relevant tests, run GitNexus detection on the staged merge result from the integration worktree, and only then create the merge commit.
 
 Commit format examples:
 
@@ -288,7 +290,7 @@ Do not edit:
 - `apps/web/src/**`
 - `packages/artifacts/src/artifact-versioning-service.ts`
 - `packages/skills/**`
-- `openspec/**` except when marking a fully proven task after review
+- `openspec/**`
 
 Implementation order:
 
@@ -362,6 +364,17 @@ Required checks:
 - teammate failure writes visible fallback system messages.
 - final aggregate wake uses `reason: "aggregate"`.
 
+- [ ] **A5: Prove orchestrator prompt-template updates**
+
+Before editing prompt builders, run impact on the concrete prompt-generation symbol in the file being changed. If the prompt lives in `packages/orchestrator/src/prompts/mission-brief.ts`, coordinate with Track B because Track B owns that file for context and skill-boundary work.
+
+Required checks:
+- member instructions require short chat updates and large outputs through `room.publish_artifact`, not long ordinary messages.
+- aggregate wake prompts for `reason: "aggregate"` ask for a concise final summary that points to produced artifacts.
+- restart recovery prompts are explicit that the run is being resumed after daemon recovery.
+- `officecli-pptx` is included in the default recommendation path for PPTX-capable agents, either in Track A prompt files or in Track B's MissionBrief boundary.
+- tests assert the relevant prompt text fragments so the behavior cannot silently regress.
+
 Acceptance commands:
 
 ```powershell
@@ -378,6 +391,8 @@ Commit sequence:
 - `fix(v12): close room list backend gaps`
 - `test(v12): prove orchestrator visible coordination`
 - `fix(v12): close orchestrator wake gaps`
+- `test(v12): prove orchestrator prompt contract`
+- `fix(v12): close orchestrator prompt gaps`
 
 ### Track B: Artifacts, Skills, PPT, and Context Refs
 
@@ -399,6 +414,7 @@ OpenSpec tasks:
 - 3.9 message pin/unpin backend retrofit
 - 3.10 message actions backend verification
 - 3.11 Agent Contacts backend
+- 3.12 `officecli-pptx` prompt recommendation at the MissionBrief/skill boundary, paired with Track A prompt work
 - 3.13 Phase 3 tests
 
 Files owned:
@@ -412,6 +428,7 @@ Files owned:
 - `packages/daemon/src/routes/ppt-proxy.ts`
 - `packages/daemon/src/routes/artifact-versions.ts`
 - `packages/daemon/src/routes/agents-contacts.ts`
+- `packages/daemon/src/routes/messages.ts` or the existing message route file only for pin/unpin, reply, regenerate, and DiffCard action verification
 - `packages/daemon/src/index.ts` only for artifact, contact, message pin, and PPT proxy routes
 - `packages/daemon/test/ppt-preview-bridge.test.ts`
 - `packages/daemon/test/v12-artifacts-backend.test.ts`
@@ -507,9 +524,29 @@ Required checks:
 Required checks:
 - `GET /agents/contacts` derives contacts from `agent_bindings`.
 - `POST /agents/custom` validates duplicate names and creates role/binding rows.
+- `/create-agent` natural-language slash command parsing extracts name, runtime, model, and skill hints into an InlineAgentEditor prefill payload without creating rows before confirmation.
 - `PATCH /agents/contacts/:agentBindingId` publishes `agent.contact.updated`.
 - `DELETE /agents/contacts/:agentBindingId` hard-deletes only when unreferenced, otherwise sets `disabled_at`.
 - runtime health is reflected in `available`, `busy`, or `offline`.
+
+- [ ] **B7: Prove message pin/unpin and message actions backend**
+
+Before editing message route or command symbols, run impact on the concrete handler or command symbol that owns the current message action.
+
+Required checks:
+- `POST /messages/:id/pin` or `POST /rooms/:roomId/messages/:messageId/pin` updates `messages.pinned_at` and publishes `message.pinned` in the same SQLite transaction.
+- `DELETE` unpin clears `messages.pinned_at` and publishes `message.unpinned` in the same SQLite transaction.
+- legacy pin routes remain compatible or forward to the canonical route.
+- `SendMessage` persists `quotedMessageId` and replay payloads preserve it.
+- `POST /messages/:id/regenerate` remains available and maps failures to a stable REST error payload.
+- DiffCard action routes for apply, reject, and detail are present or have explicit tested stubs that return the expected status.
+
+- [ ] **B8: Prove MissionBrief skill recommendation boundary**
+
+Required checks:
+- PPTX-oriented agents can receive `officecli-pptx` as a recommended skill.
+- the recommendation does not add workflow-artifact or cloud-provider capabilities that are deferred to V1.3.
+- prompt tests cover the exact recommendation path if it lives in `packages/orchestrator/src/prompts/mission-brief.ts`.
 
 Acceptance commands:
 
@@ -530,8 +567,12 @@ Commit sequence:
 - `fix(v12): close ppt preview gaps`
 - `test(v12): prove context ref injection`
 - `fix(v12): close context ref gaps`
+- `test(v12): prove message action backend`
+- `fix(v12): close message action gaps`
 - `test(v12): prove agent contacts backend`
 - `fix(v12): close contacts backend gaps`
+- `test(v12): prove pptx skill recommendation`
+- `fix(v12): close mission brief skill gaps`
 
 ### Track C: Web Shell, Studio, Composer, Settings
 
@@ -817,7 +858,7 @@ Required changes after all functional tracks pass:
 - `package.json` version becomes `1.2.0`.
 - `apps/web/package.json` version becomes `1.2.0`.
 - `packages/daemon/package.json` version becomes `1.2.0`.
-- Codex runtime displays `"experimental"` in runtime/contact UI.
+- Verify Codex runtime displays `"experimental"` in runtime/contact UI. If the label is missing, assign that production UI fix back to Track C before D4 closes.
 
 - [ ] **D5: OpenSpec task closure**
 
@@ -865,11 +906,11 @@ Merge command shape from the coordinator worktree:
 ```powershell
 cd C:\project\AgentHub\.worktrees\v12-integration-final
 git fetch --all --prune
-git merge --no-ff feat/v12-contract-final
-git merge --no-ff feat/v12-backend-deploy-orch
-git merge --no-ff feat/v12-artifacts-ppt-context
-git merge --no-ff feat/v12-web-studio-composer
-git merge --no-ff feat/v12-e2e-docs-release
+git merge --no-ff --no-commit feat/v12-contract-final
+git merge --no-ff --no-commit feat/v12-backend-deploy-orch
+git merge --no-ff --no-commit feat/v12-artifacts-ppt-context
+git merge --no-ff --no-commit feat/v12-web-studio-composer
+git merge --no-ff --no-commit feat/v12-e2e-docs-release
 ```
 
 Before each merge:
@@ -879,9 +920,14 @@ git status --short
 git log --oneline --decorate -5
 ```
 
-After each merge:
+The coordinator worktree must be clean or each dirty path must be explicitly explained before starting a merge. Unexpected dirty files block the merge.
+
+After each non-committing merge and conflict resolution:
 
 ```powershell
+git status --short
+git diff --check
+git diff --cached --check
 pnpm.cmd typecheck
 ```
 
@@ -891,6 +937,18 @@ If the merge touched daemon writes or protocol events, also run:
 pnpm.cmd events:check
 pnpm.cmd visibility:check
 ```
+
+Before creating the merge commit, run GitNexus on the staged merge result:
+
+```text
+mcp__gitnexus__.detect_changes({
+  repo: "AgentHub",
+  scope: "staged",
+  worktree: "C:\\project\\AgentHub\\.worktrees\\v12-integration-final"
+})
+```
+
+Then commit the merge with a message that names the merged track and includes the verification evidence in the body.
 
 ---
 
