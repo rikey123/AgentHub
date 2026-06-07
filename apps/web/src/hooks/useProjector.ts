@@ -1475,7 +1475,7 @@ function hydrateMessagePart(room: RoomViewModel, part: MessageViewModel["parts"]
         lastError: deployment.lastError ?? card.lastError,
         logs: room.deploymentLogsById[card.deploymentId] ?? card.logs
       }
-    } as MessageViewModel["parts"][number];
+    } as unknown as MessageViewModel["parts"][number];
   }
   if (card.type === "artifact" && typeof card.artifactId === "string") {
     const versions = room.artifactVersionsById[card.artifactId] ?? [];
