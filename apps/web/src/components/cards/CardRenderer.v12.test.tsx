@@ -52,7 +52,8 @@ describe("V1.2 artifact cards", () => {
     expect(sourceCode).toContain("v4");
     expect(sourceCode).toContain("/artifacts/artifact-source-1/download");
     expect(sourceCode).toContain("Expand");
-    expect(sourceCode).not.toContain("Unknown card");
+    expect(sourceCode).toContain('data-testid="artifact-card"');
+    expect(sourceCode).not.toContain('data-slot="card-content"><pre');
 
     expect(genericFile).toContain("Artifact");
     expect(genericFile).toContain("dataset.csv");
@@ -60,7 +61,8 @@ describe("V1.2 artifact cards", () => {
     expect(genericFile).toContain("v1");
     expect(genericFile).toContain("/artifacts/artifact-file-1/download");
     expect(genericFile).toContain("Expand");
-    expect(genericFile).not.toContain("Unknown card");
+    expect(genericFile).toContain('data-testid="artifact-card"');
+    expect(genericFile).not.toContain('data-slot="card-content"><pre');
   });
 
   it("routes web artifacts to PreviewCard with only wired actions", () => {
