@@ -203,6 +203,27 @@ The canonical event registry SHALL be extended with the following V1.0 event typ
 | `skill.deactivated` | skill | durable | detail | skill-system | Members panel REST-only；不要求 projector handler |
 | `skill.materialization_failed` | skill | durable | main | skill-system | 需要 projector handler（chat view inline error）|
 
+**V1.2 新增 events（16 个）**：
+
+| 事件类型 | category | durability | visibility | 来源 capability | 备注 |
+|---|---|---|---|---|---|
+| `artifact.version.created` | artifact | durable | both | artifacts | 需要 projector handler（版本徽标与历史列表） |
+| `deployment.created` | deployment | durable | main | deployment-publish | 需要通过 `message.part.added` 插入 DeploymentCard |
+| `deployment.status.changed` | deployment | durable | main | deployment-publish | 需要 projector handler（DeploymentCard 状态机） |
+| `deployment.log.appended` | deployment | ephemeral | main | deployment-publish | 实时日志流；断线后由 REST 补全 |
+| `deployment.ready` | deployment | durable | main | deployment-publish | 需要 projector handler（ready URL / 下载信息） |
+| `deployment.failed` | deployment | durable | main | deployment-publish | 需要 projector handler（失败原因与重试动作） |
+| `deployment.cancelled` | deployment | durable | main | deployment-publish | 需要 projector handler |
+| `deployment.expired` | deployment | durable | main | deployment-publish | 需要 projector handler（preview-url 过期） |
+| `deployment.unpublished` | deployment | durable | main | deployment-publish | 需要 projector handler（static-site stop / unpublish） |
+| `room.pinned` | room | durable | both | collab-visualization | 需要 projector handler（房间置顶排序） |
+| `room.unpinned` | room | durable | both | collab-visualization | 需要 projector handler（房间取消置顶） |
+| `message.pinned` | message | durable | both | im-chat-core-completion | Required for `messages.pinned_at` live/replay state |
+| `message.unpinned` | message | durable | both | im-chat-core-completion | Required for `messages.pinned_at` live/replay state |
+| `agent.contact.updated` | agent | durable | both | agent-contact-custom | Required for contact display-name/avatar updates |
+| `task.unblocked` | task | durable | both | task-workflow-core | 需要 projector handler（blocked 指示器清除） |
+| `wake_outbox.dispatched` | orchestrator | durable | detail | local-daemon | 内部唤醒审计；不要求 main projector handler |
+
 **V1.0 明确不引入的事件类型**（防止 spec agent 误加）：
 
 - `task.updated`：状态变化走 `task.status.changed`（V0 已注册），非状态型活动走 `task.activity.added`
@@ -214,6 +235,8 @@ The canonical event registry SHALL be extended with the following V1.0 event typ
 
 - visibility=both 的 V1.0 新事件（`task.activity.added` / `task.delegation.*` / `team.dispatch.*`）：**必须**在 `apps/web/src/hooks/useProjector.ts` 加 handler
 - visibility=detail 的 V1.0 新事件（role / runtime / model_config / agent_binding / permission.run_summary）：**不要求** projector handler；Settings UI 通过 REST 消费；Debug Panel 通过 `/debug/events` 查询
+- V1.2 的 main/both 新事件（`artifact.version.created` / `deployment.*` / `room.pinned` / `room.unpinned` / `message.pinned` / `message.unpinned` / `agent.contact.updated` / `task.unblocked`）：对应 capability 落地时**必须**在 `apps/web/src/hooks/useProjector.ts` 加 handler
+- V1.2 的 detail 新事件（`wake_outbox.dispatched`）：**不要求** main projector handler；用于内部调度审计与 Debug/Event 查询
 
 #### Scenario: events:check 校验 18 个新事件类型
 

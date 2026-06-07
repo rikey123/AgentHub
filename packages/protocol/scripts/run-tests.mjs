@@ -9,7 +9,8 @@ const vitestArgs = [
   "run",
   "packages/protocol/test/event-envelope.test.ts",
   "packages/protocol/test/event-migrator.test.ts",
-  "packages/protocol/test/schema-check.test.ts"
+  "packages/protocol/test/schema-check.test.ts",
+  "packages/protocol/test/v12-contract.test.ts"
 ];
 const command = process.platform === "win32" ? "cmd.exe" : vitestBin;
 const args = process.platform === "win32" ? ["/c", vitestBin, ...vitestArgs] : vitestArgs;
