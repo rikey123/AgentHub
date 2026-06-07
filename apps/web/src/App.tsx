@@ -37,6 +37,13 @@ export function ChatRoomLayout({ chat, pendingTurns, input }: ChatRoomLayoutProp
   );
 }
 
+export function messagePinRequestFor(messageId: string, isPinned: boolean): { readonly url: string; readonly method: "POST" | "DELETE" } {
+  return {
+    url: `/messages/${encodeURIComponent(messageId)}/pin`,
+    method: isPinned ? "DELETE" : "POST"
+  };
+}
+
 export default function App() {
   const initialSettingsState = useMemo(() => {
     if (typeof window === "undefined") return { isOpen: false, tab: "roles" as SettingsTabId };
@@ -159,8 +166,10 @@ export default function App() {
   }, [activeRoom, activeRoomId]);
 
   const handlePin = useCallback(async (id: string) => {
-    await csrfFetch(`/messages/${encodeURIComponent(id)}/pin`, { method: "POST" });
-  }, [csrfFetch]);
+    const message = activeRoom?.messages.find((item) => item.id === id);
+    const request = messagePinRequestFor(id, message?.pinnedAt !== undefined);
+    await csrfFetch(request.url, { method: request.method });
+  }, [activeRoom, csrfFetch]);
 
   const handleRegenerate = useCallback(async (id: string) => {
     await csrfFetch(`/messages/${encodeURIComponent(id)}/regenerate`, { method: "POST" });

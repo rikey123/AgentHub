@@ -471,6 +471,71 @@ describe("useProjector replay handling", () => {
     });
   });
 
+  it("hydrates deployment card error details and live logs without timeline insertion", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "assisted" }));
+    projector.apply(makeEvent("deployment.created", roomId, {
+      deploymentId: "deployment-failed-1",
+      artifactId: "artifact-failed-1",
+      kind: "container-build",
+      provider: "agenthub-local",
+      status: "in_progress"
+    }, 100));
+    projector.apply(makeEvent("deployment.log.appended", roomId, {
+      deploymentId: "deployment-failed-1",
+      line: "Detecting providers..."
+    }, 120));
+    projector.apply(makeEvent("deployment.failed", roomId, {
+      deploymentId: "deployment-failed-1",
+      error: "Docker is not available"
+    }, 130));
+
+    let room = emittedState.rooms.get(roomId);
+    expect(room?.messages).toEqual([]);
+    expect(room?.deploymentLogsById["deployment-failed-1"]).toEqual(["Detecting providers..."]);
+    expect(room?.deploymentsById["deployment-failed-1"]).toMatchObject({
+      status: "failed",
+      lastError: "Docker is not available"
+    });
+
+    projector.apply(makeAgentEvent("message.created", roomId, "agent-builder", {
+      messageId: "msg-deployment-failed-1",
+      senderId: "agent-builder",
+      senderType: "agent",
+      role: "assistant",
+      text: "Deployment failed."
+    }, 140));
+    projector.apply(makeEvent("message.part.added", roomId, {
+      messageId: "msg-deployment-failed-1",
+      part: {
+        type: "card",
+        seq: 1,
+        card: {
+          type: "deployment",
+          deploymentId: "deployment-failed-1",
+          artifactId: "artifact-failed-1",
+          kind: "container-build",
+          provider: "agenthub-local",
+          status: "in_progress"
+        }
+      }
+    }, 150));
+
+    room = emittedState.rooms.get(roomId);
+    const card = room?.messages.find((item) => item.id === "msg-deployment-failed-1")?.parts[0];
+    expect(card).toMatchObject({
+      type: "card",
+      card: {
+        type: "deployment",
+        deploymentId: "deployment-failed-1",
+        status: "failed",
+        lastError: "Docker is not available",
+        logs: ["Detecting providers..."]
+      }
+    });
+  });
+
   it("tracks artifact versions without inserting timeline content", () => {
     const roomId = `room-${randomUUID()}`;
     const projector = getProjector();

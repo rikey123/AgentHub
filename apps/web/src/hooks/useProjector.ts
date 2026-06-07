@@ -1471,7 +1471,9 @@ function hydrateMessagePart(room: RoomViewModel, part: MessageViewModel["parts"]
         status: deployment.status,
         url: deployment.url ?? card.url,
         downloadUrl: deployment.downloadUrl ?? card.downloadUrl,
-        imageTag: deployment.imageTag ?? card.imageTag
+        imageTag: deployment.imageTag ?? card.imageTag,
+        lastError: deployment.lastError ?? card.lastError,
+        logs: room.deploymentLogsById[card.deploymentId] ?? card.logs
       }
     } as MessageViewModel["parts"][number];
   }
