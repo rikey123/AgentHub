@@ -378,6 +378,106 @@ describe("App integration wiring", () => {
     await Promise.all([first, second]);
   });
 
+  it("keeps the most recently requested contact chat active when creations resolve out of order", async () => {
+    let resolveFirst: (value: { readonly data: { readonly roomId: string } }) => void = () => undefined;
+    let resolveSecond: (value: { readonly data: { readonly roomId: string } }) => void = () => undefined;
+    mocks.sdk.createRoom
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveFirst = resolve;
+      }))
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveSecond = resolve;
+      }));
+    mocks.stateOverridesByInitialValue.set("chat", "contacts");
+    renderApp();
+
+    const [contactsProps] = mocks.contactsRailContainer.mock.calls[0] as unknown as [{
+      readonly onStartChat: (contact: {
+        readonly agentBindingId: string;
+        readonly displayName: string;
+        readonly roleId: string;
+        readonly runtimeKind: string;
+        readonly capabilities: readonly string[];
+        readonly status: "available";
+      }) => Promise<void>;
+    }];
+
+    const first = contactsProps.onStartChat({
+      agentBindingId: "binding_builder",
+      displayName: "Frontend Builder",
+      roleId: "role_builder",
+      runtimeKind: "opencode",
+      capabilities: ["code.edit"],
+      status: "available"
+    });
+    const second = contactsProps.onStartChat({
+      agentBindingId: "binding_writer",
+      displayName: "Doc Writer",
+      roleId: "role_writer",
+      runtimeKind: "claude",
+      capabilities: ["docs.write"],
+      status: "available"
+    });
+
+    mocks.stateCalls = [];
+    resolveSecond({ data: { roomId: "room_writer" } });
+    await second;
+    resolveFirst({ data: { roomId: "room_builder" } });
+    await first;
+
+    expect(mocks.stateCalls.map((call) => call.value)).toEqual(["room_writer", "chat"]);
+  });
+
+  it("opens an earlier contact chat if the latest contact creation fails", async () => {
+    let resolveFirst: (value: { readonly data: { readonly roomId: string } }) => void = () => undefined;
+    let rejectSecond: (reason: Error) => void = () => undefined;
+    mocks.sdk.createRoom
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveFirst = resolve;
+      }))
+      .mockReturnValueOnce(new Promise((_, reject) => {
+        rejectSecond = reject;
+      }));
+    mocks.stateOverridesByInitialValue.set("chat", "contacts");
+    renderApp();
+
+    const [contactsProps] = mocks.contactsRailContainer.mock.calls[0] as unknown as [{
+      readonly onStartChat: (contact: {
+        readonly agentBindingId: string;
+        readonly displayName: string;
+        readonly roleId: string;
+        readonly runtimeKind: string;
+        readonly capabilities: readonly string[];
+        readonly status: "available";
+      }) => Promise<void>;
+    }];
+
+    const first = contactsProps.onStartChat({
+      agentBindingId: "binding_builder",
+      displayName: "Frontend Builder",
+      roleId: "role_builder",
+      runtimeKind: "opencode",
+      capabilities: ["code.edit"],
+      status: "available"
+    });
+    const second = contactsProps.onStartChat({
+      agentBindingId: "binding_writer",
+      displayName: "Doc Writer",
+      roleId: "role_writer",
+      runtimeKind: "claude",
+      capabilities: ["docs.write"],
+      status: "available"
+    });
+
+    mocks.stateCalls = [];
+    rejectSecond(new Error("writer failed"));
+    await second;
+    resolveFirst({ data: { roomId: "room_builder" } });
+    await first;
+
+    expect(mocks.stateCalls.map((call) => call.value)).toEqual(["writer failed", "room_builder", "chat"]);
+  });
+
   it("handles contact Start Chat creation failures without rethrowing", async () => {
     mocks.sdk.createRoom.mockRejectedValue(new Error("room create failed"));
     mocks.stateOverridesByInitialValue.set("chat", "contacts");

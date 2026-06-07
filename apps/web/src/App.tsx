@@ -94,6 +94,8 @@ export default function App() {
   const csrfFetch = useCsrfFetch();
   const { theme, setTheme, toggleTheme, setDensity } = useTheme();
   const contactStartPendingRef = useRef<Set<string>>(new Set());
+  const latestContactStartRequestRef = useRef(0);
+  const latestContactStartSuccessRef = useRef(0);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -140,11 +142,16 @@ export default function App() {
   const handleStartContactChat = useCallback(async (contact: AgentContactViewModel) => {
     if (contactStartPendingRef.current.has(contact.agentBindingId)) return;
     contactStartPendingRef.current.add(contact.agentBindingId);
+    const requestId = latestContactStartRequestRef.current + 1;
+    latestContactStartRequestRef.current = requestId;
     setBannerError(undefined);
     try {
       const res = await sdk.createRoom(createRoomInputForContactStartChat(contact)) as { data?: { roomId?: string }; id?: string; roomId?: string };
       const roomId = res?.data?.roomId ?? res?.roomId ?? res?.id;
-      if (typeof roomId === "string") openRoom(roomId);
+      if (typeof roomId === "string" && requestId > latestContactStartSuccessRef.current) {
+        latestContactStartSuccessRef.current = requestId;
+        openRoom(roomId);
+      }
     } catch (err) {
       setBannerError(err instanceof Error ? err.message : String(err));
     } finally {
