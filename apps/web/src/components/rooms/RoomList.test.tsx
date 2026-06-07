@@ -53,6 +53,24 @@ describe("RoomList V1.2 behavior", () => {
     expect(html).not.toContain("role=\"option\"");
     expect(html).not.toContain("Archive");
   });
+
+  it("keeps archived rooms out of the main list behind a collapsed entry", () => {
+    const html = renderToStaticMarkup(createElement(RoomList, {
+      rooms: [
+        roomFixture({ id: "active", title: "Active Room", lastActivityAt: 20 }),
+        roomFixture({ id: "archived", title: "Archived Room", archivedAt: 10, lastActivityAt: 30 })
+      ],
+      activeRoomId: "active",
+      onSelect: vi.fn(),
+      onCreate: vi.fn()
+    }));
+
+    expect(html).toContain("data-testid=\"room-list-item-active\"");
+    expect(html).not.toContain("data-testid=\"room-list-item-archived\"");
+    expect(html).toContain("data-testid=\"room-list-archive-entry\"");
+    expect(html).toContain("Archived rooms");
+    expect(html).toContain("1");
+  });
 });
 
 function roomFixture(patch: Partial<RoomViewModel>): RoomViewModel {

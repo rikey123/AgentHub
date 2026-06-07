@@ -74,12 +74,20 @@ function roomSearchText(room: RoomViewModel): string {
 export function RoomList({ rooms, activeRoomId, onSelect, onCreate, onTogglePin }: RoomListProps) {
   const [query, setQuery] = useState("");
 
-  const filtered = useMemo(() => {
-    return orderedRoomsForList(rooms, query);
-  }, [rooms, query]);
+  const activeRooms = useMemo(() => {
+    return rooms.filter((room) => room.archivedAt === undefined);
+  }, [rooms]);
 
-  const liveCount = rooms.filter((room) => room.runs.some((run) => run.status === "running" || run.status === "starting")).length;
-  const totalPending = rooms.reduce((sum, room) => sum + room.pendingTurns.length, 0);
+  const archivedRooms = useMemo(() => {
+    return orderedRoomsForList(rooms.filter((room) => room.archivedAt !== undefined), "");
+  }, [rooms]);
+
+  const filtered = useMemo(() => {
+    return orderedRoomsForList(activeRooms, query);
+  }, [activeRooms, query]);
+
+  const liveCount = activeRooms.filter((room) => room.runs.some((run) => run.status === "running" || run.status === "starting")).length;
+  const totalPending = activeRooms.reduce((sum, room) => sum + room.pendingTurns.length, 0);
 
   return (
     <div className="flex h-full flex-col bg-[linear-gradient(180deg,var(--surface),var(--surface-secondary))]">
@@ -96,7 +104,7 @@ export function RoomList({ rooms, activeRoomId, onSelect, onCreate, onTogglePin 
 
         <div className="mb-3 grid grid-cols-2 gap-2">
           <div className="rounded-xl border border-border bg-overlay/70 px-3 py-2 shadow-sm">
-            <div className="text-base font-semibold">{rooms.length}</div>
+            <div className="text-base font-semibold">{activeRooms.length}</div>
             <div className="text-[11px] tracking-wide text-muted">房间总数</div>
           </div>
           <div className="rounded-xl border border-border bg-overlay/70 px-3 py-2 shadow-sm">
@@ -194,6 +202,30 @@ export function RoomList({ rooms, activeRoomId, onSelect, onCreate, onTogglePin 
               </li>
             );
           })}
+          {archivedRooms.length > 0 ? (
+            <li data-testid="room-list-archive-entry" className="rounded-2xl border border-border bg-overlay/55 px-3 py-3">
+              <details>
+                <summary className="cursor-pointer text-sm font-semibold text-muted">
+                  Archived rooms ({archivedRooms.length})
+                </summary>
+                <ul className="mt-3 flex flex-col gap-2" aria-label="Archived rooms">
+                  {archivedRooms.map((room) => (
+                    <li key={room.id} className="rounded-xl border border-border/70 bg-surface/70">
+                      <button
+                        type="button"
+                        aria-label={`Open archived room ${room.title}`}
+                        className="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm text-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                        onClick={() => onSelect(room.id)}
+                      >
+                        <span className="min-w-0 truncate font-medium">{room.title}</span>
+                        <span className="shrink-0 text-[11px]">{relativeRoomTime(room)}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            </li>
+          ) : null}
         </ul>
       </ScrollShadow>
     </div>

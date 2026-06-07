@@ -252,6 +252,7 @@ export type RoomViewModel = {
   readonly primaryAgentId?: string | undefined;
   readonly pinnedAt?: number | undefined;
   readonly lastActivityAt?: number | undefined;
+  readonly archivedAt?: number | undefined;
   readonly participants: ParticipantViewModel[];
   readonly participantContactNames: Record<string, string>;
   readonly messages: MessageViewModel[];
