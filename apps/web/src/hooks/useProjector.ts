@@ -333,6 +333,25 @@ class Projector {
         }
         break;
       }
+      case "message.updated": {
+        if (payload && typeof payload.messageId === "string") {
+          const messageId = payload.messageId;
+          room = {
+            ...room,
+            messages: room.messages.map((message) => {
+              if (message.id !== messageId) return message;
+              return {
+                ...message,
+                ...(typeof payload.text === "string" ? { text: payload.text } : {}),
+                ...(typeof payload.pinnedAt === "number" ? { pinnedAt: payload.pinnedAt } : {})
+              };
+            })
+          };
+          this.rooms.set(roomId, room);
+          changed = true;
+        }
+        break;
+      }
       case "message.brief.published": {
         if (payload) {
           const runId = typeof event.runId === "string" ? event.runId : typeof payload.runId === "string" ? payload.runId : "";
@@ -1041,13 +1060,13 @@ class Projector {
       }
       case "deployment.log.appended": {
         if (payload && typeof payload.deploymentId === "string" && typeof payload.line === "string") {
-          room = {
+          room = hydrateRoomMessageParts({
             ...room,
             deploymentLogsById: {
               ...room.deploymentLogsById,
               [payload.deploymentId]: [...(room.deploymentLogsById[payload.deploymentId] ?? []), payload.line]
             }
-          };
+          });
           this.rooms.set(roomId, room);
           changed = true;
         }
@@ -1446,12 +1465,15 @@ function setDeployment(room: RoomViewModel, deployment: DeploymentViewModel): Ro
     ...room.deploymentsById,
     [deployment.id]: deployment
   };
-  const hydratedRoom = { ...room, deploymentsById };
+  return hydrateRoomMessageParts({ ...room, deploymentsById });
+}
+
+function hydrateRoomMessageParts(room: RoomViewModel): RoomViewModel {
   return {
-    ...hydratedRoom,
-    messages: hydratedRoom.messages.map((message) => ({
+    ...room,
+    messages: room.messages.map((message) => ({
       ...message,
-      parts: message.parts.map((part) => hydrateMessagePart(hydratedRoom, part))
+      parts: message.parts.map((part) => hydrateMessagePart(room, part))
     }))
   };
 }
@@ -1472,9 +1494,11 @@ function hydrateMessagePart(room: RoomViewModel, part: MessageViewModel["parts"]
         status: deployment.status,
         url: deployment.url ?? card.url,
         downloadUrl: deployment.downloadUrl ?? card.downloadUrl,
-        imageTag: deployment.imageTag ?? card.imageTag
+        imageTag: deployment.imageTag ?? card.imageTag,
+        lastError: deployment.lastError ?? card.lastError,
+        logs: room.deploymentLogsById[card.deploymentId] ?? card.logs
       }
-    } as MessageViewModel["parts"][number];
+    } as unknown as MessageViewModel["parts"][number];
   }
   if (card.type === "artifact" && typeof card.artifactId === "string") {
     const versions = room.artifactVersionsById[card.artifactId] ?? [];

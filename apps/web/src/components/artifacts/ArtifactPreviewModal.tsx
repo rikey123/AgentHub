@@ -6,6 +6,7 @@ import { extensionToLanguage, normalizePreviewKind as normalizeProtocolPreviewKi
 import { formatBytes } from "../../lib/format.ts";
 
 export type ArtifactPreviewKind = PreviewKind;
+export type ArtifactPreviewTab = "preview" | "editor" | "history" | "raw";
 
 export type ArtifactPreviewModalProps = {
   readonly isOpen: boolean;
@@ -150,6 +151,12 @@ export function normalizePreviewKind(previewKind: string | undefined, mimeType: 
 export function downloadUrlForRawArtifact(rawUrl: string): string {
   const separator = rawUrl.includes("?") ? "&" : "?";
   return rawUrl.includes("download=1") ? rawUrl : `${rawUrl}${separator}download=1`;
+}
+
+export function artifactPreviewTabsFor(input: { readonly type?: string | undefined; readonly kind?: string | undefined; readonly isBinary?: boolean | undefined }): ArtifactPreviewTab[] {
+  const readonlyTypes = new Set(["diff", "worktree_diff", "terminal"]);
+  const hideEditor = readonlyTypes.has(input.type ?? "") || input.isBinary === true || input.kind === "presentation_pptx";
+  return hideEditor ? ["preview", "history", "raw"] : ["preview", "editor", "history", "raw"];
 }
 
 function labelForKind(kind: ArtifactPreviewKind): string {

@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { ArtifactPreviewContent, ArtifactPreviewError, downloadUrlForRawArtifact, normalizePreviewKind } from "./ArtifactPreviewModal.tsx";
+import { ArtifactPreviewContent, ArtifactPreviewError, artifactPreviewTabsFor, downloadUrlForRawArtifact, normalizePreviewKind } from "./ArtifactPreviewModal.tsx";
 
 describe("ArtifactPreviewContent", () => {
   it("renders sandboxed HTML previews", () => {
@@ -87,5 +87,15 @@ describe("ArtifactPreviewContent", () => {
 
     expect(html).toContain("Failed to load");
     expect(html).toContain("Retry");
+  });
+
+  it("shows preview editor history raw tabs for editable text artifacts", () => {
+    expect(artifactPreviewTabsFor({ type: "file", kind: "web_page", isBinary: false })).toEqual(["preview", "editor", "history", "raw"]);
+  });
+
+  it("hides editor for readonly diff terminal and binary artifacts", () => {
+    expect(artifactPreviewTabsFor({ type: "diff", kind: "source_code", isBinary: false })).toEqual(["preview", "history", "raw"]);
+    expect(artifactPreviewTabsFor({ type: "terminal", kind: "generic_file", isBinary: false })).toEqual(["preview", "history", "raw"]);
+    expect(artifactPreviewTabsFor({ type: "file", kind: "presentation_pptx", isBinary: true })).toEqual(["preview", "history", "raw"]);
   });
 });

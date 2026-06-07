@@ -51,7 +51,7 @@ vi.mock("./components/CommandPalette.tsx", () => ({ CommandPalette: () => null }
 vi.mock("./components/KeymapModal.tsx", () => ({ KeymapModal: () => null }));
 vi.mock("./components/NewRoomDialog.tsx", () => ({ NewRoomDialog: mocks.newRoomDialog }));
 
-import App, { ChatRoomLayout } from "./App.tsx";
+import App, { ChatRoomLayout, messagePinRequestFor } from "./App.tsx";
 
 describe("App integration wiring", () => {
   beforeEach(() => {
@@ -116,5 +116,16 @@ describe("App integration wiring", () => {
     expect(html).toContain("min-h-0 flex-1 overflow-hidden");
     expect(html).toContain('data-testid="chat-input-region"');
     expect(html).toContain("shrink-0");
+  });
+
+  it("uses room-scoped pin routes when toggling a message pin", () => {
+    expect(messagePinRequestFor("room-1", "message-pinned", true)).toEqual({
+      url: "/rooms/room-1/messages/message-pinned/pin",
+      method: "DELETE"
+    });
+    expect(messagePinRequestFor("room-1", "message-unpinned", false)).toEqual({
+      url: "/rooms/room-1/messages/message-unpinned/pin",
+      method: "POST"
+    });
   });
 });
