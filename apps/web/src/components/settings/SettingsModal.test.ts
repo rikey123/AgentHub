@@ -16,12 +16,12 @@ import { SkillsTab, createSkill, fetchRuntimeLocalSkills, fetchSkillDetail, impo
 describe("SettingsModal integration contract", () => {
   it("defines the V1.1 top-level tabs with Roles first and Skills included", () => {
     expect(SETTINGS_TABS.map((tab) => tab.label)).toEqual([
-      "Roles",
-      "Runtimes",
-      "Models",
-      "Skills",
-      "Permissions",
-      "Workspace",
+      "角色",
+      "runtimes",
+      "模型",
+      "skills",
+      "许可",
+      "工作区",
       "MCP"
     ]);
     expect(SETTINGS_TABS[0]?.id).toBe("roles");
@@ -224,11 +224,11 @@ describe("SettingsModal integration contract", () => {
     }));
 
     expect(html).toContain("Default Policy");
-    expect(html).toContain("Permission rules");
+    expect(html).toContain("许可 rules");
     expect(html).toContain("src/**");
     expect(html).toContain("allow");
-    expect(html).toContain("Delete Rule");
-    expect(html).toContain("Rule creation is not exposed by the V1.0 daemon API.");
+    expect(html).toContain("删除 Rule");
+    expect(html).toContain("V1.0 daemon API 暂未暴露 rule 创建能力。");
   });
 
   it("renders workspace metadata as read-only when the daemon only exposes GET /workspaces/:id", () => {
@@ -236,9 +236,9 @@ describe("SettingsModal integration contract", () => {
       workspace: { workspace: { id: "ws_1", name: "Workspace", root_path: "C:/project/AgentHub", updated_at: 1234 } }
     }));
 
-    expect(html).toContain("Read-only");
+    expect(html).toContain("只读");
     expect(html).toContain("GET /workspaces/ws_1");
-    expect(html).toContain("No PATCH /workspaces endpoint is exposed in V1.0.");
+    expect(html).toContain("V1.0 未暴露 PATCH /workspaces endpoint。");
     expect(html).toContain("C:/project/AgentHub");
   });
 
@@ -258,7 +258,7 @@ describe("SettingsModal integration contract", () => {
       "room.shell"
     ]);
     for (const tool of ROOM_MCP_TOOLS) expect(html).toContain(tool);
-    expect(html).toContain("Read-only");
+    expect(html).toContain("只读");
   });
 });
 
