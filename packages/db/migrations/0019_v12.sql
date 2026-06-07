@@ -26,6 +26,7 @@ CREATE TABLE artifact_versions (
   created_at       INTEGER NOT NULL,
   created_by       TEXT,
   message          TEXT,
+  FOREIGN KEY (artifact_id) REFERENCES artifacts(id) ON DELETE CASCADE,
   UNIQUE (artifact_id, version),
   CHECK (
     (content_encoding = 'text' AND content IS NOT NULL AND storage_path IS NULL) OR
@@ -41,7 +42,8 @@ CREATE TABLE deployment_providers (
   base_url       TEXT NOT NULL,
   credential_ref TEXT NOT NULL,
   created_at     INTEGER NOT NULL,
-  updated_at     INTEGER NOT NULL
+  updated_at     INTEGER NOT NULL,
+  FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
 );
 
 CREATE TABLE deployments (
@@ -72,7 +74,11 @@ CREATE TABLE deployments (
   cancelled_at         INTEGER,
   expires_at           INTEGER,
   published_at         INTEGER,
-  unpublished_at       INTEGER
+  unpublished_at       INTEGER,
+  FOREIGN KEY (artifact_id) REFERENCES artifacts(id) ON DELETE CASCADE,
+  FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE SET NULL,
+  FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+  FOREIGN KEY (provider_config_id) REFERENCES deployment_providers(id) ON DELETE SET NULL
 );
 
 CREATE TABLE wake_outbox (
@@ -87,5 +93,13 @@ CREATE TABLE wake_outbox (
   last_error     TEXT,
   created_at     INTEGER NOT NULL,
   dispatch_after INTEGER,
-  dispatched_at  INTEGER
+  dispatched_at  INTEGER,
+  FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE,
+  FOREIGN KEY (agent_id) REFERENCES agent_profiles(id) ON DELETE CASCADE
 );
+
+CREATE INDEX idx_artifact_versions_artifact_id ON artifact_versions(artifact_id, version DESC);
+CREATE INDEX idx_deployment_providers_workspace_id ON deployment_providers(workspace_id, kind);
+CREATE INDEX idx_deployments_artifact_id ON deployments(artifact_id, created_at DESC);
+CREATE INDEX idx_deployments_status ON deployments(status, updated_at DESC);
+CREATE INDEX idx_wake_outbox_status_dispatch_after ON wake_outbox(status, dispatch_after, created_at);

@@ -493,6 +493,33 @@ function smokeCrud(tableName: string, insertSql: string, params: readonly unknow
   expect(countRows(tableName)).toBe(0);
 }
 
+function seedV12ParentRows(sqlite: Database.Database, exportName: keyof typeof schema): void {
+  if (exportName === "artifactVersions" || exportName === "deployments") {
+    sqlite
+      .prepare("INSERT OR IGNORE INTO workspaces (id, name, root_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+      .run("ws_drizzle", "Workspace", "/tmp/ws", 1, 1);
+    sqlite
+      .prepare("INSERT OR IGNORE INTO artifacts (id, workspace_id, type, title, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run("art_drizzle", "ws_drizzle", "diff", "Patch", "draft", 1, 1);
+  }
+  if (exportName === "deploymentProviders") {
+    sqlite
+      .prepare("INSERT OR IGNORE INTO workspaces (id, name, root_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+      .run("ws_drizzle", "Workspace", "/tmp/ws", 1, 1);
+  }
+  if (exportName === "wakeOutbox") {
+    sqlite
+      .prepare("INSERT OR IGNORE INTO workspaces (id, name, root_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+      .run("ws_drizzle", "Workspace", "/tmp/ws", 1, 1);
+    sqlite
+      .prepare("INSERT OR IGNORE INTO rooms (id, workspace_id, title, mode, default_context_scope, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run("room_drizzle", "ws_drizzle", "Room", "solo", "room", 1, 1);
+    sqlite
+      .prepare("INSERT OR IGNORE INTO agent_profiles (id, name, adapter_id, role_prompt, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
+      .run("agent_drizzle", "Builder", "mock", "Build", 1, 1);
+  }
+}
+
 function drizzleColumnNames(table: DrizzleTable): string[] {
   return Object.values(getTableColumns(table)).map((column) => column.name).sort();
 }
@@ -698,6 +725,7 @@ describe("Drizzle schema and migration drift contract", () => {
 
     try {
       for (const { exportName, table } of drizzleTables) {
+        seedV12ParentRows(database.sqlite, exportName);
         database.drizzle.insert(table).values(drizzleSmokeRows[exportName]).run();
         const rows = database.drizzle.select().from(table).all();
         expect(rows, `${String(exportName)} select`).toHaveLength(1);
