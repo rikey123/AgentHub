@@ -35,8 +35,8 @@ export type DeploymentViewModel = {
   readonly imageTag?: string | undefined;
   readonly artifactVersion?: number | undefined;
   readonly lastError?: string | undefined;
-  readonly createdAt: number;
-  readonly updatedAt: number;
+  readonly createdAt?: number | undefined;
+  readonly updatedAt?: number | undefined;
 };
 
 export type AgentContactViewModel = {
@@ -78,6 +78,7 @@ export type MessageViewModel = {
   readonly pendingTurnPosition?: number | undefined;
   readonly runId?: string | undefined;
   readonly createdAt: number;
+  readonly pinnedAt?: number | undefined;
 };
 
 export type BriefViewModel = {
@@ -252,6 +253,7 @@ export type RoomViewModel = {
   readonly pinnedAt?: number | undefined;
   readonly lastActivityAt?: number | undefined;
   readonly participants: ParticipantViewModel[];
+  readonly participantContactNames: Record<string, string>;
   readonly messages: MessageViewModel[];
   readonly briefs: BriefViewModel[];
   readonly unresolvedInterventions: InterventionViewModel[];
@@ -261,6 +263,9 @@ export type RoomViewModel = {
   readonly runs: RunViewModel[];
   readonly pendingTurns: MessageViewModel[];
   readonly mailboxFailures: MailboxFailureViewModel[];
+  readonly artifactVersionsById: Record<string, ArtifactVersionViewModel[]>;
+  readonly deploymentsById: Record<string, DeploymentViewModel>;
+  readonly deploymentLogsById: Record<string, string[]>;
   readonly cursor?: string | undefined;
   readonly unreadCount: number;
   // V1.1 additions

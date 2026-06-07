@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { EventEnvelope } from "@agenthub/protocol/events";
 import { EVENT_REGISTRY } from "@agenthub/protocol/events";
-import type { RoomViewModel, ProjectorState, MessageViewModel, BriefViewModel, RunViewModel, PermissionViewModel, InterventionViewModel, TaskActivityViewModel, TaskDelegationViewModel, TaskViewModel, SkillErrorViewModel, TaskFileChangeViewModel, WorktreeReviewViewModel, RoomExecutionPlanViewModel } from "../types.ts";
+import type { RoomViewModel, ProjectorState, MessageViewModel, BriefViewModel, RunViewModel, PermissionViewModel, InterventionViewModel, TaskActivityViewModel, TaskDelegationViewModel, TaskViewModel, SkillErrorViewModel, TaskFileChangeViewModel, WorktreeReviewViewModel, RoomExecutionPlanViewModel, DeploymentViewModel, ArtifactVersionViewModel } from "../types.ts";
 import { ensureAuthSession } from "./useSdk.ts";
 
 type ProjectorListener = (state: ProjectorState) => void;
@@ -210,6 +210,7 @@ class Projector {
         title: roomId,
         mode: "solo",
         participants: [],
+        participantContactNames: {},
         messages: [],
         briefs: [],
         unresolvedInterventions: [],
@@ -219,6 +220,9 @@ class Projector {
         runs: [],
         pendingTurns: [],
         mailboxFailures: [],
+        artifactVersionsById: {},
+        deploymentsById: {},
+        deploymentLogsById: {},
         unreadCount: 0
       };
       this.rooms.set(roomId, room);
@@ -230,7 +234,13 @@ class Projector {
     switch (event.type) {
       case "room.created": {
         if (payload && typeof payload.title === "string") {
-          this.rooms.set(roomId, { ...room, title: payload.title, mode: typeof payload.mode === "string" ? payload.mode : room.mode });
+          this.rooms.set(roomId, {
+            ...room,
+            title: payload.title,
+            mode: typeof payload.mode === "string" ? payload.mode : room.mode,
+            pinnedAt: typeof payload.pinnedAt === "number" ? payload.pinnedAt : room.pinnedAt,
+            lastActivityAt: typeof payload.lastActivityAt === "number" ? payload.lastActivityAt : room.lastActivityAt
+          });
           changed = true;
         }
         break;
@@ -281,7 +291,7 @@ class Projector {
       }
       case "message.part.added": {
         if (payload && typeof payload.messageId === "string" && payload.part && typeof payload.part === "object") {
-          const part = payload.part as MessageViewModel["parts"][number];
+          const part = hydrateMessagePart(room, payload.part as MessageViewModel["parts"][number]);
           room = {
             ...room,
             messages: room.messages.map((m) => {
@@ -920,34 +930,131 @@ class Projector {
         }
         break;
       }
-      case "artifact.diff.detected": {
-        if (payload && typeof payload.artifactId === "string") {
-          // Add a diff card to messages
-          const diffMessage: MessageViewModel = {
-            id: `artifact-${payload.artifactId}`,
-            roomId,
-            senderType: "system",
-            senderId: "system",
-            senderName: "System",
-            role: "system",
-            status: "completed",
-            text: "Artifact diff detected",
-            parts: [{
-              type: "card",
-              seq: 0,
-              card: {
-                type: "diff",
-                artifactId: payload.artifactId,
-                files: Array.isArray(payload.files) ? payload.files : [],
-                applyStatus: "draft"
-              }
-            }],
-            createdAt: event.createdAt
+      case "artifact.version.created": {
+        if (payload && typeof payload.artifactId === "string" && typeof payload.version === "number") {
+          const artifactId = payload.artifactId;
+          const versions = room.artifactVersionsById[artifactId] ?? [];
+          const nextVersion: ArtifactVersionViewModel = {
+            id: typeof payload.artifactVersionId === "string" ? payload.artifactVersionId : `${payload.artifactId}:v${payload.version}`,
+            artifactId,
+            version: payload.version,
+            contentEncoding: payload.contentEncoding === "binary" ? "binary" : "text",
+            createdAt: event.createdAt,
+            createdBy: typeof payload.createdBy === "string" ? payload.createdBy : undefined,
+            message: typeof payload.message === "string" ? payload.message : undefined,
+            storagePath: typeof payload.storagePath === "string" ? payload.storagePath : undefined
           };
-          room = { ...room, messages: [...room.messages, diffMessage] };
+          room = {
+            ...room,
+            artifactVersionsById: {
+              ...room.artifactVersionsById,
+              [artifactId]: [...versions.filter((item) => item.version !== nextVersion.version), nextVersion]
+                .sort((a, b) => a.version - b.version)
+            },
+            messages: room.messages.map((message) => ({
+              ...message,
+              parts: message.parts.map((part) => hydrateMessagePart({
+                ...room,
+                artifactVersionsById: {
+                  ...room.artifactVersionsById,
+                  [artifactId]: [...versions.filter((item) => item.version !== nextVersion.version), nextVersion]
+                    .sort((a, b) => a.version - b.version)
+                }
+              }, part))
+            }))
+          };
           this.rooms.set(roomId, room);
           changed = true;
         }
+        break;
+      }
+      case "deployment.created": {
+        if (
+          payload &&
+          typeof payload.deploymentId === "string" &&
+          typeof payload.artifactId === "string" &&
+          typeof payload.kind === "string" &&
+          typeof payload.provider === "string" &&
+          typeof payload.status === "string"
+        ) {
+          const existing = room.deploymentsById[payload.deploymentId];
+          const deployment: DeploymentViewModel = {
+            ...existing,
+            id: payload.deploymentId,
+            artifactId: payload.artifactId,
+            roomId,
+            workspaceId: typeof payload.workspaceId === "string" ? payload.workspaceId : existing?.workspaceId ?? event.workspaceId,
+            kind: payload.kind as DeploymentViewModel["kind"],
+            provider: payload.provider as DeploymentViewModel["provider"],
+            status: payload.status as DeploymentViewModel["status"],
+            createdAt: existing?.createdAt ?? event.createdAt,
+            updatedAt: event.createdAt
+          };
+          room = setDeployment(room, deployment);
+          this.rooms.set(roomId, room);
+          changed = true;
+        }
+        break;
+      }
+      case "deployment.status.changed":
+      case "deployment.ready":
+      case "deployment.failed":
+      case "deployment.cancelled":
+      case "deployment.expired":
+      case "deployment.unpublished": {
+        if (payload && typeof payload.deploymentId === "string") {
+          const existing = room.deploymentsById[payload.deploymentId];
+          const statusByEvent: Partial<Record<string, DeploymentViewModel["status"]>> = {
+            "deployment.ready": "ready",
+            "deployment.failed": "failed",
+            "deployment.cancelled": "cancelled",
+            "deployment.expired": "expired",
+            "deployment.unpublished": "unpublished"
+          };
+          const status = typeof payload.status === "string"
+            ? payload.status as DeploymentViewModel["status"]
+            : statusByEvent[event.type] ?? existing?.status ?? "queued";
+          const deployment: DeploymentViewModel = {
+            ...(existing ?? {
+              id: payload.deploymentId,
+              artifactId: typeof payload.artifactId === "string" ? payload.artifactId : "",
+              roomId,
+              workspaceId: event.workspaceId,
+              kind: "preview-url",
+              provider: "agenthub-local",
+              status: "queued"
+            }),
+            id: payload.deploymentId,
+            status,
+            url: typeof payload.url === "string" ? payload.url : existing?.url,
+            downloadUrl: typeof payload.downloadUrl === "string" ? payload.downloadUrl : existing?.downloadUrl,
+            imageTag: typeof payload.imageTag === "string" ? payload.imageTag : existing?.imageTag,
+            lastError: typeof payload.error === "string" ? payload.error : existing?.lastError,
+            updatedAt: event.createdAt
+          };
+          room = setDeployment(room, deployment);
+          this.rooms.set(roomId, room);
+          changed = true;
+        }
+        break;
+      }
+      case "deployment.log.appended": {
+        if (payload && typeof payload.deploymentId === "string" && typeof payload.line === "string") {
+          room = {
+            ...room,
+            deploymentLogsById: {
+              ...room.deploymentLogsById,
+              [payload.deploymentId]: [...(room.deploymentLogsById[payload.deploymentId] ?? []), payload.line]
+            }
+          };
+          this.rooms.set(roomId, room);
+          changed = true;
+        }
+        break;
+      }
+      case "artifact.diff.detected": {
+        // Artifact events update artifact state only. Timeline cards are inserted by
+        // message.part.added so replay and live projection follow the same contract.
         break;
       }
       // -----------------------------------------------------------------------
@@ -1143,6 +1250,86 @@ class Projector {
         }
         break;
       }
+      case "room.pinned": {
+        if (payload && typeof payload.pinnedAt === "number") {
+          room = { ...room, pinnedAt: payload.pinnedAt };
+          this.rooms.set(roomId, room);
+          changed = true;
+        }
+        break;
+      }
+      case "room.unpinned": {
+        room = { ...room, pinnedAt: undefined };
+        this.rooms.set(roomId, room);
+        changed = true;
+        break;
+      }
+      case "message.pinned": {
+        if (payload && typeof payload.messageId === "string" && typeof payload.pinnedAt === "number") {
+          const messageId = payload.messageId;
+          const pinnedAt = payload.pinnedAt;
+          room = {
+            ...room,
+            messages: room.messages.map((message) =>
+              message.id === messageId ? { ...message, pinnedAt } : message
+            )
+          };
+          this.rooms.set(roomId, room);
+          changed = true;
+        }
+        break;
+      }
+      case "message.unpinned": {
+        if (payload && typeof payload.messageId === "string") {
+          const messageId = payload.messageId;
+          room = {
+            ...room,
+            messages: room.messages.map((message) =>
+              message.id === messageId ? { ...message, pinnedAt: undefined } : message
+            )
+          };
+          this.rooms.set(roomId, room);
+          changed = true;
+        }
+        break;
+      }
+      case "agent.contact.updated": {
+        if (payload && typeof payload.agentBindingId === "string" && typeof payload.displayName === "string") {
+          const agentBindingId = payload.agentBindingId;
+          const displayName = payload.displayName;
+          room = {
+            ...room,
+            participantContactNames: {
+              ...room.participantContactNames,
+              [agentBindingId]: displayName
+            },
+            participants: room.participants.map((participant) =>
+              participant.agentBindingId === agentBindingId || participant.id === agentBindingId
+                ? { ...participant, name: displayName }
+                : participant
+            )
+          };
+          this.rooms.set(roomId, room);
+          changed = true;
+        }
+        break;
+      }
+      case "task.unblocked": {
+        if (payload && typeof payload.taskId === "string") {
+          const existing = room.tasks.find((task) => task.id === payload.taskId);
+          if (existing) {
+            room = this.upsertTask(room, {
+              ...existing,
+              status: existing.status === "blocked" ? "pending" : existing.status,
+              blockerReason: undefined,
+              lastUnblockedAt: event.createdAt
+            });
+            this.rooms.set(roomId, room);
+            changed = true;
+          }
+        }
+        break;
+      }
       case "room.unstalled": {
         // D4: dismiss stalled banner
         room = { ...room, stalledAt: undefined, stalledTaskIds: undefined, stalledReason: undefined };
@@ -1251,6 +1438,56 @@ function worktreeReview(existing: TaskViewModel["worktreeReviews"], review: Work
   const runId = review.runId.length > 0 ? review.runId : `worktree:${review.artifactId ?? review.updatedAt}`;
   const nextReview = { ...review, runId };
   return [...(existing ?? []).filter((item) => item.runId !== runId), nextReview].sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+function setDeployment(room: RoomViewModel, deployment: DeploymentViewModel): RoomViewModel {
+  const deploymentsById = {
+    ...room.deploymentsById,
+    [deployment.id]: deployment
+  };
+  const hydratedRoom = { ...room, deploymentsById };
+  return {
+    ...hydratedRoom,
+    messages: hydratedRoom.messages.map((message) => ({
+      ...message,
+      parts: message.parts.map((part) => hydrateMessagePart(hydratedRoom, part))
+    }))
+  };
+}
+
+function hydrateMessagePart(room: RoomViewModel, part: MessageViewModel["parts"][number]): MessageViewModel["parts"][number] {
+  if (part.type !== "card") return part;
+  const card = part.card as Record<string, unknown>;
+  if (card.type === "deployment" && typeof card.deploymentId === "string") {
+    const deployment = room.deploymentsById[card.deploymentId];
+    if (!deployment) return part;
+    return {
+      ...part,
+      card: {
+        ...card,
+        artifactId: deployment.artifactId || card.artifactId,
+        kind: deployment.kind || card.kind,
+        provider: deployment.provider || card.provider,
+        status: deployment.status,
+        url: deployment.url ?? card.url,
+        downloadUrl: deployment.downloadUrl ?? card.downloadUrl,
+        imageTag: deployment.imageTag ?? card.imageTag
+      }
+    } as MessageViewModel["parts"][number];
+  }
+  if (card.type === "artifact" && typeof card.artifactId === "string") {
+    const versions = room.artifactVersionsById[card.artifactId] ?? [];
+    const latest = versions.at(-1);
+    if (!latest) return part;
+    return {
+      ...part,
+      card: {
+        ...card,
+        version: latest.version
+      }
+    } as MessageViewModel["parts"][number];
+  }
+  return part;
 }
 
 const globalProjector = new Projector();

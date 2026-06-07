@@ -158,6 +158,7 @@ function roomFixture(patch: Partial<RoomViewModel>): RoomViewModel {
     mode: "team",
     primaryAgentId: undefined,
     participants: [],
+    participantContactNames: {},
     messages: [],
     briefs: [],
     unresolvedInterventions: [],
@@ -167,6 +168,9 @@ function roomFixture(patch: Partial<RoomViewModel>): RoomViewModel {
     runs: [],
     pendingTurns: [],
     mailboxFailures: [],
+    artifactVersionsById: {},
+    deploymentsById: {},
+    deploymentLogsById: {},
     unreadCount: 0,
     ...patch
   };
