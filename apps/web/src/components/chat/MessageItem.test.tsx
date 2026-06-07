@@ -110,6 +110,29 @@ describe("MessageItem public chat rendering", () => {
     expect(html).toContain("Copy code block");
   });
 
+  it("renders Markdown fenced code blocks with Copy Code actions", () => {
+    const html = renderToStaticMarkup(createElement(MessageItem, {
+      message: messageFixture({
+        text: [
+          "Use this endpoint:",
+          "",
+          "```ts",
+          "const apiBase = '/api/v2';",
+          "```",
+          "",
+          "Then send requests through it."
+        ].join("\n")
+      }),
+      csrfFetch: vi.fn<typeof fetch>()
+    }));
+
+    expect(html).toContain("Use this endpoint:");
+    expect(html).toContain("const apiBase = &#x27;/api/v2&#x27;;");
+    expect(html).toContain("Copy Code");
+    expect(html).toContain("Copy code block");
+    expect(html).not.toContain("```ts");
+  });
+
   it("does not expose the message wrapper as a button when nested actions render", () => {
     const html = renderToStaticMarkup(createElement(MessageItem, {
       message: messageFixture({

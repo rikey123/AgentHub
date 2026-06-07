@@ -95,9 +95,7 @@ export function MessageItem(props: MessageItemProps) {
             ) : null}
 
             {message.text ? (
-              <p className={["whitespace-pre-wrap break-words", isStreaming ? "ah-streaming-caret" : ""].join(" ")}>
-                {visibleText}
-              </p>
+              <MessageTextView text={visibleText} isStreaming={isStreaming} />
             ) : null}
 
             {textPreview.collapsed ? (
@@ -176,8 +174,58 @@ export function MessageItem(props: MessageItemProps) {
   );
 }
 
+type MessageTextSegment =
+  | { readonly type: "text"; readonly text: string }
+  | { readonly type: "code"; readonly lang: string; readonly text: string };
+
+export function parseMarkdownFencedCode(text: string): MessageTextSegment[] {
+  const segments: MessageTextSegment[] = [];
+  const fencePattern = /^```([^\r\n`]*)\r?\n([\s\S]*?)\r?\n```[ \t]*$/gm;
+  let lastIndex = 0;
+
+  for (const match of text.matchAll(fencePattern)) {
+    const index = match.index ?? 0;
+    if (index > lastIndex) {
+      segments.push({ type: "text", text: text.slice(lastIndex, index) });
+    }
+    segments.push({
+      type: "code",
+      lang: match[1]?.trim() || "code",
+      text: match[2] ?? ""
+    });
+    lastIndex = index + match[0].length;
+  }
+
+  if (lastIndex < text.length) {
+    segments.push({ type: "text", text: text.slice(lastIndex) });
+  }
+
+  return segments.length > 0 ? segments : [{ type: "text", text }];
+}
+
+function MessageTextView({ text, isStreaming }: { readonly text: string; readonly isStreaming: boolean }) {
+  const segments = parseMarkdownFencedCode(text);
+
+  return (
+    <div className={["flex flex-col gap-2", isStreaming ? "ah-streaming-caret" : ""].join(" ")}>
+      {segments.map((segment, index) => {
+        if (segment.type === "code") {
+          return <CodePartView key={index} part={{ type: "code", seq: index + 1, lang: segment.lang, text: segment.text }} />;
+        }
+
+        return segment.text.trim().length > 0 ? (
+          <p key={index} className="whitespace-pre-wrap break-words">
+            {segment.text.trim()}
+          </p>
+        ) : null;
+      })}
+    </div>
+  );
+}
+
 function publicAgentTextPreview(text: string, senderType: MessageViewModel["senderType"], isStreaming: boolean): { collapsed: boolean; preview: string } {
   if (senderType !== "agent") return { collapsed: false, preview: text };
+  if (hasMarkdownFencedCode(text)) return { collapsed: false, preview: text };
   const contentLines = text.split(/\r?\n/).filter((line) => line.trim().length > 0);
   const shouldCollapse = text.length > 640 || contentLines.length > 4;
   if (!shouldCollapse) return { collapsed: false, preview: text };
@@ -205,6 +253,10 @@ function publicAgentTextPreview(text: string, senderType: MessageViewModel["send
     previewLines.push(line);
   }
   return { collapsed: true, preview: `${previewLines.join("\n").trimEnd()}...` };
+}
+
+function hasMarkdownFencedCode(text: string): boolean {
+  return /^```[^\r\n`]*\r?\n[\s\S]*?\r?\n```[ \t]*$/m.test(text);
 }
 
 function PartView({ part, csrfFetch }: { part: MessageViewModel["parts"][number]; csrfFetch: typeof fetch }) {
