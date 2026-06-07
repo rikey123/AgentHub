@@ -36,12 +36,12 @@ describe("TasksPanel V1.1 Kanban task view contract", () => {
     }));
 
     expect(html).toContain("data-testid=\"tasks-panel-list\"");
-    expect(html).toContain("Open Kanban");
+    expect(html).toContain("打开看板");
     expect(html).toContain("Prepare plan");
     expect(html).toContain("Build panel");
-    expect(html).toContain("Board health");
-    expect(html).toContain("Standup brief");
-    expect(html).toContain("Blockers first");
+    expect(html).toContain("看板概览");
+    expect(html).toContain("任务简报");
+    expect(html).toContain("优先处理阻塞项");
     expect(html).not.toContain("data-testid=\"tasks-panel-kanban\"");
   });
 
@@ -121,8 +121,8 @@ describe("TasksPanel V1.1 Kanban task view contract", () => {
     ];
 
     expect(taskBoardBrief(tasks)).toEqual({
-      standup: "1 active, 1 blocked, 1 waiting on dependencies",
-      review: "Completed: 1. Carry-over: 4. Blocked: 1.",
+      standup: "1 个进行中，1 个阻塞，1 个等待前置任务",
+      review: "已完成：1。未完成：4。阻塞：1。",
       blockers: [{ id: "blocked", title: "Resolve keychain", reason: "Missing API key" }]
     });
   });
@@ -252,7 +252,7 @@ describe("TasksPanel V1.1 Kanban task view contract", () => {
       headers: { "content-type": "application/json" }
     });
 
-    await expect(taskBoardResponseError(response, "Move task failed")).resolves.toBe("invalid board column");
+    await expect(taskBoardResponseError(response, "移动任务失败")).resolves.toBe("invalid board column");
   });
 });
 
