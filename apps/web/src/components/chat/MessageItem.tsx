@@ -6,10 +6,18 @@ import { pendingTurnColor } from "../../lib/status.ts";
 import { CardRenderer } from "../cards/CardRenderer.tsx";
 import { ArtifactPreviewModal, normalizePreviewKind } from "../artifacts/ArtifactPreviewModal.tsx";
 
+export type QuotedMessagePreview = {
+  readonly id: string;
+  readonly senderName: string;
+  readonly preview: string;
+};
+
 interface MessageItemProps {
   message: MessageViewModel;
+  quotedMessage?: QuotedMessagePreview | undefined;
   isSelected?: boolean | undefined;
   onSelect?: (() => void) | undefined;
+  onOpenQuotedMessage?: ((id: string) => void) | undefined;
   onOpenRun?: ((runId: string) => void) | undefined;
   onReply?: (() => void) | undefined;
   onQuote?: (() => void) | undefined;
@@ -22,7 +30,7 @@ interface MessageItemProps {
 }
 
 export function MessageItem(props: MessageItemProps) {
-  const { message, isSelected, onSelect, onOpenRun, onReply, onQuote, onPin, onRegenerate, onDelete, onCancelPending, onEditPending, csrfFetch } = props;
+  const { message, quotedMessage, isSelected, onSelect, onOpenQuotedMessage, onOpenRun, onReply, onQuote, onPin, onRegenerate, onDelete, onCancelPending, onEditPending, csrfFetch } = props;
   const [expanded, setExpanded] = useState(false);
 
   const isUser = message.senderType === "user";
@@ -88,11 +96,12 @@ export function MessageItem(props: MessageItemProps) {
             ].join(" ")}
           >
             {message.quotedMessageId ? (
-              <Card variant="transparent" className={["mb-2 border-l-2 pl-2", isUser ? "border-accent-foreground/70 bg-white/10" : "border-accent bg-accent-soft"].join(" ")}>
-                <Card.Description className={["text-xs", isUser ? "text-accent-foreground/85" : ""].join(" ")}>
-                  引用 {message.quotedMessageId.slice(0, 8)}
-                </Card.Description>
-              </Card>
+              <QuotedMessageBubble
+                quotedMessageId={message.quotedMessageId}
+                quotedMessage={quotedMessage}
+                isUser={isUser}
+                onOpenQuotedMessage={onOpenQuotedMessage}
+              />
             ) : null}
 
             {message.text ? (
@@ -173,6 +182,39 @@ export function MessageItem(props: MessageItemProps) {
         ) : null}
       </div>
     </div>
+  );
+}
+
+function QuotedMessageBubble(props: {
+  readonly quotedMessageId: string;
+  readonly quotedMessage?: QuotedMessagePreview | undefined;
+  readonly isUser: boolean;
+  readonly onOpenQuotedMessage?: ((id: string) => void) | undefined;
+}) {
+  const targetId = props.quotedMessage?.id ?? props.quotedMessageId;
+  const senderName = props.quotedMessage?.senderName ?? "Quoted message";
+  const preview = props.quotedMessage?.preview || props.quotedMessageId.slice(0, 8);
+
+  return (
+    <button
+      type="button"
+      className={[
+        "mb-2 block max-w-full rounded-lg border-l-2 px-2 py-1.5 text-left text-xs leading-5 transition-colors",
+        props.isUser
+          ? "border-accent-foreground/70 bg-white/10 text-accent-foreground/90 hover:bg-white/15"
+          : "border-accent bg-accent-soft text-muted hover:bg-accent-soft/80"
+      ].join(" ")}
+      data-message-action
+      data-quoted-message-id={targetId}
+      aria-label={`Open quoted message from ${senderName}`}
+      onClick={(event) => {
+        event.stopPropagation();
+        props.onOpenQuotedMessage?.(targetId);
+      }}
+    >
+      <span className="block truncate font-semibold">{senderName}</span>
+      <span className="block truncate">{preview}</span>
+    </button>
   );
 }
 

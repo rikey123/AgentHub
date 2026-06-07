@@ -4,6 +4,18 @@ import { describe, expect, it, vi } from "vitest";
 import type { RoomViewModel } from "../../types.ts";
 import { ChatStream, activeRunIndicatorProps, buildChatFeedItems, latestRegenerableAgentMessageId, pinnedMessagesForDrawer } from "./ChatStream.tsx";
 
+vi.mock("@tanstack/react-virtual", () => ({
+  useVirtualizer: ({ count, estimateSize }: { readonly count: number; readonly estimateSize: () => number }) => {
+    const size = estimateSize();
+    return {
+      getTotalSize: () => count * size,
+      getVirtualItems: () => Array.from({ length: count }, (_, index) => ({ index, start: index * size })),
+      measureElement: () => undefined,
+      scrollToIndex: () => undefined
+    };
+  }
+}));
+
 describe("ChatStream task notification feed", () => {
   it("keeps delegated task updates out of the main chat feed", () => {
     const room = roomFixture({
@@ -223,6 +235,48 @@ describe("ChatStream task notification feed", () => {
 
     expect(html).toContain("@artifact:artifact_large");
     expect(html).toContain("Content compacted");
+  });
+
+  it("renders quoted replies with the original sender summary and jump target", () => {
+    const html = renderToStaticMarkup(createElement(ChatStream, {
+      room: roomFixture({
+        messages: [
+          messageFixture({
+            id: "source-message",
+            senderType: "agent",
+            senderName: "Builder",
+            text: "API base path is /api/v2.",
+            createdAt: 100
+          }),
+          messageFixture({
+            id: "reply-message",
+            senderType: "user",
+            senderName: "You",
+            text: "Use that path for the client.",
+            quotedMessageId: "source-message",
+            createdAt: 200
+          })
+        ]
+      }),
+      onSelectMessage: vi.fn(),
+      onOpenRun: vi.fn(),
+      onReply: vi.fn(),
+      onQuote: vi.fn(),
+      onPin: vi.fn(),
+      onRegenerate: vi.fn(),
+      onDelete: vi.fn(),
+      onOpenTask: vi.fn(),
+      onOpenTasks: vi.fn(),
+      onCancelPending: vi.fn(),
+      onEditPending: vi.fn(),
+      csrfFetch: vi.fn<typeof fetch>(),
+      connectionStatus: "connected"
+    }));
+
+    expect(html).toContain("data-quoted-message-id=\"source-message\"");
+    expect(html).toContain("aria-label=\"Open quoted message from Builder\"");
+    expect(html).toMatch(/<button[^>]+data-quoted-message-id="source-message"[^>]*>[\s\S]*Builder[\s\S]*API base path is \/api\/v2\./);
+    expect(html).not.toContain("引用 source-m");
   });
 
   it("identifies only the latest completed agent message as regenerable", () => {

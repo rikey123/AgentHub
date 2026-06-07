@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Button, ScrollShadow, Skeleton } from "@heroui/react";
 import type { RoomViewModel } from "../../types.ts";
-import { MessageItem } from "./MessageItem.tsx";
+import { MessageItem, type QuotedMessagePreview } from "./MessageItem.tsx";
 import { BriefItem } from "./BriefItem.tsx";
 import { TypingIndicator } from "./TypingIndicator.tsx";
 import { ConnectionBanner } from "./ConnectionBanner.tsx";
@@ -86,6 +86,38 @@ export function latestRegenerableAgentMessageId(messages: RoomViewModel["message
   return latest?.id;
 }
 
+export function quotedMessagePreviewFor(message: RoomViewModel["messages"][number] | undefined): QuotedMessagePreview | undefined {
+  if (message === undefined) return undefined;
+  return {
+    id: message.id,
+    senderName: message.senderName,
+    preview: messageSummaryText(message)
+  };
+}
+
+function messageSummaryText(message: RoomViewModel["messages"][number]): string {
+  const text = message.text.trim().replace(/\s+/g, " ");
+  if (text.length > 0) return truncateQuotedPreview(text, 96);
+
+  for (const part of message.parts) {
+    if (part.type === "text" && part.text.trim().length > 0) return truncateQuotedPreview(part.text.trim().replace(/\s+/g, " "), 96);
+    if (part.type === "code") return `${part.lang || "code"} code block`;
+    if (part.type === "attachment") return part.name;
+    if (part.type === "card") {
+      const card = part.card as Record<string, unknown>;
+      if (typeof card.title === "string" && card.title.trim().length > 0) return card.title.trim();
+      if (typeof card.filename === "string" && card.filename.trim().length > 0) return card.filename.trim();
+      if (typeof card.type === "string" && card.type.trim().length > 0) return `${card.type} card`;
+    }
+  }
+
+  return "Quoted message";
+}
+
+function truncateQuotedPreview(text: string, maxLength: number): string {
+  return text.length > maxLength ? `${text.slice(0, maxLength - 3).trimEnd()}...` : text;
+}
+
 export function ChatStream(props: ChatStreamProps) {
   const { room } = props;
 
@@ -134,6 +166,7 @@ export function ChatStream(props: ChatStreamProps) {
   const activeIndicator = activeRunIndicatorProps(room);
   const pinnedMessages = useMemo(() => pinnedMessagesForDrawer(room), [room.messages]);
   const regenerableMessageId = useMemo(() => latestRegenerableAgentMessageId(room.messages), [room.messages]);
+  const messagesById = useMemo(() => new Map(room.messages.map((message) => [message.id, message])), [room.messages]);
   const [dismissedFailures, setDismissedFailures] = useState<Set<string>>(() => new Set());
   const visibleFailures = useMemo(
     () => room.mailboxFailures.filter((f) => !dismissedFailures.has(f.id)),
@@ -205,8 +238,10 @@ export function ChatStream(props: ChatStreamProps) {
                     {item.kind === "message" ? (
                       <MessageItem
                         message={item.data}
+                        quotedMessage={quotedMessagePreviewFor(item.data.quotedMessageId ? messagesById.get(item.data.quotedMessageId) : undefined)}
                         isSelected={item.id === props.selectedMessageId}
                         onSelect={() => props.onSelectMessage(item.id)}
+                        onOpenQuotedMessage={(id) => props.onSelectMessage(id)}
                         onOpenRun={(runId) => props.onOpenRun(runId)}
                         onReply={() => props.onReply(item.id)}
                         onQuote={() => props.onQuote(item.id)}
