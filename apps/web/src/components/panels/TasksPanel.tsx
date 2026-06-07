@@ -35,12 +35,12 @@ export type TaskStatusGroup = (typeof KANBAN_COLUMNS)[number] & {
 };
 
 export const TASK_BOARD_FILTERS = [
-  { key: "all", label: "All" },
-  { key: "blocked", label: "Blocked" },
-  { key: "review", label: "Review" },
-  { key: "waiting", label: "Waiting" },
-  { key: "ready", label: "Ready" },
-  { key: "files", label: "Changed files" }
+  { key: "all", label: "全部" },
+  { key: "blocked", label: "阻塞" },
+  { key: "review", label: "待评审" },
+  { key: "waiting", label: "等待中" },
+  { key: "ready", label: "可应用" },
+  { key: "files", label: "变更文件" }
 ] as const;
 
 export type TaskBoardFilter = (typeof TASK_BOARD_FILTERS)[number]["key"];
@@ -173,8 +173,8 @@ export function taskBoardBrief(tasks: ReadonlyArray<TaskViewModel>): TaskBoardBr
   const visible = tasks.filter((task) => taskColumn(task) !== undefined);
   const carryOver = visible.filter((task) => task.status !== "completed").length;
   return {
-    standup: `${summary.active} active, ${summary.blocked} blocked, ${summary.waitingDependencies} waiting on dependencies`,
-    review: `Completed: ${summary.done}. Carry-over: ${carryOver}. Blocked: ${summary.blocked}.`,
+    standup: `${summary.active} 个进行中，${summary.blocked} 个阻塞，${summary.waitingDependencies} 个等待前置任务`,
+    review: `已完成：${summary.done}。未完成：${carryOver}。阻塞：${summary.blocked}。`,
     blockers: attentionTasks(visible, tasks)
       .filter(isBlockedTask)
       .map((task) => ({
@@ -208,10 +208,10 @@ export function taskUpdatedAt(task: TaskViewModel): number | undefined {
 }
 
 export function summarizeTaskActivityPayload(payload: unknown): string {
-  if (payload === null || payload === undefined) return "No payload";
+  if (payload === null || payload === undefined) return "无 payload";
   if (typeof payload === "string") return payload;
   if (typeof payload === "number" || typeof payload === "boolean") return String(payload);
-  if (!isRecord(payload)) return "Payload recorded";
+  if (!isRecord(payload)) return "已记录 payload";
 
   const preferredKeys = ["comment", "message", "summary", "reason", "status", "artifactPath", "artifactId", "runId", "blocker", "blockerReason", "text"];
   for (const key of preferredKeys) {
@@ -222,7 +222,7 @@ export function summarizeTaskActivityPayload(payload: unknown): string {
   return Object.entries(payload)
     .slice(0, 3)
     .map(([key, value]) => `${key}: ${String(value)}`)
-    .join(" / ") || "Payload recorded";
+    .join(" / ") || "已记录 payload";
 }
 
 export function unresolvedDependencyCount(task: TaskViewModel, tasks: ReadonlyArray<TaskViewModel>): number {
@@ -353,7 +353,7 @@ export function TasksPanel({ roomId, tasks, csrfFetch, executionPlan, onOpenArti
     let cancelled = false;
     void csrfFetch(`/rooms/${encodeURIComponent(roomId)}/task-plans/latest`)
       .then(async (response) => {
-        if (!response.ok) throw new Error(await taskBoardResponseError(response, "Load execution plan failed"));
+        if (!response.ok) throw new Error(await taskBoardResponseError(response, "加载执行计划失败"));
         return response.json() as Promise<unknown>;
       })
       .then((payload) => {
@@ -380,7 +380,7 @@ export function TasksPanel({ roomId, tasks, csrfFetch, executionPlan, onOpenArti
       body: JSON.stringify({ column: targetColumn })
     })
       .then(async (response) => {
-        if (!response.ok) throw new Error(await taskBoardResponseError(response, "Move task failed"));
+        if (!response.ok) throw new Error(await taskBoardResponseError(response, "移动任务失败"));
       })
       .catch((error: unknown) => setActionError(error instanceof Error ? error.message : String(error)));
   };
@@ -399,10 +399,10 @@ export function TasksPanel({ roomId, tasks, csrfFetch, executionPlan, onOpenArti
         ) : null}
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h2 className="text-sm font-semibold">Tasks</h2>
-            <p className="text-xs text-muted">{visibleTasks.length} active task{visibleTasks.length === 1 ? "" : "s"}</p>
+            <h2 className="text-sm font-semibold">任务</h2>
+            <p className="text-xs text-muted">{visibleTasks.length} 个当前任务</p>
           </div>
-          <Button size="sm" variant="secondary" onPress={() => setKanbanOpen(true)}>Open Kanban</Button>
+          <Button size="sm" variant="secondary" onPress={() => setKanbanOpen(true)}>打开看板</Button>
         </div>
         <BoardHealthStrip summary={summary} compact />
         <BoardBriefCard brief={brief} attention={attention} allTasks={tasks} onOpenTask={setSelectedTaskId} compact />
@@ -411,13 +411,13 @@ export function TasksPanel({ roomId, tasks, csrfFetch, executionPlan, onOpenArti
       </div>
       <Modal.Backdrop isOpen={kanbanOpen} onOpenChange={setKanbanOpen}>
         <Modal.Container size="cover" className="items-center justify-center p-3">
-          <Modal.Dialog className="flex h-[min(92vh,920px)] w-[min(98vw,1480px)] max-w-[1480px] overflow-hidden p-0" aria-label="Task Kanban board">
-            <Modal.CloseTrigger aria-label="Close Kanban board" />
+          <Modal.Dialog className="flex h-[min(92vh,920px)] w-[min(98vw,1480px)] max-w-[1480px] overflow-hidden p-0" aria-label="任务看板">
+            <Modal.CloseTrigger aria-label="关闭任务看板" />
             <Modal.Header className="border-b border-border px-4 py-3">
               <div className="flex w-full min-w-0 flex-wrap items-start justify-between gap-3 pr-8">
                 <div className="min-w-0">
-                  <Modal.Heading>Task Board</Modal.Heading>
-                  <p className="mt-1 text-xs text-muted">{boardVisibleTasks.length} shown from {visibleTasks.length} active task{visibleTasks.length === 1 ? "" : "s"}</p>
+                  <Modal.Heading>任务看板</Modal.Heading>
+                  <p className="mt-1 text-xs text-muted">显示 {boardVisibleTasks.length} 个，共 {visibleTasks.length} 个当前任务</p>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {TASK_BOARD_FILTERS.map((filter) => (
@@ -471,25 +471,25 @@ export function TasksPanel({ roomId, tasks, csrfFetch, executionPlan, onOpenArti
 
 function BoardHealthStrip({ summary, compact = false }: { summary: TaskBoardSummary; compact?: boolean | undefined }) {
   const metrics = [
-    { key: "active", label: "Active", value: summary.active, detail: `${summary.runningRuns} running run${summary.runningRuns === 1 ? "" : "s"}`, color: "accent" as ChipColor },
-    { key: "blocked", label: "Blocked", value: summary.blocked, detail: "Needs attention", color: "danger" as ChipColor },
-    { key: "review", label: "Review", value: summary.review, detail: "Awaiting decision", color: "warning" as ChipColor },
-    { key: "ready", label: "Ready", value: summary.readyToApply, detail: "Worktree apply", color: "success" as ChipColor },
-    { key: "conflicts", label: "Conflicts", value: summary.conflicts, detail: "Merge pressure", color: "danger" as ChipColor },
-    { key: "files", label: "Files", value: summary.filesChanged, detail: "Changed tasks", color: "default" as ChipColor },
-    { key: "waiting", label: "Waiting", value: summary.waitingDependencies, detail: "Dependency waits", color: "warning" as ChipColor }
+    { key: "active", label: "进行中", value: summary.active, detail: `${summary.runningRuns} 个运行中的 run`, color: "accent" as ChipColor },
+    { key: "blocked", label: "阻塞", value: summary.blocked, detail: "需要关注", color: "danger" as ChipColor },
+    { key: "review", label: "待评审", value: summary.review, detail: "等待确认", color: "warning" as ChipColor },
+    { key: "ready", label: "可应用", value: summary.readyToApply, detail: "Worktree 可应用", color: "success" as ChipColor },
+    { key: "conflicts", label: "冲突", value: summary.conflicts, detail: "需要处理", color: "danger" as ChipColor },
+    { key: "files", label: "变更", value: summary.filesChanged, detail: "包含文件变更", color: "default" as ChipColor },
+    { key: "waiting", label: "等待中", value: summary.waitingDependencies, detail: "前置任务未完成", color: "warning" as ChipColor }
   ];
   const shown = compact ? metrics.slice(0, 5) : metrics;
 
   return (
-    <section className="rounded-xl border border-border bg-surface-secondary/70 px-3 py-3" aria-label="Board health">
+    <section className="rounded-xl border border-border bg-surface-secondary/70 px-3 py-3" aria-label="看板概览">
       <div className="mb-2 flex items-center justify-between gap-2">
         <div>
-          <h3 className="text-xs font-semibold uppercase text-muted">Board health</h3>
-          <p className="text-xs text-muted">{summary.visible} visible / {summary.total} total</p>
+          <h3 className="text-xs font-semibold uppercase text-muted">看板概览</h3>
+          <p className="text-xs text-muted">显示 {summary.visible} 个 / 共 {summary.total} 个</p>
         </div>
         <Chip size="sm" variant="soft" color={summary.blocked > 0 || summary.conflicts > 0 ? "danger" : summary.review > 0 ? "warning" : "success"}>
-          {summary.blocked > 0 || summary.conflicts > 0 ? "Attention" : summary.review > 0 ? "Review" : "Healthy"}
+          {summary.blocked > 0 || summary.conflicts > 0 ? "需关注" : summary.review > 0 ? "待评审" : "正常"}
         </Chip>
       </div>
       <div className={`grid gap-2 ${compact ? "grid-cols-2 sm:grid-cols-5" : "grid-cols-2 md:grid-cols-4 xl:grid-cols-7"}`}>
@@ -513,21 +513,21 @@ function BoardBriefCard({ brief, attention, allTasks, onOpenTask, compact = fals
   return (
     <Card variant="transparent" className="border border-border bg-surface">
       <Card.Header className="gap-1">
-        <Card.Title className="text-sm">Standup brief</Card.Title>
+        <Card.Title className="text-sm">任务简报</Card.Title>
         <Card.Description className="text-xs">{brief.standup}</Card.Description>
       </Card.Header>
       <Card.Content className="flex flex-col gap-3">
         <div className="rounded-lg border border-border bg-surface-secondary px-3 py-2">
-          <div className="mb-1 text-xs font-semibold uppercase text-muted">Weekly review</div>
+          <div className="mb-1 text-xs font-semibold uppercase text-muted">任务回顾</div>
           <p className="text-sm">{brief.review}</p>
         </div>
         <div>
           <div className="mb-2 flex items-center justify-between gap-2">
-            <h3 className="text-xs font-semibold uppercase text-muted">Blockers first</h3>
+            <h3 className="text-xs font-semibold uppercase text-muted">优先处理阻塞项</h3>
             <Chip size="sm" variant="soft" color={brief.blockers.length > 0 ? "danger" : "success"}>{brief.blockers.length}</Chip>
           </div>
           {shownAttention.length === 0 ? (
-            <p className="rounded-lg border border-dashed border-border bg-surface-secondary px-3 py-4 text-center text-xs text-muted">No blocked or high-pressure tasks.</p>
+            <p className="rounded-lg border border-dashed border-border bg-surface-secondary px-3 py-4 text-center text-xs text-muted">暂无需要优先关注的任务。</p>
           ) : (
             <ul className="flex flex-col gap-2">
               {shownAttention.map((task) => (
@@ -553,7 +553,7 @@ function BoardAttentionItem({ task, allTasks, onOpenTask }: { task: TaskViewMode
         type="button"
         className="w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-left transition-colors hover:bg-surface"
         onClick={() => onOpenTask(task.id)}
-        aria-label={`Open task ${task.title}`}
+        aria-label={`打开任务 ${task.title}`}
       >
         <div className="flex min-w-0 items-start gap-2">
           <Chip size="sm" variant="soft" color={attentionColor(task)}>{attentionLabel(task)}</Chip>
@@ -563,10 +563,10 @@ function BoardAttentionItem({ task, allTasks, onOpenTask }: { task: TaskViewMode
           </div>
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted">
-          {unresolved > 0 ? <Chip size="sm" variant="soft" color="warning">waiting {unresolved}</Chip> : null}
-          {fileCount > 0 ? <Chip size="sm" variant="soft" color="default">{fileCount} files</Chip> : null}
-          {worktree?.status === "ready_for_review" ? <Chip size="sm" variant="soft" color="success">ready</Chip> : null}
-          {worktree?.status === "conflict" ? <Chip size="sm" variant="soft" color="danger">conflict</Chip> : null}
+          {unresolved > 0 ? <Chip size="sm" variant="soft" color="warning">前置未完成 {unresolved}</Chip> : null}
+          {fileCount > 0 ? <Chip size="sm" variant="soft" color="default">{fileCount} 个文件</Chip> : null}
+          {worktree?.status === "ready_for_review" ? <Chip size="sm" variant="soft" color="success">可应用</Chip> : null}
+          {worktree?.status === "conflict" ? <Chip size="sm" variant="soft" color="danger">冲突</Chip> : null}
           <span className="ml-auto">{updatedAt ? formatRelativeTime(updatedAt) : "-"}</span>
         </div>
       </button>
@@ -577,7 +577,7 @@ function BoardAttentionItem({ task, allTasks, onOpenTask }: { task: TaskViewMode
 function TaskList({ groups, allTasks, onOpenTask }: { groups: readonly TaskStatusGroup[]; allTasks: ReadonlyArray<TaskViewModel>; onOpenTask: (taskId: string) => void }) {
   const nonEmptyGroups = groups.filter((group) => group.items.length > 0);
   if (nonEmptyGroups.length === 0) {
-    return <div className="rounded-xl border border-dashed border-border bg-surface p-4 text-center text-sm text-muted">No active tasks.</div>;
+    return <div className="rounded-xl border border-dashed border-border bg-surface p-4 text-center text-sm text-muted">暂无当前任务。</div>;
   }
 
   return (
@@ -585,7 +585,7 @@ function TaskList({ groups, allTasks, onOpenTask }: { groups: readonly TaskStatu
       {nonEmptyGroups.map((group) => (
         <section key={group.key} className="rounded-xl border border-border bg-surface-secondary/60">
           <header className="flex items-center gap-2 border-b border-border px-3 py-2">
-            <h3 className="min-w-0 flex-1 truncate text-xs font-semibold uppercase text-muted">{group.label}</h3>
+            <h3 className="min-w-0 flex-1 truncate text-xs font-semibold uppercase text-muted">{kanbanColumnDisplayLabel(group.label)}</h3>
             <Chip size="sm" variant="soft" color="default">{group.items.length}</Chip>
           </header>
           <div className="flex flex-col divide-y divide-border">
@@ -601,7 +601,7 @@ function TaskList({ groups, allTasks, onOpenTask }: { groups: readonly TaskStatu
 
 function TaskListRow({ task, allTasks, onOpen }: { task: TaskViewModel; allTasks: ReadonlyArray<TaskViewModel>; onOpen: () => void }) {
   const updatedAt = taskUpdatedAt(task);
-  const assignee = task.assigneeRoleId ?? task.assigneeAgentId ?? "Unassigned";
+  const assignee = task.assigneeRoleId ?? task.assigneeAgentId ?? "未分配";
   const assigneeLabel = roleDisplayName(assignee) || assignee;
   const unresolved = unresolvedDependencyCount(task, allTasks);
   const fileCount = aggregateFileChanges(task);
@@ -609,23 +609,23 @@ function TaskListRow({ task, allTasks, onOpen }: { task: TaskViewModel; allTasks
   const turnCount = task.delegations?.filter((delegation) => delegation.runId !== undefined).length ?? 0;
 
   return (
-    <button type="button" className="grid w-full gap-2 px-3 py-3 text-left hover:bg-surface sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center" onClick={onOpen} aria-label={`Open task ${task.title}`}>
+    <button type="button" className="grid w-full gap-2 px-3 py-3 text-left hover:bg-surface sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center" onClick={onOpen} aria-label={`打开任务 ${task.title}`}>
       <div className="min-w-0">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <span className="min-w-0 truncate text-sm font-semibold">{task.title}</span>
-          <Chip size="sm" variant="soft" color={taskStatusColor(task.status)}>{task.status}</Chip>
+          <Chip size="sm" variant="soft" color={taskStatusColor(task.status)}>{taskStatusLabel(task.status)}</Chip>
           <Chip size="sm" variant="soft" color={priorityColor(task.priority)}>{priorityLabel(task.priority)}</Chip>
         </div>
-        <p className="mt-1 line-clamp-2 text-xs text-muted">{task.description?.trim() || "No description"}</p>
+        <p className="mt-1 line-clamp-2 text-xs text-muted">{task.description?.trim() || "暂无描述"}</p>
         {task.blockerReason ? <p className="mt-1 line-clamp-2 text-xs text-danger-700 dark:text-danger-200">{humanizeReason(task.blockerReason)}</p> : null}
       </div>
       <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted sm:justify-end">
-        {task.blockerReason ? <Chip size="sm" variant="soft" color="danger">Blocked</Chip> : null}
-        {fileCount > 0 ? <Chip size="sm" variant="soft" color="accent">{fileCount} files</Chip> : null}
-        {unresolved > 0 ? <Chip size="sm" variant="soft" color="warning">Waiting on {unresolved}</Chip> : null}
-        {task.maxTurns !== undefined ? <Chip size="sm" variant="soft" color="default">{turnCount}/{task.maxTurns} turns</Chip> : null}
-        {worktree?.status === "ready_for_review" ? <Chip size="sm" variant="soft" color="success">Ready</Chip> : null}
-        {worktree?.status === "conflict" ? <Chip size="sm" variant="soft" color="danger">Conflict</Chip> : null}
+        {task.blockerReason ? <Chip size="sm" variant="soft" color="danger">阻塞</Chip> : null}
+        {fileCount > 0 ? <Chip size="sm" variant="soft" color="accent">{fileCount} 个文件</Chip> : null}
+        {unresolved > 0 ? <Chip size="sm" variant="soft" color="warning">前置未完成 {unresolved}</Chip> : null}
+        {task.maxTurns !== undefined ? <Chip size="sm" variant="soft" color="default">{turnCount}/{task.maxTurns} 轮</Chip> : null}
+        {worktree?.status === "ready_for_review" ? <Chip size="sm" variant="soft" color="success">可应用</Chip> : null}
+        {worktree?.status === "conflict" ? <Chip size="sm" variant="soft" color="danger">冲突</Chip> : null}
         <span className="inline-flex min-w-0 items-center gap-1">
           <Avatar className="h-5 w-5 text-[10px]"><Avatar.Fallback>{initials(assigneeLabel)}</Avatar.Fallback></Avatar>
           <span className="max-w-28 truncate">{assigneeLabel}</span>
@@ -640,9 +640,9 @@ function TaskColumn({ group, allTasks, onOpenTask }: { group: TaskStatusGroup; a
   const { setNodeRef, isOver } = useDroppable({ id: group.label });
 
   return (
-    <section className="min-w-0 rounded-lg border border-border bg-surface-secondary/70 p-2" aria-label={`${group.label} tasks`}>
+    <section className="min-w-0 rounded-lg border border-border bg-surface-secondary/70 p-2" aria-label={`${kanbanColumnDisplayLabel(group.label)}任务`}>
       <header className="mb-2 flex h-7 items-center gap-2">
-        <h3 className="min-w-0 flex-1 truncate text-xs font-semibold uppercase text-muted">{group.label}</h3>
+        <h3 className="min-w-0 flex-1 truncate text-xs font-semibold uppercase text-muted">{kanbanColumnDisplayLabel(group.label)}</h3>
         <Chip size="sm" variant="soft" color="default">{group.items.length}</Chip>
       </header>
       <div ref={setNodeRef} className={`flex min-h-[360px] flex-col gap-2 rounded-md p-1 transition-colors ${isOver ? "bg-accent-soft" : ""}`}>
@@ -651,7 +651,7 @@ function TaskColumn({ group, allTasks, onOpenTask }: { group: TaskStatusGroup; a
             <TaskKanbanCard key={task.id} task={task} allTasks={allTasks} onOpen={() => onOpenTask(task.id)} />
           ))}
         </SortableContext>
-        {group.items.length === 0 ? <p className="py-8 text-center text-xs text-muted">None.</p> : null}
+        {group.items.length === 0 ? <p className="py-8 text-center text-xs text-muted">暂无。</p> : null}
       </div>
     </section>
   );
@@ -660,7 +660,7 @@ function TaskColumn({ group, allTasks, onOpenTask }: { group: TaskStatusGroup; a
 function TaskKanbanCard({ task, allTasks, onOpen }: { task: TaskViewModel; allTasks: ReadonlyArray<TaskViewModel>; onOpen: () => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id });
   const updatedAt = taskUpdatedAt(task);
-  const assignee = task.assigneeRoleId ?? task.assigneeAgentId ?? "Unassigned";
+  const assignee = task.assigneeRoleId ?? task.assigneeAgentId ?? "未分配";
   const assigneeLabel = roleDisplayName(assignee) || assignee;
   const unresolved = unresolvedDependencyCount(task, allTasks);
   const fileCount = aggregateFileChanges(task);
@@ -686,21 +686,21 @@ function TaskKanbanCard({ task, allTasks, onOpen }: { task: TaskViewModel; allTa
           <button
             type="button"
             className="mt-0.5 h-5 w-5 shrink-0 cursor-grab rounded border border-border bg-surface-secondary text-xs text-muted"
-            aria-label={`Drag task ${task.title}`}
+            aria-label={`拖拽任务 ${task.title}`}
             {...attributes}
             {...listeners}
           >
             ::
           </button>
-          <button type="button" className="min-w-0 flex-1 text-left" onClick={onOpen} aria-label={`Open task ${task.title}`}>
+          <button type="button" className="min-w-0 flex-1 text-left" onClick={onOpen} aria-label={`打开任务 ${task.title}`}>
             <span className="block line-clamp-2 text-sm font-semibold leading-snug">{task.title}</span>
-            <span className="mt-1 block truncate text-xs text-muted">{task.description?.trim() || "No description"}</span>
+            <span className="mt-1 block truncate text-xs text-muted">{task.description?.trim() || "暂无描述"}</span>
           </button>
         </div>
         <div className="flex items-center gap-1.5">
-          <Chip size="sm" variant="soft" color={taskStatusColor(task.status)}>{task.status}</Chip>
+          <Chip size="sm" variant="soft" color={taskStatusColor(task.status)}>{taskStatusLabel(task.status)}</Chip>
           <Chip size="sm" variant="soft" color={priorityColor(task.priority)}>{priorityLabel(task.priority)}</Chip>
-          {activeRuns > 0 ? <span className="ml-auto text-[11px] text-muted">{activeRuns} running</span> : null}
+          {activeRuns > 0 ? <span className="ml-auto text-[11px] text-muted">{activeRuns} 个运行中</span> : null}
         </div>
         {task.blockerReason ? (
           <div className="rounded-md border border-danger-200 bg-danger-50 px-2 py-1.5 text-xs text-danger-900 dark:border-danger-800 dark:bg-danger-950/40 dark:text-danger-100">
@@ -708,10 +708,10 @@ function TaskKanbanCard({ task, allTasks, onOpen }: { task: TaskViewModel; allTa
           </div>
         ) : null}
         <div className="grid grid-cols-2 gap-1.5 text-[11px] text-muted">
-          <TaskCardFact label="Deps" value={unresolved > 0 ? `waiting ${unresolved}` : "clear"} tone={unresolved > 0 ? "warning" : "default"} />
-          <TaskCardFact label="Files" value={fileCount > 0 ? String(fileCount) : "none"} tone={fileCount > 0 ? "accent" : "default"} />
+          <TaskCardFact label="前置任务" value={unresolved > 0 ? `${unresolved} 个未完成` : "无"} tone={unresolved > 0 ? "warning" : "default"} />
+          <TaskCardFact label="文件" value={fileCount > 0 ? String(fileCount) : "无"} tone={fileCount > 0 ? "accent" : "default"} />
           <TaskCardFact label="Worktree" value={worktreeLabel(worktree)} tone={worktreeTone(worktree)} />
-          <TaskCardFact label="Turns" value={task.maxTurns !== undefined ? `${turnCount}/${task.maxTurns}` : String(turnCount)} tone="default" />
+          <TaskCardFact label="轮次" value={task.maxTurns !== undefined ? `${turnCount}/${task.maxTurns}` : String(turnCount)} tone="default" />
         </div>
         <div className="flex items-center gap-2 text-xs text-muted">
           <Avatar className="h-5 w-5 text-[10px]"><Avatar.Fallback>{initials(assigneeLabel)}</Avatar.Fallback></Avatar>
@@ -817,56 +817,56 @@ function DependencyArrowOverlay({ lines, layoutVersion, scrollElementRef }: { li
 
 function TaskDetailDrawer({ roomId, detail, plan, csrfFetch, onOpenArtifact, isOpen, onOpenChange }: { roomId: string; detail: TaskDetail | undefined; plan: ExecutionPlan | null; csrfFetch: typeof fetch; onOpenArtifact?: ((input: { artifactId: string; runId: string; path: string }) => void) | undefined; isOpen: boolean; onOpenChange: (open: boolean) => void }) {
   const task = detail?.task;
-  const assignee = task ? task.assigneeRoleId ?? task.assigneeAgentId ?? "Unassigned" : "Unassigned";
+  const assignee = task ? task.assigneeRoleId ?? task.assigneeAgentId ?? "未分配" : "未分配";
   const assigneeLabel = roleDisplayName(assignee) || assignee;
 
   return (
     <Drawer.Backdrop isOpen={isOpen} onOpenChange={onOpenChange}>
       <Drawer.Content placement="right">
-        <Drawer.Dialog className="w-[560px] max-w-[94vw]" aria-label="Task detail">
-          <Drawer.CloseTrigger aria-label="Close task detail" />
+        <Drawer.Dialog className="w-[560px] max-w-[94vw]" aria-label="任务详情">
+          <Drawer.CloseTrigger aria-label="关闭任务详情" />
           <Drawer.Header>
-            <Drawer.Heading>{task?.title ?? "Task"}</Drawer.Heading>
+            <Drawer.Heading>{task?.title ?? "任务"}</Drawer.Heading>
             {task ? (
               <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
                 <Chip size="sm" variant="soft" color={priorityColor(task.priority)}>{priorityLabel(task.priority)}</Chip>
-                <Chip size="sm" variant="soft" color={taskStatusColor(task.status)}>{task.status}</Chip>
-                <span className="text-muted">Updated {taskUpdatedAt(task) ? formatRelativeTime(taskUpdatedAt(task)!) : "-"}</span>
+                <Chip size="sm" variant="soft" color={taskStatusColor(task.status)}>{taskStatusLabel(task.status)}</Chip>
+                <span className="text-muted">更新于 {taskUpdatedAt(task) ? formatRelativeTime(taskUpdatedAt(task)!) : "-"}</span>
               </div>
             ) : null}
           </Drawer.Header>
           <Drawer.Body className="p-0">
             {!detail || !task ? (
-              <div className="p-6 text-center text-sm text-muted">No task selected.</div>
+              <div className="p-6 text-center text-sm text-muted">未选择任务。</div>
             ) : (
               <ScrollShadow className="max-h-[calc(100vh-9rem)] overflow-auto" orientation="vertical">
                 <div className="flex flex-col gap-3 p-4">
                   {plan ? <ExecutionPlanCard plan={plan} compact /> : null}
-                  <DetailCard title="Description">
-                    <p className="whitespace-pre-wrap text-sm text-muted">{task.description?.trim() || "No description provided."}</p>
+                  <DetailCard title="描述">
+                    <p className="whitespace-pre-wrap text-sm text-muted">{task.description?.trim() || "暂无描述。"}</p>
                   </DetailCard>
 
-                  <DetailCard title="Assignee">
+                  <DetailCard title="负责人">
                     <div className="flex items-center gap-2 text-sm">
                       <Avatar className="h-7 w-7 text-xs"><Avatar.Fallback>{initials(assigneeLabel)}</Avatar.Fallback></Avatar>
                       <span>{assigneeLabel}</span>
                     </div>
                   </DetailCard>
 
-                  <DetailCard title="Parent + children">
+                  <DetailCard title="父子任务">
                     <div className="flex flex-col gap-2 text-sm">
-                      <RelationRow label="Parent" value={detail.parent ? detail.parent.title : task.parentTaskId ?? "None"} muted={!detail.parent && !task.parentTaskId} />
+                      <RelationRow label="父任务" value={detail.parent ? detail.parent.title : task.parentTaskId ?? "无"} muted={!detail.parent && !task.parentTaskId} />
                       <div>
-                        <div className="mb-1 text-xs font-semibold uppercase text-muted">Children</div>
+                        <div className="mb-1 text-xs font-semibold uppercase text-muted">子任务</div>
                         {detail.children.length === 0 ? (
-                          <p className="text-xs text-muted">None.</p>
+                          <p className="text-xs text-muted">无。</p>
                         ) : (
                           <ul className="flex flex-col gap-1">
                             {detail.children.map((child) => (
                               <li key={child.id} className="rounded-lg border border-border bg-surface-secondary px-2 py-1">
                                 <div className="flex items-center gap-2">
                                   <span className="min-w-0 flex-1 truncate">{child.title}</span>
-                                  <Chip size="sm" variant="soft" color={taskStatusColor(child.status)}>{child.status}</Chip>
+                                  <Chip size="sm" variant="soft" color={taskStatusColor(child.status)}>{taskStatusLabel(child.status)}</Chip>
                                 </div>
                               </li>
                             ))}
@@ -879,7 +879,7 @@ function TaskDetailDrawer({ roomId, detail, plan, csrfFetch, onOpenArtifact, isO
                   <FileChangesSection runs={task.fileChangeRuns ?? []} fallbackCount={task.fileChangesCount ?? 0} onOpenArtifact={onOpenArtifact} />
                   <WorktreeSection roomId={roomId} task={task} csrfFetch={csrfFetch} />
 
-                  <DetailCard title="Activity timeline">
+                  <DetailCard title="活动记录">
                     <ActivityTimeline activities={detail.activities} />
                   </DetailCard>
                 </div>
@@ -899,20 +899,20 @@ function ExecutionPlanCard({ plan, compact = false }: { plan: ExecutionPlan; com
   return (
     <Card variant="transparent" className="border border-border">
       <Card.Header>
-        <Card.Title className={compact ? "text-sm" : "text-sm"}>Execution Plan</Card.Title>
+        <Card.Title className={compact ? "text-sm" : "text-sm"}>执行计划</Card.Title>
       </Card.Header>
       <Card.Content>
         <details open={!compact}>
-          <summary className="cursor-pointer text-xs text-muted">{typeof parsed.goal === "string" ? parsed.goal : displayedTaskCount !== undefined ? `${displayedTaskCount} planned task${displayedTaskCount === 1 ? "" : "s"}` : `Plan ${plan.id}`}</summary>
+          <summary className="cursor-pointer text-xs text-muted">{typeof parsed.goal === "string" ? parsed.goal : displayedTaskCount !== undefined ? `${displayedTaskCount} 个计划任务` : `计划 ${plan.id}`}</summary>
           {tasks.length === 0 ? (
-            <p className="mt-2 text-xs text-muted">Loading plan details...</p>
+            <p className="mt-2 text-xs text-muted">正在加载计划详情...</p>
           ) : (
             <ul className="mt-2 flex flex-col gap-1.5">
               {tasks.slice(0, compact ? 5 : 8).map((item, index) => {
               const record = isRecord(item) ? item : {};
               return (
                 <li key={`${plan.id}:${index}`} className="rounded-md border border-border bg-surface-secondary px-2 py-1 text-xs">
-                  <div className="font-medium">{typeof record.title === "string" ? record.title : `Task ${index + 1}`}</div>
+                  <div className="font-medium">{typeof record.title === "string" ? record.title : `任务 ${index + 1}`}</div>
                   {typeof record.assigneeRole === "string" ? <div className="text-muted">{roleDisplayName(record.assigneeRole) || record.assigneeRole}</div> : null}
                 </li>
               );
@@ -927,15 +927,15 @@ function ExecutionPlanCard({ plan, compact = false }: { plan: ExecutionPlan; com
 
 function FileChangesSection({ runs, fallbackCount, onOpenArtifact }: { runs: readonly TaskFileChangeRunViewModel[]; fallbackCount: number; onOpenArtifact?: ((input: { artifactId: string; runId: string; path: string }) => void) | undefined }) {
   return (
-    <DetailCard title="File changes">
+    <DetailCard title="文件变更">
       {runs.length === 0 ? (
-        <p className="text-sm text-muted">{fallbackCount > 0 ? `${fallbackCount} files changed.` : "No file changes recorded."}</p>
+        <p className="text-sm text-muted">{fallbackCount > 0 ? `${fallbackCount} 个文件已变更。` : "暂无文件变更记录。"}</p>
       ) : (
         <div className="flex flex-col gap-2">
           {[...runs].sort((a, b) => b.createdAt - a.createdAt).map((run) => (
             <div key={run.runId} className="rounded-lg border border-border bg-surface-secondary px-2 py-2">
               <div className="mb-1 flex items-center gap-2 text-xs">
-                <Chip size="sm" variant="soft" color="default">{run.files.length} files</Chip>
+                <Chip size="sm" variant="soft" color="default">{run.files.length} 个文件</Chip>
                 <a className="min-w-0 truncate text-accent-soft-foreground" href={`#run:${encodeURIComponent(run.runId)}`}>{run.runId}</a>
               </div>
               <ul className="flex flex-col gap-1">
@@ -943,7 +943,7 @@ function FileChangesSection({ runs, fallbackCount, onOpenArtifact }: { runs: rea
                   const target = fileArtifactTarget(run, file);
                   return (
                     <li key={`${run.runId}:${file.path}`} className="flex items-center gap-2 text-xs">
-                      <Chip size="sm" variant="soft" color={fileChangeColor(file.change)}>{file.change}</Chip>
+                      <Chip size="sm" variant="soft" color={fileChangeColor(file.change)}>{fileChangeLabel(file.change)}</Chip>
                       {target ? (
                         <a
                           className="min-w-0 flex-1 truncate text-accent-soft-foreground ah-mono"
@@ -976,7 +976,7 @@ function WorktreeSection({ roomId, task, csrfFetch }: { roomId: string; task: Ta
   if (!review || (review.status !== "ready_for_review" && review.status !== "conflict")) {
     return (
       <DetailCard title="Worktree">
-        <p className="text-sm text-muted">No pending worktree changes.</p>
+        <p className="text-sm text-muted">暂无待处理的 Worktree 变更。</p>
       </DetailCard>
     );
   }
@@ -986,19 +986,19 @@ function WorktreeSection({ roomId, task, csrfFetch }: { roomId: string; task: Ta
     setError(undefined);
     void csrfFetch(`/rooms/${encodeURIComponent(roomId)}/worktrees/${encodeURIComponent(review.runId)}/apply`, { method: "POST" })
       .then((res) => {
-        if (!res.ok) throw new Error(`Apply failed with ${res.status}`);
+        if (!res.ok) throw new Error(`应用失败：${res.status}`);
       })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
       .finally(() => setPending(undefined));
   };
 
   const discard = () => {
-    if (!window.confirm("Discard worktree changes?")) return;
+    if (!window.confirm("丢弃 Worktree 变更？")) return;
     setPending("discard");
     setError(undefined);
     void csrfFetch(`/rooms/${encodeURIComponent(roomId)}/worktrees/${encodeURIComponent(review.runId)}/discard`, { method: "POST" })
       .then((res) => {
-        if (!res.ok) throw new Error(`Discard failed with ${res.status}`);
+        if (!res.ok) throw new Error(`丢弃失败：${res.status}`);
       })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
       .finally(() => setPending(undefined));
@@ -1008,7 +1008,7 @@ function WorktreeSection({ roomId, task, csrfFetch }: { roomId: string; task: Ta
     <DetailCard title="Worktree">
       <div className="flex flex-col gap-2">
         <div className="flex flex-wrap gap-2">
-          <Chip size="sm" variant="soft" color={review.status === "conflict" ? "danger" : "success"}>{review.status === "conflict" ? "Merge conflict" : "Changes ready to apply"}</Chip>
+          <Chip size="sm" variant="soft" color={review.status === "conflict" ? "danger" : "success"}>{review.status === "conflict" ? "合并冲突" : "变更可应用"}</Chip>
           {review.artifactId ? <Chip size="sm" variant="soft" color="default">{review.artifactId}</Chip> : null}
         </div>
         {review.filesChanged && review.filesChanged.length > 0 ? (
@@ -1019,8 +1019,8 @@ function WorktreeSection({ roomId, task, csrfFetch }: { roomId: string; task: Ta
         {review.conflictDiff ? <pre className="max-h-40 overflow-auto rounded-md bg-surface-secondary p-2 text-xs ah-mono">{review.conflictDiff}</pre> : null}
         {error ? <p className="text-xs text-danger-700 dark:text-danger-200">{error}</p> : null}
         <div className="flex gap-2">
-          {review.status === "ready_for_review" ? <Button size="sm" variant="primary" onPress={apply} isDisabled={pending !== undefined}>{pending === "apply" ? "Applying..." : "Apply changes"}</Button> : null}
-          <Button size="sm" variant="danger" onPress={discard} isDisabled={pending !== undefined}>{pending === "discard" ? "Discarding..." : "Discard changes"}</Button>
+          {review.status === "ready_for_review" ? <Button size="sm" variant="primary" onPress={apply} isDisabled={pending !== undefined}>{pending === "apply" ? "应用中..." : "应用变更"}</Button> : null}
+          <Button size="sm" variant="danger" onPress={discard} isDisabled={pending !== undefined}>{pending === "discard" ? "丢弃中..." : "丢弃变更"}</Button>
         </div>
       </div>
     </DetailCard>
@@ -1049,7 +1049,7 @@ function RelationRow({ label, value, muted }: { label: string; value: string; mu
 
 function ActivityTimeline({ activities }: { activities: ReadonlyArray<TaskActivityViewModel> }) {
   if (activities.length === 0) {
-    return <p className="text-sm text-muted">No activity yet.</p>;
+    return <p className="text-sm text-muted">暂无活动。</p>;
   }
 
   return (
@@ -1063,7 +1063,7 @@ function ActivityTimeline({ activities }: { activities: ReadonlyArray<TaskActivi
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2 text-xs">
                 <Chip size="sm" variant="soft" color="default">{activity.kind}</Chip>
-                <span className="text-muted">by {activity.by || activity.byKind}</span>
+                <span className="text-muted">由 {activity.by || activity.byKind}</span>
                 {activity.createdAt ? <span className="text-muted">{formatTime(activity.createdAt)}</span> : null}
               </div>
               <p className="mt-1 text-sm">{truncate(summarizeTaskActivityPayload(activity.payload), 180)}</p>
@@ -1085,8 +1085,8 @@ function ActivityLinks({ activity }: { activity: TaskActivityViewModel }) {
 
   return (
     <div className="mt-2 flex flex-wrap gap-2 text-xs">
-      {runId ? <a className="rounded-full bg-accent-soft px-2 py-1 text-accent-soft-foreground" href={`#run:${encodeURIComponent(runId)}`}>Run Detail: {runId}</a> : null}
-      {artifact ? <a className="rounded-full bg-surface px-2 py-1 text-muted" href={`#artifact:${encodeURIComponent(artifact)}`}>Artifact: {artifact}</a> : null}
+      {runId ? <a className="rounded-full bg-accent-soft px-2 py-1 text-accent-soft-foreground" href={`#run:${encodeURIComponent(runId)}`}>Run 详情：{runId}</a> : null}
+      {artifact ? <a className="rounded-full bg-surface px-2 py-1 text-muted" href={`#artifact:${encodeURIComponent(artifact)}`}>Artifact：{artifact}</a> : null}
     </div>
   );
 }
@@ -1117,12 +1117,12 @@ function attentionScore(task: TaskViewModel, allTasks: ReadonlyArray<TaskViewMod
 }
 
 function attentionLabel(task: TaskViewModel): string {
-  if (hasWorktreeConflict(task)) return "Conflict";
-  if (isBlockedTask(task)) return "Blocked";
-  if (task.status === "review") return "Review";
-  if (hasReadyWorktree(task)) return "Ready";
-  if (aggregateFileChanges(task) > 0) return "Changed";
-  return "Waiting";
+  if (hasWorktreeConflict(task)) return "冲突";
+  if (isBlockedTask(task)) return "阻塞";
+  if (task.status === "review") return "待评审";
+  if (hasReadyWorktree(task)) return "可应用";
+  if (aggregateFileChanges(task) > 0) return "有变更";
+  return "等待中";
 }
 
 function attentionColor(task: TaskViewModel): ChipColor {
@@ -1134,20 +1134,20 @@ function attentionColor(task: TaskViewModel): ChipColor {
 }
 
 function attentionReason(task: TaskViewModel, unresolved: number, fileCount: number, worktree: WorktreeReviewViewModel | undefined): string {
-  if (worktree?.status === "conflict") return "Worktree has merge conflicts that need operator attention.";
+  if (worktree?.status === "conflict") return "Worktree 存在合并冲突，需要人工处理。";
   if (task.blockerReason) return humanizeReason(task.blockerReason);
-  if (task.status === "blocked") return "Task is blocked.";
-  if (task.status === "review") return "Task is waiting for review.";
-  if (worktree?.status === "ready_for_review") return "Worktree changes are ready to apply.";
-  if (unresolved > 0) return `Waiting on ${unresolved} unresolved dependenc${unresolved === 1 ? "y" : "ies"}.`;
-  if (fileCount > 0) return `${fileCount} changed file${fileCount === 1 ? "" : "s"} recorded.`;
-  return "Needs attention.";
+  if (task.status === "blocked") return "任务已阻塞。";
+  if (task.status === "review") return "任务正在等待评审。";
+  if (worktree?.status === "ready_for_review") return "Worktree 变更已可应用。";
+  if (unresolved > 0) return `还有 ${unresolved} 个前置任务未完成。`;
+  if (fileCount > 0) return `已记录 ${fileCount} 个变更文件。`;
+  return "需要关注。";
 }
 
 function blockerText(task: TaskViewModel): string {
   if (task.blockerReason) return humanizeReason(task.blockerReason);
-  if (hasWorktreeConflict(task)) return "Worktree conflict";
-  return "Blocked";
+  if (hasWorktreeConflict(task)) return "Worktree 冲突";
+  return "阻塞";
 }
 
 function isActiveTask(task: TaskViewModel): boolean {
@@ -1173,15 +1173,15 @@ function activeRunCount(task: TaskViewModel): number {
 function worktreeLabel(worktree: WorktreeReviewViewModel | undefined): string {
   switch (worktree?.status) {
     case "ready_for_review":
-      return "ready";
+      return "可应用";
     case "conflict":
-      return "conflict";
+      return "冲突";
     case "applied":
-      return "applied";
+      return "已应用";
     case "discarded":
-      return "discarded";
+      return "已丢弃";
     default:
-      return "none";
+      return "无";
   }
 }
 
@@ -1250,15 +1250,25 @@ function activityIcon(kind: string): string {
 function priorityLabel(priority: string | undefined): string {
   switch (priority) {
     case "3":
-      return "urgent";
+      return "紧急";
     case "2":
-      return "high";
+      return "高";
     case "1":
-      return "normal";
+      return "普通";
     case "0":
-      return "low";
+      return "低";
+    case "critical":
+      return "关键";
+    case "urgent":
+      return "紧急";
+    case "high":
+      return "高";
+    case "medium":
+      return "中";
+    case "low":
+      return "低";
     default:
-      return priority ?? "normal";
+      return priority ?? "普通";
   }
 }
 
@@ -1290,6 +1300,60 @@ function fileChangeColor(change: string): ChipColor {
       return "danger";
     default:
       return "default";
+  }
+}
+
+function fileChangeLabel(change: string): string {
+  switch (change) {
+    case "added":
+    case "created":
+      return "新增";
+    case "deleted":
+    case "removed":
+      return "删除";
+    case "modified":
+      return "修改";
+    case "renamed":
+      return "重命名";
+    default:
+      return change;
+  }
+}
+
+function taskStatusLabel(status: string): string {
+  switch (status) {
+    case "pending":
+    case "open":
+      return "待处理";
+    case "in_progress":
+    case "running":
+      return "进行中";
+    case "blocked":
+      return "阻塞";
+    case "review":
+    case "waiting_review":
+      return "待评审";
+    case "completed":
+      return "已完成";
+    case "cancelled":
+      return "已取消";
+    default:
+      return status;
+  }
+}
+
+function kanbanColumnDisplayLabel(label: KanbanColumnLabel): string {
+  switch (label) {
+    case "Backlog":
+      return "待办";
+    case "In Progress":
+      return "进行中";
+    case "Waiting":
+      return "等待中";
+    case "Review":
+      return "待评审";
+    case "Done":
+      return "已完成";
   }
 }
 
