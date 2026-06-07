@@ -239,10 +239,24 @@ class Projector {
             title: payload.title,
             mode: typeof payload.mode === "string" ? payload.mode : room.mode,
             pinnedAt: typeof payload.pinnedAt === "number" ? payload.pinnedAt : room.pinnedAt,
-            lastActivityAt: typeof payload.lastActivityAt === "number" ? payload.lastActivityAt : room.lastActivityAt
+            lastActivityAt: advanceActivityAt(room, typeof payload.lastActivityAt === "number" ? payload.lastActivityAt : undefined).lastActivityAt,
+            archivedAt: typeof payload.archivedAt === "number" ? payload.archivedAt : room.archivedAt,
+            participantContactNames: contactNamesFromPayload(payload.participantContactNames, room.participantContactNames)
           });
           changed = true;
         }
+        break;
+      }
+      case "room.closed": {
+        room = { ...room, archivedAt: event.createdAt };
+        this.rooms.set(roomId, room);
+        changed = true;
+        break;
+      }
+      case "room.opened": {
+        room = { ...room, archivedAt: undefined };
+        this.rooms.set(roomId, room);
+        changed = true;
         break;
       }
       case "message.created": {
@@ -270,7 +284,7 @@ class Projector {
             pendingTurnId: typeof payload.pendingTurnId === "string" ? payload.pendingTurnId : undefined,
             createdAt: event.createdAt
           };
-          room = { ...room, messages: [...room.messages, message] };
+          room = advanceActivityAt({ ...room, messages: [...room.messages, message] }, event.createdAt);
           this.rooms.set(roomId, room);
           changed = true;
         }
@@ -495,6 +509,7 @@ class Projector {
           } else {
             room = { ...room, runs: [...room.runs, run] };
           }
+          room = advanceActivityAt(room, event.createdAt);
           this.rooms.set(roomId, room);
           changed = true;
         }
@@ -663,7 +678,7 @@ class Projector {
                   }))
               : undefined
           };
-          room = this.upsertTask(room, task);
+          room = advanceActivityAt(this.upsertTask(room, task), event.createdAt);
           this.rooms.set(roomId, room);
           changed = true;
         }
@@ -719,7 +734,7 @@ class Projector {
                 activities: undefined,
                 delegations: undefined
               };
-          room = this.upsertTask(room, task);
+          room = advanceActivityAt(this.upsertTask(room, task), event.createdAt);
           this.rooms.set(roomId, room);
           changed = true;
         }
@@ -861,19 +876,19 @@ class Projector {
           };
           const existing = room.participants.find((p) => p.id === payload.agentId);
           if (!existing) {
-            room = {
+            room = advanceActivityAt({
               ...room,
               participants: [...room.participants, nextParticipant]
-            };
+            }, event.createdAt);
             this.rooms.set(roomId, room);
             changed = true;
           } else {
-            room = {
+            room = advanceActivityAt({
               ...room,
               participants: room.participants.map((participant) =>
                 participant.id === payload.agentId ? { ...participant, ...nextParticipant, presence: participant.presence } : participant
               )
-            };
+            }, event.createdAt);
             this.rooms.set(roomId, room);
             changed = true;
           }
@@ -1475,6 +1490,21 @@ function setDeployment(room: RoomViewModel, deployment: DeploymentViewModel): Ro
   return hydrateRoomMessageParts({ ...room, deploymentsById });
 }
 
+function contactNamesFromPayload(value: unknown, fallback: Record<string, string>): Record<string, string> {
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].length > 0);
+    if (entries.length === 0) return fallback;
+    return Object.fromEntries(entries);
+  }
+
+  return fallback;
+}
+
+function advanceActivityAt(room: RoomViewModel, timestamp: number | undefined): RoomViewModel {
+  if (timestamp === undefined || (room.lastActivityAt !== undefined && room.lastActivityAt >= timestamp)) return room;
+  return { ...room, lastActivityAt: timestamp };
+}
+
 function hydrateRoomMessageParts(room: RoomViewModel): RoomViewModel {
   return {
     ...room,
@@ -1599,7 +1629,7 @@ export function useProjector(view: "main" | "detail", roomId?: string, runId?: s
     ensureAuthSession()
       .then(() => fetch("/rooms", { credentials: "same-origin" }))
       .then((res) => res.json())
-      .then((data: { rooms: Array<{ id: string; title: string; mode: string }> }) => {
+      .then((data: { rooms: Array<{ id: string; title: string; mode: string; pinnedAt?: number; lastActivityAt?: number; archivedAt?: number; participantContactNames?: unknown }> }) => {
         if (cancelled) return;
         for (const room of data.rooms) {
           globalProjector.apply({
@@ -1610,7 +1640,15 @@ export function useProjector(view: "main" | "detail", roomId?: string, runId?: s
             visibility: "both",
             workspaceId: "default-workspace",
             roomId: room.id,
-            payload: { roomId: room.id, title: room.title, mode: room.mode },
+            payload: {
+              roomId: room.id,
+              title: room.title,
+              mode: room.mode,
+              pinnedAt: room.pinnedAt,
+              lastActivityAt: room.lastActivityAt,
+              archivedAt: room.archivedAt,
+              participantContactNames: room.participantContactNames
+            },
             createdAt: Date.now()
           });
         }

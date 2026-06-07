@@ -42,6 +42,105 @@ describe("useProjector replay handling", () => {
     unsubscribe = undefined;
   });
 
+  it("hydrates V1.2 room list fields from room.created payloads", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+
+    projector.apply(makeEvent("room.created", roomId, {
+      roomId,
+      title: "Pinned archived room",
+      mode: "assisted",
+      pinnedAt: 100,
+      lastActivityAt: 200,
+      archivedAt: 300,
+      participantContactNames: {
+        "binding-builder": "Builder Contact"
+      }
+    }));
+
+    expect(emittedState.rooms.get(roomId)).toMatchObject({
+      title: "Pinned archived room",
+      mode: "assisted",
+      pinnedAt: 100,
+      lastActivityAt: 200,
+      archivedAt: 300,
+      participantContactNames: {
+        "binding-builder": "Builder Contact"
+      }
+    });
+  });
+
+  it("normalizes room list contact-name arrays returned by the daemon", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+
+    projector.apply(makeEvent("room.created", roomId, {
+      roomId,
+      title: "Searchable contacts",
+      mode: "assisted",
+      participantContactNames: ["Builder Contact", "Reviewer Contact"]
+    }));
+
+    expect(Object.values(emittedState.rooms.get(roomId)?.participantContactNames ?? {})).toEqual([
+      "Builder Contact",
+      "Reviewer Contact"
+    ]);
+  });
+
+  it("projects room archive and unarchive events for live RoomList updates", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "solo" }, 100));
+    projector.apply(makeEvent("room.closed", roomId, { roomId }, 200));
+
+    expect(emittedState.rooms.get(roomId)?.archivedAt).toBe(200);
+
+    projector.apply(makeEvent("room.opened", roomId, { roomId }, 300));
+
+    expect(emittedState.rooms.get(roomId)?.archivedAt).toBeUndefined();
+  });
+
+  it("advances hydrated room activity from live activity events without moving backward", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+
+    projector.apply(makeEvent("room.created", roomId, {
+      roomId,
+      title: "Activity room",
+      mode: "team",
+      lastActivityAt: 100
+    }, 100));
+
+    projector.apply(makeEvent("message.created", roomId, { messageId: "message-activity", text: "New activity" }, 200));
+    expect(emittedState.rooms.get(roomId)?.lastActivityAt).toBe(200);
+
+    projector.apply(makeAgentEvent("agent.run.started", roomId, "agent-1", { runId: "run-activity" }, 300));
+    expect(emittedState.rooms.get(roomId)?.lastActivityAt).toBe(300);
+
+    projector.apply(makeEvent("task.status.changed", roomId, { taskId: "task-activity", nextStatus: "in_progress" }, 250));
+    expect(emittedState.rooms.get(roomId)?.lastActivityAt).toBe(300);
+
+    projector.apply(makeEvent("task.status.changed", roomId, { taskId: "task-activity", nextStatus: "review" }, 350));
+    expect(emittedState.rooms.get(roomId)?.lastActivityAt).toBe(350);
+
+    projector.apply(makeAgentEvent("agent.joined", roomId, "agent-2", {
+      agentId: "agent-2",
+      agentName: "Reviewer",
+      role: "teammate",
+      adapterId: "native"
+    }, 400));
+    expect(emittedState.rooms.get(roomId)?.lastActivityAt).toBe(400);
+
+    projector.apply(makeEvent("room.created", roomId, {
+      roomId,
+      title: "Activity room",
+      mode: "team",
+      lastActivityAt: 150
+    }, 500));
+    expect(emittedState.rooms.get(roomId)?.lastActivityAt).toBe(400);
+  });
+
   it("maps task.created v1.0 payload fields without legacy todo fallback", () => {
     const roomId = `room-${randomUUID()}`;
     const projector = getProjector();
