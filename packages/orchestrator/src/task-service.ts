@@ -330,6 +330,9 @@ export class TaskService {
         ...(input.artifactIds !== undefined ? { artifactIds: input.artifactIds } : {}),
         ...(input.filesChanged !== undefined ? { filesChanged: input.filesChanged } : {})
       }, now));
+      if (nextStatus === "completed") {
+        this.unblockDependentsInTransaction(existing.workspace_id, input.roomId, input.taskId, now);
+      }
     })();
 
     const task = this.task(input.taskId);
@@ -503,6 +506,46 @@ export class TaskService {
     return failed("conflict", "invalid_task_transition", { from: existing.status, to: nextStatus });
   }
 
+  private unblockDependentsInTransaction(workspaceId: string, roomId: string, completedTaskId: string, now: number): void {
+    const candidates = this.options.database.sqlite
+      .prepare(
+        `SELECT * FROM tasks
+         WHERE room_id = ?
+           AND status = 'blocked'
+           AND dependencies LIKE ?
+         ORDER BY created_at ASC, id ASC`
+      )
+      .all(roomId, `%"${completedTaskId}"%`) as TaskRow[];
+    for (const candidate of candidates) {
+      const dependencies = parseDependencies(candidate.dependencies);
+      if (!dependencies.includes(completedTaskId)) continue;
+      if (!this.allDependenciesCompleted(dependencies)) continue;
+      const updated = this.options.database.sqlite
+        .prepare("UPDATE tasks SET status = 'pending', blocker_reason = NULL, last_unblocked_at = ?, updated_at = ? WHERE id = ? AND status = 'blocked'")
+        .run(now, now, candidate.id);
+      if (updated.changes !== 1) continue;
+      this.options.eventBus.publish(taskEvent("task.unblocked", workspaceId, roomId, candidate.id, {
+        taskId: candidate.id,
+        roomId,
+        unlockedBy: completedTaskId
+      }, now));
+      if (candidate.assignee_agent_id !== null) {
+        this.options.database.sqlite
+          .prepare("INSERT INTO wake_outbox (id, room_id, agent_id, reason, payload, status, attempt_count, max_attempts, created_at, dispatch_after) VALUES (?, ?, ?, 'delegated_task', ?, 'pending', 0, 3, ?, NULL)")
+          .run(randomUUID(), roomId, candidate.assignee_agent_id, JSON.stringify({ taskId: candidate.id, unlockedBy: completedTaskId }), now);
+      }
+    }
+  }
+
+  private allDependenciesCompleted(taskIds: readonly string[]): boolean {
+    if (taskIds.length === 0) return true;
+    const placeholders = taskIds.map(() => "?").join(", ");
+    const row = this.options.database.sqlite
+      .prepare(`SELECT COUNT(*) AS count FROM tasks WHERE id IN (${placeholders}) AND status = 'completed'`)
+      .get(...taskIds) as { readonly count: number };
+    return row.count === taskIds.length;
+  }
+
   private transitionDelegatedTask(
     taskId: string,
     nextStatus: "in_progress" | "blocked" | "completed",
@@ -672,7 +715,7 @@ function taskView(row: TaskRow): TaskView {
   };
 }
 
-function taskEvent(type: "task.created" | "task.assigned" | "task.status.changed" | "task.status.changed.rejected" | "task.activity.added" | "task.delegation.completed" | "task.column.moved", workspaceId: string, roomId: string, taskId: string, payload: Record<string, unknown>, createdAt: number): PublishInput {
+function taskEvent(type: "task.created" | "task.assigned" | "task.status.changed" | "task.status.changed.rejected" | "task.activity.added" | "task.delegation.completed" | "task.column.moved" | "task.unblocked", workspaceId: string, roomId: string, taskId: string, payload: Record<string, unknown>, createdAt: number): PublishInput {
   return { id: randomUUID(), type, schemaVersion: 1, workspaceId, roomId, taskId, payload: withoutUndefined(payload), createdAt };
 }
 

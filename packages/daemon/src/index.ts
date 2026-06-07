@@ -28,6 +28,7 @@ import { migrateAgentProfilesToV10 } from "./migrations/0014_data.ts";
 import { cleanExpiredRoleDrafts, startRoleDraftGC } from "./role-draft-gc.ts";
 import { continueAssistedSelectorAfterRun } from "./assisted-selector-continuation.ts";
 import { createDaemonCommandHandlers, seedDefaultData } from "./commands.ts";
+import { createDeploymentService, type DeploymentService, type DeploymentKind } from "./services/deployment-service.ts";
 export { daemonPidPath, defaultConfigPath, ensureAgentHubHome, ensureParentDirectory, loadAgentHubConfig, redactConfig, type AgentHubConfig, type ConfigOverrides } from "./config.ts";
 import { openApiDocument } from "./openapi.ts";
 import { RUNTIME_DEFINITIONS, runtimeDefinitionForKind, runtimeSeedRows, type RuntimeDetection, type RuntimeSeedRow } from "./runtime-catalog.ts";
@@ -121,7 +122,7 @@ export type AssistedSpeakerSelector = (input: AssistedSpeakerSelectionInput) => 
 export type DaemonOptions = { readonly databasePath: string; readonly workspaceRoot?: string; readonly webAssetsRoot?: string; readonly host?: string; readonly port?: number; readonly token?: string; readonly allowRemote?: boolean; readonly allowedOrigins?: readonly string[]; readonly adapterCommands?: { readonly claude?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv }; readonly opencode?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv } }; readonly now?: () => number; readonly modelTestFetch?: typeof fetch; readonly roleDraftGenerator?: RoleDraftGenerator; readonly assistedSpeakerSelector?: AssistedSpeakerSelector; readonly onLifecyclePhase?: (event: { readonly direction: "startup" | "shutdown"; readonly phase: DaemonStartupPhase }) => void };
 export type DaemonCloseOptions = { readonly forceCancelAfterMs?: number };
 export type DaemonCloseResult = { readonly forced: boolean; readonly cancelledRunIds: readonly string[] };
-export type DaemonApp = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly lifecycle: RunLifecycleService; readonly roomMcpServer: RoomMcpServer; readonly adapterRegistry: AdapterRegistry; readonly mockAdapter: MockAdapterManager; readonly handle: (req: IncomingMessage, res: ServerResponse) => void; readonly inFlightRunIds: () => readonly string[]; start(): Promise<Server>; close(options?: DaemonCloseOptions): Promise<DaemonCloseResult> };
+export type DaemonApp = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly lifecycle: RunLifecycleService; readonly roomMcpServer: RoomMcpServer; readonly adapterRegistry: AdapterRegistry; readonly mockAdapter: MockAdapterManager; readonly deploymentService: DeploymentService; readonly handle: (req: IncomingMessage, res: ServerResponse) => void; readonly inFlightRunIds: () => readonly string[]; start(): Promise<Server>; close(options?: DaemonCloseOptions): Promise<DaemonCloseResult> };
 type StatusLineEventBus = EventBus & { flushStatusLines?: () => void };
 const PHASE_SQLITE: DaemonStartupPhase = "SQLite open + pragma + migrate";
 const PHASE_EVENT_STORE: DaemonStartupPhase = "EventStore readiness check";
@@ -152,6 +153,7 @@ type DaemonRuntime = {
   adapterRegistry: AdapterRegistry;
   mockAdapter: MockAdapterManager;
   artifactService: ArtifactService;
+  deploymentService: DeploymentService;
   taskService: TaskService;
   skillRegistry: SkillRegistry;
   assistedSelector: AssistedSelectorGroupChatManager;
@@ -201,7 +203,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     if (!ready) return json(res, 503, { error: "service_starting", retryAfterMs: 500 });
     if (serveWebAsset({ req, res, url, ...(webAssetsRoot !== undefined ? { webAssetsRoot } : {}) })) return;
     const app = requireRuntime();
-    void route({ req, res, database: app.database, eventBus: app.eventBus, commandBus: app.commandBus, artifactService: app.artifactService, taskService: app.taskService, skillRegistry: app.skillRegistry, outbox: app.outbox, stopAssistedDiscussion: (roomId) => stopAssistedRoomDiscussion(app, roomId), modelConfigSecrets, settingsJobs, modelTestFetch: options.modelTestFetch ?? globalThis.fetch.bind(globalThis), roleDraftGenerator: options.roleDraftGenerator ?? generateRoleDraftWithModelConfig, registerSseClient: (client) => { sseClients.add(client); return () => sseClients.delete(client); }, ...(options.token !== undefined ? { token: options.token } : {}), ...(options.allowedOrigins !== undefined ? { allowedOrigins: options.allowedOrigins } : {}), host: `${options.host ?? "127.0.0.1"}:${options.port ?? 6677}`, ...(options.now !== undefined ? { now: options.now } : {}) });
+    void route({ req, res, database: app.database, eventBus: app.eventBus, commandBus: app.commandBus, artifactService: app.artifactService, deploymentService: app.deploymentService, taskService: app.taskService, skillRegistry: app.skillRegistry, outbox: app.outbox, stopAssistedDiscussion: (roomId) => stopAssistedRoomDiscussion(app, roomId), modelConfigSecrets, settingsJobs, modelTestFetch: options.modelTestFetch ?? globalThis.fetch.bind(globalThis), roleDraftGenerator: options.roleDraftGenerator ?? generateRoleDraftWithModelConfig, registerSseClient: (client) => { sseClients.add(client); return () => sseClients.delete(client); }, ...(options.token !== undefined ? { token: options.token } : {}), ...(options.allowedOrigins !== undefined ? { allowedOrigins: options.allowedOrigins } : {}), host: `${options.host ?? "127.0.0.1"}:${options.port ?? 6677}`, ...(options.now !== undefined ? { now: options.now } : {}) });
   };
 
   const start = async (): Promise<Server> => {
@@ -247,6 +249,8 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     const permissionEngine = new PermissionEngine({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
     const interventionEngine = new InterventionEngine({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
     const artifactService = new ArtifactService({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
+    const deploymentService = createDeploymentService({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}), deploymentRoot: workspaceRoot, fetchImpl: options.modelTestFetch ?? globalThis.fetch.bind(globalThis), keychain: modelConfigSecrets });
+    deploymentService.recoverInterruptedDeployments();
     const onSkillMaterializationFailed = (input: { readonly taskId?: string; readonly skillId: string; readonly skillName: string; readonly workspaceId: string; readonly runId: string; readonly error: string }): void => {
       const now = options.now?.() ?? Date.now();
       database.sqlite.transaction(() => {
@@ -609,7 +613,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     };
     taskTimeoutTimer = setInterval(runTaskTimeoutSweep, 60_000);
     taskTimeoutTimer.unref?.();
-    runtime = { database, eventBus, commandBus, roomMcpServer, adapterRegistry, mockAdapter, artifactService, taskService, skillRegistry, assistedSelector, outbox, handlers, runQueue, agentProfiles, roleDraftGcCleanup, lifecycle };
+    runtime = { database, eventBus, commandBus, roomMcpServer, adapterRegistry, mockAdapter, artifactService, deploymentService, taskService, skillRegistry, assistedSelector, outbox, handlers, runQueue, agentProfiles, roleDraftGcCleanup, lifecycle };
 
     emitPhase("startup", PHASE_HTTP);
     return await new Promise<Server>((resolve) => {
@@ -681,6 +685,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     get roomMcpServer() { return requireRuntime().roomMcpServer; },
     get adapterRegistry() { return requireRuntime().adapterRegistry; },
     get mockAdapter() { return requireRuntime().mockAdapter; },
+    get deploymentService() { return requireRuntime().deploymentService; },
     handle,
     inFlightRunIds,
     start,
@@ -738,7 +743,7 @@ function withStatusLineCoalescing(eventBus: EventBus): StatusLineEventBus {
   return wrapped;
 }
 
-type RouteContext = { readonly req: IncomingMessage; readonly res: ServerResponse; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly artifactService: ArtifactService; readonly taskService: TaskService; readonly skillRegistry: SkillRegistry; readonly outbox: { drainPending(): Promise<void> }; readonly stopAssistedDiscussion: (roomId: string) => Promise<{ readonly ok: boolean; readonly roomId: string; readonly cancelledRunIds: readonly string[] }>; readonly modelConfigSecrets: KeychainBridge; readonly settingsJobs: Map<string, SettingsJobRecord>; readonly modelTestFetch: typeof fetch; readonly roleDraftGenerator: RoleDraftGenerator; readonly registerSseClient: (client: SseClient) => () => void; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly host: string; readonly now?: () => number };
+type RouteContext = { readonly req: IncomingMessage; readonly res: ServerResponse; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly artifactService: ArtifactService; readonly deploymentService: DeploymentService; readonly taskService: TaskService; readonly skillRegistry: SkillRegistry; readonly outbox: { drainPending(): Promise<void> }; readonly stopAssistedDiscussion: (roomId: string) => Promise<{ readonly ok: boolean; readonly roomId: string; readonly cancelledRunIds: readonly string[] }>; readonly modelConfigSecrets: KeychainBridge; readonly settingsJobs: Map<string, SettingsJobRecord>; readonly modelTestFetch: typeof fetch; readonly roleDraftGenerator: RoleDraftGenerator; readonly registerSseClient: (client: SseClient) => () => void; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly host: string; readonly now?: () => number };
 
 async function route(ctx: RouteContext): Promise<void> {
   const url = new URL(ctx.req.url ?? "/", "http://127.0.0.1");
@@ -996,7 +1001,7 @@ async function route(ctx: RouteContext): Promise<void> {
     return json(ctx.res, 200, { ok: true });
   }
   if (ctx.req.method === "GET" && url.pathname === "/event") return sse(ctx, url, auth.scopes);
-  if (ctx.req.method === "GET" && url.pathname === "/rooms") return json(ctx.res, 200, { rooms: all(ctx.database, "SELECT * FROM rooms ORDER BY created_at ASC") });
+  if (ctx.req.method === "GET" && url.pathname === "/rooms") return roomsList(ctx, url);
   if (ctx.req.method === "POST" && url.pathname === "/rooms") {
     const requestBody = await body(ctx);
     const normalized = normalizeRoomCreateCompat(ctx.database, requestBody);
@@ -1012,7 +1017,9 @@ async function route(ctx: RouteContext): Promise<void> {
   if (ctx.req.method === "GET" && url.pathname === "/roles") return roles(ctx, url);
   if (ctx.req.method === "POST" && url.pathname === "/roles") return createRole(ctx, await body(ctx));
   if (ctx.req.method === "DELETE" && parts[0] === "auth" && parts[1] === "tokens" && parts[2]) { if (!requireScope(auth, "write", ctx.res)) return; return revokeToken(ctx, parts[2]); }
-  if (ctx.req.method === "GET" && parts[0] === "rooms" && parts.length === 1) return json(ctx.res, 200, { rooms: all(ctx.database, "SELECT * FROM rooms ORDER BY created_at ASC") });
+  if (ctx.req.method === "GET" && parts[0] === "rooms" && parts.length === 1) return roomsList(ctx, url);
+  if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "pin") return pinRoom(ctx, parts[1] as string);
+  if (ctx.req.method === "DELETE" && parts[0] === "rooms" && parts[2] === "pin") return unpinRoom(ctx, parts[1] as string);
   if (ctx.req.method === "GET" && parts[0] === "rooms" && parts[2] === "task-plans" && parts[3] === "latest") return latestTaskPlan(ctx, parts[1] as string);
   if (ctx.req.method === "GET" && parts[0] === "rooms" && parts.length === 2) return json(ctx.res, 200, { room: get(ctx.database, "SELECT * FROM rooms WHERE id = ?", parts[1]) });
   if (ctx.req.method === "GET" && parts[0] === "rooms" && parts[2] === "tasks") return tasks(ctx, parts[1] as string, url);
@@ -1082,6 +1089,20 @@ async function route(ctx: RouteContext): Promise<void> {
     if (ctx.req.method === "PATCH" && parts.length === 2) return updateRole(ctx, parts[1], await body(ctx));
     if (ctx.req.method === "DELETE" && parts.length === 2) return deleteRole(ctx, parts[1]);
   }
+  if (ctx.req.method === "GET" && parts[0] === "deployments" && parts.length === 1) return deployments(ctx, url);
+  if (ctx.req.method === "POST" && parts[0] === "deployments" && parts.length === 1) return createDeployment(ctx, await body(ctx));
+  if (ctx.req.method === "GET" && parts[0] === "deployments" && parts[2] === "logs") return deploymentLogs(ctx, parts[1] as string);
+  if (ctx.req.method === "GET" && parts[0] === "deployments" && parts[2] === "download") return deploymentDownload(ctx, parts[1] as string);
+  if (ctx.req.method === "POST" && parts[0] === "deployments" && parts[2] === "redeploy") return deploymentAction(ctx, parts[1] as string, "redeploy");
+  if (ctx.req.method === "POST" && parts[0] === "deployments" && parts[2] === "retry") return deploymentAction(ctx, parts[1] as string, "retry");
+  if (ctx.req.method === "POST" && parts[0] === "deployments" && parts[2] === "cancel") return deploymentAction(ctx, parts[1] as string, "cancel");
+  if (ctx.req.method === "POST" && parts[0] === "deployments" && parts[2] === "unpublish") return deploymentAction(ctx, parts[1] as string, "unpublish");
+  if (ctx.req.method === "GET" && parts[0] === "deployments" && parts.length === 2) return deployment(ctx, parts[1] as string);
+  if (ctx.req.method === "GET" && parts[0] === "deployment-providers" && parts.length === 1) return deploymentProviders(ctx);
+  if (ctx.req.method === "POST" && parts[0] === "deployment-providers" && parts.length === 1) return createDeploymentProvider(ctx, await body(ctx));
+  if (ctx.req.method === "PATCH" && parts[0] === "deployment-providers" && parts[1]) return updateDeploymentProvider(ctx, parts[1], await body(ctx));
+  if (ctx.req.method === "DELETE" && parts[0] === "deployment-providers" && parts[1]) return deleteDeploymentProvider(ctx, parts[1]);
+  if (ctx.req.method === "POST" && parts[0] === "deployment-providers" && parts[2] === "test") return testDeploymentProvider(ctx, parts[1] as string);
   if (ctx.req.method === "GET" && url.pathname === "/artifacts") return artifacts(ctx, url);
   if (ctx.req.method === "POST" && url.pathname === "/artifacts") return dispatch(ctx, await body(ctx), "CreateArtifact");
   if (ctx.req.method === "GET" && parts[0] === "artifacts" && parts.length === 2) return json(ctx.res, 200, { artifact: ctx.artifactService.get(parts[1] as string) ?? null });
@@ -1162,6 +1183,183 @@ async function detectRuntime(ctx: RouteContext, runtimeId: string): Promise<void
     })();
   }
   return json(ctx.res, 200, { runtime: get(ctx.database, "SELECT * FROM runtimes WHERE id = ?", runtimeId), changed });
+}
+
+function roomsList(ctx: RouteContext, url: URL): void {
+  const query = url.searchParams.get("q")?.trim();
+  const rows = ctx.database.sqlite
+    .prepare(
+      `SELECT r.*
+       FROM rooms r
+       WHERE r.archived_at IS NULL
+         AND (
+           ? IS NULL
+           OR r.title LIKE ?
+           OR EXISTS (
+             SELECT 1
+             FROM room_participants rp
+             LEFT JOIN agent_bindings ab ON ab.id = rp.agent_binding_id
+             LEFT JOIN roles roles ON roles.id = ab.role_id
+             WHERE rp.room_id = r.id
+               AND COALESCE(ab.contact_name, roles.name, rp.participant_id) LIKE ?
+           )
+           OR EXISTS (
+             SELECT 1
+             FROM (
+               SELECT m.id
+               FROM messages m
+               WHERE m.room_id = r.id AND m.deleted_at IS NULL
+               ORDER BY m.created_at DESC, m.id DESC
+               LIMIT 5
+             ) recent
+             JOIN message_parts mp ON mp.message_id = recent.id
+             WHERE mp.payload LIKE ?
+           )
+         )
+       ORDER BY
+         CASE WHEN r.pinned_at IS NULL THEN 0 ELSE 1 END DESC,
+         r.pinned_at DESC,
+         r.last_activity_at DESC,
+         r.updated_at DESC,
+         r.created_at DESC
+       LIMIT 20`
+    )
+    .all(query ?? null, likeQuery(query), likeQuery(query), likeQuery(query)) as Array<Record<string, unknown>>;
+  json(ctx.res, 200, { rooms: rows.map((row) => ({ ...row, participantContactNames: participantContactNames(ctx.database, String(row.id)) })) });
+}
+
+function pinRoom(ctx: RouteContext, roomId: string): void {
+  const room = ctx.database.sqlite.prepare("SELECT workspace_id FROM rooms WHERE id = ? AND archived_at IS NULL").get(roomId) as { readonly workspace_id: string } | undefined;
+  if (room === undefined) return json(ctx.res, 404, { error: "room_not_found" });
+  const now = ctx.now?.() ?? Date.now();
+  ctx.database.sqlite.transaction(() => {
+    ctx.database.sqlite.prepare("UPDATE rooms SET pinned_at = ?, updated_at = ? WHERE id = ?").run(now, now, roomId);
+    ctx.eventBus.publish({ id: randomUUID(), type: "room.pinned", schemaVersion: 1, workspaceId: room.workspace_id, roomId, payload: { roomId, pinnedAt: now }, createdAt: now });
+  })();
+  json(ctx.res, 200, { ok: true, roomId, pinnedAt: now });
+}
+
+function unpinRoom(ctx: RouteContext, roomId: string): void {
+  const room = ctx.database.sqlite.prepare("SELECT workspace_id FROM rooms WHERE id = ? AND archived_at IS NULL").get(roomId) as { readonly workspace_id: string } | undefined;
+  if (room === undefined) return json(ctx.res, 404, { error: "room_not_found" });
+  const now = ctx.now?.() ?? Date.now();
+  ctx.database.sqlite.transaction(() => {
+    ctx.database.sqlite.prepare("UPDATE rooms SET pinned_at = NULL, updated_at = ? WHERE id = ?").run(now, roomId);
+    ctx.eventBus.publish({ id: randomUUID(), type: "room.unpinned", schemaVersion: 1, workspaceId: room.workspace_id, roomId, payload: { roomId }, createdAt: now });
+  })();
+  json(ctx.res, 200, { ok: true, roomId });
+}
+
+function participantContactNames(database: AgentHubDatabase, roomId: string): readonly string[] {
+  const rows = database.sqlite
+    .prepare(
+      `SELECT COALESCE(ab.contact_name, roles.name, rp.participant_id) AS name
+       FROM room_participants rp
+       LEFT JOIN agent_bindings ab ON ab.id = rp.agent_binding_id
+       LEFT JOIN roles roles ON roles.id = ab.role_id
+       WHERE rp.room_id = ? AND rp.participant_type = 'agent'
+       ORDER BY rp.joined_at ASC`
+    )
+    .all(roomId) as Array<{ readonly name: string | null }>;
+  return rows.map((row) => row.name).filter((name): name is string => typeof name === "string" && name.length > 0);
+}
+
+function likeQuery(value: string | undefined): string | null {
+  return value === undefined || value.length === 0 ? null : `%${value}%`;
+}
+
+async function deployments(ctx: RouteContext, url: URL): Promise<void> {
+  const artifactId = url.searchParams.get("artifactId");
+  if (artifactId === null || artifactId.length === 0) {
+    return json(ctx.res, 200, { deployments: all(ctx.database, "SELECT * FROM deployments ORDER BY created_at DESC") });
+  }
+  return json(ctx.res, 200, { deployments: await ctx.deploymentService.listDeployments(artifactId) });
+}
+
+async function createDeployment(ctx: RouteContext, input: Record<string, unknown>): Promise<void> {
+  const artifactId = stringField(input.artifactId);
+  const kind = deploymentKind(input.kind);
+  if (artifactId === undefined || kind === undefined) return json(ctx.res, 400, { error: "validation_failed", message: "artifactId and valid kind are required" });
+  try {
+    const deployment = await ctx.deploymentService.createDeployment({ artifactId, kind, ...(stringField(input.roomId) !== undefined ? { roomId: stringField(input.roomId) as string } : {}), ...(stringField(input.providerId) !== undefined ? { providerId: stringField(input.providerId) as string } : {}) });
+    return json(ctx.res, 201, { deployment });
+  } catch (error) {
+    return json(ctx.res, 400, { error: errorMessage(error) });
+  }
+}
+
+async function deployment(ctx: RouteContext, deploymentId: string): Promise<void> {
+  const result = await ctx.deploymentService.getDeployment(deploymentId);
+  if (result === undefined) return json(ctx.res, 404, { error: "deployment_not_found" });
+  return json(ctx.res, 200, { deployment: result });
+}
+
+async function deploymentAction(ctx: RouteContext, deploymentId: string, action: "redeploy" | "retry" | "cancel" | "unpublish"): Promise<void> {
+  try {
+    const deployment = await ctx.deploymentService[action](deploymentId);
+    return json(ctx.res, 200, { deployment });
+  } catch (error) {
+    return json(ctx.res, 404, { error: errorMessage(error) });
+  }
+}
+
+async function deploymentLogs(ctx: RouteContext, deploymentId: string): Promise<void> {
+  const text = await ctx.deploymentService.readLogs(deploymentId);
+  ctx.res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+  ctx.res.end(text);
+}
+
+async function deploymentDownload(ctx: RouteContext, deploymentId: string): Promise<void> {
+  const path = await ctx.deploymentService.downloadPath(deploymentId);
+  if (path === undefined || !existsSync(path)) return json(ctx.res, 404, { error: "deployment_download_not_found" });
+  return serveStaticFile(ctx.req, ctx.res, path) ? undefined : json(ctx.res, 404, { error: "deployment_download_not_found" });
+}
+
+function deploymentProviders(ctx: RouteContext): void {
+  json(ctx.res, 200, { providers: all(ctx.database, "SELECT id, workspace_id, kind, name, base_url, credential_ref, created_at, updated_at FROM deployment_providers ORDER BY created_at ASC") });
+}
+
+async function createDeploymentProvider(ctx: RouteContext, input: Record<string, unknown>): Promise<void> {
+  const kind = stringField(input.kind) ?? "caprover";
+  const name = stringField(input.name);
+  const baseUrl = stringField(input.baseUrl) ?? stringField(input.base_url);
+  const credential = stringField(input.credential);
+  if (kind !== "caprover" || name === undefined || baseUrl === undefined || credential === undefined) return json(ctx.res, 400, { error: "validation_failed" });
+  const now = ctx.now?.() ?? Date.now();
+  const id = randomUUID();
+  const credentialRef = `deployment-provider:${id}`;
+  await ctx.modelConfigSecrets.set(credentialRef, credential);
+  ctx.database.sqlite.prepare("INSERT INTO deployment_providers (id, workspace_id, kind, name, base_url, credential_ref, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(id, defaultWorkspaceId(ctx.database), kind, name, baseUrl, credentialRef, now, now);
+  json(ctx.res, 201, { provider: get(ctx.database, "SELECT * FROM deployment_providers WHERE id = ?", id) });
+}
+
+async function updateDeploymentProvider(ctx: RouteContext, providerId: string, input: Record<string, unknown>): Promise<void> {
+  const existing = get(ctx.database, "SELECT * FROM deployment_providers WHERE id = ?", providerId) as Record<string, unknown> | null;
+  if (existing === null) return json(ctx.res, 404, { error: "deployment_provider_not_found" });
+  const now = ctx.now?.() ?? Date.now();
+  const name = stringField(input.name) ?? String(existing.name);
+  const baseUrl = stringField(input.baseUrl) ?? stringField(input.base_url) ?? String(existing.base_url);
+  const credential = stringField(input.credential);
+  if (credential !== undefined) await ctx.modelConfigSecrets.set(String(existing.credential_ref), credential);
+  ctx.database.sqlite.prepare("UPDATE deployment_providers SET name = ?, base_url = ?, updated_at = ? WHERE id = ?").run(name, baseUrl, now, providerId);
+  json(ctx.res, 200, { provider: get(ctx.database, "SELECT * FROM deployment_providers WHERE id = ?", providerId) });
+}
+
+async function deleteDeploymentProvider(ctx: RouteContext, providerId: string): Promise<void> {
+  const existing = get(ctx.database, "SELECT * FROM deployment_providers WHERE id = ?", providerId) as Record<string, unknown> | null;
+  if (existing === null) return json(ctx.res, 404, { error: "deployment_provider_not_found" });
+  ctx.database.sqlite.prepare("DELETE FROM deployment_providers WHERE id = ?").run(providerId);
+  await ctx.modelConfigSecrets.delete(String(existing.credential_ref)).catch(() => false);
+  json(ctx.res, 200, { ok: true });
+}
+
+async function testDeploymentProvider(ctx: RouteContext, providerId: string): Promise<void> {
+  const result = await ctx.deploymentService.testProvider(providerId);
+  json(ctx.res, result.ok ? 200 : 400, result);
+}
+
+function deploymentKind(value: unknown): DeploymentKind | undefined {
+  return value === "preview-url" || value === "static-site" || value === "source-zip" || value === "container-export" || value === "container-build" || value === "self-hosted" ? value : undefined;
 }
 
 async function testRuntime(ctx: RouteContext, runtimeId: string, input: Record<string, unknown>): Promise<void> {

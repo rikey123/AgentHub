@@ -338,6 +338,57 @@ describe("daemon M1.4 composition", () => {
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM room_participants WHERE room_id = ?").get(roomId)).toMatchObject({ count: 2 });
   });
 
+  it("lists rooms by pinned and last activity, supports search, and excludes archived rooms", async () => {
+    const now = Date.now();
+    const roleId = `role-room-search-${now}`;
+    const runtimeId = `runtime-room-search-${now}`;
+    const bindingId = `binding-room-search-${now}`;
+    daemon.database.sqlite.transaction(() => {
+      daemon.database.sqlite.prepare("INSERT INTO roles (id, workspace_id, name, avatar, description, prompt, capabilities, default_permission_profile_id, tags, is_builtin, source_path, version, created_at, updated_at) VALUES (?, 'default-workspace', 'Builder', NULL, NULL, 'Build', '[]', NULL, NULL, 0, NULL, NULL, ?, ?)").run(roleId, now, now);
+      daemon.database.sqlite.prepare("INSERT INTO runtimes (id, workspace_id, kind, name, command, args, env, detected_at, detected_path, detected_version, supported_caps, version, status, manifest_json, created_at, updated_at) VALUES (?, 'default-workspace', 'custom-acp', 'Runtime', NULL, NULL, NULL, NULL, NULL, NULL, '[]', NULL, NULL, '{}', ?, ?)").run(runtimeId, now, now);
+      daemon.database.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, avatar_url, contact_name, contact_description, created_at, updated_at) VALUES (?, 'default-workspace', ?, ?, NULL, NULL, NULL, 'Builder Contact', NULL, ?, ?)").run(bindingId, roleId, runtimeId, now, now);
+      daemon.database.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, pinned_at, last_activity_at, archived_at, created_at, updated_at) VALUES ('room_old', 'default-workspace', 'Old', 'solo', 'conversation', ?, NULL, ?, NULL, ?, ?)").run(bindingId, now - 10_000, now - 10_000, now - 10_000);
+      daemon.database.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, pinned_at, last_activity_at, archived_at, created_at, updated_at) VALUES ('room_active', 'default-workspace', 'Active', 'solo', 'conversation', ?, NULL, ?, NULL, ?, ?)").run(bindingId, now - 1_000, now - 1_000, now - 1_000);
+      daemon.database.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, pinned_at, last_activity_at, archived_at, created_at, updated_at) VALUES ('room_pinned', 'default-workspace', 'Pinned', 'solo', 'conversation', ?, ?, ?, NULL, ?, ?)").run(bindingId, now - 5_000, now - 20_000, now - 20_000, now - 20_000);
+      daemon.database.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, pinned_at, last_activity_at, archived_at, created_at, updated_at) VALUES ('room_archived', 'default-workspace', 'Archived Builder', 'solo', 'conversation', ?, NULL, ?, ?, ?, ?)").run(bindingId, now, now, now, now);
+      for (const roomId of ["room_old", "room_active", "room_pinned", "room_archived"]) {
+        daemon.database.sqlite.prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES (?, ?, 'agent', 'primary', 'mock', NULL, ?, 'active', ?)").run(roomId, bindingId, bindingId, now);
+      }
+    })();
+
+    const listed = await fetch(`${baseUrl}/rooms`);
+    const payload = await listed.json() as { readonly rooms: readonly { readonly id: string; readonly participantContactNames?: readonly string[] }[] };
+    expect(payload.rooms.map((room) => room.id).slice(0, 3)).toEqual(["room_pinned", "room_active", "room_old"]);
+    expect(payload.rooms.map((room) => room.id)).not.toContain("room_archived");
+    expect(payload.rooms.find((room) => room.id === "room_active")?.participantContactNames).toContain("Builder Contact");
+
+    const searched = await fetch(`${baseUrl}/rooms?q=Builder`);
+    const searchedPayload = await searched.json() as { readonly rooms: readonly { readonly id: string }[] };
+    expect(searchedPayload.rooms.map((room) => room.id)).toEqual(expect.arrayContaining(["room_pinned", "room_active", "room_old"]));
+    expect(searchedPayload.rooms.map((room) => room.id)).not.toContain("room_archived");
+  });
+
+  it("pins and unpins a room with durable room events", async () => {
+    const room = await fetch(`${baseUrl}/rooms`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Pin Me", mode: "solo", primaryAgentId: "mock-builder" })
+    });
+    const body = await room.json() as { readonly data?: { readonly roomId?: string } };
+    const roomId = body.data?.roomId ?? "";
+
+    const pinned = await fetch(`${baseUrl}/rooms/${roomId}/pin`, { method: "POST" });
+    expect(pinned.status).toBe(200);
+    expect(daemon.database.sqlite.prepare("SELECT pinned_at FROM rooms WHERE id = ?").get(roomId)).toMatchObject({ pinned_at: expect.any(Number) });
+    expect(daemon.eventBus.replayDurableSinceSeq(0, { view: "main" }).filter((event) => event.type === "room.pinned" && (event.payload as Record<string, unknown>).roomId === roomId)).toHaveLength(1);
+    expect(daemon.eventBus.replayDurableSinceSeq(0, { view: "detail" }).filter((event) => event.type === "room.pinned" && (event.payload as Record<string, unknown>).roomId === roomId)).toHaveLength(1);
+
+    const unpinned = await fetch(`${baseUrl}/rooms/${roomId}/pin`, { method: "DELETE" });
+    expect(unpinned.status).toBe(200);
+    expect(daemon.database.sqlite.prepare("SELECT pinned_at FROM rooms WHERE id = ?").get(roomId)).toMatchObject({ pinned_at: null });
+    expect(daemon.eventBus.replayDurableSinceSeq(0, { view: "main" }).filter((event) => event.type === "room.unpinned" && (event.payload as Record<string, unknown>).roomId === roomId)).toHaveLength(1);
+  });
+
   it("creates solo rooms from a V1 role/runtime/model binding without falling back to mock", async () => {
     const now = Date.now();
     const roleId = `role-solo-v1-${now}`;

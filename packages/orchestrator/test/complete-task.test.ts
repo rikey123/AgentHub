@@ -148,6 +148,41 @@ describe("TaskService.completeTask", () => {
     expect(events).not.toContain("task.delegation.completed");
   });
 
+  test("unblocks dependent tasks and writes wake_outbox when all dependencies complete", () => {
+    const dependencyTaskId = createTask({ roomId: "room_squad", assigneeAgentId: "agent_worker", expectsReview: false, status: "in_progress" });
+    const dependent = currentService().create({
+      roomId: "room_squad",
+      title: "Dependent task",
+      assigneeAgentId: "agent_worker",
+      dependencies: [dependencyTaskId],
+      expectsReview: false,
+      createdBy: "agent_system"
+    });
+    if (!dependent.ok) throw new Error("expected dependent task create success");
+    currentDatabase().sqlite.prepare("UPDATE tasks SET status = 'blocked', blocker_reason = 'waiting_on_dependency', updated_at = ? WHERE id = ?").run(now, dependent.data.taskId);
+
+    const result = currentService().completeTask({
+      taskId: dependencyTaskId,
+      roomId: "room_squad",
+      callerAgentId: "agent_worker",
+      status: "completed",
+      summary: "Dependency done"
+    });
+
+    expect(result.ok).toBe(true);
+    expect(currentDatabase().sqlite.prepare("SELECT status, blocker_reason, last_unblocked_at FROM tasks WHERE id = ?").get(dependent.data.taskId)).toMatchObject({
+      status: "pending",
+      blocker_reason: null,
+      last_unblocked_at: now
+    });
+    expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'task.unblocked' AND task_id = ?").get(dependent.data.taskId)).toMatchObject({ count: 1 });
+    expect(currentDatabase().sqlite.prepare("SELECT reason, room_id, agent_id FROM wake_outbox WHERE payload LIKE ?").get(`%${dependent.data.taskId}%`)).toMatchObject({
+      reason: "delegated_task",
+      room_id: "room_squad",
+      agent_id: "agent_worker"
+    });
+  });
+
   test("onSessionEndedWithoutCompletion transitions task to review with missing_completion_report", () => {
     // Spec D6: if run ends without room.complete_task, task → review(missing_completion_report)
     const taskId = createTask({ roomId: "room_squad", assigneeAgentId: "agent_worker", expectsReview: false, status: "in_progress" });

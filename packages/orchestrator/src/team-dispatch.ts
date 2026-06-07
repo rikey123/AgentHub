@@ -23,20 +23,22 @@ export async function handleTeamDispatchReviewTerminal(runtime: TeamDispatchRunt
   const task = runtime.database.sqlite.prepare("SELECT * FROM tasks WHERE id = ?").get(run.task_id) as TaskRow | undefined;
   if (task === undefined || task.expects_review === 0) return;
   if (task.room_id === null) return;
+  const roomId = task.room_id;
 
   const scope = taskDispatchScope(task);
   if (scope === undefined) return;
 
-  const siblingState = teamDispatchSiblingState(runtime.database, task.room_id, scope);
+  const siblingState = teamDispatchSiblingState(runtime.database, roomId, scope);
   if (siblingState.taskIds.length === 0) return;
 
-  const alreadyStarted = teamDispatchEventCount(runtime.database, task.room_id, "team.dispatch.started", scope) > 0;
+  const alreadyStarted = teamDispatchEventCount(runtime.database, roomId, "team.dispatch.started", scope) > 0;
   if (alreadyStarted) return;
 
   if (siblingState.pendingCount > 0) return;
 
-  const room = runtime.database.sqlite.prepare("SELECT workspace_id, primary_agent_id FROM rooms WHERE id = ?").get(task.room_id) as { readonly workspace_id: string; readonly primary_agent_id: string | null } | undefined;
+  const room = runtime.database.sqlite.prepare("SELECT workspace_id, primary_agent_id FROM rooms WHERE id = ?").get(roomId) as { readonly workspace_id: string; readonly primary_agent_id: string | null } | undefined;
   if (room === undefined || room.primary_agent_id === null) return;
+  const leaderAgentId = room.primary_agent_id;
 
   const wakeReason = siblingState.blockedCount > 0 ? "task_blocked" : "task_review";
   const prompt = wakeReason === "task_blocked"
@@ -62,21 +64,37 @@ export async function handleTeamDispatchReviewTerminal(runtime: TeamDispatchRunt
   if (typeof leaderRunId !== "string" || leaderRunId.length === 0) return;
 
   const dispatchId = `team-dispatch:${scope.kind}:${scope.value}`;
-  runtime.eventBus.publish({
-    id: randomUUID(),
-    type: "team.dispatch.started",
-    schemaVersion: 1,
-    workspaceId: room.workspace_id,
-      roomId: task.room_id,
-    runId: leaderRunId,
-    agentId: room.primary_agent_id,
-    taskId: task.id,
-    payload: { dispatchId, leaderRunId, targetTaskIds: siblingState.taskIds, sourceRunId: scope.value },
-    createdAt: runtime.now?.() ?? Date.now()
-  });
+  const createdAt = runtime.now?.() ?? Date.now();
+  runtime.database.sqlite.transaction(() => {
+    runtime.eventBus.publish({
+      id: randomUUID(),
+      type: "team.dispatch.started",
+      schemaVersion: 1,
+      workspaceId: room.workspace_id,
+      roomId,
+      runId: leaderRunId,
+      agentId: leaderAgentId,
+      taskId: task.id,
+      payload: { dispatchId, leaderRunId, targetTaskIds: siblingState.taskIds, sourceRunId: scope.value },
+      createdAt
+    });
+    if (wakeReason === "task_blocked") {
+      const blocked = blockedTask(runtime.database, roomId, scope) ?? (task.status === "blocked" ? task : undefined);
+      const reason = blocked !== undefined ? taskBlockReason(runtime.database, blocked) : undefined;
+      publishSystemCoordinationMessage(runtime, {
+        workspaceId: room.workspace_id,
+        roomId,
+        agentId: leaderAgentId,
+        runId: leaderRunId,
+        taskId: blocked?.id ?? task.id,
+        text: `A delegated task failed or blocked. Reason: ${reason ?? "unknown"}. Degrade: leader review requested.`,
+        createdAt
+      });
+    }
+  })();
   runtime.taskModeGroupChatPresenter?.publishTeamReviewStarted({
-    roomId: task.room_id,
-    leaderAgentId: room.primary_agent_id,
+    roomId,
+    leaderAgentId,
     taskIds: siblingState.taskIds,
     runId: leaderRunId
   });
@@ -87,31 +105,45 @@ export function maybePublishTeamDispatchCompleted(runtime: Pick<TeamDispatchRunt
   const scope = taskDispatchScope(task);
   if (scope === undefined) return;
   if (task.room_id === null) return;
+  const roomId = task.room_id;
 
-  const taskIds = teamDispatchTaskIds(runtime.database, task.room_id, scope);
+  const taskIds = teamDispatchTaskIds(runtime.database, roomId, scope);
   if (taskIds.length === 0) return;
-  if (teamDispatchAllCompleted(runtime.database, task.room_id, scope) === false) return;
-  if (teamDispatchEventCount(runtime.database, task.room_id, "team.dispatch.completed", scope) > 0) return;
+  if (teamDispatchAllCompleted(runtime.database, roomId, scope) === false) return;
+  if (teamDispatchEventCount(runtime.database, roomId, "team.dispatch.completed", scope) > 0) return;
 
-  const room = runtime.database.sqlite.prepare("SELECT workspace_id, primary_agent_id FROM rooms WHERE id = ?").get(task.room_id) as { readonly workspace_id: string; readonly primary_agent_id: string | null } | undefined;
+  const room = runtime.database.sqlite.prepare("SELECT workspace_id, primary_agent_id FROM rooms WHERE id = ?").get(roomId) as { readonly workspace_id: string; readonly primary_agent_id: string | null } | undefined;
   if (room === undefined || room.primary_agent_id === null) return;
+  const leaderAgentId = room.primary_agent_id;
 
   const dispatchId = `team-dispatch:${scope.kind}:${scope.value}`;
-  runtime.eventBus.publish({
-    id: randomUUID(),
-    type: "team.dispatch.completed",
-    schemaVersion: 1,
-    workspaceId: room.workspace_id,
-    roomId: task.room_id,
-    runId: task.source_run_id ?? scope.value,
-    agentId: room.primary_agent_id,
-    taskId: task.id,
-    payload: { dispatchId, leaderRunId: task.source_run_id ?? scope.value, taskIds, sourceRunId: scope.value, summary: `All ${taskIds.length} review tasks completed` },
-    createdAt: runtime.now?.() ?? Date.now()
-  });
+  const createdAt = runtime.now?.() ?? Date.now();
+  runtime.database.sqlite.transaction(() => {
+    runtime.eventBus.publish({
+      id: randomUUID(),
+      type: "team.dispatch.completed",
+      schemaVersion: 1,
+      workspaceId: room.workspace_id,
+      roomId,
+      runId: task.source_run_id ?? scope.value,
+      agentId: leaderAgentId,
+      taskId: task.id,
+      payload: { dispatchId, leaderRunId: task.source_run_id ?? scope.value, taskIds, sourceRunId: scope.value, summary: `All ${taskIds.length} review tasks completed` },
+      createdAt
+    });
+    const payload = JSON.stringify({ taskIds, sourceRunId: scope.value });
+    const existing = runtime.database.sqlite
+      .prepare("SELECT id FROM wake_outbox WHERE room_id = ? AND agent_id = ? AND reason = 'aggregate' AND payload = ? AND status IN ('pending', 'dispatching', 'dispatched') LIMIT 1")
+      .get(roomId, leaderAgentId, payload);
+    if (existing === undefined) {
+      runtime.database.sqlite
+        .prepare("INSERT INTO wake_outbox (id, room_id, agent_id, reason, payload, status, attempt_count, max_attempts, created_at, dispatch_after) VALUES (?, ?, ?, 'aggregate', ?, 'pending', 0, 3, ?, NULL)")
+        .run(randomUUID(), roomId, leaderAgentId, payload, createdAt);
+    }
+  })();
   runtime.taskModeGroupChatPresenter?.publishTeamReviewCompleted({
-    roomId: task.room_id,
-    leaderAgentId: room.primary_agent_id,
+    roomId,
+    leaderAgentId,
     taskIds,
     runId: task.source_run_id ?? scope.value
   });
@@ -150,6 +182,63 @@ function teamDispatchAllCompleted(database: AgentHubDatabase, roomId: string, sc
     ? "SELECT COUNT(*) AS count FROM tasks WHERE room_id = ? AND parent_task_id = ? AND expects_review = 1 AND status != 'completed'"
     : "SELECT COUNT(*) AS count FROM tasks WHERE room_id = ? AND source_run_id = ? AND parent_task_id IS NULL AND expects_review = 1 AND status != 'completed'";
   return ((database.sqlite.prepare(sql).get(roomId, scope.value) as { readonly count: number }).count ?? 0) === 0;
+}
+
+function blockedTask(database: AgentHubDatabase, roomId: string, scope: TeamDispatchScope): TaskRow | undefined {
+  const sql = scope.kind === "parent_task_id"
+    ? "SELECT * FROM tasks WHERE room_id = ? AND parent_task_id = ? AND expects_review = 1 AND status = 'blocked' ORDER BY updated_at DESC, id DESC LIMIT 1"
+    : "SELECT * FROM tasks WHERE room_id = ? AND source_run_id = ? AND parent_task_id IS NULL AND expects_review = 1 AND status = 'blocked' ORDER BY updated_at DESC, id DESC LIMIT 1";
+  return database.sqlite.prepare(sql).get(roomId, scope.value) as TaskRow | undefined;
+}
+
+function taskBlockReason(database: AgentHubDatabase, task: TaskRow): string | undefined {
+  if (task.blocker_reason !== null && task.blocker_reason.trim().length > 0) return task.blocker_reason;
+  const row = database.sqlite
+    .prepare("SELECT payload FROM events WHERE task_id = ? AND type = 'task.status.changed' ORDER BY seq DESC LIMIT 1")
+    .get(task.id) as { readonly payload: string } | undefined;
+  if (row === undefined) return undefined;
+  try {
+    const payload = JSON.parse(row.payload) as { readonly blockerReason?: unknown; readonly reason?: unknown };
+    if (typeof payload.blockerReason === "string" && payload.blockerReason.length > 0) return payload.blockerReason;
+    if (typeof payload.reason === "string" && payload.reason.length > 0) return payload.reason;
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+function publishSystemCoordinationMessage(runtime: Pick<TeamDispatchRuntime, "database" | "eventBus">, input: { readonly workspaceId: string; readonly roomId: string; readonly agentId: string; readonly taskId: string; readonly runId: string; readonly text: string; readonly createdAt: number }): void {
+  const messageId = `msg_team_coord_${randomUUID()}`;
+  runtime.database.sqlite
+    .prepare("INSERT INTO messages (id, workspace_id, room_id, sender_type, sender_id, run_id, role, status, quoted_message_id, turn_dispatch_mode, pending_turn_id, created_at, updated_at, deleted_at) VALUES (?, ?, ?, 'system', 'team-dispatch', ?, 'system', 'completed', NULL, 'immediate', NULL, ?, ?, NULL)")
+    .run(messageId, input.workspaceId, input.roomId, input.runId, input.createdAt, input.createdAt);
+  runtime.database.sqlite
+    .prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, 1, 'text', ?, ?)")
+    .run(messageId, JSON.stringify({ text: input.text }), input.createdAt);
+  runtime.eventBus.publish({
+    id: randomUUID(),
+    type: "message.created",
+    schemaVersion: 1,
+    workspaceId: input.workspaceId,
+    roomId: input.roomId,
+    runId: input.runId,
+    agentId: input.agentId,
+    taskId: input.taskId,
+    payload: { messageId, senderType: "system", senderId: "team-dispatch", role: "system", status: "completed" },
+    createdAt: input.createdAt
+  });
+  runtime.eventBus.publish({
+    id: randomUUID(),
+    type: "message.completed",
+    schemaVersion: 1,
+    workspaceId: input.workspaceId,
+    roomId: input.roomId,
+    runId: input.runId,
+    agentId: input.agentId,
+    taskId: input.taskId,
+    payload: { messageId, text: input.text },
+    createdAt: input.createdAt
+  });
 }
 
 function teamDispatchEventCount(database: AgentHubDatabase, roomId: string, type: "team.dispatch.started" | "team.dispatch.completed", scope: TeamDispatchScope): number {

@@ -66,6 +66,24 @@ describe("ReclaimStaleClaimedRun", () => {
       pid_at_start: 123
     });
   });
+
+  test("restartable running run writes one restart_recovery wake_outbox row idempotently", async () => {
+    currentLifecycle().markStarting(null, "run_stuck", 456);
+    currentLifecycle().markRunning(null, "run_stuck", "ses_restart");
+    const reclaim = new ReclaimStaleClaimedRun(currentDatabase(), currentLifecycle(), () => ({ crashRecovery: "restartable" }), () => now, 123);
+
+    await reclaim.scan();
+    await reclaim.scan();
+
+    expect(currentDatabase().sqlite.prepare("SELECT status, failure_class, error FROM runs WHERE id = 'run_stuck'").get()).toMatchObject({
+      status: "failed",
+      failure_class: "transient",
+      error: "daemon_restarted"
+    });
+    expect(currentDatabase().sqlite.prepare("SELECT room_id, agent_id, reason, status, attempt_count, max_attempts FROM wake_outbox WHERE payload = ?").all(JSON.stringify({ runId: "run_stuck" }))).toEqual([
+      expect.objectContaining({ room_id: "room_1", agent_id: "agent_1", reason: "restart_recovery", status: "pending", attempt_count: 0, max_attempts: 3 })
+    ]);
+  });
 });
 
 function currentDatabase(): AgentHubDatabase {
@@ -85,6 +103,7 @@ function currentLifecycle(): RunLifecycleService {
 
 function seedRun(): void {
   currentDatabase().sqlite.prepare("INSERT INTO workspaces (id, name, root_path, created_at, updated_at) VALUES ('ws_1', 'Workspace', '.', 1, 1)").run();
+  currentDatabase().sqlite.prepare("INSERT INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES ('agent_1', 'ws_1', 'Agent', 'mock', NULL, '', '[]', NULL, 0, NULL, 1, 1)").run();
   currentDatabase().sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES ('room_1', 'ws_1', 'Room', 'solo', 'conversation', 'agent_1', NULL, 1, 1)").run();
   currentLifecycle().create(null, {
     runId: "run_stuck",

@@ -625,6 +625,9 @@ describe("TaskService and RoomMcpServer", () => {
       "Builder，我把「Review me」交给你，先从你的角度推进。",
       "Leader：这组任务已经 review 完成，我来给你合并结论。"
     ]));
+    expect(currentDatabase().sqlite.prepare("SELECT room_id, agent_id, reason, status FROM wake_outbox WHERE reason = 'aggregate'").all()).toEqual([
+      expect.objectContaining({ room_id: "room_team_approve", agent_id: "agent_leader", reason: "aggregate", status: "pending" })
+    ]);
   });
 
   test("team mode wakes leader with task_blocked when a sibling run fails", async () => {
@@ -652,6 +655,7 @@ describe("TaskService and RoomMcpServer", () => {
     const blockedWakes = dispatched.filter((command) => command.reason === "task_blocked");
     expect(blockedWakes).toHaveLength(1);
     expect(blockedWakes[0]).toMatchObject({ taskId: task1Result.data.taskId });
+    expect(systemMessageTexts("room_team_blocked").join("\n")).toContain("timeout");
   });
 
   test("room.delegate rejects non-leader callers without writes or events", async () => {
@@ -1513,6 +1517,19 @@ function publicMessageTexts(roomId: string): string[] {
      WHERE m.room_id = ?
        AND m.sender_type = 'agent'
        AND m.role = 'assistant'
+     ORDER BY m.created_at ASC, m.id ASC, mp.seq ASC`
+  ).all(roomId) as Array<{ readonly payload: string }>;
+  return rows.map((row) => (JSON.parse(row.payload) as { readonly text: string }).text);
+}
+
+function systemMessageTexts(roomId: string): string[] {
+  const rows = currentDatabase().sqlite.prepare(
+    `SELECT mp.payload
+     FROM messages m
+     JOIN message_parts mp ON mp.message_id = m.id AND mp.part_type = 'text'
+     WHERE m.room_id = ?
+       AND m.sender_type = 'system'
+       AND m.role = 'system'
      ORDER BY m.created_at ASC, m.id ASC, mp.seq ASC`
   ).all(roomId) as Array<{ readonly payload: string }>;
   return rows.map((row) => (JSON.parse(row.payload) as { readonly text: string }).text);

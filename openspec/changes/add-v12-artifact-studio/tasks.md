@@ -35,38 +35,38 @@
 
 **负责文件：** `wake-outbox-dispatcher.ts`、`run-lifecycle-service.ts`、`task-service.ts`、`team-dispatch.ts`、`deployment-service.ts`、`packages/daemon/src/routes/deployments.ts`、`packages/daemon/src/routes/deployment-providers.ts`
 
-- [ ] **2.1** WakeAgent Outbox Dispatcher
+- [x] **2.1** WakeAgent Outbox Dispatcher
   - 100ms 轮询 `wake_outbox WHERE status='pending' AND (dispatch_after IS NULL OR dispatch_after <= now())`
   - atomic `UPDATE SET status='dispatching' WHERE status='pending'`
   - 成功：`status='dispatched'`；失败：指数退避，最多 3 次后 `status='failed'`
   - Daemon 启动时扫描 `status IN ('pending', 'dispatching')` 并重置为 `pending`
 
-- [ ] **2.2** Daemon 启动恢复（内部）
+- [x] **2.2** Daemon 启动恢复（内部）
   - 扫描 `runs WHERE status IN ('running', 'queued')`
   - adapter 进程已死的 run → 写 `wake_outbox`（reason: `"restart_recovery"`）
   - 幂等检查：不重复创建已有 pending run
 
-- [ ] **2.3** Dependency Auto-dispatch
+- [x] **2.3** Dependency Auto-dispatch
   - `room.complete_task` 处理路径：查询依赖已完成的 task → `tasks.last_unblocked_at = now()` + 发 `task.unblocked` + 写 `wake_outbox`
   - 全部在同一 SQLite 事务中
 
-- [ ] **2.4** Orchestrator 可见协调消息（team-dispatch.ts）
+- [x] **2.4** Orchestrator 可见协调消息（team-dispatch.ts）
   - 分派时同事务写 system 消息（"已将任务…分配给…"）
   - 任务 failed 时写 failure system 消息（原因 + 降级决策）
   - 最后一个 task 终态时写 `wake_outbox`（reason: `"aggregate"`）
 
-- [ ] **2.5** DeploymentService — preview-url + static-site
+- [x] **2.5** DeploymentService — preview-url + static-site
   - `createDeployment(artifactId, kind, options)` — 同事务写 deployments + 发 deployment.created + 写 message part + 发 message.part.added
   - `deployPreviewUrl` — 30 分钟 token，复用现有 preview server
   - `deployStaticSite` — 写文件到 `.agenthub/sites/<deploymentId>/`，Node.js static server 挂载
   - `CleanupScheduler`（DeploymentExpirySweeper）— 内部维护循环，处理 preview-url 过期，不对外暴露
   - daemon 重启时扫描 `deployments WHERE status='in_progress'` → 标 `failed`（`last_error = "daemon_restarted"`）
 
-- [ ] **2.6** DeploymentService — source-zip + container-export
+- [x] **2.6** DeploymentService — source-zip + container-export
   - `deploySourceZip` — `archiver` 打包 `artifact_files.new_content` 或 `content_path`（binary 用文件路径）
   - `deployContainerExport` — 根据 artifact kind 生成 Dockerfile 模板 + build context zip
 
-- [ ] **2.7** DeploymentService — container-build
+- [x] **2.7** DeploymentService — container-build
   - 检测：Windows 用 `where.exe officecli` 或直接 `officecli --version`（不用 `which`）；同理 docker/nixpacks
   - 优先 Nixpacks：`nixpacks build {buildDir} --name {imageTag}`
   - 回退 Docker：`docker build -t {imageTag} {contextDir}`
@@ -75,21 +75,21 @@
   - `deployments.pid` 记录进程 PID，支持 cancel
   - `POST /deployments/:id/cancel` → kill 进程 + `status='cancelled'`
 
-- [ ] **2.8** DeploymentService — CapRover self-hosted
+- [x] **2.8** DeploymentService — CapRover self-hosted
   - `deployment_providers` CRUD 路由，credential 写 Keychain
   - Test Connection：`GET {baseUrl}/api/v2/user/info`，认证头 `x-captain-auth: {token}`（不是 Bearer）
   - 部署：multipart POST，field 名 `sourceFile`，认证头 `x-captain-auth`，`?detached=1`
   - 3 秒轮询，超时 5 分钟，获取外部 URL
   - 提供 CapRover mock 测试，验证认证头和 multipart 格式
 
-- [ ] **2.9** 完整 Deployment REST API
+- [x] **2.9** 完整 Deployment REST API
   - `POST /deployments/:id/redeploy`、`POST /deployments/:id/retry`、`POST /deployments/:id/cancel`、`POST /deployments/:id/unpublish`
   - `GET /deployments?artifactId=`（历史列表）
   - `GET /deployments/:id/logs`（全文日志，plain text）
   - `POST /deployment-providers/:id/test`
   - `DELETE /deployment-providers/:id`（同时删除 Keychain credential）
 
-- [ ] **2.10** Phase 2 测试
+- [x] **2.10** Phase 2 测试
   - WakeAgent outbox：crash recovery 后 pending 行重新 dispatch
   - DeploymentService：preview-url 30 分钟过期、static-site stop、container-build cancel by pid
   - CapRover mock：x-captain-auth header、multipart sourceFile field
