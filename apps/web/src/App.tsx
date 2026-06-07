@@ -37,9 +37,9 @@ export function ChatRoomLayout({ chat, pendingTurns, input }: ChatRoomLayoutProp
   );
 }
 
-export function messagePinRequestFor(messageId: string, isPinned: boolean): { readonly url: string; readonly method: "POST" | "DELETE" } {
+export function messagePinRequestFor(roomId: string, messageId: string, isPinned: boolean): { readonly url: string; readonly method: "POST" | "DELETE" } {
   return {
-    url: `/messages/${encodeURIComponent(messageId)}/pin`,
+    url: `/rooms/${encodeURIComponent(roomId)}/messages/${encodeURIComponent(messageId)}/pin`,
     method: isPinned ? "DELETE" : "POST"
   };
 }
@@ -166,10 +166,11 @@ export default function App() {
   }, [activeRoom, activeRoomId]);
 
   const handlePin = useCallback(async (id: string) => {
+    if (!activeRoomId) return;
     const message = activeRoom?.messages.find((item) => item.id === id);
-    const request = messagePinRequestFor(id, message?.pinnedAt !== undefined);
+    const request = messagePinRequestFor(activeRoomId, id, message?.pinnedAt !== undefined);
     await csrfFetch(request.url, { method: request.method });
-  }, [activeRoom, csrfFetch]);
+  }, [activeRoom, activeRoomId, csrfFetch]);
 
   const handleRegenerate = useCallback(async (id: string) => {
     await csrfFetch(`/messages/${encodeURIComponent(id)}/regenerate`, { method: "POST" });

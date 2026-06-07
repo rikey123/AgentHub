@@ -39,7 +39,7 @@ function notImplemented(method: string): never {
   throw new Error(`ArtifactVersioningService.${method} is not implemented in the V1.2 contract foundation`);
 }
 
-export function createArtifactVersioningService(_options: ArtifactVersioningServiceOptions): ArtifactVersioningService {
+export function createArtifactVersioningService(): ArtifactVersioningService {
   return {
     createVersion: async () => notImplemented("createVersion"),
     createBinaryVersion: async () => notImplemented("createBinaryVersion"),

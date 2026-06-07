@@ -22,7 +22,7 @@ describe("V1.2 artifact cards", () => {
     expect(html).toContain("/artifacts/artifact-doc-1/download");
   });
 
-  it("routes web artifacts to PreviewCard with edit deploy download and expand actions", () => {
+  it("routes web artifacts to PreviewCard with only wired actions", () => {
     const html = renderToStaticMarkup(createElement(CardRenderer, {
       card: {
         type: "artifact",
@@ -36,10 +36,10 @@ describe("V1.2 artifact cards", () => {
 
     expect(html).toContain("Preview");
     expect(html).toContain("landing.html");
-    expect(html).toContain("Edit");
-    expect(html).toContain("Deploy");
     expect(html).toContain("Download");
-    expect(html).toContain("Expand");
+    expect(html).not.toContain("Edit");
+    expect(html).not.toContain("Deploy");
+    expect(html).not.toContain("Expand");
     expect(html).toContain("sandbox=\"allow-scripts\"");
   });
 
@@ -66,7 +66,9 @@ describe("V1.2 artifact cards", () => {
     }));
 
     expect(slides).toContain("HTML slides");
-    expect(slides).toContain("Reference slide");
+    expect(slides).not.toContain("Reference slide");
+    expect(slides).not.toContain("Edit");
+    expect(slides).not.toContain("Expand");
     expect(pptx).toContain("PPTX preview");
     expect(pptx).toContain("Install failed");
     expect(pptx).toContain("/artifacts/artifact-pptx-1/download");
@@ -92,8 +94,8 @@ describe("V1.2 artifact cards", () => {
     expect(html).toContain("container-build");
     expect(html).toContain("failed");
     expect(html).toContain("Docker is not available");
-    expect(html).toContain("Retry");
-    expect(html).toContain("View Logs");
+    expect(html).not.toContain("Retry");
+    expect(html).not.toContain("View Logs");
     expect(html).toContain("Detecting providers...");
   });
 });

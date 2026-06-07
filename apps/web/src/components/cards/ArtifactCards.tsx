@@ -1,4 +1,4 @@
-import { Button, Card, Chip } from "@heroui/react";
+import { Card, Chip } from "@heroui/react";
 import type { Card as ProtocolCard } from "@agenthub/protocol/domains";
 
 type ArtifactCardData = Extract<ProtocolCard, { type: "artifact" }>;
@@ -28,10 +28,7 @@ export function PreviewArtifactCard({ card }: { readonly card: ArtifactCardData 
         />
       </Card.Content>
       <Card.Footer className="flex-wrap gap-2">
-        <Button size="sm" variant="secondary">Edit</Button>
-        <Button size="sm" variant="primary">Deploy</Button>
         <a className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-semibold text-foreground hover:bg-surface-secondary" href={downloadUrl}>Download</a>
-        <Button size="sm" variant="ghost">Expand</Button>
       </Card.Footer>
     </Card>
   );
@@ -54,9 +51,7 @@ export function DocumentCard({ card }: { readonly card: ArtifactCardData }) {
         </div>
       </Card.Content>
       <Card.Footer className="flex-wrap gap-2">
-        <Button size="sm" variant="secondary">Edit</Button>
         <a className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-semibold text-foreground hover:bg-surface-secondary" href={artifactDownloadUrl(card.artifactId)}>Download</a>
-        <Button size="sm" variant="ghost">Expand</Button>
       </Card.Footer>
     </Card>
   );
@@ -87,9 +82,6 @@ export function PresentationCard({ card }: { readonly card: ArtifactCardData }) 
         )}
       </Card.Content>
       <Card.Footer className="flex-wrap gap-2">
-        <Button size="sm" variant="secondary">Edit</Button>
-        <Button size="sm" variant="ghost">Expand</Button>
-        <Button size="sm" variant="secondary">Reference slide</Button>
         <a className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-semibold text-foreground hover:bg-surface-secondary" href={artifactDownloadUrl(card.artifactId)}>Download</a>
       </Card.Footer>
     </Card>
@@ -121,10 +113,7 @@ export function DeploymentCard({ card }: { readonly card: DeploymentCardData }) 
         </div>
       </Card.Content>
       <Card.Footer className="flex-wrap gap-2">
-        {card.status === "failed" ? <Button size="sm" variant="secondary">Retry</Button> : null}
-        <Button size="sm" variant="ghost">View Logs</Button>
-        {card.url ? <Button size="sm" variant="primary">Open</Button> : null}
-        {(card.status === "queued" || card.status === "in_progress") ? <Button size="sm" variant="danger">Cancel</Button> : null}
+        {card.url ? <a className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-semibold text-foreground hover:bg-surface-secondary" href={card.url}>Open</a> : null}
       </Card.Footer>
     </Card>
   );

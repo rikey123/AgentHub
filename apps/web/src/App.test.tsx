@@ -118,13 +118,13 @@ describe("App integration wiring", () => {
     expect(html).toContain("shrink-0");
   });
 
-  it("uses delete pin route when pinning an already pinned message", () => {
-    expect(messagePinRequestFor("message-pinned", true)).toEqual({
-      url: "/messages/message-pinned/pin",
+  it("uses room-scoped pin routes when toggling a message pin", () => {
+    expect(messagePinRequestFor("room-1", "message-pinned", true)).toEqual({
+      url: "/rooms/room-1/messages/message-pinned/pin",
       method: "DELETE"
     });
-    expect(messagePinRequestFor("message-unpinned", false)).toEqual({
-      url: "/messages/message-unpinned/pin",
+    expect(messagePinRequestFor("room-1", "message-unpinned", false)).toEqual({
+      url: "/rooms/room-1/messages/message-unpinned/pin",
       method: "POST"
     });
   });

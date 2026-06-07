@@ -1514,17 +1514,6 @@ type TaskReportEvidenceCounts = {
   readonly unresolvedComments: number;
 };
 
-function taskDeliveryReportMarkdown(task: ReturnType<TaskService["list"]>[number]): string {
-  return taskDeliveryReportMarkdownFromEvidence({
-    id: task.id,
-    title: task.title,
-    description: task.description,
-    status: task.status,
-    assignee: task.assigneeRoleId ?? task.assigneeAgentId ?? "Unassigned",
-    sourceRunId: task.sourceRunId
-  });
-}
-
 function taskDeliveryReportMarkdownFromEvidence(input: {
   readonly id: string;
   readonly title: string;

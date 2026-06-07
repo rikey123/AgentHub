@@ -25,7 +25,7 @@ function notImplemented(method: string): never {
   throw new Error(`WakeOutboxDispatcher.${method} is not implemented in the V1.2 contract foundation`);
 }
 
-export function createWakeOutboxDispatcher(_options: WakeOutboxDispatcherOptions): WakeOutboxDispatcher {
+export function createWakeOutboxDispatcher(): WakeOutboxDispatcher {
   return {
     start: () => notImplemented("start"),
     stop: () => notImplemented("stop"),
