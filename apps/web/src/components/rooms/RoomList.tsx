@@ -17,12 +17,9 @@ function roomInitials(title: string) {
 }
 
 function relativeRoomTime(room: RoomViewModel) {
-  const latestMessage = room.messages.reduce<number | undefined>((latest, message) => {
-    if (latest === undefined || message.createdAt > latest) return message.createdAt;
-    return latest;
-  }, undefined);
-  if (latestMessage === undefined) return "No messages";
-  const minutes = Math.max(0, Math.round((Date.now() - latestMessage) / 60000));
+  const latestActivity = latestRoomActivity(room);
+  if (latestActivity === undefined) return "No messages";
+  const minutes = Math.max(0, Math.round((Date.now() - latestActivity) / 60000));
   if (minutes < 1) return "Just now";
   if (minutes < 60) return `${minutes}m`;
   const hours = Math.round(minutes / 60);
@@ -39,21 +36,45 @@ function roomPreview(room: RoomViewModel) {
   return "Start the room conversation";
 }
 
+export function orderedRoomsForList(rooms: ReadonlyArray<RoomViewModel>, query: string): RoomViewModel[] {
+  const q = query.trim().toLowerCase();
+  const list = q
+    ? rooms.filter((room) => roomSearchText(room).includes(q))
+    : rooms.slice();
+  return list.sort((a, b) => {
+    const ap = a.pinnedAt !== undefined;
+    const bp = b.pinnedAt !== undefined;
+    if (ap !== bp) return Number(bp) - Number(ap);
+    if (ap && bp && a.pinnedAt !== b.pinnedAt) return (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0);
+    const activityDelta = (latestRoomActivity(b) ?? 0) - (latestRoomActivity(a) ?? 0);
+    if (activityDelta !== 0) return activityDelta;
+    return a.title.localeCompare(b.title);
+  });
+}
+
+function latestRoomActivity(room: RoomViewModel): number | undefined {
+  if (room.lastActivityAt !== undefined) return room.lastActivityAt;
+  return room.messages.reduce<number | undefined>((latest, message) => {
+    if (latest === undefined || message.createdAt > latest) return message.createdAt;
+    return latest;
+  }, undefined);
+}
+
+function roomSearchText(room: RoomViewModel): string {
+  return [
+    room.title,
+    room.mode,
+    ...Object.values(room.participantContactNames),
+    ...room.participants.flatMap((participant) => [participant.name, participant.role, participant.presence]),
+    ...room.messages.slice(-5).map((message) => message.text)
+  ].join(" ").toLowerCase();
+}
+
 export function RoomList({ rooms, activeRoomId, onSelect, onCreate }: RoomListProps) {
   const [query, setQuery] = useState("");
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const list = q
-      ? rooms.filter((r) => r.title.toLowerCase().includes(q) || r.mode.toLowerCase().includes(q))
-      : rooms.slice();
-    return list.sort((a, b) => {
-      if (a.unreadCount !== b.unreadCount) return b.unreadCount - a.unreadCount;
-      const ar = a.runs.some((r) => r.status === "running" || r.status === "starting");
-      const br = b.runs.some((r) => r.status === "running" || r.status === "starting");
-      if (ar !== br) return Number(br) - Number(ar);
-      return b.pendingTurns.length - a.pendingTurns.length;
-    });
+    return orderedRoomsForList(rooms, query);
   }, [rooms, query]);
 
   const liveCount = rooms.filter((room) => room.runs.some((run) => run.status === "running" || run.status === "starting")).length;
@@ -160,6 +181,14 @@ export function RoomList({ rooms, activeRoomId, onSelect, onCreate }: RoomListPr
                   {room.unreadCount > 0 ? (
                     <Badge color="danger" variant="primary">{String(room.unreadCount)}</Badge>
                   ) : null}
+                  <span className="ml-auto flex gap-1 opacity-80">
+                    <button type="button" className="rounded-md border border-border px-2 py-1 text-[11px] hover:bg-default">
+                      {room.pinnedAt !== undefined ? "Unpin" : "Pin"}
+                    </button>
+                    <button type="button" className="rounded-md border border-border px-2 py-1 text-[11px] hover:bg-default">
+                      Archive
+                    </button>
+                  </span>
                 </div>
               </li>
             );

@@ -1,7 +1,7 @@
 import type React from "react";
 import { Tooltip } from "@heroui/react";
 
-export type RailItem = "chat" | "runs" | "tasks" | "context" | "artifacts" | "settings";
+export type RailItem = "chat" | "contacts" | "runs" | "tasks" | "context" | "artifacts" | "settings";
 
 interface FeatureRailProps {
   active: RailItem;
@@ -42,6 +42,17 @@ function IconRuns() {
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
       <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+function IconContacts() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="9" cy="8" r="3" />
+      <path d="M3.5 20a6.5 6.5 0 0 1 13 0" />
+      <circle cx="17" cy="10" r="2.5" />
+      <path d="M15.5 15.5c2.8.4 5 2 5.5 4.5" />
     </svg>
   );
 }
@@ -95,6 +106,7 @@ function IconSettings() {
 
 const ICONS: Record<RailItem, React.ReactNode> = {
   chat: <IconHome />,
+  contacts: <IconContacts />,
   runs: <IconRuns />,
   tasks: <IconTasks />,
   context: <IconContext />,
@@ -104,6 +116,7 @@ const ICONS: Record<RailItem, React.ReactNode> = {
 
 const items: Array<{ key: RailItem; label: string; cn: string }> = [
   { key: "chat", label: "Chat", cn: "聊天" },
+  { key: "contacts", label: "Contacts", cn: "联系人" },
   { key: "runs", label: "Runs", cn: "运行" },
   { key: "tasks", label: "Tasks", cn: "任务" },
   { key: "context", label: "Context", cn: "上下文" },
