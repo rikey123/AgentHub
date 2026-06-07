@@ -5,6 +5,7 @@ import { RolesTab, type RoleConfig } from "./RolesTab.tsx";
 import { RuntimesTab, type RuntimeConfig } from "./RuntimesTab.tsx";
 import { SkillsTab, type SkillConfig } from "./SkillsTab.tsx";
 import { formatBytes } from "../../lib/format.ts";
+import { IconSettings } from "../shell/FeatureRail.tsx";
 
 export type SettingsTabId = "roles" | "runtimes" | "models" | "skills" | "permissions" | "workspace" | "mcp";
 
@@ -22,12 +23,12 @@ export const ROOM_MCP_TOOLS = [
 ] as const;
 
 export const SETTINGS_TABS: Array<{ id: SettingsTabId; label: string; endpoint?: SettingsEndpoint }> = [
-  { id: "roles", label: "Roles", endpoint: "roles" },
-  { id: "runtimes", label: "Runtimes", endpoint: "runtimes" },
-  { id: "models", label: "Models", endpoint: "modelConfigs" },
-  { id: "skills", label: "Skills", endpoint: "skills" },
-  { id: "permissions", label: "Permissions", endpoint: "permissionProfiles" },
-  { id: "workspace", label: "Workspace" },
+  { id: "roles", label: "角色", endpoint: "roles" },
+  { id: "runtimes", label: "runtimes", endpoint: "runtimes" },
+  { id: "models", label: "模型", endpoint: "modelConfigs" },
+  { id: "skills", label: "skills", endpoint: "skills" },
+  { id: "permissions", label: "许可", endpoint: "permissionProfiles" },
+  { id: "workspace", label: "工作区" },
   { id: "mcp", label: "MCP" }
 ];
 
@@ -160,43 +161,46 @@ export function SettingsModal({ isOpen, selectedTab, onTabChange, onOpenChange, 
   const expectedLoadedCount = Object.keys(endpointPaths).length + 1;
   const errorCount = Object.keys(data.errors).length;
   const allDataEndpointsFailed = errorCount >= Object.keys(endpointPaths).length && loadedCount === 0;
+  const statusLabel = loading
+    ? "加载中"
+    : status === "error"
+      ? `${errorCount} 个 REST 错误`
+      : `${loadedCount}/${expectedLoadedCount} 已加载`;
 
   return (
     <Modal.Backdrop isOpen={isOpen} onOpenChange={onOpenChange}>
       <Modal.Container size="full" className="items-center justify-center p-4">
-        <Modal.Dialog className="flex h-[min(92vh,900px)] w-[min(96vw,1120px)] max-w-[1120px] overflow-hidden p-0" aria-label="Settings">
+        <Modal.Dialog className="flex h-[min(92vh,900px)] w-[min(96vw,1120px)] max-w-[1120px] overflow-hidden p-0" aria-label="设置">
           <Modal.CloseTrigger />
-          <Modal.Header className="border-b border-border bg-[linear-gradient(135deg,var(--surface),var(--surface-secondary))] px-6 py-4">
+          <Modal.Header className="border-b border-border bg-[linear-gradient(135deg,var(--surface),var(--surface-secondary))] px-6 py-4 pr-16">
             <div className="flex items-center gap-4">
               <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-accent text-sm font-black text-accent-foreground shadow-[0_14px_30px_color-mix(in_oklab,var(--accent)_24%,transparent)]">
-                SE
+                <IconSettings />
               </div>
-              <div className="min-w-0">
-                <Modal.Heading>Settings</Modal.Heading>
+              <div className="min-w-0 flex-1">
+                <Modal.Heading>设置</Modal.Heading>
                 <p className="mt-1 max-w-2xl text-sm text-muted">
-                  Configure local roles, runtimes, models, permissions, workspace defaults, and MCP tool surfaces.
+                  配置本地角色、runtimes、模型、权限、工作区默认项和 MCP 工具入口。
                 </p>
               </div>
-                <Chip className="ml-auto" size="sm" variant="soft" color={status === "error" ? "danger" : loading ? "warning" : "success"}>
-                {loading ? "Loading" : status === "error" ? `${errorCount} REST error${errorCount === 1 ? "" : "s"}` : `${loadedCount}/${expectedLoadedCount} loaded`}
-                </Chip>
+              <Chip className="mr-3 shrink-0" size="sm" variant="soft" color={status === "error" ? "danger" : loading ? "warning" : "success"}>
+                {statusLabel}
+              </Chip>
             </div>
           </Modal.Header>
 
           <Modal.Body className="min-h-0 flex-1 gap-0 overflow-hidden p-0">
             <Tabs selectedKey={selectedTab} onSelectionChange={(key) => onTabChange(String(key) as SettingsTabId)} className="flex h-full min-h-0 flex-1 flex-col">
-              <Tabs.ListContainer>
-                <Tabs.List aria-label="Settings sections" data-testid="settings-tabs">
-                  {SETTINGS_TABS.map((tab, index) => (
-                    <Tabs.Tab key={tab.id} id={tab.id} data-testid={`settings-tab-${tab.id}`}>
-                      {index > 0 ? <Tabs.Separator /> : null}
-                      {tab.label}
+              <Tabs.ListContainer className="ah-settings-tabs-wrap">
+                <Tabs.List aria-label="Settings sections" className="ah-settings-tabs" data-testid="settings-tabs">
+                  {SETTINGS_TABS.map((tab) => (
+                    <Tabs.Tab key={tab.id} id={tab.id} className="ah-settings-tab" data-testid={`settings-tab-${tab.id}`}>
+                      <span className="ah-settings-tab-label">{tab.label}</span>
                       {tab.endpoint ? (
-                        <Chip className="ml-2" size="sm" variant="soft" color={data[tab.endpoint] === undefined ? "default" : "success"}>
-                          {data[tab.endpoint] === undefined ? "pending" : "ready"}
+                        <Chip className="ah-settings-tab-status" size="sm" variant="soft" color={data[tab.endpoint] === undefined ? "default" : "success"}>
+                          {data[tab.endpoint] === undefined ? "待加载" : "就绪"}
                         </Chip>
                       ) : null}
-                      <Tabs.Indicator />
                     </Tabs.Tab>
                   ))}
                 </Tabs.List>
@@ -382,7 +386,7 @@ export function PermissionsSettingsTab({
         headers: { accept: "application/json", "content-type": "application/json" },
         body: JSON.stringify({ name: name.trim(), payload: { description: description.trim() } })
       });
-      if (!response.ok) throw new Error(`Create profile failed: ${response.status}`);
+      if (!response.ok) throw new Error(`创建 profile 失败：${response.status}`);
       const created = await response.json() as { readonly profile?: unknown; readonly profiles?: unknown[] };
       if (created.profile !== undefined) {
         onPermissionProfilesChange({ profiles: [...profiles, created.profile] });
@@ -410,7 +414,7 @@ export function PermissionsSettingsTab({
         credentials: "same-origin",
         headers: { accept: "application/json" }
       });
-      if (!response.ok) throw new Error(`Delete rule failed: ${response.status}`);
+      if (!response.ok) throw new Error(`删除 rule 失败：${response.status}`);
       onPermissionRulesChange({ rules: rules.filter((rule) => rule.id !== ruleId) });
     } catch (error) {
       setRuleError(error instanceof Error ? error.message : String(error));
@@ -423,22 +427,22 @@ export function PermissionsSettingsTab({
     <section className="grid gap-3 p-5" data-testid="settings-panel-permissions">
       <Card variant="transparent" className="border border-border">
         <Card.Header>
-          <Card.Title className="text-sm">Create profile</Card.Title>
-          <Card.Description className="text-xs">Create a custom permission profile for agents.</Card.Description>
+          <Card.Title className="text-sm">创建 profile</Card.Title>
+          <Card.Description className="text-xs">为 agents 创建自定义许可 profile。</Card.Description>
         </Card.Header>
         <Card.Content className="grid gap-3">
           <TextField value={name} onChange={setName}>
-            <Label className="text-sm font-semibold">Name</Label>
-            <Input placeholder="e.g. Builder Strict Clone" data-testid="permission-profile-name" />
+            <Label className="text-sm font-semibold">名称</Label>
+            <Input placeholder="例如：Builder Strict Clone" data-testid="permission-profile-name" />
           </TextField>
           <TextField value={description} onChange={setDescription}>
-            <Label className="text-sm font-semibold">Description</Label>
-            <TextArea className="min-h-24" placeholder="Explain when to use this profile" data-testid="permission-profile-description" />
+            <Label className="text-sm font-semibold">描述</Label>
+            <TextArea className="min-h-24" placeholder="说明何时使用此 profile" data-testid="permission-profile-description" />
           </TextField>
           {formError ? <p className="text-xs text-danger" role="alert">{formError}</p> : null}
           <div>
             <Button size="sm" variant="primary" isPending={creating} isDisabled={name.trim().length === 0} onPress={() => void createProfile()}>
-              Create Profile
+              创建 Profile
             </Button>
           </div>
         </Card.Content>
@@ -446,18 +450,18 @@ export function PermissionsSettingsTab({
       <Card variant="transparent" className="border border-border">
         <Card.Header>
           <div className="flex flex-wrap items-center gap-2">
-            <Card.Title className="text-sm">Permission rules</Card.Title>
-            <Chip size="sm" variant="soft" color="success">{rules.length} loaded</Chip>
+            <Card.Title className="text-sm">许可 rules</Card.Title>
+            <Chip size="sm" variant="soft" color="success">已加载 {rules.length} 条</Chip>
           </div>
           <Card.Description className="text-xs">
-            Stored allow, deny, and ask decisions returned by GET /permissions/rules. Rule creation is not exposed by the V1.0 daemon API.
+            这里展示 GET /permissions/rules 返回的已保存 allow、deny 和 ask 决策。V1.0 daemon API 暂未暴露 rule 创建能力。
           </Card.Description>
         </Card.Header>
         <Card.Content className="grid gap-2">
           {ruleError ? <p className="text-xs text-danger" role="alert">{ruleError}</p> : null}
           {rules.length === 0 ? (
             <div className="rounded-xl border border-dashed border-border bg-surface px-3 py-3 text-sm text-muted">
-              No remembered permission rules are stored yet.
+              暂无已记住的许可 rules。
             </div>
           ) : rules.map((rule) => (
             <div key={rule.id} className="grid gap-2 rounded-xl border border-border bg-surface px-3 py-3 sm:grid-cols-[1fr_auto] sm:items-center">
@@ -468,11 +472,11 @@ export function PermissionsSettingsTab({
                   <Chip size="sm" variant="soft" color="default">{rule.resourceType}</Chip>
                 </div>
                 <div className="mt-1 text-xs text-muted">
-                  Workspace {rule.workspaceId ?? "all"}{rule.agentId ? ` · Agent ${rule.agentId}` : ""}{rule.profileId ? ` · Profile ${rule.profileId}` : ""}
+                  工作区 {rule.workspaceId ?? "全部"}{rule.agentId ? ` · Agent ${rule.agentId}` : ""}{rule.profileId ? ` · Profile ${rule.profileId}` : ""}
                 </div>
               </div>
               <Button size="sm" variant="danger" isPending={deletingRuleId === rule.id} onPress={() => void deleteRule(rule.id)}>
-                Delete Rule
+                删除 Rule
               </Button>
             </div>
           ))}
@@ -485,10 +489,10 @@ export function PermissionsSettingsTab({
               <Card.Title className="text-sm">{profile.name}</Card.Title>
               <Chip size="sm" variant="soft" color="accent">profile</Chip>
             </div>
-            <Card.Description className="text-xs">{profile.description ?? "No description provided."}</Card.Description>
+            <Card.Description className="text-xs">{profile.description ?? "暂无描述。"}</Card.Description>
           </Card.Header>
           <Card.Content className="grid gap-1 text-xs text-muted">
-            <div>Rules are configured per-agent-binding.</div>
+            <div>Rules 按 agent-binding 配置。</div>
             <div className="ah-mono">Profile ID: {profile.id}</div>
           </Card.Content>
         </Card>
@@ -503,9 +507,9 @@ export function WorkspaceTab({ workspace }: { workspace: unknown }) {
   const workspaceName = typeof workspaceRecord.name === "string" ? workspaceRecord.name : undefined;
   const workspaceId = typeof workspaceRecord.id === "string" ? workspaceRecord.id : undefined;
   const worktreeMode = readWorkspaceString(workspace, ["worktree_mode", "worktreeMode", "workspace_mode", "workspaceMode"]);
-  const artifactStorage = readWorkspaceString(workspace, ["artifact_storage", "artifactStorage", "artifact_storage_mode", "artifactStorageMode"]) ?? "Artifact storage is managed by the daemon";
+  const artifactStorage = readWorkspaceString(workspace, ["artifact_storage", "artifactStorage", "artifact_storage_mode", "artifactStorageMode"]) ?? "产物存储由 daemon 管理";
   const attachmentLimit = readWorkspaceNumber(workspace, ["attachment_max_bytes", "attachmentMaxBytes", "attachment_limit_bytes", "attachmentLimitBytes"]);
-  const gcPolicy = readWorkspaceString(workspace, ["gc_policy", "gcPolicy", "attachment_gc_policy", "attachmentGcPolicy"]) ?? "Garbage collection is daemon-managed";
+  const gcPolicy = readWorkspaceString(workspace, ["gc_policy", "gcPolicy", "attachment_gc_policy", "attachmentGcPolicy"]) ?? "垃圾回收由 daemon 管理";
   const updatedAt = readWorkspaceNumber(workspace, ["updated_at", "updatedAt"]);
 
   return (
@@ -513,22 +517,22 @@ export function WorkspaceTab({ workspace }: { workspace: unknown }) {
       <Card variant="transparent" className="border border-border">
         <Card.Header>
           <div className="flex flex-wrap items-center gap-2">
-            <Card.Title className="text-sm">Workspace root</Card.Title>
-            <Chip size="sm" variant="soft" color="warning">Read-only</Chip>
+            <Card.Title className="text-sm">工作区根目录</Card.Title>
+            <Chip size="sm" variant="soft" color="warning">只读</Chip>
           </div>
           <Card.Description className="text-xs">
-            Local storage, artifacts, and attachment cleanup all resolve from this path. No PATCH /workspaces endpoint is exposed in V1.0.
+            本地存储、产物和附件清理都会从此路径解析。V1.0 未暴露 PATCH /workspaces endpoint。
           </Card.Description>
         </Card.Header>
         <Card.Content className="grid gap-2 text-sm">
-          <div><span className="text-muted">Name:</span> {workspaceName ?? workspaceId ?? "Workspace"}</div>
-          <div><span className="text-muted">Configuration endpoint:</span> GET /workspaces/{workspaceId ?? "default-workspace"}</div>
+          <div><span className="text-muted">名称：</span> {workspaceName ?? workspaceId ?? "Workspace"}</div>
+          <div><span className="text-muted">配置 endpoint：</span> GET /workspaces/{workspaceId ?? "default-workspace"}</div>
           <div className="ah-mono rounded-xl border border-border bg-surface px-3 py-2 text-xs">{rootPath}</div>
-          <div><span className="text-muted">Worktree mode:</span> {worktreeMode ?? "Not reported"}</div>
-          <div><span className="text-muted">Artifacts:</span> {artifactStorage}</div>
-          <div><span className="text-muted">Attachment limit:</span> {attachmentLimit !== undefined ? formatBytes(attachmentLimit) : "Not reported"}</div>
+          <div><span className="text-muted">Worktree 模式：</span> {worktreeMode ?? "未上报"}</div>
+          <div><span className="text-muted">产物：</span> {artifactStorage}</div>
+          <div><span className="text-muted">附件限制：</span> {attachmentLimit !== undefined ? formatBytes(attachmentLimit) : "未上报"}</div>
           <div><span className="text-muted">GC:</span> {gcPolicy}</div>
-          <div><span className="text-muted">Last updated:</span> {updatedAt !== undefined ? String(updatedAt) : "Not reported"}</div>
+          <div><span className="text-muted">最后更新：</span> {updatedAt !== undefined ? String(updatedAt) : "未上报"}</div>
         </Card.Content>
       </Card>
     </section>
@@ -542,12 +546,12 @@ export function McpPlaceholder() {
         <Card.Header>
           <div className="flex flex-wrap items-center gap-2">
             <Card.Title className="text-sm">MCP / Tools</Card.Title>
-            <Chip size="sm" variant="soft" color="warning">Read-only</Chip>
+            <Chip size="sm" variant="soft" color="warning">只读</Chip>
           </div>
-          <Card.Description className="text-xs">MCP server management coming in V1.1. This release shows the enabled V1.0 room tools.</Card.Description>
+          <Card.Description className="text-xs">MCP server 管理将在 V1.1 提供。当前版本展示已启用的 V1.0 room tools。</Card.Description>
         </Card.Header>
         <Card.Content className="grid gap-3 text-sm text-muted">
-          <p>Existing room tools remain available, but external server management is not editable yet.</p>
+          <p>现有 room tools 仍可使用，但外部 server 管理暂不可编辑。</p>
           <div className="grid gap-2 sm:grid-cols-2">
             {ROOM_MCP_TOOLS.map((tool) => (
               <div key={tool} className="ah-mono rounded-xl border border-border bg-surface px-3 py-2 text-xs text-foreground">
@@ -685,7 +689,7 @@ function panelDescription(tab: SettingsTabId): string {
     case "runtimes":
       return "Local runtime detection and command configuration.";
     case "models":
-      return "Provider, model, keychain, and test-call configuration.";
+      return "provider、model、keychain 和测试调用配置。";
     case "skills":
       return "Standard SKILL.md packages for room and agent capability guidance.";
     case "permissions":
