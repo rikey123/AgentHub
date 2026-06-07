@@ -51,6 +51,11 @@ export function workbenchCenterModeForRail(rail: RailItem, hasActiveRoom: boolea
   return hasActiveRoom ? "room" : "home";
 }
 
+export function workbenchNavigationForRoomOpen(roomId: string, currentRail: RailItem): { readonly activeRoomId: string; readonly rail: RailItem } {
+  void currentRail;
+  return { activeRoomId: roomId, rail: "chat" };
+}
+
 export default function App() {
   const initialSettingsState = useMemo(() => {
     if (typeof window === "undefined") return { isOpen: false, tab: "roles" as SettingsTabId };
@@ -90,6 +95,12 @@ export default function App() {
   const rooms = useMemo(() => Array.from(projector.rooms.values()), [projector.rooms]);
   const activeRoom = activeRoomId ? projector.rooms.get(activeRoomId) : undefined;
 
+  const openRoom = useCallback((roomId: string) => {
+    const next = workbenchNavigationForRoomOpen(roomId, rail);
+    setActiveRoomId(next.activeRoomId);
+    setRail(next.rail);
+  }, [rail]);
+
   const handleCreateRoom = useCallback(async (input: CreateRoomInput) => {
     setBannerError(undefined);
     try {
@@ -106,13 +117,13 @@ export default function App() {
         // The daemon emits real `agent.joined` + `agent.state.changed` events for every
         // participant inside the same transaction as room.created, so SSE replay gives us the
         // member roster on first render and any future refresh — no local synthesis needed.
-        setActiveRoomId(roomId);
+        openRoom(roomId);
       }
     } catch (err) {
       setBannerError(err instanceof Error ? err.message : String(err));
       throw err;
     }
-  }, [sdk]);
+  }, [openRoom, sdk]);
 
   const openNewRoom = useCallback(() => setNewRoomOpen(true), []);
   const openSettings = useCallback(() => setSettingsOpen(true), []);
@@ -292,11 +303,11 @@ export default function App() {
         label: `打开 room · ${room.title}`,
         group: "Rooms",
         keywords: [room.id, room.mode],
-        perform: () => setActiveRoomId(room.id)
+        perform: () => openRoom(room.id)
       });
     }
     return list;
-  }, [rooms, openNewRoom, openSettings, leftCollapsed, rightCollapsed, setTheme, setDensity]);
+  }, [rooms, openRoom, openNewRoom, openSettings, leftCollapsed, rightCollapsed, setTheme, setDensity]);
 
   const centerMode = workbenchCenterModeForRail(rail, activeRoom !== undefined);
   const roomCenter = activeRoom ? (
@@ -371,7 +382,7 @@ export default function App() {
       </div>
     </div>
   ) : (
-    <HomeView rooms={rooms} onOpenRoom={setActiveRoomId} onCreate={openNewRoom} />
+    <HomeView rooms={rooms} onOpenRoom={openRoom} onCreate={openNewRoom} />
   );
   const center = centerMode === "contacts"
     ? <ContactsRailContainer fetchImpl={csrfFetch} onStartChat={openNewRoom} onEditContact={() => setSettingsOpen(true)} />
@@ -402,7 +413,7 @@ export default function App() {
           <RoomList
             rooms={rooms}
             activeRoomId={activeRoomId}
-            onSelect={setActiveRoomId}
+            onSelect={openRoom}
             onCreate={openNewRoom}
           />
         }
