@@ -183,6 +183,23 @@ describe("TaskService.completeTask", () => {
     });
   });
 
+  test("task status changes update room last_activity_at in the same transaction", () => {
+    const taskId = createTask({ roomId: "room_squad", assigneeAgentId: "agent_worker", expectsReview: false, status: "in_progress" });
+    now = 5_000;
+
+    const result = currentService().completeTask({
+      taskId,
+      roomId: "room_squad",
+      callerAgentId: "agent_worker",
+      status: "completed",
+      summary: "Done"
+    });
+
+    expect(result.ok).toBe(true);
+    expect(currentDatabase().sqlite.prepare("SELECT last_activity_at FROM rooms WHERE id = 'room_squad'").get()).toMatchObject({ last_activity_at: 5_000 });
+    expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'task.status.changed' AND task_id = ?").get(taskId)).toMatchObject({ count: 1 });
+  });
+
   test("onSessionEndedWithoutCompletion transitions task to review with missing_completion_report", () => {
     // Spec D6: if run ends without room.complete_task, task → review(missing_completion_report)
     const taskId = createTask({ roomId: "room_squad", assigneeAgentId: "agent_worker", expectsReview: false, status: "in_progress" });

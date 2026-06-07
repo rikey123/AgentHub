@@ -1,6 +1,8 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { gunzipSync } from "node:zlib";
+import { EventEmitter } from "node:events";
 
 import { EventBus } from "@agenthub/bus";
 import { createDatabase, type AgentHubDatabase } from "@agenthub/db";
@@ -94,6 +96,116 @@ describe("DeploymentService", () => {
     expect(dockerExport).toContain("FROM nginx:alpine");
   });
 
+  test("source-zip and container-export produce valid zip archives with artifact entries", async () => {
+    const service = createDeploymentService({ database: currentDatabase(), eventBus: currentBus(), now: () => now, deploymentRoot: currentTempDir(), sitePort: 8888 });
+
+    const sourceZip = await service.createDeployment({ artifactId: "artifact_1", kind: "source-zip", roomId: "room_1" });
+    const containerExport = await service.createDeployment({ artifactId: "artifact_1", kind: "container-export", roomId: "room_1" });
+
+    const sourcePath = await service.downloadPath(sourceZip.id);
+    const containerPath = await service.downloadPath(containerExport.id);
+    expect(sourcePath).toBeDefined();
+    expect(containerPath).toBeDefined();
+    expect(readZipEntries(sourcePath ?? "")).toContain("index.html");
+    expect(readZipEntries(containerPath ?? "")).toEqual(expect.arrayContaining(["index.html", "Dockerfile"]));
+  });
+
+  test("self-hosted CapRover upload sends spec path, generated app name, and real tar.gz content", async () => {
+    const calls: Array<{ readonly url: string; readonly init?: RequestInit }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof URL ? input.toString() : typeof input === "string" ? input : input.url;
+      calls.push({ url, ...(init !== undefined ? { init } : {}) });
+      if (url.includes("/api/v2/user/apps/appData/self-hosted-artifa?detached=1")) return new Response(JSON.stringify({ data: { ok: true } }), { status: 200, headers: { "content-type": "application/json" } });
+      if (url.endsWith("/api/v2/user/apps/appData/self-hosted-artifa")) return new Response(JSON.stringify({ data: { appDefinition: { deployedVersion: "v1", customDomain: ["app.example.com"] } } }), { status: 200, headers: { "content-type": "application/json" } });
+      return new Response("{}", { status: 404, headers: { "content-type": "application/json" } });
+    });
+    const keychain = { get: vi.fn(async () => "captain-token"), set: vi.fn(), delete: vi.fn() };
+    const service = createDeploymentService({ database: currentDatabase(), eventBus: currentBus(), now: () => now, keychain, fetchImpl: fetchMock, deploymentRoot: currentTempDir() });
+    currentDatabase().sqlite.prepare("INSERT INTO deployment_providers (id, workspace_id, kind, name, base_url, credential_ref, created_at, updated_at) VALUES ('provider_1', 'ws_1', 'caprover', 'CapRover', 'https://captain.example', 'secret_ref', ?, ?)").run(now, now);
+
+    const deployment = await service.createDeployment({ artifactId: "artifact_1", kind: "self-hosted", roomId: "room_1", providerId: "provider_1" });
+
+    expect(deployment).toMatchObject({ status: "ready", url: "https://app.example.com" });
+    const upload = calls.find((call) => call.url.includes("?detached=1"));
+    expect(upload?.url).toBe("https://captain.example/api/v2/user/apps/appData/self-hosted-artifa?detached=1");
+    expect(upload?.init?.headers).toMatchObject({ "x-captain-auth": "captain-token" });
+    const sourceFile = (upload?.init?.body as FormData | undefined)?.get("sourceFile");
+    expect(sourceFile).toBeInstanceOf(File);
+    const tarball = Buffer.from(await (sourceFile as File).arrayBuffer());
+    expect(tarball.subarray(0, 2)).toEqual(Buffer.from([0x1f, 0x8b]));
+    expect(readTarEntries(gunzipSync(tarball))).toEqual(expect.arrayContaining(["index.html", "Dockerfile", "captain-definition.json"]));
+  });
+
+  test("container-build prefers Nixpacks, falls back to Docker, and falls back to container export when neither exists", async () => {
+    const spawned: Array<{ readonly command: string; readonly args: readonly string[] }> = [];
+    const service = createDeploymentService({
+      database: currentDatabase(),
+      eventBus: currentBus(),
+      now: () => now,
+      deploymentRoot: currentTempDir(),
+      commandProbe: (command) => command === "nixpacks",
+      spawnImpl: ((command: string, args: readonly string[]) => {
+        spawned.push({ command, args });
+        return fakeSuccessfulChild(42);
+      }) as never
+    });
+
+    const deployment = await service.createDeployment({ artifactId: "artifact_1", kind: "container-build", roomId: "room_1" });
+
+    await eventually(() => expect(currentDatabase().sqlite.prepare("SELECT status, pid FROM deployments WHERE id = ?").get(deployment.id)).toMatchObject({ status: "ready", pid: "42" }));
+    expect(spawned[0]).toMatchObject({ command: "nixpacks", args: expect.arrayContaining(["build"]) });
+
+    const dockerOnly = createDeploymentService({
+      database: currentDatabase(),
+      eventBus: currentBus(),
+      now: () => now,
+      deploymentRoot: currentTempDir(),
+      commandProbe: (command) => command === "docker",
+      spawnImpl: ((command: string, args: readonly string[]) => {
+        spawned.push({ command, args });
+        return fakeSuccessfulChild(43);
+      }) as never
+    });
+    const dockerDeployment = await dockerOnly.createDeployment({ artifactId: "artifact_1", kind: "container-build", roomId: "room_1" });
+    await eventually(() => expect(currentDatabase().sqlite.prepare("SELECT status, pid FROM deployments WHERE id = ?").get(dockerDeployment.id)).toMatchObject({ status: "ready", pid: "43" }));
+    expect(spawned.at(-1)).toMatchObject({ command: "docker", args: expect.arrayContaining(["build"]) });
+
+    const fallback = createDeploymentService({
+      database: currentDatabase(),
+      eventBus: currentBus(),
+      now: () => now,
+      deploymentRoot: currentTempDir(),
+      commandProbe: () => false
+    });
+    const fallbackDeployment = await fallback.createDeployment({ artifactId: "artifact_1", kind: "container-build", roomId: "room_1" });
+    const fallbackRow = currentDatabase().sqlite.prepare("SELECT status, kind, zip_path FROM deployments WHERE id = ?").get(fallbackDeployment.id) as { readonly status: string; readonly kind: string; readonly zip_path: string | null };
+    expect(fallbackRow).toMatchObject({ status: "ready", kind: "container-export" });
+    expect(fallbackRow.zip_path && readZipEntries(fallbackRow.zip_path)).toEqual(expect.arrayContaining(["index.html", "Dockerfile"]));
+  });
+
+  test("deployment actions enforce valid transitions and kinds", async () => {
+    const service = createDeploymentService({ database: currentDatabase(), eventBus: currentBus(), now: () => now, deploymentRoot: currentTempDir() });
+    const ready = await service.createDeployment({ artifactId: "artifact_1", kind: "preview-url", roomId: "room_1" });
+    const failed = await service.createDeployment({ artifactId: "artifact_1", kind: "container-export", roomId: "room_1" });
+    currentDatabase().sqlite.prepare("UPDATE deployments SET status = 'failed' WHERE id = ?").run(failed.id);
+
+    await expect(service.retry(ready.id)).rejects.toThrow("retry_requires_failed");
+    await expect(service.cancel(ready.id)).rejects.toThrow("cancel_requires_active");
+    await expect(service.unpublish(ready.id)).rejects.toThrow("unpublish_not_supported");
+    await expect(service.retry(failed.id)).resolves.toMatchObject({ status: "ready" });
+  });
+
+  test("expiry sweeper marks expired preview deployments and publishes deployment.expired transactionally", async () => {
+    const service = createDeploymentService({ database: currentDatabase(), eventBus: currentBus(), now: () => now, deploymentRoot: currentTempDir(), previewPort: 7777 });
+    const deployment = await service.createDeployment({ artifactId: "artifact_1", kind: "preview-url", roomId: "room_1" });
+    now += 30 * 60 * 1000 + 1;
+
+    service.expirePreviewDeployments();
+
+    expect(currentDatabase().sqlite.prepare("SELECT status FROM deployments WHERE id = ?").get(deployment.id)).toMatchObject({ status: "expired" });
+    expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'deployment.expired' AND json_extract(payload, '$.deploymentId') = ?").get(deployment.id)).toMatchObject({ count: 1 });
+  });
+
   test("terminal status events use registry payload shapes", async () => {
     const service = createDeploymentService({ database: currentDatabase(), eventBus: currentBus(), now: () => now, deploymentRoot: currentTempDir() });
     const deployment = await service.createDeployment({ artifactId: "artifact_1", kind: "container-build", roomId: "room_1" });
@@ -161,4 +273,61 @@ function seedArtifact(): void {
   currentDatabase().sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES ('room_1', 'ws_1', 'Room', 'solo', 'conversation', 'agent_1', NULL, 1, 1)").run();
   currentDatabase().sqlite.prepare("INSERT INTO artifacts (id, workspace_id, room_id, task_id, run_id, message_id, type, kind, title, status, created_by, metadata, created_at, updated_at) VALUES ('artifact_1', 'ws_1', 'room_1', NULL, NULL, NULL, 'file', 'web_page', 'Index', 'ready', 'agent_1', '{}', 1, 1)").run();
   currentDatabase().sqlite.prepare("INSERT INTO artifact_files (artifact_id, path, old_content, new_content, patch, additions, deletions, file_status, old_path, binary, no_newline_at_end, old_sha256, new_sha256, applied_state, content_path, created_at) VALUES ('artifact_1', 'index.html', NULL, '<h1>Hello</h1>', NULL, 1, 0, 'added', NULL, 0, 0, NULL, NULL, NULL, NULL, 1)").run();
+}
+
+function readZipEntries(path: string): string[] {
+  expect(existsSync(path)).toBe(true);
+  expect(statSync(path).size).toBeGreaterThan(22);
+  const buffer = readFileSync(path);
+  const entries: string[] = [];
+  for (let offset = 0; offset < buffer.length - 4; offset += 1) {
+    if (buffer.readUInt32LE(offset) !== 0x02014b50) continue;
+    const nameLength = buffer.readUInt16LE(offset + 28);
+    const extraLength = buffer.readUInt16LE(offset + 30);
+    const commentLength = buffer.readUInt16LE(offset + 32);
+    const nameStart = offset + 46;
+    entries.push(buffer.subarray(nameStart, nameStart + nameLength).toString("utf8"));
+    offset = nameStart + nameLength + extraLength + commentLength - 1;
+  }
+  return entries;
+}
+
+function readTarEntries(buffer: Buffer): string[] {
+  const entries: string[] = [];
+  for (let offset = 0; offset + 512 <= buffer.length;) {
+    const name = buffer.subarray(offset, offset + 100).toString("utf8").replace(/\0.*$/u, "");
+    if (name.length === 0) break;
+    const sizeText = buffer.subarray(offset + 124, offset + 136).toString("utf8").replace(/\0.*$/u, "").trim();
+    const size = Number.parseInt(sizeText || "0", 8);
+    entries.push(name);
+    offset += 512 + Math.ceil(size / 512) * 512;
+  }
+  return entries;
+}
+
+function fakeSuccessfulChild(pid: number): EventEmitter & { readonly pid: number; readonly stdout: EventEmitter; readonly stderr: EventEmitter; kill: () => boolean } {
+  const child = new EventEmitter() as EventEmitter & { pid: number; stdout: EventEmitter; stderr: EventEmitter; kill: () => boolean };
+  child.pid = pid;
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.kill = () => true;
+  queueMicrotask(() => {
+    child.stdout.emit("data", "built\n");
+    child.emit("exit", 0);
+  });
+  return child;
+}
+
+async function eventually(assertion: () => void): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      assertion();
+      return;
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  }
+  throw lastError;
 }

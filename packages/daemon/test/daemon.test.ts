@@ -162,6 +162,109 @@ describe("daemon M1.4 composition", () => {
     expect(messages.messages.some((message) => message.role === "assistant" && message.status === "completed")).toBe(true);
   });
 
+  it("deployment provider CRUD masks credentials and publishes provider events in transactions", async () => {
+    const created = await fetch(`${baseUrl}/deployment-providers`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind: "caprover", name: "Captain", baseUrl: "https://captain.example", credential: "secret-token" })
+    });
+    expect(created.status).toBe(201);
+    const createdBody = await created.json() as { readonly provider?: Record<string, unknown> };
+    expect(createdBody.provider).toMatchObject({ kind: "caprover", name: "Captain", base_url: "https://captain.example", hasCredential: true });
+    expect(createdBody.provider).not.toHaveProperty("credential_ref");
+    const providerId = String(createdBody.provider?.id);
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'deployment.provider.created' AND json_extract(payload, '$.providerId') = ?").get(providerId)).toMatchObject({ count: 1 });
+
+    const listed = await fetch(`${baseUrl}/deployment-providers`);
+    const listedBody = await listed.json() as { readonly providers?: readonly Record<string, unknown>[] };
+    expect(listedBody.providers?.[0]).toMatchObject({ id: providerId, hasCredential: true });
+    expect(listedBody.providers?.[0]).not.toHaveProperty("credential_ref");
+
+    const updated = await fetch(`${baseUrl}/deployment-providers/${providerId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Captain Updated", credential: "new-secret" })
+    });
+    expect(updated.status).toBe(200);
+    const updatedBody = await updated.json() as { readonly provider?: Record<string, unknown> };
+    expect(updatedBody.provider).toMatchObject({ id: providerId, name: "Captain Updated", hasCredential: true });
+    expect(updatedBody.provider).not.toHaveProperty("credential_ref");
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'deployment.provider.updated' AND json_extract(payload, '$.providerId') = ?").get(providerId)).toMatchObject({ count: 1 });
+
+    const deleted = await fetch(`${baseUrl}/deployment-providers/${providerId}`, { method: "DELETE" });
+    expect(deleted.status).toBe(200);
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'deployment.provider.deleted' AND json_extract(payload, '$.providerId') = ?").get(providerId)).toMatchObject({ count: 1 });
+  });
+
+  it("serves preview-url and static-site deployment URLs from daemon routes", async () => {
+    daemon.database.sqlite.transaction(() => {
+      daemon.database.sqlite.prepare("INSERT INTO artifacts (id, workspace_id, room_id, task_id, run_id, message_id, type, kind, title, status, created_by, metadata, created_at, updated_at) VALUES ('artifact_deploy_route', 'default-workspace', NULL, NULL, NULL, NULL, 'file', 'web_page', 'Index', 'ready', 'agent_1', '{}', 1, 1)").run();
+      daemon.database.sqlite.prepare("INSERT INTO artifact_files (artifact_id, path, old_content, new_content, patch, additions, deletions, file_status, old_path, binary, no_newline_at_end, old_sha256, new_sha256, applied_state, content_path, created_at) VALUES ('artifact_deploy_route', 'index.html', NULL, '<h1>Deploy Route</h1>', NULL, 1, 0, 'added', NULL, 0, 0, NULL, NULL, NULL, NULL, 1)").run();
+    })();
+
+    const previewCreated = await fetch(`${baseUrl}/deployments`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ artifactId: "artifact_deploy_route", kind: "preview-url" })
+    });
+    expect(previewCreated.status).toBe(201);
+    const previewBody = await previewCreated.json() as { readonly deployment?: { readonly url?: string } };
+    const previewUrl = previewBody.deployment?.url ?? "";
+    const preview = await fetch(previewUrl.replace("http://127.0.0.1:6677", baseUrl));
+    expect(preview.status).toBe(200);
+    expect(preview.headers.get("content-type")).toContain("text/html");
+    expect(await preview.text()).toContain("Deploy Route");
+
+    const siteCreated = await fetch(`${baseUrl}/deployments`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ artifactId: "artifact_deploy_route", kind: "static-site" })
+    });
+    expect(siteCreated.status).toBe(201);
+    const siteBody = await siteCreated.json() as { readonly deployment?: { readonly url?: string } };
+    const siteUrl = siteBody.deployment?.url ?? "";
+    const site = await fetch(siteUrl.replace("http://127.0.0.1:6677", baseUrl));
+    expect(site.status).toBe(200);
+    expect(site.headers.get("content-type")).toContain("text/html");
+    expect(await site.text()).toContain("Deploy Route");
+  });
+
+  it("authorizes daemon container-build commands through the permission engine before spawning", async () => {
+    await daemon.close();
+    currentDaemon = undefined;
+    const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-build-auth-"));
+    daemon = createDaemon({
+      databasePath: join(dir, "agenthub.sqlite"),
+      port: 0,
+      modelTestFetch: modelTestFetchMock,
+      deploymentCommandProbe: () => true
+    });
+    currentDaemon = daemon;
+    const server = await daemon.start();
+    const address = server.address();
+    if (typeof address !== "object" || address === null) throw new Error("expected TCP address");
+    baseUrl = `http://127.0.0.1:${address.port}`;
+
+    daemon.database.sqlite.transaction(() => {
+      daemon.database.sqlite.prepare("INSERT INTO artifacts (id, workspace_id, room_id, task_id, run_id, message_id, type, kind, title, status, created_by, metadata, created_at, updated_at) VALUES ('artifact_build_auth', 'default-workspace', NULL, NULL, NULL, NULL, 'file', 'web_page', 'Build', 'ready', 'agent_1', '{}', 1, 1)").run();
+      daemon.database.sqlite.prepare("INSERT INTO artifact_files (artifact_id, path, old_content, new_content, patch, additions, deletions, file_status, old_path, binary, no_newline_at_end, old_sha256, new_sha256, applied_state, content_path, created_at) VALUES ('artifact_build_auth', 'index.html', NULL, '<h1>Build</h1>', NULL, 1, 0, 'added', NULL, 0, 0, NULL, NULL, NULL, NULL, 1)").run();
+      daemon.database.sqlite.prepare("INSERT INTO permission_rules (id, workspace_id, agent_id, profile_id, resource_type, resource_match, action, remember, created_at) VALUES ('deny_build_rule', 'default-workspace', NULL, NULL, 'shell', 'nixpacks **', 'deny', 1, 1)").run();
+    })();
+
+    const created = await fetch(`${baseUrl}/deployments`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ artifactId: "artifact_build_auth", kind: "container-build" })
+    });
+
+    expect(created.status).toBe(201);
+    const body = await created.json() as { readonly deployment?: { readonly id?: string; readonly status?: string; readonly lastError?: string } };
+    expect(body.deployment).toMatchObject({ status: "failed" });
+    expect(daemon.database.sqlite.prepare("SELECT last_error FROM deployments WHERE id = ?").get(body.deployment?.id)).toMatchObject({ last_error: "permission_denied" });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'deployment.failed' AND json_extract(payload, '$.deploymentId') = ? AND json_extract(payload, '$.error') = 'permission_denied'").get(body.deployment?.id)).toMatchObject({ count: 1 });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'permission.resolved' AND json_extract(payload, '$.matchedRuleId') = 'deny_build_rule'").get()).toMatchObject({ count: 1 });
+  });
+
   it("serves built web assets from the daemon without relying on Vite", async () => {
     await daemon.close();
     currentDaemon = undefined;
@@ -563,6 +666,36 @@ describe("daemon M1.4 composition", () => {
     expect(seededDaemon.database.sqlite.prepare("SELECT status, expects_review FROM tasks WHERE id = 'task_reconcile_a'").get()).toMatchObject({ status: "review", expects_review: 1 });
     expect(seededDaemon.database.sqlite.prepare("SELECT status, expects_review FROM tasks WHERE id = 'task_reconcile_b'").get()).toMatchObject({ status: "review", expects_review: 1 });
     expect(seededDaemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'team.dispatch.started' AND json_extract(payload, '$.sourceRunId') = 'run_source_reconcile'").get()).toMatchObject({ count: 1 });
+
+    await seededDaemon.close();
+  });
+
+  it("starts WakeOutboxDispatcher and drains pending wake rows without manual dispatchPending", async () => {
+    await daemon.close();
+    currentDaemon = undefined;
+    const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-wake-dispatcher-"));
+    const databasePath = join(dir, "agenthub.sqlite");
+    const seeded = createDatabase({ path: databasePath, applyMigrations: true });
+    try {
+      seeded.sqlite.transaction(() => {
+        seeded.sqlite.prepare("INSERT INTO workspaces (id, name, root_path, created_at, updated_at) VALUES ('ws_wake', 'Workspace', '.', 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO roles (id, workspace_id, name, prompt, capabilities, is_builtin, created_at, updated_at) VALUES ('role_wake', 'ws_wake', 'Leader', '', '[]', 0, 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES ('agent_wake', 'ws_wake', 'Leader', 'mock', NULL, '', '[]', NULL, 0, NULL, 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES ('binding_wake', 'ws_wake', 'role_wake', 'runtime_1', NULL, NULL, 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES ('room_wake', 'ws_wake', 'Wake Room', 'solo', 'conversation', 'agent_wake', NULL, 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES ('room_wake', 'agent_wake', 'agent', 'primary', 'mock', NULL, 'binding_wake', 'active', 1)").run();
+        seeded.sqlite.prepare("INSERT INTO wake_outbox (id, room_id, agent_id, reason, payload, status, attempt_count, max_attempts, created_at, dispatch_after) VALUES ('wake_startup_1', 'room_wake', 'agent_wake', 'aggregate', ?, 'dispatching', 0, 3, 1, NULL)").run(JSON.stringify({ taskIds: ["task_1"] }));
+      })();
+    } finally {
+      seeded.sqlite.close();
+    }
+
+    const seededDaemon = createDaemon({ databasePath, port: 0, modelTestFetch: modelTestFetchMock, now: () => 500 });
+    await seededDaemon.start();
+
+    await eventually(() => expect(seededDaemon.database.sqlite.prepare("SELECT status FROM wake_outbox WHERE id = 'wake_startup_1'").get()).toMatchObject({ status: "dispatched" }));
+    expect(seededDaemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM runs WHERE room_id = 'room_wake' AND wake_reason = 'task_review'").get()).toMatchObject({ count: 1 });
+    expect(seededDaemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'wake_outbox.dispatched' AND json_extract(payload, '$.outboxId') = 'wake_startup_1'").get()).toMatchObject({ count: 1 });
 
     await seededDaemon.close();
   });
@@ -2778,4 +2911,18 @@ async function waitFor<T>(read: () => T, done: (value: T) => boolean, options: {
   }
   if (!done(value)) throw new Error(`Timed out waiting for condition: ${JSON.stringify(value)}`);
   return value;
+}
+
+async function eventually(assertion: () => void): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    try {
+      assertion();
+      return;
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+  throw lastError;
 }

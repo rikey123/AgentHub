@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { CommandBus, EventBus } from "@agenthub/bus";
+import type { EventBus } from "@agenthub/bus";
 import type { AgentHubDatabase } from "@agenthub/db";
 
 import { TaskService, type TaskRow, type TeamDispatchScope } from "./task-service.ts";
@@ -9,7 +9,7 @@ import type { TaskModeGroupChatPresenter } from "./task-mode-group-chat-presente
 type TeamDispatchRuntime = {
   readonly database: AgentHubDatabase;
   readonly eventBus: EventBus;
-  readonly commandBus: CommandBus;
+  readonly commandBus?: unknown;
   readonly taskService: TaskService;
   readonly taskModeGroupChatPresenter?: TaskModeGroupChatPresenter;
   readonly now?: () => number;
@@ -44,24 +44,8 @@ export async function handleTeamDispatchReviewTerminal(runtime: TeamDispatchRunt
   const prompt = wakeReason === "task_blocked"
     ? `A delegated task is blocked: ${siblingState.taskIds.join(", ")}`
     : `All delegated tasks are ready for review: ${siblingState.taskIds.join(", ")}`;
-  const wakeResult = await Promise.resolve(runtime.commandBus.dispatch(
-    {
-      type: "WakeAgent",
-      roomId: task.room_id,
-      agentId: room.primary_agent_id,
-      workspaceId: room.workspace_id,
-      reason: wakeReason,
-      taskId: task.id,
-      promptDelta: { kind: "delta_only", instructions: prompt },
-      idempotencyKey: `team-dispatch:${scope.kind}:${scope.value}:${wakeReason}`
-    },
-    { actor: { type: "system" }, traceId: `team-dispatch:${runId}:${task.id}`, idempotencyKey: `team-dispatch:${scope.kind}:${scope.value}:${wakeReason}`, origin: "internal" }
-  ));
-  if (!wakeResult.ok) return;
-
-  const wakeData = wakeResult.data as { readonly runId?: string; readonly appendedToRunId?: string };
-  const leaderRunId = typeof wakeData.runId === "string" ? wakeData.runId : wakeData.appendedToRunId;
-  if (typeof leaderRunId !== "string" || leaderRunId.length === 0) return;
+  void prompt;
+  const leaderRunId = `wake-outbox:${scope.kind}:${scope.value}:${wakeReason}`;
 
   const dispatchId = `team-dispatch:${scope.kind}:${scope.value}`;
   const createdAt = runtime.now?.() ?? Date.now();
@@ -78,6 +62,15 @@ export async function handleTeamDispatchReviewTerminal(runtime: TeamDispatchRunt
       payload: { dispatchId, leaderRunId, targetTaskIds: siblingState.taskIds, sourceRunId: scope.value },
       createdAt
     });
+    const payload = JSON.stringify({ taskIds: siblingState.taskIds, sourceRunId: scope.value });
+    const existing = runtime.database.sqlite
+      .prepare("SELECT id FROM wake_outbox WHERE room_id = ? AND agent_id = ? AND reason = ? AND payload = ? AND status IN ('pending', 'dispatching', 'dispatched') LIMIT 1")
+      .get(roomId, leaderAgentId, wakeReason, payload);
+    if (existing === undefined) {
+      runtime.database.sqlite
+        .prepare("INSERT INTO wake_outbox (id, room_id, agent_id, reason, payload, status, attempt_count, max_attempts, created_at, dispatch_after) VALUES (?, ?, ?, ?, ?, 'pending', 0, 3, ?, NULL)")
+        .run(randomUUID(), roomId, leaderAgentId, wakeReason, payload, createdAt);
+    }
     if (wakeReason === "task_blocked") {
       const blocked = blockedTask(runtime.database, roomId, scope) ?? (task.status === "blocked" ? task : undefined);
       const reason = blocked !== undefined ? taskBlockReason(runtime.database, blocked) : undefined;
@@ -101,7 +94,7 @@ export async function handleTeamDispatchReviewTerminal(runtime: TeamDispatchRunt
 }
 
 export function maybePublishTeamDispatchCompleted(runtime: Pick<TeamDispatchRuntime, "database" | "eventBus" | "taskModeGroupChatPresenter" | "now">, task: TaskRow): void {
-  if (task.status !== "completed" || task.expects_review === 0) return;
+  if (!isAggregateTerminal(task.status) || task.expects_review === 0) return;
   const scope = taskDispatchScope(task);
   if (scope === undefined) return;
   if (task.room_id === null) return;
@@ -109,7 +102,8 @@ export function maybePublishTeamDispatchCompleted(runtime: Pick<TeamDispatchRunt
 
   const taskIds = teamDispatchTaskIds(runtime.database, roomId, scope);
   if (taskIds.length === 0) return;
-  if (teamDispatchAllCompleted(runtime.database, roomId, scope) === false) return;
+  const terminalState = teamDispatchTerminalState(runtime.database, roomId, scope);
+  if (terminalState.allTerminal === false) return;
   if (teamDispatchEventCount(runtime.database, roomId, "team.dispatch.completed", scope) > 0) return;
 
   const room = runtime.database.sqlite.prepare("SELECT workspace_id, primary_agent_id FROM rooms WHERE id = ?").get(roomId) as { readonly workspace_id: string; readonly primary_agent_id: string | null } | undefined;
@@ -128,10 +122,10 @@ export function maybePublishTeamDispatchCompleted(runtime: Pick<TeamDispatchRunt
       runId: task.source_run_id ?? scope.value,
       agentId: leaderAgentId,
       taskId: task.id,
-      payload: { dispatchId, leaderRunId: task.source_run_id ?? scope.value, taskIds, sourceRunId: scope.value, summary: `All ${taskIds.length} review tasks completed` },
+      payload: { dispatchId, leaderRunId: task.source_run_id ?? scope.value, taskIds, sourceRunId: scope.value, summary: `All ${taskIds.length} review tasks reached terminal states` },
       createdAt
     });
-    const payload = JSON.stringify({ taskIds, sourceRunId: scope.value });
+    const payload = JSON.stringify({ completedTaskIds: terminalState.completedTaskIds, artifactIds: terminalState.artifactIds, blockedTaskIds: terminalState.blockedTaskIds, reviewTaskIds: terminalState.reviewTaskIds, sourceRunId: scope.value });
     const existing = runtime.database.sqlite
       .prepare("SELECT id FROM wake_outbox WHERE room_id = ? AND agent_id = ? AND reason = 'aggregate' AND payload = ? AND status IN ('pending', 'dispatching', 'dispatched') LIMIT 1")
       .get(roomId, leaderAgentId, payload);
@@ -177,11 +171,27 @@ function teamDispatchSiblingState(database: AgentHubDatabase, roomId: string, sc
   return { taskIds: rows.map((row) => row.id), pendingCount, blockedCount };
 }
 
-function teamDispatchAllCompleted(database: AgentHubDatabase, roomId: string, scope: TeamDispatchScope): boolean {
+function teamDispatchTerminalState(database: AgentHubDatabase, roomId: string, scope: TeamDispatchScope): { readonly allTerminal: boolean; readonly completedTaskIds: readonly string[]; readonly blockedTaskIds: readonly string[]; readonly reviewTaskIds: readonly string[]; readonly artifactIds: readonly string[] } {
   const sql = scope.kind === "parent_task_id"
-    ? "SELECT COUNT(*) AS count FROM tasks WHERE room_id = ? AND parent_task_id = ? AND expects_review = 1 AND status != 'completed'"
-    : "SELECT COUNT(*) AS count FROM tasks WHERE room_id = ? AND source_run_id = ? AND parent_task_id IS NULL AND expects_review = 1 AND status != 'completed'";
-  return ((database.sqlite.prepare(sql).get(roomId, scope.value) as { readonly count: number }).count ?? 0) === 0;
+    ? "SELECT id, status FROM tasks WHERE room_id = ? AND parent_task_id = ? AND expects_review = 1 ORDER BY created_at ASC, id ASC"
+    : "SELECT id, status FROM tasks WHERE room_id = ? AND source_run_id = ? AND parent_task_id IS NULL AND expects_review = 1 ORDER BY created_at ASC, id ASC";
+  const rows = database.sqlite.prepare(sql).all(roomId, scope.value) as Array<{ readonly id: string; readonly status: string }>;
+  const completedTaskIds = rows.filter((row) => row.status === "completed").map((row) => row.id);
+  const blockedTaskIds = rows.filter((row) => row.status === "blocked").map((row) => row.id);
+  const reviewTaskIds = rows.filter((row) => row.status === "review").map((row) => row.id);
+  const artifactIds = artifactIdsForTasks(database, rows.map((row) => row.id));
+  return { allTerminal: rows.length > 0 && rows.every((row) => isAggregateTerminal(row.status)), completedTaskIds, blockedTaskIds, reviewTaskIds, artifactIds };
+}
+
+function isAggregateTerminal(status: string): boolean {
+  return status === "completed" || status === "blocked" || status === "review";
+}
+
+function artifactIdsForTasks(database: AgentHubDatabase, taskIds: readonly string[]): readonly string[] {
+  if (taskIds.length === 0) return [];
+  const placeholders = taskIds.map(() => "?").join(",");
+  const rows = database.sqlite.prepare(`SELECT DISTINCT id FROM artifacts WHERE task_id IN (${placeholders}) AND deleted_at IS NULL ORDER BY id ASC`).all(...taskIds) as Array<{ readonly id: string }>;
+  return rows.map((row) => row.id);
 }
 
 function blockedTask(database: AgentHubDatabase, roomId: string, scope: TeamDispatchScope): TaskRow | undefined {

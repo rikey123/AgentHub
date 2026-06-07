@@ -12,7 +12,7 @@ import { ContextLedger, createContextCommandHandlers, HeuristicBriefGenerator } 
 import { createDatabase, type AgentHubDatabase } from "@agenthub/db";
 import { MockAdapterManager } from "@agenthub/adapter-mock";
 import { createInterventionCommandHandlers, InterventionEngine } from "@agenthub/interventions";
-import { ActiveWakesRegistry, AssistedSelectorGroupChatManager, checkTaskTimeouts, createCancelRunHandler, createCompleteTaskHandler, createConsumePendingTurnHandler, createCreateTaskHandler, createUpdateTaskHandler, createWakeAgentHandler, handleTeamDispatchReviewTerminal, MailboxService, maybePublishTeamDispatchCompleted, PendingTurnService, ReclaimStaleClaimedRun, reconcileTerminalDelegatedTaskRuns, RoomMcpServer, RunLifecycleService, RunQueue, StartupRecovery, TaskModeGroupChatPresenter, TaskService, WELL_KNOWN_CAPABILITY_TOKENS, type BriefResolver } from "@agenthub/orchestrator";
+import { ActiveWakesRegistry, AssistedSelectorGroupChatManager, checkTaskTimeouts, createCancelRunHandler, createCompleteTaskHandler, createConsumePendingTurnHandler, createCreateTaskHandler, createUpdateTaskHandler, createWakeAgentHandler, createWakeOutboxDispatcher, handleTeamDispatchReviewTerminal, MailboxService, maybePublishTeamDispatchCompleted, PendingTurnService, ReclaimStaleClaimedRun, reconcileTerminalDelegatedTaskRuns, RoomMcpServer, RunLifecycleService, RunQueue, StartupRecovery, TaskModeGroupChatPresenter, TaskService, WELL_KNOWN_CAPABILITY_TOKENS, type BriefResolver, type WakeOutboxDispatcher } from "@agenthub/orchestrator";
 import { createPermissionCommandHandlers, PermissionEngine, seedBuiltInPermissionProfiles } from "@agenthub/permissions";
 import type { EventEnvelope } from "@agenthub/protocol/events";
 import { artifactContentTypeFor as protocolArtifactContentTypeFor } from "@agenthub/protocol/preview";
@@ -119,7 +119,7 @@ export type DaemonStartupPhase =
   | "HTTP server bind + SSE accept";
 export type RoleDraftGenerator = (input: RoleDraftGenerationInput) => Promise<RoleDraft>;
 export type AssistedSpeakerSelector = (input: AssistedSpeakerSelectionInput) => Promise<string | undefined>;
-export type DaemonOptions = { readonly databasePath: string; readonly workspaceRoot?: string; readonly webAssetsRoot?: string; readonly host?: string; readonly port?: number; readonly token?: string; readonly allowRemote?: boolean; readonly allowedOrigins?: readonly string[]; readonly adapterCommands?: { readonly claude?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv }; readonly opencode?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv } }; readonly now?: () => number; readonly modelTestFetch?: typeof fetch; readonly roleDraftGenerator?: RoleDraftGenerator; readonly assistedSpeakerSelector?: AssistedSpeakerSelector; readonly onLifecyclePhase?: (event: { readonly direction: "startup" | "shutdown"; readonly phase: DaemonStartupPhase }) => void };
+export type DaemonOptions = { readonly databasePath: string; readonly workspaceRoot?: string; readonly webAssetsRoot?: string; readonly host?: string; readonly port?: number; readonly token?: string; readonly allowRemote?: boolean; readonly allowedOrigins?: readonly string[]; readonly adapterCommands?: { readonly claude?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv }; readonly opencode?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv } }; readonly now?: () => number; readonly modelTestFetch?: typeof fetch; readonly roleDraftGenerator?: RoleDraftGenerator; readonly assistedSpeakerSelector?: AssistedSpeakerSelector; readonly deploymentCommandProbe?: (command: "nixpacks" | "docker") => boolean | Promise<boolean>; readonly onLifecyclePhase?: (event: { readonly direction: "startup" | "shutdown"; readonly phase: DaemonStartupPhase }) => void };
 export type DaemonCloseOptions = { readonly forceCancelAfterMs?: number };
 export type DaemonCloseResult = { readonly forced: boolean; readonly cancelledRunIds: readonly string[] };
 export type DaemonApp = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly lifecycle: RunLifecycleService; readonly roomMcpServer: RoomMcpServer; readonly adapterRegistry: AdapterRegistry; readonly mockAdapter: MockAdapterManager; readonly deploymentService: DeploymentService; readonly handle: (req: IncomingMessage, res: ServerResponse) => void; readonly inFlightRunIds: () => readonly string[]; start(): Promise<Server>; close(options?: DaemonCloseOptions): Promise<DaemonCloseResult> };
@@ -158,6 +158,7 @@ type DaemonRuntime = {
   skillRegistry: SkillRegistry;
   assistedSelector: AssistedSelectorGroupChatManager;
   outbox: OutboxDispatcher;
+  wakeOutbox: WakeOutboxDispatcher;
   handlers: DurableHandlerRegistry;
   runQueue: RunQueue;
   agentProfiles: AgentProfileWatcher;
@@ -249,7 +250,27 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     const permissionEngine = new PermissionEngine({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
     const interventionEngine = new InterventionEngine({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
     const artifactService = new ArtifactService({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
-    const deploymentService = createDeploymentService({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}), deploymentRoot: workspaceRoot, fetchImpl: options.modelTestFetch ?? globalThis.fetch.bind(globalThis), keychain: modelConfigSecrets });
+    const deploymentService = createDeploymentService({
+      database,
+      eventBus,
+      ...(options.now !== undefined ? { now: options.now } : {}),
+      deploymentRoot: workspaceRoot,
+      fetchImpl: options.modelTestFetch ?? globalThis.fetch.bind(globalThis),
+      keychain: modelConfigSecrets,
+      ...(options.deploymentCommandProbe !== undefined ? { commandProbe: options.deploymentCommandProbe } : {}),
+      authorizeBuild: async (input) => {
+        const decision = permissionEngine.check({
+          workspaceId: input.workspaceId,
+          idempotencyKey: `deployment-build:${input.deploymentId}`,
+          resource: { type: "shell", command: input.command },
+          reason: `deployment container build ${input.deploymentId}`
+        });
+        if (decision.status === "allow") return "allow";
+        if (decision.status === "deny") return "deny";
+        const resolved = await decision.promise;
+        return resolved.decision === "allowed" ? "allow" : "deny";
+      }
+    });
     deploymentService.recoverInterruptedDeployments();
     const onSkillMaterializationFailed = (input: { readonly taskId?: string; readonly skillId: string; readonly skillName: string; readonly workspaceId: string; readonly runId: string; readonly error: string }): void => {
       const now = options.now?.() ?? Date.now();
@@ -594,6 +615,34 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
       }
     });
     commandBusRef.current = commandBus;
+    const wakeOutbox = createWakeOutboxDispatcher({
+      database,
+      eventBus,
+      ...(options.now !== undefined ? { now: options.now } : {}),
+      dispatchWake: async (item) => {
+        const room = database.sqlite.prepare("SELECT workspace_id FROM rooms WHERE id = ?").get(item.roomId) as { readonly workspace_id: string } | undefined;
+        const payload = parseWakePayload(item.payload);
+        const taskId = typeof payload.taskId === "string" ? payload.taskId : Array.isArray(payload.taskIds) && typeof payload.taskIds[0] === "string" ? payload.taskIds[0] : undefined;
+        const result = await Promise.resolve(commandBus.dispatch(
+          {
+            type: "WakeAgent",
+            roomId: item.roomId,
+            agentId: item.agentId,
+            workspaceId: room?.workspace_id ?? "default-workspace",
+            reason: wakeReasonForCommand(item.reason),
+            ...(taskId !== undefined ? { taskId } : {}),
+            promptDelta: { kind: "delta_only", instructions: promptForWakeOutbox(item.reason, payload) },
+            idempotencyKey: `wake-outbox:${item.id}`
+          },
+          { actor: { type: "system" }, traceId: `wake-outbox:${item.id}`, idempotencyKey: `wake-outbox:${item.id}`, origin: "internal" }
+        ));
+        if (!result.ok) throw new Error(result.error.message);
+        const data = result.data as { readonly runId?: string; readonly appendedToRunId?: string };
+        const runId = data.runId ?? data.appendedToRunId;
+        return runId === undefined ? {} : { runId };
+      }
+    });
+    wakeOutbox.start();
     const roomMcpServer = new RoomMcpServer({ commandBus, taskService, database, eventBus, taskModeGroupChatPresenter, permissionEngine, artifactFs, artifactService, ...(options.now !== undefined ? { now: options.now } : {}) });
     // Start the TCP server so agents can reach room.* MCP tools via the stdio bridge.
     await roomMcpServer.startTcp();
@@ -613,7 +662,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     };
     taskTimeoutTimer = setInterval(runTaskTimeoutSweep, 60_000);
     taskTimeoutTimer.unref?.();
-    runtime = { database, eventBus, commandBus, roomMcpServer, adapterRegistry, mockAdapter, artifactService, deploymentService, taskService, skillRegistry, assistedSelector, outbox, handlers, runQueue, agentProfiles, roleDraftGcCleanup, lifecycle };
+    runtime = { database, eventBus, commandBus, roomMcpServer, adapterRegistry, mockAdapter, artifactService, deploymentService, taskService, skillRegistry, assistedSelector, outbox, wakeOutbox, handlers, runQueue, agentProfiles, roleDraftGcCleanup, lifecycle };
 
     emitPhase("startup", PHASE_HTTP);
     return await new Promise<Server>((resolve) => {
@@ -637,6 +686,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
         await new Promise<void>((resolve, reject) => server?.close((err) => err ? reject(err) : resolve()));
         server = undefined;
       } else if (phase === PHASE_OUTBOX) {
+        runtime?.wakeOutbox.stop();
         await runtime?.outbox.drainPending();
       } else if (phase === PHASE_EVENT_BUS) {
         runtime?.roleDraftGcCleanup();
@@ -741,6 +791,40 @@ function withStatusLineCoalescing(eventBus: EventBus): StatusLineEventBus {
     basePublish(buffer.input);
   }
   return wrapped;
+}
+
+function parseWakePayload(payload: string | undefined): Record<string, unknown> {
+  if (payload === undefined) return {};
+  try {
+    const parsed = JSON.parse(payload) as unknown;
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+function promptForWakeOutbox(reason: string, payload: Record<string, unknown>): string {
+  if (reason === "aggregate") {
+    return "All delegated tasks reached terminal states. Summarize completed artifacts, blocked work, and review items for the room.";
+  }
+  if (reason === "task_review") {
+    return "Delegated tasks are ready for leader review. Review their outputs and provide the next coordination step.";
+  }
+  if (reason === "task_blocked") {
+    return "A delegated task is blocked. Explain the issue and choose a degradation, retry, or user-intervention path.";
+  }
+  if (reason === "restart_recovery") {
+    return "The daemon restarted while work was in progress. Recover the previous run state and continue safely.";
+  }
+  if (typeof payload.taskId === "string") return `Continue delegated task ${payload.taskId}.`;
+  return `Continue work for wake reason ${reason}.`;
+}
+
+function wakeReasonForCommand(reason: string): "primary_turn" | "user_mention" | "delegated_task" | "task_review" | "task_blocked" | "rule_review" | "knock_approved" | "group_review" | "phase_completed" | "agent_crashed" | "consume_pending_turn" | "mailbox_message" | "plan" | "execute" | "agent_stalled" {
+  if (reason === "aggregate") return "task_review";
+  if (reason === "restart_recovery") return "agent_crashed";
+  if (reason === "task_review" || reason === "task_blocked" || reason === "delegated_task") return reason;
+  return "delegated_task";
 }
 
 type RouteContext = { readonly req: IncomingMessage; readonly res: ServerResponse; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly artifactService: ArtifactService; readonly deploymentService: DeploymentService; readonly taskService: TaskService; readonly skillRegistry: SkillRegistry; readonly outbox: { drainPending(): Promise<void> }; readonly stopAssistedDiscussion: (roomId: string) => Promise<{ readonly ok: boolean; readonly roomId: string; readonly cancelledRunIds: readonly string[] }>; readonly modelConfigSecrets: KeychainBridge; readonly settingsJobs: Map<string, SettingsJobRecord>; readonly modelTestFetch: typeof fetch; readonly roleDraftGenerator: RoleDraftGenerator; readonly registerSseClient: (client: SseClient) => () => void; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly host: string; readonly now?: () => number };
@@ -1093,6 +1177,8 @@ async function route(ctx: RouteContext): Promise<void> {
   if (ctx.req.method === "POST" && parts[0] === "deployments" && parts.length === 1) return createDeployment(ctx, await body(ctx));
   if (ctx.req.method === "GET" && parts[0] === "deployments" && parts[2] === "logs") return deploymentLogs(ctx, parts[1] as string);
   if (ctx.req.method === "GET" && parts[0] === "deployments" && parts[2] === "download") return deploymentDownload(ctx, parts[1] as string);
+  if (ctx.req.method === "GET" && parts[0] === "deployments" && parts[2] === "preview") return deploymentPreview(ctx, parts[1] as string);
+  if (ctx.req.method === "GET" && parts[0] === "sites" && parts[1]) return deploymentSite(ctx, parts[1], decodeURIComponent(parts.slice(2).join("/")));
   if (ctx.req.method === "POST" && parts[0] === "deployments" && parts[2] === "redeploy") return deploymentAction(ctx, parts[1] as string, "redeploy");
   if (ctx.req.method === "POST" && parts[0] === "deployments" && parts[2] === "retry") return deploymentAction(ctx, parts[1] as string, "retry");
   if (ctx.req.method === "POST" && parts[0] === "deployments" && parts[2] === "cancel") return deploymentAction(ctx, parts[1] as string, "cancel");
@@ -1315,8 +1401,25 @@ async function deploymentDownload(ctx: RouteContext, deploymentId: string): Prom
   return serveStaticFile(ctx.req, ctx.res, path) ? undefined : json(ctx.res, 404, { error: "deployment_download_not_found" });
 }
 
+function deploymentPreview(ctx: RouteContext, deploymentId: string): void {
+  const row = get(ctx.database, "SELECT kind, status, source_path FROM deployments WHERE id = ?", deploymentId) as { readonly kind: string; readonly status: string; readonly source_path: string | null } | null;
+  if (row === null || row.kind !== "preview-url" || row.status !== "ready" || row.source_path === null) return json(ctx.res, 404, { error: "deployment_preview_not_found" });
+  const filePath = containedPath(row.source_path, "index.html");
+  if (filePath === undefined) return json(ctx.res, 404, { error: "deployment_preview_not_found" });
+  return serveStaticFile(ctx.req, ctx.res, filePath) ? undefined : json(ctx.res, 404, { error: "deployment_preview_not_found" });
+}
+
+function deploymentSite(ctx: RouteContext, deploymentId: string, requestedPath: string): void {
+  const row = get(ctx.database, "SELECT kind, status, source_path FROM deployments WHERE id = ?", deploymentId) as { readonly kind: string; readonly status: string; readonly source_path: string | null } | null;
+  if (row === null || row.kind !== "static-site" || row.status !== "ready" || row.source_path === null) return json(ctx.res, 404, { error: "deployment_site_not_found" });
+  const normalizedPath = requestedPath.length === 0 || requestedPath.endsWith("/") ? `${requestedPath}index.html` : requestedPath;
+  const filePath = containedPath(row.source_path, normalizedPath);
+  if (filePath === undefined) return json(ctx.res, 404, { error: "deployment_site_not_found" });
+  return serveStaticFile(ctx.req, ctx.res, filePath) ? undefined : json(ctx.res, 404, { error: "deployment_site_not_found" });
+}
+
 function deploymentProviders(ctx: RouteContext): void {
-  json(ctx.res, 200, { providers: all(ctx.database, "SELECT id, workspace_id, kind, name, base_url, credential_ref, created_at, updated_at FROM deployment_providers ORDER BY created_at ASC") });
+  json(ctx.res, 200, { providers: (all(ctx.database, "SELECT id, workspace_id, kind, name, base_url, credential_ref, created_at, updated_at FROM deployment_providers ORDER BY created_at ASC") as Array<Record<string, unknown>>).map(providerResponse) });
 }
 
 async function createDeploymentProvider(ctx: RouteContext, input: Record<string, unknown>): Promise<void> {
@@ -1329,8 +1432,12 @@ async function createDeploymentProvider(ctx: RouteContext, input: Record<string,
   const id = randomUUID();
   const credentialRef = `deployment-provider:${id}`;
   await ctx.modelConfigSecrets.set(credentialRef, credential);
-  ctx.database.sqlite.prepare("INSERT INTO deployment_providers (id, workspace_id, kind, name, base_url, credential_ref, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(id, defaultWorkspaceId(ctx.database), kind, name, baseUrl, credentialRef, now, now);
-  json(ctx.res, 201, { provider: get(ctx.database, "SELECT * FROM deployment_providers WHERE id = ?", id) });
+  const workspaceId = defaultWorkspaceId(ctx.database);
+  ctx.database.sqlite.transaction(() => {
+    ctx.database.sqlite.prepare("INSERT INTO deployment_providers (id, workspace_id, kind, name, base_url, credential_ref, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(id, workspaceId, kind, name, baseUrl, credentialRef, now, now);
+    ctx.eventBus.publish({ id: randomUUID(), type: "deployment.provider.created", schemaVersion: 1, workspaceId, payload: { providerId: id, kind, name, baseUrl, hasCredential: true }, createdAt: now });
+  })();
+  json(ctx.res, 201, { provider: providerResponse(get(ctx.database, "SELECT * FROM deployment_providers WHERE id = ?", id) as Record<string, unknown>) });
 }
 
 async function updateDeploymentProvider(ctx: RouteContext, providerId: string, input: Record<string, unknown>): Promise<void> {
@@ -1341,16 +1448,30 @@ async function updateDeploymentProvider(ctx: RouteContext, providerId: string, i
   const baseUrl = stringField(input.baseUrl) ?? stringField(input.base_url) ?? String(existing.base_url);
   const credential = stringField(input.credential);
   if (credential !== undefined) await ctx.modelConfigSecrets.set(String(existing.credential_ref), credential);
-  ctx.database.sqlite.prepare("UPDATE deployment_providers SET name = ?, base_url = ?, updated_at = ? WHERE id = ?").run(name, baseUrl, now, providerId);
-  json(ctx.res, 200, { provider: get(ctx.database, "SELECT * FROM deployment_providers WHERE id = ?", providerId) });
+  const workspaceId = String(existing.workspace_id);
+  ctx.database.sqlite.transaction(() => {
+    ctx.database.sqlite.prepare("UPDATE deployment_providers SET name = ?, base_url = ?, updated_at = ? WHERE id = ?").run(name, baseUrl, now, providerId);
+    ctx.eventBus.publish({ id: randomUUID(), type: "deployment.provider.updated", schemaVersion: 1, workspaceId, payload: { providerId, kind: String(existing.kind), name, baseUrl, hasCredential: true }, createdAt: now });
+  })();
+  json(ctx.res, 200, { provider: providerResponse(get(ctx.database, "SELECT * FROM deployment_providers WHERE id = ?", providerId) as Record<string, unknown>) });
 }
 
 async function deleteDeploymentProvider(ctx: RouteContext, providerId: string): Promise<void> {
   const existing = get(ctx.database, "SELECT * FROM deployment_providers WHERE id = ?", providerId) as Record<string, unknown> | null;
   if (existing === null) return json(ctx.res, 404, { error: "deployment_provider_not_found" });
-  ctx.database.sqlite.prepare("DELETE FROM deployment_providers WHERE id = ?").run(providerId);
+  const now = ctx.now?.() ?? Date.now();
+  ctx.database.sqlite.transaction(() => {
+    ctx.database.sqlite.prepare("DELETE FROM deployment_providers WHERE id = ?").run(providerId);
+    ctx.eventBus.publish({ id: randomUUID(), type: "deployment.provider.deleted", schemaVersion: 1, workspaceId: String(existing.workspace_id), payload: { providerId, kind: String(existing.kind) }, createdAt: now });
+  })();
   await ctx.modelConfigSecrets.delete(String(existing.credential_ref)).catch(() => false);
   json(ctx.res, 200, { ok: true });
+}
+
+function providerResponse(row: Record<string, unknown>): Record<string, unknown> {
+  const { credential_ref: _credentialRef, ...publicRow } = row;
+  void _credentialRef;
+  return { ...publicRow, hasCredential: typeof row.credential_ref === "string" && row.credential_ref.length > 0, masked: typeof row.credential_ref === "string" && row.credential_ref.length > 0 };
 }
 
 async function testDeploymentProvider(ctx: RouteContext, providerId: string): Promise<void> {
@@ -3515,6 +3636,14 @@ function serveStaticFile(req: IncomingMessage, res: ServerResponse, filePath: st
   } catch {
     return false;
   }
+}
+
+function containedPath(root: string, childPath: string): string | undefined {
+  const resolvedRoot = resolvePath(root);
+  const candidate = resolvePath(resolvedRoot, childPath);
+  const rel = relative(resolvedRoot, candidate);
+  if (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))) return candidate;
+  return undefined;
 }
 
 function hasFileExtension(pathname: string): boolean {

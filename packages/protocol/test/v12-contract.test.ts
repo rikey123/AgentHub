@@ -18,6 +18,9 @@ const V12_EVENT_EXPECTATIONS = [
   { type: "deployment.cancelled", category: "deployment", durability: "durable", visibility: "main" },
   { type: "deployment.expired", category: "deployment", durability: "durable", visibility: "main" },
   { type: "deployment.unpublished", category: "deployment", durability: "durable", visibility: "main" },
+  { type: "deployment.provider.created", category: "deployment", durability: "durable", visibility: "detail" },
+  { type: "deployment.provider.updated", category: "deployment", durability: "durable", visibility: "detail" },
+  { type: "deployment.provider.deleted", category: "deployment", durability: "durable", visibility: "detail" },
   { type: "room.pinned", category: "room", durability: "durable", visibility: "both" },
   { type: "room.unpinned", category: "room", durability: "durable", visibility: "both" },
   { type: "message.pinned", category: "message", durability: "durable", visibility: "both" },
@@ -96,6 +99,24 @@ describe("V1.2 contract registry", () => {
       },
       "deployment.unpublished": {
         deploymentId: "deployment-1"
+      },
+      "deployment.provider.created": {
+        providerId: "provider-1",
+        kind: "caprover",
+        name: "Captain",
+        baseUrl: "https://captain.example",
+        hasCredential: true
+      },
+      "deployment.provider.updated": {
+        providerId: "provider-1",
+        kind: "caprover",
+        name: "Captain 2",
+        baseUrl: "https://captain.example",
+        hasCredential: true
+      },
+      "deployment.provider.deleted": {
+        providerId: "provider-1",
+        kind: "caprover"
       },
       "room.pinned": {
         roomId: "room-1",

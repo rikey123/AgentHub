@@ -229,6 +229,7 @@ export class TaskService {
       } else {
         this.options.database.sqlite.prepare("UPDATE tasks SET status = ?, blocker_reason = NULL, updated_at = ? WHERE id = ?").run(nextStatus, now, input.taskId);
       }
+      if (existing.room_id !== null) this.touchRoomActivityInTransaction(existing.room_id, now);
       this.options.eventBus.publish(taskEvent("task.status.changed", existing.workspace_id, existing.room_id ?? "", input.taskId, { taskId: input.taskId, prevStatus: existing.status, nextStatus, ...(input.reason !== undefined ? { reason: input.reason } : {}), ...(input.blockerReason !== undefined ? { blockerReason: input.blockerReason } : {}), ...(clearsBoardOverride ? { boardColumn: null } : {}) }, now));
     })();
     if (nextStatus === "completed") {
@@ -288,6 +289,7 @@ export class TaskService {
       } else {
         this.options.database.sqlite.prepare("UPDATE tasks SET status = ?, blocker_reason = NULL, updated_at = ? WHERE id = ?").run(nextStatus, now, input.taskId);
       }
+      this.touchRoomActivityInTransaction(input.roomId, now);
       this.options.database.sqlite
         .prepare("INSERT INTO task_activities (id, task_id, kind, by_kind, by, payload, created_at) VALUES (?, ?, 'comment', 'role', ?, ?, ?)")
         .run(
@@ -537,6 +539,10 @@ export class TaskService {
     }
   }
 
+  private touchRoomActivityInTransaction(roomId: string, now: number): void {
+    this.options.database.sqlite.prepare("UPDATE rooms SET last_activity_at = ?, updated_at = ? WHERE id = ?").run(now, now, roomId);
+  }
+
   private allDependenciesCompleted(taskIds: readonly string[]): boolean {
     if (taskIds.length === 0) return true;
     const placeholders = taskIds.map(() => "?").join(", ");
@@ -569,6 +575,7 @@ export class TaskService {
           this.options.database.sqlite.prepare("UPDATE tasks SET status = ?, blocker_reason = NULL, updated_at = ? WHERE id = ?").run(nextStatus, now, taskId);
         }
       }
+      if (existing.room_id !== null) this.touchRoomActivityInTransaction(existing.room_id, now);
       this.options.eventBus.publish(taskEvent("task.status.changed", existing.workspace_id, existing.room_id ?? "", taskId, { taskId, prevStatus: existing.status, nextStatus, reason: input.reason, ...(input.blockerReason !== undefined ? { blockerReason: input.blockerReason } : {}), ...(isTerminalStatus(nextStatus) ? { boardColumn: null } : {}) }, now));
     })();
 

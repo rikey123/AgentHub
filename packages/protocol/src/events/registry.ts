@@ -125,6 +125,30 @@ export const DeploymentUnpublishedPayloadSchema = Schema.Struct({
 });
 export type DeploymentUnpublishedPayload = typeof DeploymentUnpublishedPayloadSchema.Type;
 
+export const DeploymentProviderCreatedPayloadSchema = Schema.Struct({
+  providerId: IdSchema,
+  kind: Schema.Literal("caprover"),
+  name: Schema.String,
+  baseUrl: Schema.String,
+  hasCredential: Schema.Boolean
+});
+export type DeploymentProviderCreatedPayload = typeof DeploymentProviderCreatedPayloadSchema.Type;
+
+export const DeploymentProviderUpdatedPayloadSchema = Schema.Struct({
+  providerId: IdSchema,
+  kind: Schema.Literal("caprover"),
+  name: Schema.String,
+  baseUrl: Schema.String,
+  hasCredential: Schema.Boolean
+});
+export type DeploymentProviderUpdatedPayload = typeof DeploymentProviderUpdatedPayloadSchema.Type;
+
+export const DeploymentProviderDeletedPayloadSchema = Schema.Struct({
+  providerId: IdSchema,
+  kind: Schema.Literal("caprover")
+});
+export type DeploymentProviderDeletedPayload = typeof DeploymentProviderDeletedPayloadSchema.Type;
+
 export const RoomPinnedPayloadSchema = Schema.Struct({
   roomId: IdSchema,
   pinnedAt: EpochMillisSchema
@@ -185,6 +209,9 @@ export const EVENT_PAYLOAD_SCHEMAS = {
   "deployment.cancelled": DeploymentCancelledPayloadSchema,
   "deployment.expired": DeploymentExpiredPayloadSchema,
   "deployment.unpublished": DeploymentUnpublishedPayloadSchema,
+  "deployment.provider.created": DeploymentProviderCreatedPayloadSchema,
+  "deployment.provider.updated": DeploymentProviderUpdatedPayloadSchema,
+  "deployment.provider.deleted": DeploymentProviderDeletedPayloadSchema,
   "room.pinned": RoomPinnedPayloadSchema,
   "room.unpinned": RoomUnpinnedPayloadSchema,
   "message.pinned": MessagePinnedPayloadSchema,
@@ -309,6 +336,9 @@ export const EVENT_REGISTRY = [
   { type: "deployment.cancelled", category: "deployment", durability: "durable", visibility: "main", schemaVersion: 1 },
   { type: "deployment.expired", category: "deployment", durability: "durable", visibility: "main", schemaVersion: 1 },
   { type: "deployment.unpublished", category: "deployment", durability: "durable", visibility: "main", schemaVersion: 1 },
+  { type: "deployment.provider.created", category: "deployment", durability: "durable", visibility: "detail", schemaVersion: 1 },
+  { type: "deployment.provider.updated", category: "deployment", durability: "durable", visibility: "detail", schemaVersion: 1 },
+  { type: "deployment.provider.deleted", category: "deployment", durability: "durable", visibility: "detail", schemaVersion: 1 },
   { type: "room.pinned", category: "room", durability: "durable", visibility: "both", schemaVersion: 1 },
   { type: "room.unpinned", category: "room", durability: "durable", visibility: "both", schemaVersion: 1 },
   { type: "task.unblocked", category: "task", durability: "durable", visibility: "both", schemaVersion: 1 },
