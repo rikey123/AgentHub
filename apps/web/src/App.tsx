@@ -53,18 +53,19 @@ export function roomPinRequestFor(roomId: string, isPinned: boolean): { readonly
   };
 }
 
-type MessageDraftState = { text?: string; quotedMessageId?: string; quotePreview?: string };
+type MessageDraftState = { text?: string; quotedMessageId?: string; quotePreview?: string; quoteInsertText?: string };
 
 export function draftWithQuotedMessage(draft: MessageDraftState, messageId: string, preview: string): MessageDraftState {
+  const { quoteInsertText: _quoteInsertText, ...baseDraft } = draft;
   return {
-    ...draft,
+    ...baseDraft,
     quotedMessageId: messageId,
     quotePreview: preview.slice(0, 80)
   };
 }
 
 export function draftWithQuotedText(draft: MessageDraftState, text: string): MessageDraftState {
-  const { quotedMessageId: _quotedMessageId, quotePreview: _quotePreview, ...baseDraft } = draft;
+  const { quotedMessageId: _quotedMessageId, quotePreview: _quotePreview, quoteInsertText: _quoteInsertText, ...baseDraft } = draft;
   if (text.trim().length === 0) return baseDraft;
   const quoteText = text
     .split(/\r?\n/u)
@@ -72,10 +73,9 @@ export function draftWithQuotedText(draft: MessageDraftState, text: string): Mes
     .join("\n")
     .trimEnd();
   if (quoteText.length === 0) return baseDraft;
-  const existingText = baseDraft.text?.trimStart() ?? "";
   return {
     ...baseDraft,
-    text: existingText.length > 0 ? `${quoteText}\n\n${existingText}` : quoteText
+    quoteInsertText: quoteText
   };
 }
 

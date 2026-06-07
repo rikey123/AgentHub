@@ -29,6 +29,24 @@ type DraftQuote = { messageId: string; preview: string };
 
 type Attachment = { fileId: string; name: string; sizeBytes: number };
 
+type StoredDraft = {
+  text?: string;
+  mentions?: string[];
+  quotedMessageId?: string;
+  quotePreview?: string;
+  quoteInsertText?: string;
+  attachments?: Attachment[];
+};
+
+export function insertTextAtSelection(currentText: string, insertion: string, selectionStart: number, selectionEnd: number): { text: string; cursor: number } {
+  const start = Math.max(0, Math.min(selectionStart, currentText.length));
+  const end = Math.max(start, Math.min(selectionEnd, currentText.length));
+  return {
+    text: `${currentText.slice(0, start)}${insertion}${currentText.slice(end)}`,
+    cursor: start + insertion.length
+  };
+}
+
 interface InputBoxProps {
   roomId: string;
   participants: ReadonlyArray<ParticipantViewModel>;
@@ -57,6 +75,11 @@ export function InputBox(props: InputBoxProps) {
   const [dragOver, setDragOver] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textRef = useRef(text);
+
+  useEffect(() => {
+    textRef.current = text;
+  }, [text]);
 
   const canSend = props.connectionStatus === "connected" && (text.trim().length > 0 || attachments.length > 0);
   const queueFull = props.pendingCount >= 20;
@@ -67,7 +90,7 @@ export function InputBox(props: InputBoxProps) {
     try {
       const raw = sessionStorage.getItem(draftKey);
       if (raw) {
-        const parsed = JSON.parse(raw) as { text?: string; mentions?: string[]; quotedMessageId?: string; quotePreview?: string; attachments?: Attachment[] };
+        const parsed = JSON.parse(raw) as StoredDraft;
         if (typeof parsed.text === "string") setText(parsed.text);
         if (Array.isArray(parsed.mentions)) setMentions(parsed.mentions);
         if (parsed.quotedMessageId) setQuote({ messageId: parsed.quotedMessageId, preview: parsed.quotePreview ?? "" });
@@ -79,8 +102,30 @@ export function InputBox(props: InputBoxProps) {
     const onStorage = (ev: StorageEvent) => {
       if (ev.key !== draftKey || ev.newValue === null) return;
       try {
-        const parsed = JSON.parse(ev.newValue) as { text?: string; mentions?: string[]; quotedMessageId?: string; quotePreview?: string; attachments?: Attachment[] };
-        if (typeof parsed.text === "string") setText(parsed.text);
+        const parsed = JSON.parse(ev.newValue) as StoredDraft;
+        let nextText = typeof parsed.text === "string" ? parsed.text : textRef.current;
+        if (typeof parsed.quoteInsertText === "string" && parsed.quoteInsertText.length > 0) {
+          nextText = textRef.current;
+          const selectionStart = taRef.current?.selectionStart ?? nextText.length;
+          const selectionEnd = taRef.current?.selectionEnd ?? selectionStart;
+          const inserted = insertTextAtSelection(nextText, parsed.quoteInsertText, selectionStart, selectionEnd);
+          nextText = inserted.text;
+          parsed.text = inserted.text;
+          delete parsed.quoteInsertText;
+          requestAnimationFrame(() => {
+            taRef.current?.focus();
+            taRef.current?.setSelectionRange(inserted.cursor, inserted.cursor);
+          });
+          const newValue = JSON.stringify(parsed);
+          try {
+            sessionStorage.setItem(draftKey, newValue);
+            window.dispatchEvent(new StorageEvent("storage", { key: draftKey, newValue }));
+          } catch {
+            // ignore unavailable storage
+          }
+        }
+        textRef.current = nextText;
+        setText(nextText);
         if (Array.isArray(parsed.mentions)) setMentions(parsed.mentions);
         setQuote(parsed.quotedMessageId ? { messageId: parsed.quotedMessageId, preview: parsed.quotePreview ?? "" } : undefined);
         setAttachments(Array.isArray(parsed.attachments) ? parsed.attachments : []);
@@ -116,6 +161,7 @@ export function InputBox(props: InputBoxProps) {
   }, [mentionQuery]);
 
   const handleChange = (next: string) => {
+    textRef.current = next;
     setText(next);
     const cursor = taRef.current?.selectionStart ?? next.length;
     const upToCursor = next.slice(0, cursor);
@@ -140,6 +186,7 @@ export function InputBox(props: InputBoxProps) {
     const slug = p.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
     const mentionText = slug.length > 0 ? `@${slug}` : `@"${p.name.replace(/"/g, '\\"')}"`;
     const newText = before.slice(0, at) + `${mentionText} ` + after;
+    textRef.current = newText;
     setText(newText);
     setMentionQuery(undefined);
     setMentions((prev) => Array.from(new Set([...prev, p.id])));
@@ -153,6 +200,7 @@ export function InputBox(props: InputBoxProps) {
     const prefix = before.length === 0 || /\s$/.test(before) ? "@" : " @";
     const next = before + prefix + after;
     const nextCursor = before.length + prefix.length;
+    textRef.current = next;
     setText(next);
     setMentionQuery("");
     requestAnimationFrame(() => {

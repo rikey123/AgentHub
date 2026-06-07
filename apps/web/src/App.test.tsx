@@ -203,15 +203,22 @@ describe("App integration wiring", () => {
       quotedMessageId: "message-1",
       quotePreview: "Use /api/v2"
     });
+    expect(draftWithQuotedMessage({ text: "Please explain", quoteInsertText: "> old quote" }, "message-1", "Use /api/v2")).toEqual({
+      text: "Please explain",
+      quotedMessageId: "message-1",
+      quotePreview: "Use /api/v2"
+    });
 
     expect(draftWithQuotedText({ text: "Please explain" }, "Line one\nLine two")).toEqual({
-      text: "> Line one\n> Line two\n\nPlease explain"
+      text: "Please explain",
+      quoteInsertText: "> Line one\n> Line two"
     });
     expect(draftWithQuotedText({ text: "Please explain" }, "")).toEqual({
       text: "Please explain"
     });
     expect(draftWithQuotedText({ text: "Please explain", quotedMessageId: "old-message", quotePreview: "old" }, "New source")).toEqual({
-      text: "> New source\n\nPlease explain"
+      text: "Please explain",
+      quoteInsertText: "> New source"
     });
   });
 
