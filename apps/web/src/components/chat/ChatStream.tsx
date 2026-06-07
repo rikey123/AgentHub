@@ -255,19 +255,24 @@ function PinnedContextDrawer({ messages, onUnpin }: { readonly messages: RoomVie
       <div className="mt-2 flex flex-col gap-2">
         {messages.map((message) => (
           <div key={message.id} className="rounded-lg border border-border/70 bg-surface-secondary/70 px-3 py-2">
-            <div className="flex items-start gap-2">
-              <p className="min-w-0 flex-1 line-clamp-2 text-xs leading-5 text-muted">
-                {pinnedMessagePreview(message)}
-              </p>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-7 px-2 text-xs"
-                aria-label={`Unpin pinned message ${message.id}`}
-                onPress={() => onUnpin(message.id)}
-              >
-                Unpin
-              </Button>
+            <div className="grid gap-1">
+              <div className="flex items-start gap-2">
+                <p className="min-w-0 flex-1 line-clamp-2 text-xs leading-5 text-muted">
+                  {pinnedMessagePreview(message)}
+                </p>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2 text-xs"
+                  aria-label={`Unpin pinned message ${message.id}`}
+                  onPress={() => onUnpin(message.id)}
+                >
+                  Unpin
+                </Button>
+              </div>
+              {pinnedArtifactRef(message) !== undefined ? (
+                <p className="text-[11px] font-medium text-warning-soft-foreground">Content compacted to avoid expanding large artifacts.</p>
+              ) : null}
             </div>
           </div>
         ))}
@@ -278,17 +283,21 @@ function PinnedContextDrawer({ messages, onUnpin }: { readonly messages: RoomVie
 
 function pinnedMessagePreview(message: RoomViewModel["messages"][number]): string {
   const text = message.text.trim();
-  const artifactRef = message.parts
+  const artifactRef = pinnedArtifactRef(message);
+  if (artifactRef !== undefined && text.length > 0) return `${artifactRef} ${truncatePinnedMessageText(text, 140)}`;
+  if (artifactRef !== undefined) return artifactRef;
+  if (text.length > 0) return truncatePinnedMessageText(text, 160);
+  return "Pinned message";
+}
+
+function pinnedArtifactRef(message: RoomViewModel["messages"][number]): string | undefined {
+  return message.parts
     .map((part) => {
       if (part.type !== "card") return undefined;
       const card = part.card as Record<string, unknown>;
       return card.type === "artifact" && typeof card.artifactId === "string" ? `@artifact:${card.artifactId}` : undefined;
     })
     .find((ref): ref is string => ref !== undefined);
-  if (artifactRef !== undefined && text.length > 0) return `${artifactRef} ${truncatePinnedMessageText(text, 140)}`;
-  if (artifactRef !== undefined) return artifactRef;
-  if (text.length > 0) return truncatePinnedMessageText(text, 160);
-  return "Pinned message";
 }
 
 function truncatePinnedMessageText(text: string, maxLength: number): string {

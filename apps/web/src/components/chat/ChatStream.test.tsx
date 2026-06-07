@@ -193,6 +193,36 @@ describe("ChatStream task notification feed", () => {
     expect(html).toContain("Unpin pinned message");
   });
 
+  it("warns when pinned artifact messages are compacted", () => {
+    const html = renderToStaticMarkup(createElement(ChatStream, {
+      room: roomFixture({
+        messages: [
+          messageFixture({
+            id: "artifact-pin",
+            text: "Large HTML artifact content should not be expanded in the pinned drawer.",
+            parts: [{ type: "card", seq: 1, card: { type: "artifact", artifactId: "artifact_large", kind: "web_page", title: "Large HTML" } }],
+            pinnedAt: 300
+          })
+        ]
+      }),
+      onSelectMessage: vi.fn(),
+      onOpenRun: vi.fn(),
+      onQuote: vi.fn(),
+      onPin: vi.fn(),
+      onRegenerate: vi.fn(),
+      onDelete: vi.fn(),
+      onOpenTask: vi.fn(),
+      onOpenTasks: vi.fn(),
+      onCancelPending: vi.fn(),
+      onEditPending: vi.fn(),
+      csrfFetch: vi.fn<typeof fetch>(),
+      connectionStatus: "connected"
+    }));
+
+    expect(html).toContain("@artifact:artifact_large");
+    expect(html).toContain("Content compacted");
+  });
+
   it("identifies only the latest completed agent message as regenerable", () => {
     expect(latestRegenerableAgentMessageId([
       messageFixture({ id: "older-agent", text: "Earlier answer", senderType: "agent", status: "completed", createdAt: 100 }),
