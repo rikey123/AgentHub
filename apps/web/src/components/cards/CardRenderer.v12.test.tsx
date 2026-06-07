@@ -21,6 +21,46 @@ describe("V1.2 artifact cards", () => {
     expect(html).toContain("Launch brief.md");
     expect(html).toContain("v3");
     expect(html).toContain("/artifacts/artifact-doc-1/download");
+    expect(html).toContain("Expand");
+  });
+
+  it("routes source code and generic file artifacts to generic ArtifactCard branches", () => {
+    const sourceCode = renderToStaticMarkup(createElement(CardRenderer, {
+      card: {
+        type: "artifact",
+        artifactId: "artifact-source-1",
+        kind: "source_code",
+        title: "src/app.ts",
+        version: 4
+      },
+      csrfFetch: vi.fn<typeof fetch>()
+    }));
+    const genericFile = renderToStaticMarkup(createElement(CardRenderer, {
+      card: {
+        type: "artifact",
+        artifactId: "artifact-file-1",
+        kind: "generic_file",
+        title: "dataset.csv",
+        version: 1
+      },
+      csrfFetch: vi.fn<typeof fetch>()
+    }));
+
+    expect(sourceCode).toContain("Artifact");
+    expect(sourceCode).toContain("src/app.ts");
+    expect(sourceCode).toContain("source_code");
+    expect(sourceCode).toContain("v4");
+    expect(sourceCode).toContain("/artifacts/artifact-source-1/download");
+    expect(sourceCode).toContain("Expand");
+    expect(sourceCode).not.toContain("Unknown card");
+
+    expect(genericFile).toContain("Artifact");
+    expect(genericFile).toContain("dataset.csv");
+    expect(genericFile).toContain("generic_file");
+    expect(genericFile).toContain("v1");
+    expect(genericFile).toContain("/artifacts/artifact-file-1/download");
+    expect(genericFile).toContain("Expand");
+    expect(genericFile).not.toContain("Unknown card");
   });
 
   it("routes web artifacts to PreviewCard with only wired actions", () => {

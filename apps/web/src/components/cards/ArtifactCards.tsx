@@ -98,6 +98,30 @@ export function PresentationCard({ card, csrfFetch }: { readonly card: ArtifactC
   );
 }
 
+export function GenericArtifactCard({ card, csrfFetch }: { readonly card: ArtifactCardData; readonly csrfFetch: typeof fetch }) {
+  return (
+    <Card variant="default" data-testid="artifact-card">
+      <Card.Header>
+        <div className="flex items-center gap-2">
+          <Card.Title className="flex-1 truncate">Artifact</Card.Title>
+          <Chip size="sm" variant="soft" color="default">{card.kind}</Chip>
+          {card.version !== undefined ? <Chip size="sm" variant="soft" color="default">v{card.version}</Chip> : null}
+        </div>
+        <Card.Description className="truncate">{card.title}</Card.Description>
+      </Card.Header>
+      <Card.Content>
+        <div className="rounded-lg border border-border bg-surface-secondary p-3 text-sm text-muted">
+          {card.kind === "source_code" ? "Source preview is available in the artifact studio." : "This artifact can be downloaded or expanded for details."}
+        </div>
+      </Card.Content>
+      <Card.Footer className="flex-wrap gap-2">
+        <a className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-semibold text-foreground hover:bg-surface-secondary" href={artifactDownloadUrl(card.artifactId)}>Download</a>
+        <ArtifactExpandAction card={card} csrfFetch={csrfFetch} />
+      </Card.Footer>
+    </Card>
+  );
+}
+
 export function DeploymentCard({ card, csrfFetch }: { readonly card: DeploymentCardData; readonly csrfFetch: typeof fetch }) {
   const [pendingAction, setPendingAction] = useState<DeploymentAction | undefined>(undefined);
   const [actionError, setActionError] = useState<string | undefined>(undefined);

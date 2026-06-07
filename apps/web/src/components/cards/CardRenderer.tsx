@@ -6,7 +6,7 @@ import { ContextCard } from "./ContextCard.tsx";
 import { TaskCard } from "./TaskCard.tsx";
 import { PreviewCard } from "./PreviewCard.tsx";
 import { UnknownCard } from "./UnknownCard.tsx";
-import { DeploymentCard, DocumentCard, PresentationCard, PreviewArtifactCard } from "./ArtifactCards.tsx";
+import { DeploymentCard, DocumentCard, GenericArtifactCard, PresentationCard, PreviewArtifactCard } from "./ArtifactCards.tsx";
 
 interface CardRendererProps {
   card: ProtocolCard;
@@ -25,6 +25,7 @@ export function CardRenderer({ card, csrfFetch }: CardRendererProps) {
       if (card.kind === "web_page" || card.kind === "web_app") return <PreviewArtifactCard card={card} csrfFetch={csrfFetch} />;
       if (card.kind === "document") return <DocumentCard card={card} csrfFetch={csrfFetch} />;
       if (card.kind === "presentation" || card.kind === "presentation_pptx") return <PresentationCard card={card} csrfFetch={csrfFetch} />;
+      if (card.kind === "source_code" || card.kind === "generic_file") return <GenericArtifactCard card={card} csrfFetch={csrfFetch} />;
       return <UnknownCard card={card as unknown as Record<string, unknown>} />;
     }
     case "deployment": return <DeploymentCard card={card as never} csrfFetch={csrfFetch} />;
