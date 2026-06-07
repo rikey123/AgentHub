@@ -27,7 +27,7 @@
   - `packages/daemon/src/routes/agents-contacts.ts`
   - `packages/daemon/src/routes/ppt-proxy.ts`
 
-- [ ] **1.5** 跑 `pnpm check:all` 全绿后合并到 main，三人各自建立功能分支
+- [x] **1.5** 跑 `pnpm check:all` 全绿后合并到 main，三人各自建立功能分支
 
 ---
 
