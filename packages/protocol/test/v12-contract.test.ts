@@ -137,8 +137,8 @@ describe("V1.2 contract registry", () => {
       "agent.contact.updated": {
         agentBindingId: "binding-1",
         displayName: "Builder",
-        avatarUrl: "agenthub://avatar/builder",
-        description: "Frontend builder",
+        avatarUrl: null,
+        description: null,
         disabledAt: 1_764_000_000_000
       },
       "task.unblocked": {

@@ -338,6 +338,36 @@ describe("daemon M1.4 composition", () => {
     expect(traversal.status).toBe(400);
   });
 
+  it("serves built web assets before token auth while preserving API misses", async () => {
+    await daemon.close();
+    currentDaemon = undefined;
+
+    const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-web-assets-token-"));
+    const webAssetsRoot = join(dir, "web-dist");
+    mkdirSync(join(webAssetsRoot, "assets"), { recursive: true });
+    writeFileSync(join(webAssetsRoot, "index.html"), '<!doctype html><div id="root"></div><script type="module" src="/assets/app.js"></script>');
+    writeFileSync(join(webAssetsRoot, "assets", "app.js"), "globalThis.__agenthubTokenWeb = true;");
+
+    daemon = createDaemon({ databasePath: join(dir, "agenthub.sqlite"), port: 0, webAssetsRoot, token: "dev-token", modelTestFetch: modelTestFetchMock });
+    currentDaemon = daemon;
+    const server = await daemon.start();
+    const address = server.address();
+    if (typeof address !== "object" || address === null) throw new Error("expected TCP address");
+    baseUrl = `http://127.0.0.1:${address.port}`;
+
+    const page = await fetch(`${baseUrl}/`);
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain("root");
+
+    const script = await fetch(`${baseUrl}/assets/app.js`);
+    expect(script.status).toBe(200);
+    expect(await script.text()).toContain("__agenthubTokenWeb");
+
+    const apiMiss = await fetch(`${baseUrl}/auth/not-a-static-page`);
+    expect(apiMiss.status).toBe(401);
+    expect(await apiMiss.json()).toMatchObject({ error: "unauthorized" });
+  });
+
   it("rejects squad rooms without leaderRoleId", async () => {
     const response = await fetch(`${baseUrl}/rooms`, {
       method: "POST",
@@ -2059,6 +2089,45 @@ describe("daemon M1.4 composition", () => {
     expect(daemon.mockAdapter.llmCallsFor(targetAgentId)).toBe(1);
     const runs = daemon.database.sqlite.prepare("SELECT agent_id, wake_reason FROM runs WHERE room_id = ? ORDER BY created_at ASC").all(room.data.roomId) as { readonly agent_id: string; readonly wake_reason: string }[];
     expect(runs[0]).toMatchObject({ agent_id: targetAgentId, wake_reason: "user_mention" });
+  });
+
+  it("routes assisted structured mention objects from V1.2 clients", async () => {
+    const client = new AgentHubClient({ baseUrl });
+    const targetAgentId = "agent-structured-mention";
+    daemon.database.sqlite.prepare("INSERT INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES (?, 'default-workspace', 'Structured Mention', 'mock', NULL, '', '{}', NULL, 0, NULL, ?, ?)").run(targetAgentId, Date.now(), Date.now());
+    const room = await client.createRoom({ title: "Structured Mention", mode: "assisted", primaryAgentId: "mock-builder", participants: [{ type: "agent", agentId: targetAgentId, role: "teammate", defaultPresence: "active" }] }) as { readonly data: { readonly roomId: string } };
+
+    const sent = await fetch(`${baseUrl}/rooms/${room.data.roomId}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "@ please review this", mentions: [{ agentBindingId: targetAgentId }], idempotencyKey: "mention-structured-1" })
+    });
+
+    expect(sent.status).toBe(200);
+    expect(daemon.mockAdapter.llmCallsFor(targetAgentId)).toBe(1);
+    const runs = daemon.database.sqlite.prepare("SELECT agent_id, wake_reason FROM runs WHERE room_id = ? ORDER BY created_at ASC").all(room.data.roomId) as { readonly agent_id: string; readonly wake_reason: string }[];
+    expect(runs[0]).toMatchObject({ agent_id: targetAgentId, wake_reason: "user_mention" });
+  });
+
+  it("preserves structured mentions when editing queued pending messages", async () => {
+    const client = new AgentHubClient({ baseUrl });
+    const targetAgentId = "agent-edit-structured-mention";
+    daemon.database.sqlite.prepare("INSERT INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES (?, 'default-workspace', 'Edit Structured Mention', 'mock', NULL, '', '{}', NULL, 0, NULL, ?, ?)").run(targetAgentId, Date.now(), Date.now());
+    const room = await client.createRoom({ title: "Edit Structured Mention", mode: "assisted", primaryAgentId: "mock-builder", participants: [{ type: "agent", agentId: targetAgentId, role: "teammate", defaultPresence: "active" }] }) as { readonly data: { readonly roomId: string } };
+    const messageId = "msg_edit_structured_mention";
+    seedPendingMessage(room.data.roomId, "mock-builder", messageId, "old");
+
+    const edited = await fetch(`${baseUrl}/messages/${messageId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "@ please use the selected reviewer", mentions: [{ agentBindingId: targetAgentId }] })
+    });
+
+    const payload = await edited.json() as { readonly ok: boolean; readonly data: { readonly messageId: string } };
+    expect(edited.status).toBe(200);
+    expect(payload.ok).toBe(true);
+    const createdEvent = daemon.database.sqlite.prepare("SELECT payload FROM events WHERE type = 'message.created' AND json_extract(payload, '$.messageId') = ?").get(payload.data.messageId) as { readonly payload: string } | undefined;
+    expect(JSON.parse(createdEvent?.payload ?? "{}")).toMatchObject({ mentions: [{ agentBindingId: targetAgentId }] });
   });
 
   it("uses the assisted selector model to choose the first active speaker", async () => {

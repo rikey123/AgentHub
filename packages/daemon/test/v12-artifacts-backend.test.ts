@@ -149,6 +149,25 @@ describe("V1.2 artifact backend routes", () => {
     ]);
   });
 
+  it("returns deterministic primary file metadata for multi-file artifact library rows", async () => {
+    seedTextArtifact("artifact_multi_file_shape", "secondary", { roomId: "room_multi_file_shape", kind: "document", title: "Multi File Doc", createdAt: 30, updatedAt: 50, metadata: { filename: "z-secondary.md" } });
+    const db = currentDaemon().database.sqlite;
+    db.prepare("INSERT INTO artifact_files (artifact_id, path, old_content, new_content, patch, additions, deletions, file_status, old_sha256, new_sha256, applied_state, content_path, created_at, binary, mime_type, size_bytes) VALUES ('artifact_multi_file_shape', 'a-primary.md', NULL, 'primary', NULL, 0, 0, 'modified', NULL, NULL, NULL, NULL, 31, 0, 'text/markdown', 7)").run();
+
+    const response = await fetch(`${baseUrl}/artifacts?roomId=room_multi_file_shape`);
+    const payload = await response.json() as { readonly artifacts: readonly Record<string, unknown>[] };
+
+    expect(response.status).toBe(200);
+    expect(payload.artifacts).toEqual([
+      expect.objectContaining({
+        id: "artifact_multi_file_shape",
+        filename: "a-primary.md",
+        mimeType: "text/markdown",
+        sizeBytes: 7
+      })
+    ]);
+  });
+
   it("returns room list rows with camelCase pin/activity fields and contact names", async () => {
     const db = currentDaemon().database.sqlite;
     seedRuntime("runtime_room_list", "opencode");
@@ -257,6 +276,58 @@ describe("V1.2 artifact backend routes", () => {
 
     contacts = await (await fetch(`${baseUrl}/agents/contacts`)).json() as { readonly contacts: readonly Record<string, unknown>[] };
     expect(contacts.contacts.some((contact) => contact.agentBindingId === created.agentBindingId)).toBe(false);
+  });
+
+  it("publishes explicit nulls when clearing contact avatar and description", async () => {
+    const runtimeId = seedRuntime("runtime_contact_clear", "opencode");
+    const created = await createCustomAgent("Clearable Expert", runtimeId);
+
+    const populated = await fetch(`${baseUrl}/agents/contacts/${created.agentBindingId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ description: "Has description", avatarUrl: "agenthub://avatar/clearable" })
+    });
+    expect(populated.status).toBe(200);
+
+    const cleared = await fetch(`${baseUrl}/agents/contacts/${created.agentBindingId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ description: null, avatarUrl: null })
+    });
+    expect(cleared.status).toBe(200);
+
+    const event = currentDaemon().database.sqlite.prepare("SELECT payload FROM events WHERE type = 'agent.contact.updated' AND json_extract(payload, '$.agentBindingId') = ? ORDER BY seq DESC LIMIT 1").get(created.agentBindingId) as { readonly payload: string } | undefined;
+    expect(JSON.parse(event?.payload ?? "{}")).toMatchObject({
+      agentBindingId: created.agentBindingId,
+      avatarUrl: null,
+      description: null
+    });
+  });
+
+  it("allows recreating a disabled contact name and rejects disabled bindings as new room participants", async () => {
+    const runtimeId = seedRuntime("runtime_disabled_contact", "opencode");
+    const disabled = await createCustomAgent("Reusable Expert", runtimeId);
+
+    const deleted = await fetch(`${baseUrl}/agents/contacts/${disabled.agentBindingId}`, { method: "DELETE" });
+    expect(deleted.status).toBe(200);
+
+    const recreated = await fetch(`${baseUrl}/agents/custom`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Reusable Expert", runtimeId, systemPrompt: "Build again." })
+    });
+    expect(recreated.status).toBe(201);
+
+    const db = currentDaemon().database.sqlite;
+    db.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES ('room_disabled_participant', 'default-workspace', 'Disabled Participant', 'assisted', 'conversation', 'agent', NULL, 1, 1)").run();
+    const added = await fetch(`${baseUrl}/rooms/room_disabled_participant/participants`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ agentBindingId: disabled.agentBindingId })
+    });
+
+    expect(added.status).toBe(400);
+    await expect(added.json()).resolves.toMatchObject({ error: { code: "validation_failed" } });
   });
 
   it("accepts POST runtime health checks for contact connection tests", async () => {

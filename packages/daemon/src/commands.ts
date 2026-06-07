@@ -217,7 +217,8 @@ function addParticipant(options: DaemonCommandHandlersOptions, command: Command,
         roles.id AS role_id,
         roles.name AS role_name,
         roles.capabilities AS role_capabilities,
-        runtimes.kind AS runtime_kind
+        runtimes.kind AS runtime_kind,
+        agent_bindings.disabled_at AS disabled_at
        FROM agent_bindings
        LEFT JOIN roles ON roles.id = agent_bindings.role_id
        LEFT JOIN runtimes ON runtimes.id = agent_bindings.runtime_id
@@ -225,9 +226,10 @@ function addParticipant(options: DaemonCommandHandlersOptions, command: Command,
        LIMIT 1`
     )
     .get(agentBindingId) as
-    | { readonly binding_id: string; readonly workspace_id: string; readonly role_id: string | null; readonly role_name: string | null; readonly role_capabilities: string | null; readonly runtime_kind: string | null }
+    | { readonly binding_id: string; readonly workspace_id: string; readonly role_id: string | null; readonly role_name: string | null; readonly role_capabilities: string | null; readonly runtime_kind: string | null; readonly disabled_at: number | null }
     | undefined;
   if (binding === undefined) return failed("not_found", "agent_binding_not_found");
+  if (binding.disabled_at !== null) return failed("validation_failed", "agent_binding_disabled");
   if (binding.workspace_id !== room.workspace_id) return failed("validation_failed", "agent_binding_workspace_mismatch");
 
   const duplicate = options.database.sqlite
@@ -423,7 +425,7 @@ function editMessage(options: DaemonCommandHandlersOptions, command: Command, me
     options.database.sqlite.prepare("UPDATE messages SET status = 'cancelled', updated_at = ? WHERE id = ?").run(now, messageId);
     options.eventBus.publish(messageEvent("message.updated", row.workspace_id, row.room_id, messageId, { text, replacement: true }, now));
   })();
-  return sendMessage(options, { type: "SendMessage", roomId: row.room_id, text, idempotencyKey: `edit:${messageId}:${now}` }, meta);
+  return sendMessage(options, { type: "SendMessage", roomId: row.room_id, text, mentions: mentionInputsFromCommand(command), idempotencyKey: `edit:${messageId}:${now}` }, meta);
 }
 
 function regenerateMessage(options: DaemonCommandHandlersOptions, command: Command, meta: CommandMeta): CommandResult | Promise<CommandResult> {
@@ -699,8 +701,19 @@ function resolveMessageMentions(command: Command, text: string, members: readonl
     mentions.push(agentId);
   };
   for (const agentId of parseMentions(text, members)) add(agentId);
-  for (const agentId of stringArrayField(command, "mentions", "mentionAgentIds", "mention_agent_ids")) add(agentId);
+  for (const agentId of mentionAgentIdsFromCommand(command)) add(agentId);
   return mentions;
+}
+
+function mentionInputsFromCommand(command: Command): readonly unknown[] {
+  const value = command.mentions ?? command.mentionAgentIds ?? command.mention_agent_ids;
+  return Array.isArray(value) ? value : [];
+}
+
+function mentionAgentIdsFromCommand(command: Command): string[] {
+  return mentionInputsFromCommand(command)
+    .map((item) => typeof item === "string" ? item : isObject(item) && typeof item.agentBindingId === "string" ? item.agentBindingId : undefined)
+    .filter((item): item is string => item !== undefined && item.length > 0);
 }
 
 function messageText(database: AgentHubDatabase, messageId: string): string {

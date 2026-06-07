@@ -178,8 +178,8 @@ export type MessageUnpinnedPayload = typeof MessageUnpinnedPayloadSchema.Type;
 export const AgentContactUpdatedPayloadSchema = Schema.Struct({
   agentBindingId: IdSchema,
   displayName: Schema.String,
-  avatarUrl: Schema.optional(Schema.String),
-  description: Schema.optional(Schema.String),
+  avatarUrl: Schema.optional(Schema.Union(Schema.String, Schema.Literal(null))),
+  description: Schema.optional(Schema.Union(Schema.String, Schema.Literal(null))),
   disabledAt: Schema.optional(EpochMillisSchema)
 });
 export type AgentContactUpdatedPayload = typeof AgentContactUpdatedPayloadSchema.Type;

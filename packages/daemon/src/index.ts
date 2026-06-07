@@ -206,6 +206,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     if (req.method === "GET" && url.pathname === "/healthz") return json(res, 200, stopping ? { status: "shutting_down" } : { ok: true });
     if (stopping) return json(res, 503, { error: "service_stopping" });
     if (!ready) return json(res, 503, { error: "service_starting", retryAfterMs: 500 });
+    if (serveWebAsset({ req, res, url, ...(webAssetsRoot !== undefined ? { webAssetsRoot } : {}) })) return;
     const app = requireRuntime();
     void route({ req, res, database: app.database, eventBus: app.eventBus, commandBus: app.commandBus, artifactService: app.artifactService, deploymentService: app.deploymentService, taskService: app.taskService, skillRegistry: app.skillRegistry, pptPreviewBridge: app.pptPreviewBridge, outbox: app.outbox, stopAssistedDiscussion: (roomId) => stopAssistedRoomDiscussion(app, roomId), modelConfigSecrets, settingsJobs, modelTestFetch: options.modelTestFetch ?? globalThis.fetch.bind(globalThis), roleDraftGenerator: options.roleDraftGenerator ?? generateRoleDraftWithModelConfig, registerSseClient: (client) => { sseClients.add(client); return () => sseClients.delete(client); }, serveWebAsset: () => serveWebAsset({ req, res, url, ...(webAssetsRoot !== undefined ? { webAssetsRoot } : {}) }), ...(options.token !== undefined ? { token: options.token } : {}), ...(options.allowedOrigins !== undefined ? { allowedOrigins: options.allowedOrigins } : {}), host: `${options.host ?? "127.0.0.1"}:${options.port ?? 6677}`, ...(options.now !== undefined ? { now: options.now } : {}) });
   };
@@ -1850,9 +1851,27 @@ function artifacts(ctx: RouteContext, url: URL): void {
   const rows = all(
     ctx.database,
     `SELECT a.*,
-            af.path AS filename,
-            af.mime_type,
-            af.size_bytes,
+            (
+              SELECT af_primary.path
+              FROM artifact_files af_primary
+              WHERE af_primary.artifact_id = a.id
+              ORDER BY af_primary.path ASC, af_primary.created_at ASC
+              LIMIT 1
+            ) AS filename,
+            (
+              SELECT af_primary.mime_type
+              FROM artifact_files af_primary
+              WHERE af_primary.artifact_id = a.id
+              ORDER BY af_primary.path ASC, af_primary.created_at ASC
+              LIMIT 1
+            ) AS mime_type,
+            (
+              SELECT af_primary.size_bytes
+              FROM artifact_files af_primary
+              WHERE af_primary.artifact_id = a.id
+              ORDER BY af_primary.path ASC, af_primary.created_at ASC
+              LIMIT 1
+            ) AS size_bytes,
             (SELECT MAX(version) FROM artifact_versions av WHERE av.artifact_id = a.id) AS latest_version
      FROM artifacts a
      LEFT JOIN artifact_files af ON af.artifact_id = a.id
@@ -3255,7 +3274,7 @@ function createCustomAgent(ctx: RouteContext, input: Record<string, unknown>): v
   const runtimeId = stringField(input.runtimeId);
   const systemPrompt = stringField(input.systemPrompt);
   if (name === undefined || runtimeId === undefined || systemPrompt === undefined) return json(ctx.res, 400, { error: "validation_failed", message: "name, runtimeId, and systemPrompt are required" });
-  if (get(ctx.database, "SELECT id FROM agent_bindings WHERE contact_name = ?", name) !== null) return json(ctx.res, 400, { error: "agent_name_conflict" });
+  if (get(ctx.database, "SELECT id FROM agent_bindings WHERE contact_name = ? AND disabled_at IS NULL", name) !== null) return json(ctx.res, 400, { error: "agent_name_conflict" });
   const runtime = get(ctx.database, "SELECT * FROM runtimes WHERE id = ?", runtimeId) as Record<string, unknown> | null;
   if (runtime === null) return json(ctx.res, 404, { error: "runtime_not_found" });
   const now = ctx.now?.() ?? Date.now();
@@ -3268,7 +3287,7 @@ function createCustomAgent(ctx: RouteContext, input: Record<string, unknown>): v
     ctx.database.sqlite.prepare("INSERT INTO roles (id, workspace_id, name, avatar, description, prompt, capabilities, default_permission_profile_id, tags, is_builtin, source_path, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, 0, NULL, NULL, ?, ?)").run(roleId, workspaceId, name, stringOrNull(input.avatarUrl), stringOrNull(input.description), systemPrompt, capabilities, skillIds, now, now);
     ctx.database.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at, avatar_url, contact_name, contact_description) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)").run(bindingId, workspaceId, roleId, runtimeId, stringOrNull(input.modelConfigId), now, now, stringOrNull(input.avatarUrl), name, stringOrNull(input.description));
     ctx.eventBus.publish({ id: randomUUID(), type: "agent_binding.created", schemaVersion: 1, workspaceId, payload: { bindingId, roleId, runtimeId, workspaceId }, createdAt: now });
-    ctx.eventBus.publish({ id: randomUUID(), type: "agent.contact.updated", schemaVersion: 1, workspaceId, payload: { agentBindingId: bindingId, displayName: name, ...(stringField(input.avatarUrl) !== undefined ? { avatarUrl: stringField(input.avatarUrl) } : {}), ...(stringField(input.description) !== undefined ? { description: stringField(input.description) } : {}) }, createdAt: now });
+    ctx.eventBus.publish({ id: randomUUID(), type: "agent.contact.updated", schemaVersion: 1, workspaceId, payload: { agentBindingId: bindingId, displayName: name, avatarUrl: stringOrNull(input.avatarUrl), description: stringOrNull(input.description) }, createdAt: now });
   })();
   json(ctx.res, 201, { agentBindingId: bindingId, roleId });
 }
@@ -3284,7 +3303,7 @@ function updateCustomAgent(ctx: RouteContext, bindingId: string, input: Record<s
   ctx.database.sqlite.transaction(() => {
     ctx.database.sqlite.prepare("UPDATE agent_bindings SET contact_name = ?, avatar_url = ?, contact_description = ?, updated_at = ? WHERE id = ?").run(name, avatarUrl, description, now, bindingId);
     ctx.database.sqlite.prepare("UPDATE roles SET name = COALESCE(?, name), description = COALESCE(?, description), avatar = COALESCE(?, avatar), prompt = COALESCE(?, prompt), updated_at = ? WHERE id = ?").run(name, description, avatarUrl, stringField(input.systemPrompt), now, String(existing.role_id));
-    ctx.eventBus.publish({ id: randomUUID(), type: "agent.contact.updated", schemaVersion: 1, workspaceId, payload: { agentBindingId: bindingId, displayName: name, ...(avatarUrl !== null ? { avatarUrl } : {}), ...(description !== null ? { description } : {}) }, createdAt: now });
+    ctx.eventBus.publish({ id: randomUUID(), type: "agent.contact.updated", schemaVersion: 1, workspaceId, payload: { agentBindingId: bindingId, displayName: name, avatarUrl, description }, createdAt: now });
   })();
   json(ctx.res, 200, { agentBindingId: bindingId });
 }
