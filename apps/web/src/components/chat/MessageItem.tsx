@@ -307,6 +307,10 @@ export function shouldSelectMessageFromTarget(target: EventTarget | null): boole
   return typeof closest !== "function" || closest.call(target, MESSAGE_ACTION_SELECTOR) === null;
 }
 
+export function copyCodeButtonLabel(copied: boolean): string {
+  return copied ? "Copied ✓" : "Copy Code";
+}
+
 function CodePartView({ part }: { part: Extract<MessageViewModel["parts"][number], { type: "code" }> }) {
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState<string | undefined>(undefined);
@@ -334,7 +338,7 @@ function CodePartView({ part }: { part: Extract<MessageViewModel["parts"][number
       <div className="flex items-center justify-between gap-2 border-b border-border/70 px-2 py-1">
         <span className="text-[11px] font-semibold text-muted">{part.lang}</span>
         <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onPress={copyCode} aria-label="Copy code block">
-          {copied ? "Copied" : "Copy Code"}
+          {copyCodeButtonLabel(copied)}
         </Button>
       </div>
       <pre className="ah-mono overflow-auto p-2 text-xs">

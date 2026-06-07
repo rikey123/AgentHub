@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { MessageViewModel } from "../../types.ts";
-import { MessageItem, shouldSelectMessageFromTarget } from "./MessageItem.tsx";
+import { copyCodeButtonLabel, MessageItem, shouldSelectMessageFromTarget } from "./MessageItem.tsx";
 
 describe("MessageItem public chat rendering", () => {
   it("collapses long completed agent text in the public chat bubble", () => {
@@ -108,6 +108,11 @@ describe("MessageItem public chat rendering", () => {
     expect(html).toContain("const apiBase = &#x27;/api/v2&#x27;;");
     expect(html).toContain("Copy Code");
     expect(html).toContain("Copy code block");
+  });
+
+  it("matches the spec label while a code block copy is confirmed", () => {
+    expect(copyCodeButtonLabel(true)).toBe("Copied ✓");
+    expect(copyCodeButtonLabel(false)).toBe("Copy Code");
   });
 
   it("renders Markdown fenced code blocks with Copy Code actions", () => {
