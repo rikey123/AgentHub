@@ -72,6 +72,17 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
       .get(agentId) as { adapter_id?: string; name?: string } | undefined;
     return { adapterId: row?.adapter_id ?? "mock", name: row?.name ?? agentId };
   };
+  const bindingStatus = (agentBindingId: string): "active" | "disabled" | "missing" => {
+    const row = options.database.sqlite
+      .prepare("SELECT disabled_at FROM agent_bindings WHERE id = ?")
+      .get(agentBindingId) as { readonly disabled_at: number | null } | undefined;
+    if (row === undefined) return "missing";
+    return row.disabled_at === null ? "active" : "disabled";
+  };
+  const rejectIfDisabledBinding = (agentBindingId: string): CommandResult | undefined => {
+    const status = bindingStatus(agentBindingId);
+    return status === "disabled" ? failed("validation_failed", "agent_binding_disabled") : undefined;
+  };
 
   const lookupBinding = (roleId: string, runtimeId: string, modelConfigId: string | null | undefined): { readonly bindingId: string; readonly adapterId: string; readonly name: string } | undefined => {
     const row = options.database.sqlite
@@ -88,6 +99,7 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
          LEFT JOIN roles ON roles.id = agent_bindings.role_id
          LEFT JOIN runtimes ON runtimes.id = agent_bindings.runtime_id
          WHERE agent_bindings.role_id = ? AND agent_bindings.runtime_id = ? AND ${modelConfigId === undefined ? "agent_bindings.model_config_id IS NULL" : "agent_bindings.model_config_id = ?"}
+           AND agent_bindings.disabled_at IS NULL
          LIMIT 1`
       )
       .get(...(modelConfigId === undefined ? [roleId, runtimeId] : [roleId, runtimeId, modelConfigId])) as
@@ -109,21 +121,32 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
   const resolvedParticipants: RoomParticipantRecord[] = [];
   let primaryParticipant: RoomParticipantRecord | undefined;
 
+  const primaryBindingError = rejectIfDisabledBinding(primaryAgentId) ?? (stringField(command, "agentBindingId") !== undefined ? rejectIfDisabledBinding(stringField(command, "agentBindingId") as string) : undefined);
+  if (primaryBindingError !== undefined) return primaryBindingError;
+
   // In team/squad mode the primary agent is the leader; all other participants are teammates.
   // In assisted mode participants keep whatever role is specified (default: observer).
   for (const participant of participants) {
     if (!isObject(participant)) continue;
     if (participant.type === "agent" && typeof participant.agentId === "string" && participant.agentId !== primaryAgentId) {
+      const participantBindingId = typeof participant.agentBindingId === "string" ? participant.agentBindingId : participant.agentId;
+      const participantBindingError = rejectIfDisabledBinding(participantBindingId);
+      if (participantBindingError !== undefined) return participantBindingError;
       const info = lookupAgent(participant.agentId);
       const role = participantRole(participant, isTeamMode);
       const presence = participantPresence(participant, isTeamMode, role);
-      resolvedParticipants.push({ participantId: participant.agentId, agentBindingId: typeof participant.agentBindingId === "string" ? participant.agentBindingId : participant.agentId, adapterId: info.adapterId, name: info.name, role, presence });
+      resolvedParticipants.push({ participantId: participant.agentId, agentBindingId: participantBindingId, adapterId: info.adapterId, name: info.name, role, presence });
       continue;
     }
     if (typeof participant.roleId === "string" && typeof participant.runtimeId === "string") {
       const modelConfigId = stringField(participant as Record<string, unknown>, "modelConfigId");
       const binding = lookupBinding(participant.roleId, participant.runtimeId, modelConfigId);
-      if (binding === undefined) return failed("not_found", "agent_binding_not_found");
+      if (binding === undefined) {
+        const disabled = options.database.sqlite
+          .prepare(`SELECT 1 FROM agent_bindings WHERE role_id = ? AND runtime_id = ? AND ${modelConfigId === undefined ? "model_config_id IS NULL" : "model_config_id = ?"} AND disabled_at IS NOT NULL LIMIT 1`)
+          .get(...(modelConfigId === undefined ? [participant.roleId, participant.runtimeId] : [participant.roleId, participant.runtimeId, modelConfigId]));
+        return disabled !== undefined ? failed("validation_failed", "agent_binding_disabled") : failed("not_found", "agent_binding_not_found");
+      }
       const role = participantRole(participant, isTeamMode);
       const presence = participantPresence(participant, isTeamMode, role);
       const record: RoomParticipantRecord = { participantId: binding.bindingId, agentBindingId: binding.bindingId, adapterId: binding.adapterId, name: binding.name, role, presence };

@@ -330,6 +330,44 @@ describe("V1.2 artifact backend routes", () => {
     await expect(added.json()).resolves.toMatchObject({ error: { code: "validation_failed" } });
   });
 
+  it("rejects disabled contact bindings during room creation", async () => {
+    const runtimeId = seedRuntime("runtime_disabled_room_primary", "opencode");
+    const disabled = await createCustomAgent("Disabled Primary", runtimeId);
+    const deleted = await fetch(`${baseUrl}/agents/contacts/${disabled.agentBindingId}`, { method: "DELETE" });
+    expect(deleted.status).toBe(200);
+
+    const byPrimaryId = await fetch(`${baseUrl}/rooms`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Disabled Primary Room", mode: "assisted", primaryAgentId: disabled.agentBindingId })
+    });
+
+    expect(byPrimaryId.status).toBe(400);
+    await expect(byPrimaryId.json()).resolves.toMatchObject({ error: { code: "validation_failed" } });
+  });
+
+  it("rejects disabled role/runtime bindings as initial room participants", async () => {
+    const runtimeId = seedRuntime("runtime_disabled_room_participant", "opencode");
+    const disabled = await createCustomAgent("Disabled Participant", runtimeId);
+    const binding = currentDaemon().database.sqlite.prepare("SELECT role_id FROM agent_bindings WHERE id = ?").get(disabled.agentBindingId) as { readonly role_id: string };
+    const deleted = await fetch(`${baseUrl}/agents/contacts/${disabled.agentBindingId}`, { method: "DELETE" });
+    expect(deleted.status).toBe(200);
+
+    const byRoleRuntime = await fetch(`${baseUrl}/rooms`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        title: "Disabled Role Runtime Room",
+        mode: "assisted",
+        primaryAgentId: "mock-builder",
+        participants: [{ roleId: binding.role_id, runtimeId, role: "teammate", defaultPresence: "active" }]
+      })
+    });
+
+    expect(byRoleRuntime.status).toBe(400);
+    await expect(byRoleRuntime.json()).resolves.toMatchObject({ error: { code: "validation_failed" } });
+  });
+
   it("accepts POST runtime health checks for contact connection tests", async () => {
     const runtimeId = seedRuntime("runtime_post_health", "opencode");
 
