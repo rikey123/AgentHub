@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { RoomViewModel } from "../../types.ts";
-import { ChatStream, activeRunIndicatorProps, buildChatFeedItems, pinnedMessagesForDrawer } from "./ChatStream.tsx";
+import { ChatStream, activeRunIndicatorProps, buildChatFeedItems, latestRegenerableAgentMessageId, pinnedMessagesForDrawer } from "./ChatStream.tsx";
 
 describe("ChatStream task notification feed", () => {
   it("keeps delegated task updates out of the main chat feed", () => {
@@ -191,6 +191,22 @@ describe("ChatStream task notification feed", () => {
     expect(html).toContain("API base path is /api/v2");
     expect(html).toContain("@artifact:artifact_1");
     expect(html).toContain("Unpin pinned message");
+  });
+
+  it("identifies only the latest completed agent message as regenerable", () => {
+    expect(latestRegenerableAgentMessageId([
+      messageFixture({ id: "older-agent", text: "Earlier answer", senderType: "agent", status: "completed", createdAt: 100 }),
+      messageFixture({ id: "latest-user", text: "Follow-up", senderType: "user", status: "completed", createdAt: 150 }),
+      messageFixture({ id: "streaming-agent", text: "Still running", senderType: "agent", status: "streaming", createdAt: 175 }),
+      messageFixture({ id: "latest-agent", text: "Latest answer", senderType: "agent", status: "completed", createdAt: 200 })
+    ])).toBe("latest-agent");
+  });
+
+  it("uses createdAt rather than array order for the latest regenerable agent message", () => {
+    expect(latestRegenerableAgentMessageId([
+      messageFixture({ id: "newest-agent", text: "Newest answer", senderType: "agent", status: "completed", createdAt: 300 }),
+      messageFixture({ id: "older-agent", text: "Older answer", senderType: "agent", status: "completed", createdAt: 100 })
+    ])).toBe("newest-agent");
   });
 });
 

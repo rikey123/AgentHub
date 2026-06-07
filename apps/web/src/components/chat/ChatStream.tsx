@@ -76,6 +76,15 @@ export function pinnedMessagesForDrawer(room: RoomViewModel): RoomViewModel["mes
     .sort((a, b) => (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0));
 }
 
+export function latestRegenerableAgentMessageId(messages: RoomViewModel["messages"]): string | undefined {
+  let latest: RoomViewModel["messages"][number] | undefined;
+  for (const message of messages) {
+    if (message.senderType !== "agent" || message.status !== "completed") continue;
+    if (latest === undefined || message.createdAt >= latest.createdAt) latest = message;
+  }
+  return latest?.id;
+}
+
 export function ChatStream(props: ChatStreamProps) {
   const { room } = props;
 
@@ -123,6 +132,7 @@ export function ChatStream(props: ChatStreamProps) {
 
   const activeIndicator = activeRunIndicatorProps(room);
   const pinnedMessages = useMemo(() => pinnedMessagesForDrawer(room), [room.messages]);
+  const regenerableMessageId = useMemo(() => latestRegenerableAgentMessageId(room.messages), [room.messages]);
   const [dismissedFailures, setDismissedFailures] = useState<Set<string>>(() => new Set());
   const visibleFailures = useMemo(
     () => room.mailboxFailures.filter((f) => !dismissedFailures.has(f.id)),
@@ -199,7 +209,7 @@ export function ChatStream(props: ChatStreamProps) {
                         onOpenRun={(runId) => props.onOpenRun(runId)}
                         onQuote={() => props.onQuote(item.id)}
                         onPin={() => props.onPin(item.id)}
-                        onRegenerate={() => props.onRegenerate(item.id)}
+                        onRegenerate={item.id === regenerableMessageId ? () => props.onRegenerate(item.id) : undefined}
                         onDelete={() => props.onDelete(item.id)}
                         onCancelPending={item.data.pendingTurnId ? () => props.onCancelPending(item.data.pendingTurnId!) : undefined}
                         onEditPending={() => props.onEditPending(item.id)}

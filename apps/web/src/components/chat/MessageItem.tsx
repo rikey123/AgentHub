@@ -151,7 +151,7 @@ export function MessageItem(props: MessageItemProps) {
                   {onRegenerate && message.senderType === "agent" && message.status === "completed" ? (
                     <Dropdown.Item onAction={onRegenerate}>重新生成</Dropdown.Item>
                   ) : null}
-                  {onPin && message.status === "completed" ? <Dropdown.Item onAction={onPin}>置顶</Dropdown.Item> : null}
+                  {onPin && message.status === "completed" ? <Dropdown.Item onAction={onPin}>{pinActionLabel(message.pinnedAt !== undefined)}</Dropdown.Item> : null}
                   {message.runId && onOpenRun ? (
                     <Dropdown.Item onAction={() => onOpenRun(message.runId!)}>打开运行详情</Dropdown.Item>
                   ) : null}
@@ -309,6 +309,10 @@ export function shouldSelectMessageFromTarget(target: EventTarget | null): boole
 
 export function copyCodeButtonLabel(copied: boolean): string {
   return copied ? "Copied ✓" : "Copy Code";
+}
+
+export function pinActionLabel(isPinned: boolean): string {
+  return isPinned ? "Unpin" : "Pin";
 }
 
 function CodePartView({ part }: { part: Extract<MessageViewModel["parts"][number], { type: "code" }> }) {
