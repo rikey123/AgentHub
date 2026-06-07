@@ -44,7 +44,9 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
     return failed("validation_failed", `unknown room mode '${mode}' (supported: solo, assisted, team, squad)`);
   }
   const workspaceId = stringField(command, "workspaceId") ?? "default-workspace";
-  let primaryAgentId = stringField(command, "primaryAgentId") ?? stringField(command, "agentBindingId") ?? "mock-builder";
+  const explicitPrimaryAgentId = stringField(command, "primaryAgentId");
+  const explicitAgentBindingId = stringField(command, "agentBindingId");
+  let primaryAgentId = explicitPrimaryAgentId ?? explicitAgentBindingId ?? "mock-builder";
   const leaderRoleId = stringField(command, "leaderRoleId");
   const legacyAgentProfileId = stringField(command, "agentProfileId");
   const participants = Array.isArray(command.participants) ? command.participants : [];
@@ -121,7 +123,8 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
   const resolvedParticipants: RoomParticipantRecord[] = [];
   let primaryParticipant: RoomParticipantRecord | undefined;
 
-  const primaryBindingError = rejectIfDisabledBinding(primaryAgentId) ?? (stringField(command, "agentBindingId") !== undefined ? rejectIfDisabledBinding(stringField(command, "agentBindingId") as string) : undefined);
+  const primaryBindingError = (explicitPrimaryAgentId !== undefined ? rejectIfDisabledBinding(explicitPrimaryAgentId) : undefined)
+    ?? (explicitAgentBindingId !== undefined ? rejectIfDisabledBinding(explicitAgentBindingId) : undefined);
   if (primaryBindingError !== undefined) return primaryBindingError;
 
   // In team/squad mode the primary agent is the leader; all other participants are teammates.
@@ -166,6 +169,10 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
   if (primaryParticipant !== undefined) {
     primaryAgentId = primaryParticipant.participantId;
   }
+  if (primaryParticipant === undefined) {
+    const selectedPrimaryBindingError = rejectIfDisabledBinding(explicitAgentBindingId ?? primaryAgentId);
+    if (selectedPrimaryBindingError !== undefined) return selectedPrimaryBindingError;
+  }
   const leaderPayload = leaderRoleId !== undefined ? { leaderRoleId } : {};
 
   options.database.sqlite.transaction(() => {
@@ -175,7 +182,7 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
       .run(roomId, workspaceId, title, mode, primaryAgentId, leaderRoleId ?? null, now, now);
     const primary = primaryParticipant ?? (() => {
       const info = lookupAgent(primaryAgentId);
-      return { participantId: primaryAgentId, agentBindingId: stringField(command, "agentBindingId") ?? primaryAgentId, adapterId: info.adapterId, name: info.name, role: "primary", presence: "active" } satisfies RoomParticipantRecord;
+      return { participantId: primaryAgentId, agentBindingId: explicitAgentBindingId ?? primaryAgentId, adapterId: info.adapterId, name: info.name, role: "primary", presence: "active" } satisfies RoomParticipantRecord;
     })();
     options.database.sqlite
       .prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES (?, ?, 'agent', 'primary', ?, NULL, ?, 'active', ?)")

@@ -335,15 +335,18 @@ describe("V1.2 artifact backend routes", () => {
     const disabled = await createCustomAgent("Disabled Primary", runtimeId);
     const deleted = await fetch(`${baseUrl}/agents/contacts/${disabled.agentBindingId}`, { method: "DELETE" });
     expect(deleted.status).toBe(200);
+    const title = "Disabled Primary Room";
 
     const byPrimaryId = await fetch(`${baseUrl}/rooms`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ title: "Disabled Primary Room", mode: "assisted", primaryAgentId: disabled.agentBindingId })
+      body: JSON.stringify({ title, mode: "assisted", primaryAgentId: disabled.agentBindingId })
     });
 
     expect(byPrimaryId.status).toBe(400);
-    await expect(byPrimaryId.json()).resolves.toMatchObject({ error: { code: "validation_failed" } });
+    await expect(byPrimaryId.json()).resolves.toMatchObject({ error: { code: "validation_failed", message: "agent_binding_disabled" } });
+    expect(currentDaemon().database.sqlite.prepare("SELECT id FROM rooms WHERE title = ?").get(title)).toBeUndefined();
+    expect(currentDaemon().database.sqlite.prepare("SELECT id FROM events WHERE type = 'room.created' AND json_extract(payload, '$.title') = ?").get(title)).toBeUndefined();
   });
 
   it("rejects disabled role/runtime bindings as initial room participants", async () => {
@@ -352,12 +355,13 @@ describe("V1.2 artifact backend routes", () => {
     const binding = currentDaemon().database.sqlite.prepare("SELECT role_id FROM agent_bindings WHERE id = ?").get(disabled.agentBindingId) as { readonly role_id: string };
     const deleted = await fetch(`${baseUrl}/agents/contacts/${disabled.agentBindingId}`, { method: "DELETE" });
     expect(deleted.status).toBe(200);
+    const title = "Disabled Role Runtime Room";
 
     const byRoleRuntime = await fetch(`${baseUrl}/rooms`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        title: "Disabled Role Runtime Room",
+        title,
         mode: "assisted",
         primaryAgentId: "mock-builder",
         participants: [{ roleId: binding.role_id, runtimeId, role: "teammate", defaultPresence: "active" }]
@@ -365,7 +369,38 @@ describe("V1.2 artifact backend routes", () => {
     });
 
     expect(byRoleRuntime.status).toBe(400);
-    await expect(byRoleRuntime.json()).resolves.toMatchObject({ error: { code: "validation_failed" } });
+    await expect(byRoleRuntime.json()).resolves.toMatchObject({ error: { code: "validation_failed", message: "agent_binding_disabled" } });
+    expect(currentDaemon().database.sqlite.prepare("SELECT id FROM rooms WHERE title = ?").get(title)).toBeUndefined();
+    expect(currentDaemon().database.sqlite.prepare("SELECT id FROM events WHERE type = 'room.created' AND json_extract(payload, '$.title') = ?").get(title)).toBeUndefined();
+  });
+
+  it("does not reject an unused disabled mock-builder fallback when role/runtime participants choose the primary", async () => {
+    const db = currentDaemon().database.sqlite;
+    const disabledRuntimeId = seedRuntime("runtime_disabled_mock_builder", "opencode");
+    const disabledMockBuilder = await createCustomAgent("Disabled Mock Builder", disabledRuntimeId);
+    db.prepare("UPDATE agent_bindings SET id = 'mock-builder' WHERE id = ?").run(disabledMockBuilder.agentBindingId);
+    const deleted = await fetch(`${baseUrl}/agents/contacts/mock-builder`, { method: "DELETE" });
+    expect(deleted.status).toBe(200);
+
+    const activeRuntimeId = seedRuntime("runtime_active_team_leader", "opencode");
+    const active = await createCustomAgent("Active Team Leader", activeRuntimeId);
+    const activeBinding = db.prepare("SELECT role_id FROM agent_bindings WHERE id = ?").get(active.agentBindingId) as { readonly role_id: string };
+
+    const created = await fetch(`${baseUrl}/rooms`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        title: "Active Leader Ignores Disabled Fallback",
+        mode: "team",
+        leaderRoleId: activeBinding.role_id,
+        participants: [{ roleId: activeBinding.role_id, runtimeId: activeRuntimeId, role: "primary", defaultPresence: "active" }]
+      })
+    });
+    const payload = await created.json() as { readonly data?: { readonly roomId?: string }; readonly error?: unknown };
+
+    expect(created.status).toBe(201);
+    expect(payload.data?.roomId).toEqual(expect.any(String));
+    expect(db.prepare("SELECT primary_agent_id FROM rooms WHERE id = ?").get(payload.data?.roomId)).toMatchObject({ primary_agent_id: active.agentBindingId });
   });
 
   it("accepts POST runtime health checks for contact connection tests", async () => {
