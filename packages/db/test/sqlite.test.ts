@@ -670,6 +670,16 @@ describe("SQLite pragmas and migrations", () => {
     );
     expect(columnNames("rooms")).toContain("stalled_at");
 
+    // V1.2 contract columns
+    expect(columnNames("rooms")).toEqual(expect.arrayContaining(["pinned_at", "last_activity_at"]));
+    expect(columnNames("agent_bindings")).toEqual(
+      expect.arrayContaining(["avatar_url", "contact_name", "contact_description", "disabled_at"])
+    );
+    expect(columnNames("artifact_files")).toEqual(expect.arrayContaining(["mime_type", "size_bytes"]));
+    expect(columnNames("artifact_versions")).toEqual(
+      expect.arrayContaining(["artifact_id", "version", "content_encoding", "storage_path"])
+    );
+
     // V1.1 new tables
     expect(tableNames()).toEqual(expect.arrayContaining(["task_checkpoints", "task_plans", "run_file_changes", "skills", "skill_files", "room_skills", "agent_skills"]));
     expect(columnNames("skills")).toEqual(

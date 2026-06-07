@@ -206,9 +206,8 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     if (req.method === "GET" && url.pathname === "/healthz") return json(res, 200, stopping ? { status: "shutting_down" } : { ok: true });
     if (stopping) return json(res, 503, { error: "service_stopping" });
     if (!ready) return json(res, 503, { error: "service_starting", retryAfterMs: 500 });
-    if (serveWebAsset({ req, res, url, ...(webAssetsRoot !== undefined ? { webAssetsRoot } : {}) })) return;
     const app = requireRuntime();
-    void route({ req, res, database: app.database, eventBus: app.eventBus, commandBus: app.commandBus, artifactService: app.artifactService, deploymentService: app.deploymentService, taskService: app.taskService, skillRegistry: app.skillRegistry, pptPreviewBridge: app.pptPreviewBridge, outbox: app.outbox, stopAssistedDiscussion: (roomId) => stopAssistedRoomDiscussion(app, roomId), modelConfigSecrets, settingsJobs, modelTestFetch: options.modelTestFetch ?? globalThis.fetch.bind(globalThis), roleDraftGenerator: options.roleDraftGenerator ?? generateRoleDraftWithModelConfig, registerSseClient: (client) => { sseClients.add(client); return () => sseClients.delete(client); }, ...(options.token !== undefined ? { token: options.token } : {}), ...(options.allowedOrigins !== undefined ? { allowedOrigins: options.allowedOrigins } : {}), host: `${options.host ?? "127.0.0.1"}:${options.port ?? 6677}`, ...(options.now !== undefined ? { now: options.now } : {}) });
+    void route({ req, res, database: app.database, eventBus: app.eventBus, commandBus: app.commandBus, artifactService: app.artifactService, deploymentService: app.deploymentService, taskService: app.taskService, skillRegistry: app.skillRegistry, pptPreviewBridge: app.pptPreviewBridge, outbox: app.outbox, stopAssistedDiscussion: (roomId) => stopAssistedRoomDiscussion(app, roomId), modelConfigSecrets, settingsJobs, modelTestFetch: options.modelTestFetch ?? globalThis.fetch.bind(globalThis), roleDraftGenerator: options.roleDraftGenerator ?? generateRoleDraftWithModelConfig, registerSseClient: (client) => { sseClients.add(client); return () => sseClients.delete(client); }, serveWebAsset: () => serveWebAsset({ req, res, url, ...(webAssetsRoot !== undefined ? { webAssetsRoot } : {}) }), ...(options.token !== undefined ? { token: options.token } : {}), ...(options.allowedOrigins !== undefined ? { allowedOrigins: options.allowedOrigins } : {}), host: `${options.host ?? "127.0.0.1"}:${options.port ?? 6677}`, ...(options.now !== undefined ? { now: options.now } : {}) });
   };
 
   const start = async (): Promise<Server> => {
@@ -835,7 +834,7 @@ function wakeReasonForCommand(reason: string): "primary_turn" | "user_mention" |
   return "delegated_task";
 }
 
-type RouteContext = { readonly req: IncomingMessage; readonly res: ServerResponse; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly artifactService: ArtifactService; readonly deploymentService: DeploymentService; readonly taskService: TaskService; readonly skillRegistry: SkillRegistry; readonly pptPreviewBridge: PptPreviewBridge; readonly outbox: { drainPending(): Promise<void> }; readonly stopAssistedDiscussion: (roomId: string) => Promise<{ readonly ok: boolean; readonly roomId: string; readonly cancelledRunIds: readonly string[] }>; readonly modelConfigSecrets: KeychainBridge; readonly settingsJobs: Map<string, SettingsJobRecord>; readonly modelTestFetch: typeof fetch; readonly roleDraftGenerator: RoleDraftGenerator; readonly registerSseClient: (client: SseClient) => () => void; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly host: string; readonly now?: () => number };
+type RouteContext = { readonly req: IncomingMessage; readonly res: ServerResponse; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly artifactService: ArtifactService; readonly deploymentService: DeploymentService; readonly taskService: TaskService; readonly skillRegistry: SkillRegistry; readonly pptPreviewBridge: PptPreviewBridge; readonly outbox: { drainPending(): Promise<void> }; readonly stopAssistedDiscussion: (roomId: string) => Promise<{ readonly ok: boolean; readonly roomId: string; readonly cancelledRunIds: readonly string[] }>; readonly modelConfigSecrets: KeychainBridge; readonly settingsJobs: Map<string, SettingsJobRecord>; readonly modelTestFetch: typeof fetch; readonly roleDraftGenerator: RoleDraftGenerator; readonly registerSseClient: (client: SseClient) => () => void; readonly serveWebAsset: () => boolean; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly host: string; readonly now?: () => number };
 
 async function route(ctx: RouteContext): Promise<void> {
   const url = new URL(ctx.req.url ?? "/", "http://127.0.0.1");
@@ -1066,7 +1065,7 @@ async function route(ctx: RouteContext): Promise<void> {
   }
   if (ctx.req.method === "POST" && parts[0] === "runtimes" && parts[1] && parts[2] === "detect") return detectRuntime(ctx, parts[1]);
   if (ctx.req.method === "POST" && parts[0] === "runtimes" && parts[1] && parts[2] === "test") return testRuntime(ctx, parts[1], await body(ctx));
-  if (ctx.req.method === "GET" && parts[0] === "runtimes" && parts[1] && parts[2] === "health") return runtimeHealth(ctx, parts[1]);
+  if ((ctx.req.method === "GET" || ctx.req.method === "POST") && parts[0] === "runtimes" && parts[1] && parts[2] === "health") return runtimeHealth(ctx, parts[1]);
   if (ctx.req.method === "GET" && parts[0] === "runtimes" && parts[1] && parts[2] === "local-skills" && parts.length === 3) return runtimeLocalSkills(ctx, parts[1]);
   if (ctx.req.method === "POST" && parts[0] === "runtimes" && parts[1] && parts[2] === "local-skills" && parts[3] === "import") return importRuntimeLocalSkill(ctx, parts[1], await body(ctx));
   if (ctx.req.method === "DELETE" && parts[0] === "runtimes" && parts[1]) {
@@ -1144,6 +1143,8 @@ async function route(ctx: RouteContext): Promise<void> {
   if (ctx.req.method === "DELETE" && parts[0] === "messages" && parts[1]) return dispatch(ctx, { messageId: parts[1] }, "DeleteMessage");
   if (ctx.req.method === "GET" && url.pathname === "/agents/contacts") return agentContacts(ctx);
   if (ctx.req.method === "POST" && url.pathname === "/agents/custom") return createCustomAgent(ctx, await body(ctx));
+  if (ctx.req.method === "PATCH" && parts[0] === "agents" && parts[1] === "contacts" && parts[2]) return updateCustomAgent(ctx, parts[2], await body(ctx));
+  if (ctx.req.method === "DELETE" && parts[0] === "agents" && parts[1] === "contacts" && parts[2]) return deleteCustomAgent(ctx, parts[2], url.searchParams.get("hard") === "1" || url.searchParams.get("hard") === "true");
   if (ctx.req.method === "PATCH" && parts[0] === "agents" && parts[1] === "custom" && parts[2]) return updateCustomAgent(ctx, parts[2], await body(ctx));
   if (ctx.req.method === "DELETE" && parts[0] === "agents" && parts[1] === "custom" && parts[2]) return deleteCustomAgent(ctx, parts[2], url.searchParams.get("hard") === "1" || url.searchParams.get("hard") === "true");
   if (ctx.req.method === "POST" && url.pathname === "/create-agent") return parseCreateAgent(ctx, await body(ctx));
@@ -1269,6 +1270,7 @@ async function route(ctx: RouteContext): Promise<void> {
   if (ctx.req.method === "POST" && url.pathname === "/skills") return createSkill(ctx, await body(ctx));
   if (ctx.req.method === "PUT" && parts[0] === "skills" && parts[1]) return updateSkill(ctx, parts[1], await body(ctx));
   if (ctx.req.method === "DELETE" && parts[0] === "skills" && parts[1]) return deleteSkill(ctx, parts[1]);
+  if (ctx.serveWebAsset()) return;
   return json(ctx.res, 404, { error: "not_found" });
 }
 
@@ -1335,7 +1337,25 @@ function roomsList(ctx: RouteContext, url: URL): void {
        LIMIT 20`
     )
     .all(query ?? null, likeQuery(query), likeQuery(query), likeQuery(query)) as Array<Record<string, unknown>>;
-  json(ctx.res, 200, { rooms: rows.map((row) => ({ ...row, participantContactNames: participantContactNames(ctx.database, String(row.id)) })) });
+  json(ctx.res, 200, { rooms: rows.map((row) => roomListRow(ctx.database, row)) });
+}
+
+function roomListRow(database: AgentHubDatabase, row: Record<string, unknown>): Record<string, unknown> {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    title: row.title,
+    mode: row.mode,
+    defaultContextScope: row.default_context_scope,
+    primaryAgentId: row.primary_agent_id ?? undefined,
+    archivedAt: row.archived_at ?? undefined,
+    pinnedAt: row.pinned_at ?? undefined,
+    lastActivityAt: row.last_activity_at ?? undefined,
+    stalledAt: row.stalled_at ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    participantContactNames: participantContactNames(database, String(row.id))
+  };
 }
 
 function pinRoom(ctx: RouteContext, roomId: string): void {
@@ -1815,26 +1835,40 @@ function artifacts(ctx: RouteContext, url: URL): void {
   const limit = Math.min(Math.max(numberQuery(url, "limit") ?? 100, 1), 500);
   const statusParam = url.searchParams.get("status");
   const status = statusParam === null ? undefined : statusParam.split(",").filter(Boolean) as NonNullable<Parameters<ArtifactService["list"]>[0]>["status"];
-  if (kind !== undefined || q !== undefined || url.searchParams.has("limit")) {
-    const clauses: string[] = [];
-    const params: unknown[] = [];
-    if (roomId !== undefined) { clauses.push("room_id = ?"); params.push(roomId); }
-    if (taskId !== undefined) { clauses.push("task_id = ?"); params.push(taskId); }
-    if (kind !== undefined) { clauses.push("kind = ?"); params.push(kind); }
-    if (status !== undefined && status.length > 0) { clauses.push(`status IN (${status.map(() => "?").join(", ")})`); params.push(...status); }
-    if (includeDeleted !== true) clauses.push("deleted_at IS NULL");
-    if (q !== undefined) {
-      clauses.push("(title LIKE ? OR metadata LIKE ? OR id LIKE ?)");
-      params.push(`%${q}%`, `%${q}%`, `%${q}%`);
-    }
-    const where = clauses.length > 0 ? ` WHERE ${clauses.join(" AND ")}` : "";
-    const rows = all(ctx.database, `SELECT * FROM artifacts${where} ORDER BY updated_at DESC, created_at DESC, id ASC LIMIT ?`, ...params, limit) as Record<string, unknown>[];
-    return json(ctx.res, 200, { artifacts: rows.map(artifactLibraryRow) });
+  const clauses: string[] = [];
+  const params: unknown[] = [];
+  if (roomId !== undefined) { clauses.push("a.room_id = ?"); params.push(roomId); }
+  if (taskId !== undefined) { clauses.push("a.task_id = ?"); params.push(taskId); }
+  if (kind !== undefined) { clauses.push("a.kind = ?"); params.push(kind); }
+  if (status !== undefined && status.length > 0) { clauses.push(`a.status IN (${status.map(() => "?").join(", ")})`); params.push(...status); }
+  if (includeDeleted !== true) clauses.push("a.deleted_at IS NULL");
+  if (q !== undefined) {
+    clauses.push("(a.title LIKE ? OR a.metadata LIKE ? OR a.id LIKE ? OR af.path LIKE ?)");
+    params.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
   }
-  json(ctx.res, 200, { artifacts: ctx.artifactService.list({ ...(roomId !== undefined ? { roomId } : {}), ...(taskId !== undefined ? { taskId } : {}), ...(status !== undefined ? { status } : {}), includeDeleted }) });
+  const where = clauses.length > 0 ? ` WHERE ${clauses.join(" AND ")}` : "";
+  const rows = all(
+    ctx.database,
+    `SELECT a.*,
+            af.path AS filename,
+            af.mime_type,
+            af.size_bytes,
+            (SELECT MAX(version) FROM artifact_versions av WHERE av.artifact_id = a.id) AS latest_version
+     FROM artifacts a
+     LEFT JOIN artifact_files af ON af.artifact_id = a.id
+     ${where}
+     GROUP BY a.id
+     ORDER BY a.updated_at DESC, a.created_at DESC, a.id ASC
+     LIMIT ?`,
+    ...params,
+    limit
+  ) as Record<string, unknown>[];
+  json(ctx.res, 200, { artifacts: rows.map(artifactLibraryRow) });
 }
 
 function artifactLibraryRow(row: Record<string, unknown>): Record<string, unknown> {
+  const metadata = parseJsonField(row.metadata, {}) as Record<string, unknown>;
+  const filename = stringField(row.filename) ?? stringField(metadata.filename);
   return {
     id: row.id,
     workspaceId: row.workspace_id,
@@ -1845,9 +1879,13 @@ function artifactLibraryRow(row: Record<string, unknown>): Record<string, unknow
     type: row.type,
     kind: row.kind ?? undefined,
     title: row.title,
+    ...(filename !== undefined ? { filename } : {}),
+    latestVersion: typeof row.latest_version === "number" ? row.latest_version : 0,
     status: row.status,
     createdBy: row.created_by,
-    metadata: parseJsonField(row.metadata, {}),
+    metadata,
+    ...(stringField(row.mime_type) !== undefined ? { mimeType: stringField(row.mime_type) } : {}),
+    ...(typeof row.size_bytes === "number" ? { sizeBytes: row.size_bytes } : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     archivedAt: row.archived_at ?? undefined,
@@ -3199,14 +3237,14 @@ function deleteAgentBinding(ctx: RouteContext, bindingId: string): void {
 function agentContacts(ctx: RouteContext): void {
   const rows = all(
     ctx.database,
-    `SELECT ab.id, ab.role_id, ab.runtime_id, ab.contact_name, ab.avatar_url, ab.contact_description, ab.updated_at,
+    `SELECT ab.id, ab.role_id, ab.runtime_id, ab.contact_name, ab.avatar_url, ab.contact_description, ab.disabled_at, ab.updated_at,
             r.name AS role_name, r.capabilities, rt.kind AS runtime_kind, rt.status AS runtime_status,
             (SELECT MAX(started_at) FROM runs WHERE runs.agent_id = ab.id OR runs.agent_id = r.id) AS last_used_at,
             (SELECT COUNT(*) FROM runs WHERE (runs.agent_id = ab.id OR runs.agent_id = r.id) AND runs.status IN ('running', 'queued', 'starting')) AS busy_count
      FROM agent_bindings ab
      JOIN roles r ON r.id = ab.role_id
      JOIN runtimes rt ON rt.id = ab.runtime_id
-     WHERE ab.contact_description IS NULL OR ab.contact_description != '__disabled__'
+     WHERE ab.disabled_at IS NULL
      ORDER BY ab.created_at DESC`
   ) as Array<Record<string, unknown>>;
   json(ctx.res, 200, { contacts: rows.map(contactRow) });
@@ -3260,7 +3298,7 @@ function deleteCustomAgent(ctx: RouteContext, bindingId: string, hard: boolean):
   const workspaceId = stringField(existing.workspace_id) ?? "default-workspace";
   ctx.database.sqlite.transaction(() => {
     if (hard) ctx.database.sqlite.prepare("DELETE FROM agent_bindings WHERE id = ?").run(bindingId);
-    else ctx.database.sqlite.prepare("UPDATE agent_bindings SET contact_description = '__disabled__', updated_at = ? WHERE id = ?").run(now, bindingId);
+    else ctx.database.sqlite.prepare("UPDATE agent_bindings SET disabled_at = ?, updated_at = ? WHERE id = ?").run(now, now, bindingId);
     ctx.eventBus.publish({ id: randomUUID(), type: "agent.contact.updated", schemaVersion: 1, workspaceId, payload: { agentBindingId: bindingId, displayName: stringField(existing.contact_name) ?? bindingId, disabledAt: now }, createdAt: now });
   })();
   json(ctx.res, 200, { ok: true, agentBindingId: bindingId, hard });
@@ -3287,6 +3325,7 @@ function contactRow(row: Record<string, unknown>): Record<string, unknown> {
     runtimeKind: row.runtime_kind,
     capabilities: parseJsonField(row.capabilities, []),
     status: Number(row.busy_count ?? 0) > 0 ? "busy" : runtimeStatusAvailable(row.runtime_status) ? "available" : "offline",
+    ...(typeof row.disabled_at === "number" ? { disabledAt: row.disabled_at, isDisabled: true } : {}),
     ...(stringField(row.contact_description) !== undefined ? { description: stringField(row.contact_description) } : {}),
     ...(typeof row.last_used_at === "number" ? { lastUsedAt: row.last_used_at } : {})
   };
@@ -3863,6 +3902,10 @@ const WEB_API_PREFIXES = [
   "/permissions",
   "/interventions",
   "/artifacts",
+  "/deployments",
+  "/deployment-providers",
+  "/sites",
+  "/api",
   "/debug",
   "/healthz",
   "/openapi.json",

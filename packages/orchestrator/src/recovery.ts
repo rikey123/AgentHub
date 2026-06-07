@@ -30,6 +30,8 @@ type TerminalDelegatedTaskRunRow = {
   readonly task_status: TaskStatus;
   readonly expects_review: number;
   readonly room_mode: string;
+  readonly workspace_id: string;
+  readonly room_id: string;
 };
 
 export class StartupRecovery {
@@ -71,6 +73,8 @@ export function reconcileTerminalDelegatedTaskRuns(input: { readonly database: A
               r.task_id AS task_id,
               t.status AS task_status,
               t.expects_review AS expects_review,
+              t.workspace_id AS workspace_id,
+              t.room_id AS room_id,
               rooms.mode AS room_mode
        FROM runs r
        INNER JOIN tasks t ON t.id = r.task_id
@@ -93,7 +97,16 @@ export function reconcileTerminalDelegatedTaskRuns(input: { readonly database: A
     checkedRunIds.push(row.run_id);
     const requiresReview = row.room_mode === "team" || row.expects_review !== 0;
     if (row.room_mode === "team" && row.expects_review === 0) {
-      input.database.sqlite.prepare("UPDATE tasks SET expects_review = 1, updated_at = ? WHERE id = ? AND expects_review = 0").run(now, row.task_id);
+      input.database.sqlite.transaction(() => {
+        input.database.sqlite.prepare("UPDATE tasks SET expects_review = 1, updated_at = ? WHERE id = ? AND expects_review = 0").run(now, row.task_id);
+        input.eventBus.publish(taskEvent("task.status.changed", row.workspace_id, row.room_id, row.task_id, {
+          taskId: row.task_id,
+          prevStatus: row.task_status,
+          nextStatus: row.task_status,
+          reason: "startup_reconciliation",
+          expectsReview: true
+        }, now));
+      })();
     }
 
     if (row.task_status === "pending") {
@@ -134,6 +147,10 @@ export function reconcileTerminalDelegatedTaskRuns(input: { readonly database: A
 
 function pushUnique(target: string[], value: string): void {
   if (!target.includes(value)) target.push(value);
+}
+
+function taskEvent(type: "task.status.changed", workspaceId: string, roomId: string, taskId: string, payload: Record<string, unknown>, createdAt: number) {
+  return { id: randomUUID(), type, schemaVersion: 1, workspaceId, roomId, taskId, payload, createdAt };
 }
 
 export class ReclaimStaleClaimedRun {

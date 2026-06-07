@@ -68,6 +68,41 @@ describe("V1.2 artifact backend routes", () => {
     expect(currentDaemon().database.sqlite.prepare("SELECT type FROM events WHERE type = 'message.unpinned' AND json_extract(payload, '$.messageId') = ?").get(messageId)).toBeDefined();
   });
 
+  it("keeps legacy PinMessage command publishing the message.pinned event contract", async () => {
+    const messageId = seedMessage("room_pin_command", "message_pin_command");
+
+    const result = await currentDaemon().commandBus.dispatch(
+      { type: "PinMessage", messageId, idempotencyKey: "pin-command-v12" },
+      { actor: { type: "user", id: "local" }, traceId: "trace-pin-command-v12", origin: "http" }
+    );
+
+    expect(result).toMatchObject({ ok: true });
+    expect(currentDaemon().database.sqlite.prepare("SELECT pinned_at FROM messages WHERE id = ?").get(messageId)).toMatchObject({ pinned_at: expect.any(Number) });
+    expect(currentDaemon().database.sqlite.prepare("SELECT type FROM events WHERE type = 'message.pinned' AND json_extract(payload, '$.messageId') = ?").get(messageId)).toBeDefined();
+  });
+
+  it("emits structured mention objects in message.created while preserving routing by binding id", async () => {
+    const runtimeId = seedRuntime("runtime_mentions", "opencode");
+    const created = await createCustomAgent("Mention Expert", runtimeId);
+    currentDaemon().database.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES ('room_mentions', 'default-workspace', 'Mention Room', 'assisted', ?, ?, NULL, 1, 1)").run("conversation", created.agentBindingId);
+    currentDaemon().database.sqlite.prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES ('room_mentions', ?, 'agent', 'primary', 'opencode', NULL, ?, 'active', 1)").run(created.agentBindingId, created.agentBindingId);
+
+    const response = await fetch(`${baseUrl}/rooms/room_mentions/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: `@"Mention Expert" please inspect this`, mentions: [created.agentBindingId] })
+    });
+    expect(response.status).toBe(200);
+    const payload = await response.json() as { readonly data?: { readonly messageId?: string } };
+    const event = currentDaemon().database.sqlite.prepare("SELECT payload FROM events WHERE type = 'message.created' AND json_extract(payload, '$.messageId') = ?").get(payload.data?.messageId) as { readonly payload: string } | undefined;
+
+    expect(event).toBeDefined();
+    expect(JSON.parse(event?.payload ?? "{}")).toMatchObject({
+      messageId: payload.data?.messageId,
+      mentions: [{ agentBindingId: created.agentBindingId }]
+    });
+  });
+
   it("rejects room-scoped pin requests when the message belongs to a different room", async () => {
     const messageId = seedMessage("room_pin_owner", "message_pin_owner");
     currentDaemon().database.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES ('room_pin_other', 'default-workspace', 'Other Room', 'assisted', 'conversation', 'agent', NULL, 1, 1)").run();
@@ -89,6 +124,53 @@ describe("V1.2 artifact backend routes", () => {
 
     expect(response.status).toBe(200);
     expect(payload.artifacts).toEqual([expect.objectContaining({ id: "artifact_latest_doc", kind: "document", metadata: expect.objectContaining({ filename: "launch.md", tag: "release" }) })]);
+  });
+
+  it("returns the expanded artifact library shape for recent artifacts without query filters", async () => {
+    seedTextArtifact("artifact_recent_shape", "recent", { roomId: "room_library_shape", kind: "document", title: "Shape Doc", createdAt: 30, updatedAt: 50, metadata: { filename: "shape.md" } });
+
+    const response = await fetch(`${baseUrl}/artifacts?roomId=room_library_shape`);
+    const payload = await response.json() as { readonly artifacts: readonly Record<string, unknown>[] };
+
+    expect(response.status).toBe(200);
+    expect(payload.artifacts).toEqual([
+      expect.objectContaining({
+        id: "artifact_recent_shape",
+        kind: "document",
+        title: "Shape Doc",
+        filename: "shape.md",
+        latestVersion: 1,
+        updatedAt: 50,
+        roomId: "room_library_shape",
+        createdBy: "agent",
+        mimeType: "text/markdown",
+        sizeBytes: Buffer.byteLength("recent")
+      })
+    ]);
+  });
+
+  it("returns room list rows with camelCase pin/activity fields and contact names", async () => {
+    const db = currentDaemon().database.sqlite;
+    seedRuntime("runtime_room_list", "opencode");
+    db.prepare("INSERT INTO roles (id, workspace_id, name, avatar, description, prompt, capabilities, default_permission_profile_id, tags, is_builtin, source_path, version, created_at, updated_at) VALUES ('role_room_list', 'default-workspace', 'Room Specialist', NULL, NULL, 'Prompt', '[]', NULL, NULL, 0, NULL, NULL, 1, 1)").run();
+    db.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, avatar_url, contact_name, contact_description, created_at, updated_at) VALUES ('binding_room_list', 'default-workspace', 'role_room_list', 'runtime_room_list', NULL, NULL, NULL, 'Contact Name', NULL, 1, 1)").run();
+    db.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, pinned_at, last_activity_at, created_at, updated_at) VALUES ('room_list_shape', 'default-workspace', 'Pinned Room', 'assisted', 'conversation', 'binding_room_list', NULL, 123, 456, 1, 2)").run();
+    db.prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES ('room_list_shape', 'binding_room_list', 'agent', 'primary', 'opencode', NULL, 'binding_room_list', 'active', 1)").run();
+
+    const response = await fetch(`${baseUrl}/rooms?q=Contact`);
+    const payload = await response.json() as { readonly rooms: readonly Record<string, unknown>[] };
+
+    expect(response.status).toBe(200);
+    expect(payload.rooms).toContainEqual(expect.objectContaining({
+      id: "room_list_shape",
+      workspaceId: "default-workspace",
+      pinnedAt: 123,
+      lastActivityAt: 456,
+      participantContactNames: ["Contact Name"]
+    }));
+    const room = payload.rooms.find((item) => item.id === "room_list_shape");
+    expect(room).not.toHaveProperty("pinned_at");
+    expect(room).not.toHaveProperty("last_activity_at");
   });
 
   it("rejects inactive ppt proxy ports", async () => {
@@ -146,6 +228,44 @@ describe("V1.2 artifact backend routes", () => {
     const duplicate = await fetch(`${baseUrl}/agents/custom`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Frontend Expert", runtimeId, systemPrompt: "Again" }) });
     expect(duplicate.status).toBe(400);
     expect(await duplicate.json()).toMatchObject({ error: "agent_name_conflict" });
+  });
+
+  it("updates and disables contacts through /agents/contacts routes with persistent disabled_at state", async () => {
+    const runtimeId = seedRuntime("runtime_contact_update", "opencode");
+    const created = await createCustomAgent("Editable Expert", runtimeId);
+
+    const updated = await fetch(`${baseUrl}/agents/contacts/${created.agentBindingId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Renamed Expert", description: "Updated contact", avatarUrl: "agenthub://avatar/renamed" })
+    });
+    expect(updated.status).toBe(200);
+    expect(await updated.json()).toMatchObject({ agentBindingId: created.agentBindingId });
+
+    let contacts = await (await fetch(`${baseUrl}/agents/contacts`)).json() as { readonly contacts: readonly Record<string, unknown>[] };
+    expect(contacts.contacts).toContainEqual(expect.objectContaining({
+      agentBindingId: created.agentBindingId,
+      displayName: "Renamed Expert",
+      description: "Updated contact",
+      avatarUrl: "agenthub://avatar/renamed"
+    }));
+
+    const deleted = await fetch(`${baseUrl}/agents/contacts/${created.agentBindingId}`, { method: "DELETE" });
+    expect(deleted.status).toBe(200);
+    expect(currentDaemon().database.sqlite.prepare("SELECT disabled_at, contact_description FROM agent_bindings WHERE id = ?").get(created.agentBindingId)).toMatchObject({ disabled_at: expect.any(Number), contact_description: "Updated contact" });
+    expect(currentDaemon().database.sqlite.prepare("SELECT type FROM events WHERE type = 'agent.contact.updated' AND json_extract(payload, '$.agentBindingId') = ? AND json_extract(payload, '$.disabledAt') IS NOT NULL").get(created.agentBindingId)).toBeDefined();
+
+    contacts = await (await fetch(`${baseUrl}/agents/contacts`)).json() as { readonly contacts: readonly Record<string, unknown>[] };
+    expect(contacts.contacts.some((contact) => contact.agentBindingId === created.agentBindingId)).toBe(false);
+  });
+
+  it("accepts POST runtime health checks for contact connection tests", async () => {
+    const runtimeId = seedRuntime("runtime_post_health", "opencode");
+
+    const response = await fetch(`${baseUrl}/runtimes/${runtimeId}/health`, { method: "POST" });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ ok: true, runtimeId, status: "available" });
   });
 
   it("reports contacts offline when runtime health/status is unavailable unless the agent is busy", async () => {

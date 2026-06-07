@@ -1353,6 +1353,7 @@ describe("startup recovery and reclaim", () => {
     expect(result.reviewDispatchRunIds).toEqual(["run_reconcile_a", "run_reconcile_b"]);
     expect(currentDatabase().sqlite.prepare("SELECT status, expects_review FROM tasks WHERE id = ?").get(taskA.data.taskId)).toMatchObject({ status: "review", expects_review: 1 });
     expect(currentDatabase().sqlite.prepare("SELECT status, expects_review FROM tasks WHERE id = ?").get(taskB.data.taskId)).toMatchObject({ status: "review", expects_review: 1 });
+    expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'task.status.changed' AND json_extract(payload, '$.taskId') IN (?, ?) AND json_extract(payload, '$.expectsReview') = 1").get(taskA.data.taskId, taskB.data.taskId)).toMatchObject({ count: 2 });
     const commandBus = { dispatch: (command: { readonly reason: string; readonly taskId: string }) => ({ ok: true, data: { runId: `leader-${command.taskId}` }, emittedEvents: [] }) } as unknown as CommandBus;
     await handleTeamDispatchReviewTerminal({ database: currentDatabase(), eventBus: currentBus(), commandBus, taskService: service, now: () => now }, "run_reconcile_b");
     expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'team.dispatch.started' AND json_extract(payload, '$.sourceRunId') = 'run_source_reconcile'").get()).toMatchObject({ count: 1 });

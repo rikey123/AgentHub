@@ -205,8 +205,10 @@ export function createArtifactVersioningService(options: ArtifactVersioningServi
       return await service.createVersion({ artifactId, content: source.content, message: `Restore v${version}` });
     },
     diffVersions: async (artifactId, fromVersion, toVersion) => {
-      const from = readVersionContent(options.database, artifactId, fromVersion);
-      const to = readVersionContent(options.database, artifactId, toVersion);
+      const artifact = requireArtifact(options.database, artifactId);
+      const workspaceRoot = workspaceRootFor(options.database, artifact.workspace_id);
+      const from = readVersionContent(options.database, workspaceRoot, artifactId, fromVersion);
+      const to = readVersionContent(options.database, workspaceRoot, artifactId, toVersion);
       if (from.encoding === "binary" || to.encoding === "binary") {
         return JSON.stringify({ type: "binary", from, to, changed: binaryVersionChanged(from, to) });
       }
@@ -332,15 +334,16 @@ function mimeTypeForPath(path: string): string {
 
 type VersionContent =
   | { readonly encoding: "text"; readonly content: string }
-  | { readonly encoding: "binary"; readonly version: number; readonly sizeBytes: number; readonly sha256: string };
+  | { readonly encoding: "binary"; readonly version: number; readonly filename: string; readonly sizeBytes: number; readonly sha256: string };
 
-function readVersionContent(database: AgentHubDatabase, artifactId: string, version: number): VersionContent {
+function readVersionContent(database: AgentHubDatabase, workspaceRoot: string, artifactId: string, version: number): VersionContent {
   const row = database.sqlite.prepare("SELECT content, storage_path, content_encoding FROM artifact_versions WHERE artifact_id = ? AND version = ?").get(artifactId, version) as { readonly content: string | null; readonly storage_path: string | null; readonly content_encoding: ArtifactVersionEncoding } | undefined;
   if (row === undefined) throw new Error(`artifact version ${version} not found`);
   if (row.content_encoding === "binary") {
     if (row.storage_path === null) throw new Error(`binary artifact version ${version} is missing storage_path`);
-    const stats = statSync(row.storage_path);
-    return { encoding: "binary", version, sizeBytes: stats.size, sha256: fileSha256(row.storage_path) };
+    const storagePath = resolveControlledStoragePath(workspaceRoot, artifactId, version, row.storage_path);
+    const stats = statSync(storagePath);
+    return { encoding: "binary", version, filename: basename(storagePath), sizeBytes: stats.size, sha256: fileSha256(storagePath) };
   }
   return { encoding: "text", content: row.content ?? "" };
 }

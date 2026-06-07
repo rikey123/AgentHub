@@ -265,7 +265,7 @@ class Projector {
             role: typeof payload.role === "string" ? payload.role : "user",
             status: "streaming",
             text: typeof payload.text === "string" ? payload.text : "",
-            parts: [],
+            parts: payloadParts(room, payload),
             quotedMessageId: typeof payload.quotedMessageId === "string" ? payload.quotedMessageId : undefined,
             pendingTurnId: typeof payload.pendingTurnId === "string" ? payload.pendingTurnId : undefined,
             createdAt: event.createdAt
@@ -312,7 +312,14 @@ class Projector {
           room = {
             ...room,
             messages: room.messages.map((m) =>
-              m.id === payload.messageId ? { ...m, status: "completed", text: typeof payload.text === "string" ? payload.text : m.text } : m
+              m.id === payload.messageId
+                ? {
+                    ...m,
+                    status: "completed",
+                    text: typeof payload.text === "string" ? payload.text : m.text,
+                    parts: mergeMessageParts(room, m.parts, payloadParts(room, payload))
+                  }
+                : m
             )
           };
           this.rooms.set(roomId, room);
@@ -1476,6 +1483,29 @@ function hydrateRoomMessageParts(room: RoomViewModel): RoomViewModel {
       parts: message.parts.map((part) => hydrateMessagePart(room, part))
     }))
   };
+}
+
+function payloadParts(room: RoomViewModel, payload: Record<string, unknown>): MessageViewModel["parts"] {
+  if (!Array.isArray(payload.parts)) return [];
+  return payload.parts
+    .filter((part): part is MessageViewModel["parts"][number] => isMessagePart(part))
+    .map((part) => hydrateMessagePart(room, part))
+    .sort((a, b) => a.seq - b.seq);
+}
+
+function mergeMessageParts(room: RoomViewModel, existing: MessageViewModel["parts"], incoming: MessageViewModel["parts"]): MessageViewModel["parts"] {
+  const merged = [...existing];
+  for (const part of incoming) {
+    if (merged.some((item) => item.seq === part.seq && item.type === part.type)) continue;
+    merged.push(hydrateMessagePart(room, part));
+  }
+  return merged.sort((a, b) => a.seq - b.seq);
+}
+
+function isMessagePart(value: unknown): value is MessageViewModel["parts"][number] {
+  if (typeof value !== "object" || value === null) return false;
+  const part = value as { readonly type?: unknown; readonly seq?: unknown };
+  return typeof part.type === "string" && typeof part.seq === "number";
 }
 
 function hydrateMessagePart(room: RoomViewModel, part: MessageViewModel["parts"][number]): MessageViewModel["parts"][number] {

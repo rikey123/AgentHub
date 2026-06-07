@@ -242,6 +242,76 @@ describe("useProjector replay handling", () => {
     ]);
   });
 
+  it("hydrates message.created and message.completed payload parts during durable replay", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "assisted" }));
+    projector.apply(makeEvent("deployment.ready", roomId, {
+      deploymentId: "deployment-replay-1",
+      url: "http://127.0.0.1:4173/sites/deployment-replay-1/",
+      downloadUrl: "/deployments/deployment-replay-1/download"
+    }, 100));
+    projector.apply(makeAgentEvent("message.created", roomId, "agent-builder", {
+      messageId: "msg-replay-parts-1",
+      senderId: "agent-builder",
+      senderType: "agent",
+      role: "assistant",
+      text: "Deployment ready.",
+      parts: [
+        {
+          type: "card",
+          seq: 1,
+          card: {
+            type: "deployment",
+            deploymentId: "deployment-replay-1",
+            artifactId: "artifact-replay-1",
+            kind: "preview-url",
+            provider: "agenthub-local",
+            status: "queued"
+          }
+        }
+      ]
+    }, 110));
+    projector.apply(makeEvent("message.completed", roomId, {
+      messageId: "msg-replay-parts-1",
+      text: "Deployment ready.",
+      parts: [
+        {
+          type: "attachment",
+          seq: 2,
+          fileId: "file-replay-1",
+          name: "README.md",
+          mimeType: "text/markdown",
+          sizeBytes: 100,
+          artifactId: "artifact-replay-1",
+          path: "README.md",
+          previewKind: "markdown"
+        }
+      ]
+    }, 120));
+
+    const message = emittedState.rooms.get(roomId)?.messages.find((item) => item.id === "msg-replay-parts-1");
+    expect(message?.parts).toEqual([
+      expect.objectContaining({
+        type: "card",
+        seq: 1,
+        card: expect.objectContaining({
+          type: "deployment",
+          deploymentId: "deployment-replay-1",
+          status: "ready",
+          url: "http://127.0.0.1:4173/sites/deployment-replay-1/",
+          downloadUrl: "/deployments/deployment-replay-1/download"
+        })
+      }),
+      expect.objectContaining({
+        type: "attachment",
+        seq: 2,
+        fileId: "file-replay-1",
+        artifactId: "artifact-replay-1"
+      })
+    ]);
+  });
+
   it("removes deleted messages and pending turn entries from live state", () => {
     const roomId = `room-${randomUUID()}`;
     const projector = getProjector();

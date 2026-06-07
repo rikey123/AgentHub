@@ -11,6 +11,7 @@ ALTER TABLE tasks ADD COLUMN last_unblocked_at INTEGER;
 ALTER TABLE agent_bindings ADD COLUMN avatar_url TEXT;
 ALTER TABLE agent_bindings ADD COLUMN contact_name TEXT;
 ALTER TABLE agent_bindings ADD COLUMN contact_description TEXT;
+ALTER TABLE agent_bindings ADD COLUMN disabled_at INTEGER;
 
 ALTER TABLE artifact_files ADD COLUMN mime_type TEXT;
 ALTER TABLE artifact_files ADD COLUMN size_bytes INTEGER;

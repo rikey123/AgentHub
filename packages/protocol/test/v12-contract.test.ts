@@ -186,7 +186,7 @@ describe("V1.2 shared domain contracts", () => {
       senderId: "agent-1",
       senderType: "agent",
       text: "Created a deployment card",
-      mentions: ["agent-binding-1"],
+      mentions: [{ agentBindingId: "agent-binding-1" }],
       refs: [
         { type: "artifact", artifactId: "artifact-1", lineStart: 12, lineEnd: 30 },
         { type: "artifact", artifactId: "deck-1", slide: 3 },
@@ -206,9 +206,9 @@ describe("V1.2 shared domain contracts", () => {
           }
         }
       ]
-    }) as { readonly mentions?: readonly string[]; readonly refs?: readonly unknown[] };
+    }) as { readonly mentions?: readonly { readonly agentBindingId: string }[]; readonly refs?: readonly unknown[] };
 
-    expect(decodedMessage.mentions).toEqual(["agent-binding-1"]);
+    expect(decodedMessage.mentions).toEqual([{ agentBindingId: "agent-binding-1" }]);
     expect(decodedMessage.refs).toEqual([
       { type: "artifact", artifactId: "artifact-1", lineStart: 12, lineEnd: 30 },
       { type: "artifact", artifactId: "deck-1", slide: 3 },

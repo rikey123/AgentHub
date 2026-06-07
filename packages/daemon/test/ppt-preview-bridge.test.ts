@@ -1,10 +1,24 @@
 import { EventEmitter } from "node:events";
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createPptPreviewBridge, type PptPreviewBridgeOptions } from "../src/services/ppt-preview-bridge.ts";
 
+const execFileMock = vi.hoisted(() => vi.fn());
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return {
+    ...actual,
+    execFile: execFileMock
+  };
+});
+
 describe("PptPreviewBridge", () => {
+  afterEach(() => {
+    execFileMock.mockReset();
+  });
+
   it("starts officecli watch on a per-file port and tracks active sessions", async () => {
     const child = fakeChild(1234);
     const bridge = createPptPreviewBridge({
@@ -68,6 +82,23 @@ describe("PptPreviewBridge", () => {
     await expect(pending).rejects.toThrow("ppt preview did not become ready");
     expect(child.kill).toHaveBeenCalled();
     expect(bridge.isActivePreviewPort(61237)).toBe(false);
+  });
+
+  it("detects officecli on non-Windows through a shell instead of the command builtin executable", async () => {
+    execFileMock.mockImplementation((command: string, args: readonly string[], callback: (error: Error | null) => void) => {
+      callback(null);
+    });
+    const child = fakeChild(1237);
+    const bridge = createPptPreviewBridge({
+      findFreePort: async () => 61238,
+      spawnWatch: vi.fn(() => child),
+      waitForReady: async () => undefined,
+      platform: () => "linux"
+    });
+
+    await expect(bridge.start("deck.pptx")).resolves.toMatchObject({ port: 61238, status: "ready" });
+
+    expect(execFileMock).toHaveBeenCalledWith("sh", ["-c", "command -v officecli"], expect.any(Function));
   });
 });
 

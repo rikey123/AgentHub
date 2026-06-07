@@ -125,6 +125,7 @@ export const agentBindings = sqliteTable("agent_bindings", {
   avatarUrl: text("avatar_url"),
   contactName: text("contact_name"),
   contactDescription: text("contact_description"),
+  disabledAt: integer("disabled_at"),
   createdAt: integer("created_at").notNull(),
   updatedAt: integer("updated_at").notNull()
 });

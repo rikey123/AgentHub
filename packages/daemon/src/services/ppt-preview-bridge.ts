@@ -19,6 +19,7 @@ export type PptPreviewBridge = {
 export type PptPreviewBridgeOptions = {
   readonly detectOfficecli?: () => Promise<boolean>;
   readonly installOfficecli?: () => Promise<void>;
+  readonly platform?: () => NodeJS.Platform;
   readonly findFreePort?: () => Promise<number>;
   readonly spawnWatch?: (filePath: string, port: number) => ChildProcessLike;
   readonly waitForReady?: (child: ChildProcessLike, port: number) => Promise<void>;
@@ -38,8 +39,9 @@ type ChildProcessLike = Pick<ChildProcess, "pid" | "kill" | "once" | "removeList
 export function createPptPreviewBridge(options: PptPreviewBridgeOptions = {}): PptPreviewBridge {
   const sessions = new Map<number, { readonly filePath: string; readonly child: ChildProcessLike; status: PptPreviewSession["status"] }>();
   let installFailed = false;
-  const detectOfficecli = options.detectOfficecli ?? defaultDetectOfficecli;
-  const installOfficecli = options.installOfficecli ?? defaultInstallOfficecli;
+  const getPlatform = options.platform ?? platform;
+  const detectOfficecli = options.detectOfficecli ?? (() => defaultDetectOfficecli(getPlatform));
+  const installOfficecli = options.installOfficecli ?? (() => defaultInstallOfficecli(getPlatform));
   const findFreePortImpl = options.findFreePort ?? findFreePort;
   const spawnWatch = options.spawnWatch ?? ((filePath, port) => spawn("officecli", ["watch", filePath, "--port", String(port)], { stdio: ["ignore", "pipe", "pipe"] }));
   const waitForReady = options.waitForReady ?? ((child, port) => defaultWaitForReady(child, port, options.readyTimeoutMs));
@@ -98,17 +100,17 @@ export function createPptPreviewBridge(options: PptPreviewBridgeOptions = {}): P
   };
 }
 
-async function defaultDetectOfficecli(): Promise<boolean> {
-  const command = platform() === "win32" ? "where.exe" : "command";
-  const args = platform() === "win32" ? ["officecli"] : ["-v", "officecli"];
+async function defaultDetectOfficecli(getPlatform: () => NodeJS.Platform): Promise<boolean> {
+  const command = getPlatform() === "win32" ? "where.exe" : "sh";
+  const args = getPlatform() === "win32" ? ["officecli"] : ["-c", "command -v officecli"];
   return await new Promise((resolve) => {
     execFile(command, args, (error) => resolve(error === null));
   });
 }
 
-async function defaultInstallOfficecli(): Promise<void> {
-  const command = platform() === "win32" ? "powershell.exe" : "sh";
-  const args = platform() === "win32"
+async function defaultInstallOfficecli(getPlatform: () => NodeJS.Platform): Promise<void> {
+  const command = getPlatform() === "win32" ? "powershell.exe" : "sh";
+  const args = getPlatform() === "win32"
     ? ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "irm https://raw.githubusercontent.com/officecli/install/main/install.ps1 | iex"]
     : ["-c", "curl -fsSL https://raw.githubusercontent.com/officecli/install/main/install.sh | sh"];
   await new Promise<void>((resolve, reject) => {

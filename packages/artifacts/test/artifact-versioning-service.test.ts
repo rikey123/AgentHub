@@ -115,20 +115,33 @@ describe("ArtifactVersioningService", () => {
     const diff = JSON.parse(await service.diffVersions("artifact_1", 1, 2)) as {
       readonly type: string;
       readonly changed: boolean;
-      readonly from: { readonly version: number; readonly sizeBytes: number; readonly sha256: string };
-      readonly to: { readonly version: number; readonly sizeBytes: number; readonly sha256: string };
+      readonly from: { readonly version: number; readonly filename: string; readonly sizeBytes: number; readonly sha256: string };
+      readonly to: { readonly version: number; readonly filename: string; readonly sizeBytes: number; readonly sha256: string };
     };
 
     expect(diff).toMatchObject({
       type: "binary",
       changed: true,
-      from: { version: 1, sizeBytes: Buffer.byteLength("first deck") },
-      to: { version: 2, sizeBytes: Buffer.byteLength("second deck") }
+      from: { version: 1, filename: "deck.pptx", sizeBytes: Buffer.byteLength("first deck") },
+      to: { version: 2, filename: "deck.pptx", sizeBytes: Buffer.byteLength("second deck") }
     });
     expect(diff.from.sha256).toHaveLength(64);
     expect(diff.to.sha256).toHaveLength(64);
     expect(JSON.stringify(diff)).not.toContain("storagePath");
     expect(JSON.stringify(diff)).not.toContain(".agenthub");
+  });
+
+  it("rejects binary diff when a selected version points outside controlled artifact storage", async () => {
+    const source = join(currentRoot(), "output", "deck.pptx");
+    mkdirSync(dirname(source), { recursive: true });
+    writeFileSync(source, Buffer.from("original deck"));
+    const tampered = join(currentRoot(), "output", "tampered.pptx");
+    writeFileSync(tampered, Buffer.from("tampered deck"));
+    const service = createArtifactVersioningService({ database: currentDb(), eventBus: currentBus(), now: () => now });
+    await service.createBinaryVersion({ artifactId: "artifact_1", filePath: "output/deck.pptx", filename: "deck.pptx", createdBy: "agent_1", message: "initial" });
+    currentDb().sqlite.prepare("UPDATE artifact_versions SET storage_path = ? WHERE artifact_id = ? AND version = 1").run(tampered, "artifact_1");
+
+    await expect(service.diffVersions("artifact_1", 1, 1)).rejects.toThrow("controlled artifact storage");
   });
 
   it("rejects binary restore when the selected version points outside controlled artifact storage", async () => {

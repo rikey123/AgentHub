@@ -211,6 +211,14 @@ export const MessageContextRefSchema = Schema.Union(
 );
 export type MessageContextRef = typeof MessageContextRefSchema.Type;
 
+export const MessageMentionSchema = Schema.Struct({
+  agentBindingId: IdSchema,
+  label: Schema.optional(Schema.String),
+  roleName: Schema.optional(Schema.String),
+  runtimeName: Schema.optional(Schema.String)
+});
+export type MessageMention = typeof MessageMentionSchema.Type;
+
 export const MessageCreatePayloadSchema = Schema.Struct({
   messageId: IdSchema,
   role: Schema.Literal("user", "assistant", "system", "tool"),
@@ -218,7 +226,7 @@ export const MessageCreatePayloadSchema = Schema.Struct({
   senderType: Schema.optional(Schema.Literal("user", "agent", "system")),
   text: Schema.optional(Schema.String),
   parts: Schema.optional(Schema.Array(MessagePartSchema)),
-  mentions: Schema.optional(Schema.Array(IdSchema)),
+  mentions: Schema.optional(Schema.Array(MessageMentionSchema)),
   refs: Schema.optional(Schema.Array(MessageContextRefSchema)),
   quotedMessageId: Schema.optional(IdSchema),
   pendingTurnId: Schema.optional(IdSchema)

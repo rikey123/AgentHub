@@ -7,6 +7,8 @@ export type RouteStub = {
 export const agentContactRouteStubs = [
   { method: "GET", path: "/agents/contacts", summary: "List agent contacts" },
   { method: "POST", path: "/agents/custom", summary: "Create a custom agent" },
+  { method: "PATCH", path: "/agents/contacts/:agentBindingId", summary: "Update an agent contact" },
+  { method: "DELETE", path: "/agents/contacts/:agentBindingId", summary: "Disable or delete an agent contact" },
   { method: "PATCH", path: "/agents/custom/:id", summary: "Update a custom agent" },
   { method: "POST", path: "/create-agent", summary: "Parse slash command input into agent creation defaults" }
 ] as const satisfies readonly RouteStub[];

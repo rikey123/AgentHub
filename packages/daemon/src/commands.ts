@@ -295,6 +295,7 @@ function sendMessage(options: DaemonCommandHandlersOptions, command: Command, me
   const members = roomMembers(options.database, roomId);
   // Parse @mentions in assisted mode; in team/squad mode the leader handles routing via MCP
   const mentions = (room.mode === "assisted") ? resolveMessageMentions(command, text, members) : [];
+  const mentionPayloads = mentions.map((agentBindingId) => ({ agentBindingId }));
   const quotedMessageId = stringField(command, "quotedMessageId") ?? stringField(command, "quoted_message_id");
   const attachmentFileIds = stringArrayField(command, "attachmentFileIds", "attachments");
   const useAssistedSelector = room.mode === "assisted" && options.assistedSelector !== undefined;
@@ -317,13 +318,13 @@ function sendMessage(options: DaemonCommandHandlersOptions, command: Command, me
         ) VALUES (?, ?, ?, 'user', ?, NULL, 'user', 'completed', ?, ?, ?, ?, ?, NULL)`
       )
       .run(messageId, room.workspace_id, roomId, actorId(meta), quotedMessageId ?? null, busy ? "pending" : "immediate", pendingTurnId ?? null, now, now);
-    options.database.sqlite.prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, 1, 'text', ?, ?)").run(messageId, JSON.stringify({ text, mentions }), now);
+    options.database.sqlite.prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, 1, 'text', ?, ?)").run(messageId, JSON.stringify({ text, mentions: mentionPayloads }), now);
     if (attachmentFileIds.length > 0) {
       const placeholders = attachmentFileIds.map(() => "?").join(", ");
       options.database.sqlite.prepare(`UPDATE attachments SET message_id = ? WHERE file_id IN (${placeholders})`).run(messageId, ...attachmentFileIds);
     }
-    options.eventBus.publish(messageEvent("message.created", room.workspace_id, roomId, messageId, { text, senderId: actorId(meta), role: "user", turnDispatchMode: busy ? "pending" : "immediate", mentions, attachmentFileIds, ...(quotedMessageId !== undefined ? { quotedMessageId } : {}), ...(pendingTurnId !== undefined ? { pendingTurnId } : {}) }, now));
-    options.eventBus.publish(messageEvent("message.completed", room.workspace_id, roomId, messageId, { text }, now));
+    options.eventBus.publish(messageEvent("message.created", room.workspace_id, roomId, messageId, { text, senderId: actorId(meta), role: "user", turnDispatchMode: busy ? "pending" : "immediate", mentions: mentionPayloads, attachmentFileIds, ...(quotedMessageId !== undefined ? { quotedMessageId } : {}), ...(pendingTurnId !== undefined ? { pendingTurnId } : {}) }, now));
+    options.eventBus.publish(messageEvent("message.completed", room.workspace_id, roomId, messageId, { text, mentions: mentionPayloads }, now));
     if (pendingTurnId && room.primary_agent_id) {
       options.database.sqlite.prepare("INSERT INTO pending_turns (id, room_id, user_message_id, primary_agent_id, status, enqueued_at, scheduled_at, cancelled_at, notes) VALUES (?, ?, ?, ?, 'queued', ?, NULL, NULL, NULL)").run(pendingTurnId, roomId, messageId, room.primary_agent_id, now);
       options.eventBus.publish(pendingTurnEvent("pending_turn.created", room.workspace_id, roomId, room.primary_agent_id, pendingTurnId, messageId, "queued", now));
@@ -459,6 +460,7 @@ function pinMessage(options: DaemonCommandHandlersOptions, command: Command, met
     options.eventBus.publish({ id: randomUUID(), type: "context.item.visibility.changed", schemaVersion: 1, workspaceId: row.workspace_id, roomId: row.room_id, payload: { contextId, scope: "workspace", pinned: true, visibility: {} }, createdAt: now });
     // Echo the pin onto the originating message so SSE consumers can update the kebab state.
     options.eventBus.publish({ id: randomUUID(), type: "message.updated", schemaVersion: 1, workspaceId: row.workspace_id, roomId: row.room_id, payload: { messageId, pinnedAt: now, contextId }, createdAt: now });
+    options.eventBus.publish({ id: randomUUID(), type: "message.pinned", schemaVersion: 1, workspaceId: row.workspace_id, roomId: row.room_id, payload: { roomId: row.room_id, messageId, pinnedAt: now }, createdAt: now });
   })();
   return { ok: true, data: item, emittedEvents: latestContextEvents(options.database, contextId) };
 }
