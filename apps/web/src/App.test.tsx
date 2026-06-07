@@ -85,7 +85,7 @@ vi.mock("./components/CommandPalette.tsx", () => ({ CommandPalette: mocks.comman
 vi.mock("./components/KeymapModal.tsx", () => ({ KeymapModal: () => null }));
 vi.mock("./components/NewRoomDialog.tsx", () => ({ NewRoomDialog: mocks.newRoomDialog }));
 
-import App, { ChatRoomLayout, createRoomInputForContactStartChat, draftWithQuotedMessage, draftWithQuotedText, messagePinRequestFor, roomPinRequestFor, workbenchCenterModeForRail, workbenchNavigationForRoomOpen } from "./App.tsx";
+import App, { ChatRoomLayout, createRoomInputForContactStartChat, draftWithQuotedMessage, draftWithQuotedText, messagePinRequestFor, replyPreviewForMessage, roomPinRequestFor, workbenchCenterModeForRail, workbenchNavigationForRoomOpen } from "./App.tsx";
 
 function renderApp() {
   mocks.stateIndex = 0;
@@ -220,6 +220,49 @@ describe("App integration wiring", () => {
       text: "Please explain",
       quoteInsertText: "> New source"
     });
+  });
+
+  it("builds Reply previews with sender and text summary", () => {
+    expect(replyPreviewForMessage({
+      id: "message_1",
+      roomId: "room_1",
+      senderType: "agent",
+      senderId: "agent_1",
+      senderName: "Builder",
+      role: "teammate",
+      status: "completed",
+      text: "Use /api/v2 for the backend calls.",
+      parts: [],
+      createdAt: 1_700_000_000
+    })).toBe("Builder: Use /api/v2 for the backend calls.");
+  });
+
+  it("builds Reply previews for card-only and attachment-only messages", () => {
+    expect(replyPreviewForMessage({
+      id: "message_1",
+      roomId: "room_1",
+      senderType: "agent",
+      senderId: "agent_1",
+      senderName: "Builder",
+      role: "teammate",
+      status: "completed",
+      text: "",
+      parts: [{ type: "card", seq: 1, card: { type: "artifact", artifactId: "artifact_1", kind: "document", title: "Launch plan", version: 2 } }],
+      createdAt: 1_700_000_000
+    })).toBe("Builder: Artifact - Launch plan");
+
+    expect(replyPreviewForMessage({
+      id: "message_2",
+      roomId: "room_1",
+      senderType: "user",
+      senderId: "user_1",
+      senderName: "You",
+      role: "owner",
+      status: "completed",
+      text: "",
+      parts: [{ type: "attachment", seq: 1, fileId: "file_1", name: "requirements.md", mimeType: "text/markdown", sizeBytes: 1024 }],
+      createdAt: 1_700_000_001
+    })).toBe("You: Attachment - requirements.md");
   });
 
   it("maps contacts and artifacts rail selection to dedicated center views", () => {

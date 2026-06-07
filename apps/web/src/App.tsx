@@ -18,7 +18,7 @@ import { NewRoomDialog, type CreateRoomInput } from "./components/NewRoomDialog.
 import { SettingsModal } from "./components/settings/index.ts";
 import { getSettingsSearch, getSettingsStateFromSearch } from "./components/settings/settingsUrl.ts";
 import type { SettingsTabId } from "./components/settings/SettingsModal.tsx";
-import type { AgentContactViewModel } from "./types.ts";
+import type { AgentContactViewModel, MessageViewModel } from "./types.ts";
 import { normalizedRoomSearchQuery, useProjector } from "./hooks/useProjector.ts";
 import { useSdk, useCsrfFetch } from "./hooks/useSdk.ts";
 import { useTheme } from "./hooks/useTheme.ts";
@@ -54,6 +54,7 @@ export function roomPinRequestFor(roomId: string, isPinned: boolean): { readonly
 }
 
 type MessageDraftState = { text?: string; quotedMessageId?: string; quotePreview?: string; quoteInsertText?: string };
+type MessageCard = Extract<MessageViewModel["parts"][number], { type: "card" }>["card"];
 
 export function draftWithQuotedMessage(draft: MessageDraftState, messageId: string, preview: string): MessageDraftState {
   const { quoteInsertText: _quoteInsertText, ...baseDraft } = draft;
@@ -77,6 +78,34 @@ export function draftWithQuotedText(draft: MessageDraftState, text: string): Mes
     ...baseDraft,
     quoteInsertText: quoteText
   };
+}
+
+export function replyPreviewForMessage(message: MessageViewModel): string {
+  const summary = message.text.trim() || messagePartPreview(message.parts[0]) || message.id;
+  return `${message.senderName}: ${summary}`.slice(0, 80);
+}
+
+function messagePartPreview(part: MessageViewModel["parts"][number] | undefined): string | undefined {
+  if (part === undefined) return undefined;
+  if (part.type === "text") return part.text.trim() || undefined;
+  if (part.type === "code") return part.lang ? `Code - ${part.lang}` : "Code";
+  if (part.type === "attachment") return `Attachment - ${part.name}`;
+  if (part.type === "tool_call") return `Tool call - ${part.name}`;
+  if (part.type === "tool_result") return `Tool result - ${part.ok ? "ok" : "error"}`;
+  if (part.type === "card") return cardPreview(part.card);
+  return undefined;
+}
+
+function cardPreview(card: MessageCard): string {
+  if (card.type === "artifact") return `Artifact - ${card.title}`;
+  if (card.type === "deployment") return `Deployment - ${card.status}`;
+  if (card.type === "diff") return `Diff - ${card.files.length} file${card.files.length === 1 ? "" : "s"}`;
+  if (card.type === "context") return `Context - ${card.title}`;
+  if (card.type === "task") return `Task - ${card.title}`;
+  if (card.type === "preview") return `Preview - ${card.kind}`;
+  if (card.type === "permission") return `Permission - ${card.status}`;
+  if (card.type === "intervention") return `Intervention - ${card.reason}`;
+  return `Card - ${card.type}`;
 }
 
 export function workbenchCenterModeForRail(rail: RailItem, hasActiveRoom: boolean): "home" | "room" | "contacts" | "artifacts" {
@@ -258,7 +287,7 @@ export default function App() {
 
   const handleReplyMessage = useCallback((id: string) => {
     const message = activeRoom?.messages.find((item) => item.id === id);
-    writeMessageDraft((draft) => draftWithQuotedMessage(draft, id, message?.text ?? ""));
+    writeMessageDraft((draft) => draftWithQuotedMessage(draft, id, message ? replyPreviewForMessage(message) : ""));
   }, [activeRoom, writeMessageDraft]);
 
   const handleQuoteMessage = useCallback((id: string) => {
