@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it, vi } from "vitest";
 import type { RoomViewModel } from "../../types.ts";
-import { activeRunIndicatorProps, buildChatFeedItems } from "./ChatStream.tsx";
+import { ChatStream, activeRunIndicatorProps, buildChatFeedItems, pinnedMessagesForDrawer } from "./ChatStream.tsx";
 
 describe("ChatStream task notification feed", () => {
   it("keeps delegated task updates out of the main chat feed", () => {
@@ -149,6 +151,47 @@ describe("ChatStream task notification feed", () => {
       turnIndex: 1
     });
   });
+
+  it("orders pinned messages newest first for the Pinned Context drawer", () => {
+    const room = roomFixture({
+      messages: [
+        messageFixture({ id: "old-pin", text: "Old durable context", pinnedAt: 100 }),
+        messageFixture({ id: "not-pin", text: "Regular message" }),
+        messageFixture({ id: "new-pin", text: "Latest durable context", pinnedAt: 200 })
+      ]
+    });
+
+    expect(pinnedMessagesForDrawer(room).map((message) => message.id)).toEqual(["new-pin", "old-pin"]);
+  });
+
+  it("renders a collapsed Pinned Context drawer with unpin actions", () => {
+    const html = renderToStaticMarkup(createElement(ChatStream, {
+      room: roomFixture({
+        messages: [
+          messageFixture({ id: "message-pin-1", text: "API base path is /api/v2", pinnedAt: 200 }),
+          messageFixture({ id: "message-pin-2", text: "Long artifact note", parts: [{ type: "card", seq: 1, card: { type: "artifact", artifactId: "artifact_1", kind: "web_page", title: "Large HTML" } }], pinnedAt: 100 })
+        ]
+      }),
+      onSelectMessage: vi.fn(),
+      onOpenRun: vi.fn(),
+      onQuote: vi.fn(),
+      onPin: vi.fn(),
+      onRegenerate: vi.fn(),
+      onDelete: vi.fn(),
+      onOpenTask: vi.fn(),
+      onOpenTasks: vi.fn(),
+      onCancelPending: vi.fn(),
+      onEditPending: vi.fn(),
+      csrfFetch: vi.fn<typeof fetch>(),
+      connectionStatus: "connected"
+    }));
+
+    expect(html).toContain("Pinned Context");
+    expect(html).toContain("2 pinned");
+    expect(html).toContain("API base path is /api/v2");
+    expect(html).toContain("@artifact:artifact_1");
+    expect(html).toContain("Unpin pinned message");
+  });
 });
 
 function roomFixture(patch: Partial<RoomViewModel>): RoomViewModel {
@@ -172,6 +215,22 @@ function roomFixture(patch: Partial<RoomViewModel>): RoomViewModel {
     deploymentsById: {},
     deploymentLogsById: {},
     unreadCount: 0,
+    ...patch
+  };
+}
+
+function messageFixture(patch: Partial<RoomViewModel["messages"][number]>): RoomViewModel["messages"][number] {
+  return {
+    id: "message-1",
+    roomId: "room-1",
+    senderType: "agent",
+    senderId: "agent",
+    senderName: "Agent",
+    role: "assistant",
+    status: "completed",
+    text: "",
+    parts: [],
+    createdAt: 1,
     ...patch
   };
 }

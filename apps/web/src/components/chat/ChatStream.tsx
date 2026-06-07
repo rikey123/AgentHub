@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ScrollShadow, Skeleton } from "@heroui/react";
+import { Button, ScrollShadow, Skeleton } from "@heroui/react";
 import type { RoomViewModel } from "../../types.ts";
 import { MessageItem } from "./MessageItem.tsx";
 import { BriefItem } from "./BriefItem.tsx";
@@ -69,6 +69,13 @@ export function activeRunIndicatorProps(room: RoomViewModel): { readonly runId: 
   };
 }
 
+export function pinnedMessagesForDrawer(room: RoomViewModel): RoomViewModel["messages"] {
+  return room.messages
+    .filter((message) => message.pinnedAt !== undefined)
+    .slice()
+    .sort((a, b) => (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0));
+}
+
 export function ChatStream(props: ChatStreamProps) {
   const { room } = props;
 
@@ -115,6 +122,7 @@ export function ChatStream(props: ChatStreamProps) {
   }, [props.selectedMessageId, items, virtualizer]);
 
   const activeIndicator = activeRunIndicatorProps(room);
+  const pinnedMessages = useMemo(() => pinnedMessagesForDrawer(room), [room.messages]);
   const [dismissedFailures, setDismissedFailures] = useState<Set<string>>(() => new Set());
   const visibleFailures = useMemo(
     () => room.mailboxFailures.filter((f) => !dismissedFailures.has(f.id)),
@@ -133,6 +141,9 @@ export function ChatStream(props: ChatStreamProps) {
         <div className="px-3 pt-2">
           <ConnectionBanner status={props.connectionStatus} error={props.connectionError} />
         </div>
+      ) : null}
+      {pinnedMessages.length > 0 ? (
+        <PinnedContextDrawer messages={pinnedMessages} onUnpin={props.onPin} />
       ) : null}
       {visibleFailures.length > 0 ? (
         <div className="flex flex-col gap-2 px-3 pt-2">
@@ -223,4 +234,53 @@ export function ChatStream(props: ChatStreamProps) {
       ) : null}
     </div>
   );
+}
+
+function PinnedContextDrawer({ messages, onUnpin }: { readonly messages: RoomViewModel["messages"]; readonly onUnpin: (id: string) => void }) {
+  return (
+    <details className="mx-3 mt-2 shrink-0 rounded-xl border border-border bg-overlay/85 px-3 py-2 shadow-sm">
+      <summary className="cursor-pointer text-sm font-semibold">
+        Pinned Context <span className="ml-2 text-xs font-medium text-muted">{messages.length} pinned</span>
+      </summary>
+      <div className="mt-2 flex flex-col gap-2">
+        {messages.map((message) => (
+          <div key={message.id} className="rounded-lg border border-border/70 bg-surface-secondary/70 px-3 py-2">
+            <div className="flex items-start gap-2">
+              <p className="min-w-0 flex-1 line-clamp-2 text-xs leading-5 text-muted">
+                {pinnedMessagePreview(message)}
+              </p>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 px-2 text-xs"
+                aria-label={`Unpin pinned message ${message.id}`}
+                onPress={() => onUnpin(message.id)}
+              >
+                Unpin
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+function pinnedMessagePreview(message: RoomViewModel["messages"][number]): string {
+  const text = message.text.trim();
+  const artifactRef = message.parts
+    .map((part) => {
+      if (part.type !== "card") return undefined;
+      const card = part.card as Record<string, unknown>;
+      return card.type === "artifact" && typeof card.artifactId === "string" ? `@artifact:${card.artifactId}` : undefined;
+    })
+    .find((ref): ref is string => ref !== undefined);
+  if (artifactRef !== undefined && text.length > 0) return `${artifactRef} ${truncatePinnedMessageText(text, 140)}`;
+  if (artifactRef !== undefined) return artifactRef;
+  if (text.length > 0) return truncatePinnedMessageText(text, 160);
+  return "Pinned message";
+}
+
+function truncatePinnedMessageText(text: string, maxLength: number): string {
+  return text.length > maxLength ? `${text.slice(0, maxLength - 3).trimEnd()}...` : text;
 }
