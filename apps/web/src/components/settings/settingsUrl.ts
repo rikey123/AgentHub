@@ -1,6 +1,6 @@
 import type { SettingsTabId } from "./SettingsModal.tsx";
 
-const VALID_SETTINGS_TABS = new Set<SettingsTabId>(["roles", "runtimes", "models", "skills", "permissions", "workspace", "mcp"]);
+const VALID_SETTINGS_TABS = new Set<SettingsTabId>(["roles", "runtimes", "models", "skills", "permissions", "workspace", "deploy-providers", "mcp"]);
 
 export function normalizeSettingsTab(value: string | null | undefined): SettingsTabId {
   return value && VALID_SETTINGS_TABS.has(value as SettingsTabId) ? (value as SettingsTabId) : "roles";

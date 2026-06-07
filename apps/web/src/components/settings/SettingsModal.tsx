@@ -6,7 +6,7 @@ import { RuntimesTab, type RuntimeConfig } from "./RuntimesTab.tsx";
 import { SkillsTab, type SkillConfig } from "./SkillsTab.tsx";
 import { formatBytes } from "../../lib/format.ts";
 
-export type SettingsTabId = "roles" | "runtimes" | "models" | "skills" | "permissions" | "workspace" | "mcp";
+export type SettingsTabId = "roles" | "runtimes" | "models" | "skills" | "permissions" | "workspace" | "deploy-providers" | "mcp";
 
 export const ROOM_MCP_TOOLS = [
   "room.delegate",
@@ -28,10 +28,11 @@ export const SETTINGS_TABS: Array<{ id: SettingsTabId; label: string; endpoint?:
   { id: "skills", label: "Skills", endpoint: "skills" },
   { id: "permissions", label: "Permissions", endpoint: "permissionProfiles" },
   { id: "workspace", label: "Workspace" },
+  { id: "deploy-providers", label: "Deploy Providers", endpoint: "deploymentProviders" },
   { id: "mcp", label: "MCP" }
 ];
 
-type SettingsEndpoint = "roles" | "runtimes" | "modelConfigs" | "skills" | "agentBindings" | "permissionProfiles" | "permissionRules";
+type SettingsEndpoint = "roles" | "runtimes" | "modelConfigs" | "skills" | "agentBindings" | "permissionProfiles" | "permissionRules" | "deploymentProviders";
 
 type SettingsData = Record<SettingsEndpoint, unknown> & {
   workspace: unknown;
@@ -55,7 +56,8 @@ const endpointPaths: Record<SettingsEndpoint, string> = {
   skills: "/skills",
   agentBindings: "/agent-bindings",
   permissionProfiles: "/permissions/profiles",
-  permissionRules: "/permissions/rules"
+  permissionRules: "/permissions/rules",
+  deploymentProviders: "/deployment-providers"
 };
 
 const emptySettingsData = (): SettingsData => ({
@@ -66,6 +68,7 @@ const emptySettingsData = (): SettingsData => ({
   agentBindings: undefined,
   permissionProfiles: undefined,
   permissionRules: undefined,
+  deploymentProviders: undefined,
   workspace: undefined,
   errors: {}
 });
@@ -218,6 +221,7 @@ export function SettingsModal({ isOpen, selectedTab, onTabChange, onOpenChange, 
                       onSkillsChange={(skills) => setData((current) => ({ ...current, skills: { skills } }))}
                       onPermissionProfilesChange={(permissionProfiles) => setData((current) => ({ ...current, permissionProfiles }))}
                       onPermissionRulesChange={(permissionRules) => setData((current) => ({ ...current, permissionRules }))}
+                      onDeploymentProvidersChange={(deploymentProviders) => setData((current) => ({ ...current, deploymentProviders }))}
                     />
                   </Tabs.Panel>
                 ))}
@@ -242,7 +246,8 @@ export function SettingsPanel({
   onModelConfigsChange,
   onSkillsChange,
   onPermissionProfilesChange,
-  onPermissionRulesChange
+  onPermissionRulesChange,
+  onDeploymentProvidersChange
 }: {
   tab: (typeof SETTINGS_TABS)[number];
   loading: boolean;
@@ -256,6 +261,7 @@ export function SettingsPanel({
   onSkillsChange: (skills: SkillConfig[]) => void;
   onPermissionProfilesChange: (permissionProfiles: unknown) => void;
   onPermissionRulesChange: (permissionRules: unknown) => void;
+  onDeploymentProvidersChange: (deploymentProviders: unknown) => void;
 }) {
   if (tab.id === "roles" && data !== undefined) {
     return <RolesTab roles={data} modelConfigs={allData.modelConfigs} fetchImpl={fetchImpl} onRolesChange={onRolesChange} />;
@@ -287,6 +293,10 @@ export function SettingsPanel({
 
   if (tab.id === "workspace" && allData.workspace !== undefined) {
     return <WorkspaceTab workspace={allData.workspace} />;
+  }
+
+  if (tab.id === "deploy-providers" && data !== undefined) {
+    return <DeployProvidersSettingsTab providers={data} fetchImpl={fetchImpl} onProvidersChange={onDeploymentProvidersChange} />;
   }
 
   if (tab.id === "mcp" && !loading) {
@@ -561,6 +571,341 @@ export function McpPlaceholder() {
   );
 }
 
+export type DeploymentProviderConfig = {
+  readonly id: string;
+  readonly kind: "caprover";
+  readonly name: string;
+  readonly baseUrl: string;
+  readonly workspaceId?: string | undefined;
+  readonly hasCredential: boolean;
+  readonly masked: boolean;
+  readonly createdAt?: number | undefined;
+  readonly updatedAt?: number | undefined;
+};
+
+type DeploymentProviderInput = {
+  readonly kind: "caprover";
+  readonly name: string;
+  readonly baseUrl: string;
+  readonly credential: string;
+};
+
+type DeploymentProviderUpdateInput = {
+  readonly name: string;
+  readonly baseUrl: string;
+  readonly credential?: string | undefined;
+};
+
+type DeploymentProviderTestResult = {
+  readonly ok: boolean;
+  readonly version?: string | undefined;
+  readonly error?: string | undefined;
+};
+
+export function DeployProvidersSettingsTab({
+  providers,
+  fetchImpl,
+  onProvidersChange
+}: {
+  providers: unknown;
+  fetchImpl: typeof fetch;
+  onProvidersChange: (providers: unknown) => void;
+}) {
+  const normalized = normalizeDeploymentProviders(providers);
+  const [name, setName] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
+  const [credential, setCredential] = useState("");
+  const [editingId, setEditingId] = useState<string | undefined>(undefined);
+  const [pendingId, setPendingId] = useState<string | undefined>(undefined);
+  const [formError, setFormError] = useState<string | undefined>(undefined);
+  const [testResultsByProvider, setTestResultsByProvider] = useState<Record<string, DeploymentProviderTestResult>>({});
+  const providerTestGenerationsRef = useRef<Record<string, number>>({});
+
+  const resetForm = () => {
+    setEditingId(undefined);
+    setName("");
+    setBaseUrl("");
+    setCredential("");
+    setFormError(undefined);
+  };
+
+  const submit = async () => {
+    if (name.trim().length === 0 || baseUrl.trim().length === 0) return;
+    if (!editingId && credential.trim().length === 0) {
+      setFormError("API token is required when adding a provider.");
+      return;
+    }
+    setPendingId("form");
+    setFormError(undefined);
+    try {
+      const provider = editingId
+        ? await updateDeploymentProvider(fetchImpl, editingId, {
+            name: name.trim(),
+            baseUrl: baseUrl.trim(),
+            ...(credential.trim().length > 0 ? { credential: credential.trim() } : {})
+          })
+        : await createDeploymentProvider(fetchImpl, {
+            kind: "caprover",
+            name: name.trim(),
+            baseUrl: baseUrl.trim(),
+            credential: credential.trim()
+          });
+      const next = editingId
+        ? normalized.map((item) => item.id === provider.id ? provider : item)
+        : [...normalized, provider];
+      providerTestGenerationsRef.current = bumpDeploymentProviderTestGenerations(providerTestGenerationsRef.current, [provider.id]);
+      setTestResultsByProvider((current) => clearDeploymentProviderTestResultsForChangedProviders(current, next, [provider.id]));
+      onProvidersChange({ providers: next });
+      resetForm();
+    } catch (error) {
+      setFormError(errorMessage(error));
+    } finally {
+      setPendingId(undefined);
+    }
+  };
+
+  const edit = (provider: DeploymentProviderConfig) => {
+    setEditingId(provider.id);
+    setName(provider.name);
+    setBaseUrl(provider.baseUrl);
+    setCredential("");
+    setFormError(undefined);
+  };
+
+  const test = async (providerId: string) => {
+    if (!(providerId in providerTestGenerationsRef.current)) {
+      providerTestGenerationsRef.current = { ...providerTestGenerationsRef.current, [providerId]: 0 };
+    }
+    const generation = providerTestGenerationsRef.current[providerId] ?? 0;
+    setPendingId(providerId);
+    setTestResultsByProvider((current) => updateDeploymentProviderTestResults(current, providerId, undefined));
+    try {
+      const result = await testDeploymentProvider(fetchImpl, providerId);
+      if (!shouldApplyDeploymentProviderTestResult(providerTestGenerationsRef.current, providerId, generation)) return;
+      setTestResultsByProvider((current) => updateDeploymentProviderTestResults(current, providerId, result));
+    } catch (error) {
+      if (!shouldApplyDeploymentProviderTestResult(providerTestGenerationsRef.current, providerId, generation)) return;
+      setTestResultsByProvider((current) => updateDeploymentProviderTestResults(current, providerId, { ok: false, error: errorMessage(error) }));
+    } finally {
+      setPendingId(undefined);
+    }
+  };
+
+  const remove = async (providerId: string) => {
+    setPendingId(providerId);
+    setFormError(undefined);
+    try {
+      await deleteDeploymentProvider(fetchImpl, providerId);
+      const next = normalized.filter((provider) => provider.id !== providerId);
+      providerTestGenerationsRef.current = bumpDeploymentProviderTestGenerations(providerTestGenerationsRef.current, [providerId]);
+      setTestResultsByProvider((current) => clearDeploymentProviderTestResultsForChangedProviders(current, next, [providerId]));
+      onProvidersChange({ providers: next });
+    } catch (error) {
+      setFormError(errorMessage(error));
+    } finally {
+      setPendingId(undefined);
+    }
+  };
+
+  return (
+    <section className="grid gap-4 p-5" data-testid="settings-panel-deploy-providers">
+      <Card variant="transparent" className="border border-border">
+        <Card.Header>
+          <div className="flex flex-wrap items-center gap-2">
+            <Card.Title className="text-sm">Deploy Providers</Card.Title>
+            <Chip size="sm" variant="soft" color="accent">CapRover</Chip>
+          </div>
+          <Card.Description className="text-xs">
+            V1.2 only supports CapRover self-hosted deployment providers. Tokens are stored in the daemon keychain and are never echoed back.
+          </Card.Description>
+        </Card.Header>
+        <Card.Content className="grid gap-3">
+          {normalized.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border bg-surface px-3 py-3 text-sm text-muted">
+              <div className="font-semibold text-foreground">Add a CapRover provider</div>
+              <div className="mt-1 text-xs">Configure a CapRover base URL and API token to enable self-hosted deployments.</div>
+            </div>
+          ) : normalized.map((provider) => {
+            const testResult = testResultsByProvider[provider.id];
+            return (
+              <div key={provider.id} className="grid gap-3 rounded-xl border border-border bg-surface px-3 py-3 sm:grid-cols-[1fr_auto] sm:items-center">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-semibold">{provider.name}</span>
+                    <Chip size="sm" variant="soft" color="success">CapRover</Chip>
+                    <Chip size="sm" variant="soft" color={provider.hasCredential ? "success" : "warning"}>
+                      {provider.hasCredential ? "Credential stored" : "Credential missing"}
+                    </Chip>
+                  </div>
+                  <div className="mt-1 break-all text-xs text-muted">{provider.baseUrl}</div>
+                  {testResult && pendingId !== provider.id ? (
+                    <div className={`mt-1 text-xs ${testResult.ok ? "text-success" : "text-danger"}`}>
+                      {testResult.ok ? `Connection ready${testResult.version ? ` (${testResult.version})` : ""}` : testResult.error ?? "Connection failed"}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="secondary" isPending={pendingId === provider.id} onPress={() => void test(provider.id)}>Test Connection</Button>
+                  <Button size="sm" variant="secondary" onPress={() => edit(provider)}>Edit</Button>
+                  <Button size="sm" variant="danger" isPending={pendingId === provider.id} onPress={() => void remove(provider.id)}>Delete</Button>
+                </div>
+              </div>
+            );
+          })}
+        </Card.Content>
+      </Card>
+      <Card variant="transparent" className="border border-border">
+        <Card.Header>
+          <Card.Title className="text-sm">{editingId ? "Edit CapRover provider" : "Add CapRover provider"}</Card.Title>
+          <Card.Description className="text-xs">Use the CapRover base URL and API token from your self-hosted instance.</Card.Description>
+        </Card.Header>
+        <Card.Content className="grid gap-3">
+          <TextField value={name} onChange={setName}>
+            <Label className="text-sm font-semibold">Name</Label>
+            <Input placeholder="Production Captain" data-testid="deployment-provider-name" />
+          </TextField>
+          <TextField value={baseUrl} onChange={setBaseUrl}>
+            <Label className="text-sm font-semibold">Base URL</Label>
+            <Input placeholder="https://captain.example.com" data-testid="deployment-provider-base-url" />
+          </TextField>
+          <TextField value={credential} onChange={setCredential}>
+            <Label className="text-sm font-semibold">API token</Label>
+            <Input placeholder={editingId ? "Leave blank to keep existing token" : "CapRover API token"} type="password" data-testid="deployment-provider-token" />
+          </TextField>
+          {formError ? <p className="text-xs text-danger" role="alert">{formError}</p> : null}
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="primary" isPending={pendingId === "form"} isDisabled={name.trim().length === 0 || baseUrl.trim().length === 0 || (!editingId && credential.trim().length === 0)} onPress={() => void submit()}>
+              {editingId ? "Save Provider" : "Create Provider"}
+            </Button>
+            {editingId ? <Button size="sm" variant="secondary" onPress={resetForm}>Cancel Edit</Button> : null}
+          </div>
+        </Card.Content>
+      </Card>
+    </section>
+  );
+}
+
+export function normalizeDeploymentProviders(value: unknown): DeploymentProviderConfig[] {
+  const rows = value && typeof value === "object" && Array.isArray((value as { readonly providers?: unknown }).providers)
+    ? (value as { readonly providers: unknown[] }).providers
+    : [];
+  return rows.flatMap((provider) => {
+    if (!provider || typeof provider !== "object") return [];
+    const record = provider as Record<string, unknown>;
+    const id = readStringFromRecord(record, ["id"]);
+    const kind = readStringFromRecord(record, ["kind"]);
+    const name = readStringFromRecord(record, ["name"]);
+    const baseUrl = readStringFromRecord(record, ["baseUrl", "base_url"]);
+    if (!id || kind !== "caprover" || !name || !baseUrl) return [];
+    return [{
+      id,
+      kind,
+      name,
+      baseUrl,
+      workspaceId: readStringFromRecord(record, ["workspaceId", "workspace_id"]),
+      hasCredential: readBooleanFromRecord(record, ["hasCredential", "has_credential"]) ?? readStringFromRecord(record, ["credentialRef", "credential_ref"]) !== undefined,
+      masked: readBooleanFromRecord(record, ["masked"]) ?? readStringFromRecord(record, ["credentialRef", "credential_ref"]) !== undefined,
+      createdAt: readNumberFromRecord(record, ["createdAt", "created_at"]),
+      updatedAt: readNumberFromRecord(record, ["updatedAt", "updated_at"])
+    }];
+  });
+}
+
+export async function createDeploymentProvider(fetchImpl: typeof fetch, input: DeploymentProviderInput): Promise<DeploymentProviderConfig> {
+  const response = await fetchImpl("/deployment-providers", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return readDeploymentProviderResponse(response);
+}
+
+export async function updateDeploymentProvider(fetchImpl: typeof fetch, providerId: string, input: DeploymentProviderUpdateInput): Promise<DeploymentProviderConfig> {
+  const response = await fetchImpl(`/deployment-providers/${encodeURIComponent(providerId)}`, {
+    method: "PATCH",
+    credentials: "same-origin",
+    headers: { accept: "application/json", "content-type": "application/json" },
+    body: JSON.stringify(input)
+  });
+  return readDeploymentProviderResponse(response);
+}
+
+export async function testDeploymentProvider(fetchImpl: typeof fetch, providerId: string): Promise<DeploymentProviderTestResult> {
+  const response = await fetchImpl(`/deployment-providers/${encodeURIComponent(providerId)}/test`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { accept: "application/json" }
+  });
+  if (!response.ok) throw new Error(`Test deployment provider failed: ${response.status}`);
+  return response.json() as Promise<DeploymentProviderTestResult>;
+}
+
+export function updateDeploymentProviderTestResults(
+  current: Readonly<Record<string, DeploymentProviderTestResult>>,
+  providerId: string,
+  result: DeploymentProviderTestResult | undefined
+): Record<string, DeploymentProviderTestResult> {
+  const next = { ...current };
+  if (result === undefined) {
+    delete next[providerId];
+    return next;
+  }
+  next[providerId] = result;
+  return next;
+}
+
+export function clearDeploymentProviderTestResultsForChangedProviders(
+  current: Readonly<Record<string, DeploymentProviderTestResult>>,
+  providers: readonly DeploymentProviderConfig[],
+  changedProviderIds: readonly string[]
+): Record<string, DeploymentProviderTestResult> {
+  const providerIds = new Set(providers.map((provider) => provider.id));
+  const changedIds = new Set(changedProviderIds);
+  const next: Record<string, DeploymentProviderTestResult> = {};
+  for (const [providerId, result] of Object.entries(current)) {
+    if (!providerIds.has(providerId) || changedIds.has(providerId)) continue;
+    next[providerId] = result;
+  }
+  return next;
+}
+
+export function shouldApplyDeploymentProviderTestResult(
+  generations: Readonly<Record<string, number>>,
+  providerId: string,
+  testedGeneration: number
+): boolean {
+  return generations[providerId] === testedGeneration;
+}
+
+function bumpDeploymentProviderTestGenerations(
+  current: Readonly<Record<string, number>>,
+  providerIds: readonly string[]
+): Record<string, number> {
+  const next = { ...current };
+  for (const providerId of providerIds) {
+    next[providerId] = (next[providerId] ?? 0) + 1;
+  }
+  return next;
+}
+
+export async function deleteDeploymentProvider(fetchImpl: typeof fetch, providerId: string): Promise<void> {
+  const response = await fetchImpl(`/deployment-providers/${encodeURIComponent(providerId)}`, {
+    method: "DELETE",
+    credentials: "same-origin",
+    headers: { accept: "application/json" }
+  });
+  if (!response.ok) throw new Error(`Delete deployment provider failed: ${response.status}`);
+}
+
+async function readDeploymentProviderResponse(response: Response): Promise<DeploymentProviderConfig> {
+  if (!response.ok) throw new Error(`Deployment provider request failed: ${response.status}`);
+  const payload = await response.json() as { readonly provider?: unknown };
+  const provider = normalizeDeploymentProviders({ providers: payload.provider !== undefined ? [payload.provider] : [] })[0];
+  if (provider === undefined) throw new Error("Deployment provider response missing provider");
+  return provider;
+}
+
 async function fetchJson(fetchImpl: typeof fetch, path: string): Promise<unknown> {
   const response = await fetchImpl(path, {
     credentials: "same-origin",
@@ -652,6 +997,25 @@ function readWorkspaceNumber(workspace: unknown, keys: readonly string[]): numbe
   return undefined;
 }
 
+function readNumberFromRecord(record: Record<string, unknown>, keys: readonly string[]): number | undefined {
+  for (const key of keys) {
+    if (typeof record[key] === "number" && Number.isFinite(record[key])) return record[key] as number;
+    if (typeof record[key] === "string" && record[key].trim().length > 0) {
+      const parsed = Number(record[key]);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return undefined;
+}
+
+function readBooleanFromRecord(record: Record<string, unknown>, keys: readonly string[]): boolean | undefined {
+  for (const key of keys) {
+    if (typeof record[key] === "boolean") return record[key] as boolean;
+    if (typeof record[key] === "number") return record[key] !== 0;
+  }
+  return undefined;
+}
+
 function unwrapWorkspace(workspace: unknown): Record<string, unknown> {
   if (!workspace || typeof workspace !== "object") return {};
   const record = workspace as Record<string, unknown>;
@@ -692,6 +1056,8 @@ function panelDescription(tab: SettingsTabId): string {
       return "Agent binding and permission-profile assignments.";
     case "workspace":
       return "Workspace root, artifacts, attachment limits, and cleanup policy.";
+    case "deploy-providers":
+      return "CapRover provider credentials and connection checks for V1.2 deployments.";
     case "mcp":
       return "MCP/tool management is read-only in V1.0.";
   }
