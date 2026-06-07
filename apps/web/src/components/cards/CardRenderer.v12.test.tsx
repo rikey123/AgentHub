@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import { loadArtifactPreviewState } from "./ArtifactCards.tsx";
 import { CardRenderer } from "./CardRenderer.tsx";
 
 describe("V1.2 artifact cards", () => {
@@ -39,7 +40,7 @@ describe("V1.2 artifact cards", () => {
     expect(html).toContain("Download");
     expect(html).not.toContain("Edit");
     expect(html).not.toContain("Deploy");
-    expect(html).not.toContain("Expand");
+    expect(html).toContain("Expand");
     expect(html).toContain("sandbox=\"allow-scripts\"");
   });
 
@@ -68,10 +69,11 @@ describe("V1.2 artifact cards", () => {
     expect(slides).toContain("HTML slides");
     expect(slides).not.toContain("Reference slide");
     expect(slides).not.toContain("Edit");
-    expect(slides).not.toContain("Expand");
+    expect(slides).toContain("Expand");
     expect(pptx).toContain("PPTX preview");
     expect(pptx).toContain("Install failed");
     expect(pptx).toContain("/artifacts/artifact-pptx-1/download");
+    expect(pptx).toContain("Expand");
   });
 
   it("routes failed deployment payloads to retry/log/download actions", () => {
@@ -231,5 +233,18 @@ describe("V1.2 artifact cards", () => {
     expect(runningExportWithStaleDownload).not.toContain("/deployments/deployment-running-stale-1/download");
     expect(runningExportWithStaleDownload).not.toContain("C:\\workspace");
     expect(runningExportWithStaleDownload).toContain("Cancel");
+  });
+
+  it("ignores artifact expand loads after the modal is closed", async () => {
+    const fetchImpl = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ files: [{ path: "index.html" }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ content: { content: "<h1>Hello</h1>" } }), { status: 200 }));
+
+    await expect(loadArtifactPreviewState({
+      artifactId: "artifact-web-1",
+      title: "landing.html",
+      csrfFetch: fetchImpl,
+      shouldApply: () => false
+    })).resolves.toBeUndefined();
   });
 });

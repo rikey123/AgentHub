@@ -22,9 +22,9 @@ export function CardRenderer({ card, csrfFetch }: CardRendererProps) {
     case "task": return <TaskCard card={card} />;
     case "preview": return <PreviewCard card={card} />;
     case "artifact": {
-      if (card.kind === "web_page" || card.kind === "web_app") return <PreviewArtifactCard card={card} />;
-      if (card.kind === "document") return <DocumentCard card={card} />;
-      if (card.kind === "presentation" || card.kind === "presentation_pptx") return <PresentationCard card={card} />;
+      if (card.kind === "web_page" || card.kind === "web_app") return <PreviewArtifactCard card={card} csrfFetch={csrfFetch} />;
+      if (card.kind === "document") return <DocumentCard card={card} csrfFetch={csrfFetch} />;
+      if (card.kind === "presentation" || card.kind === "presentation_pptx") return <PresentationCard card={card} csrfFetch={csrfFetch} />;
       return <UnknownCard card={card as unknown as Record<string, unknown>} />;
     }
     case "deployment": return <DeploymentCard card={card as never} csrfFetch={csrfFetch} />;

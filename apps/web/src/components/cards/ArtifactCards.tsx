@@ -1,16 +1,20 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button, Card, Chip } from "@heroui/react";
 import type { Card as ProtocolCard } from "@agenthub/protocol/domains";
+import { artifactContentTypeFor } from "@agenthub/protocol/preview";
+import { ArtifactPreviewModal, normalizePreviewKind } from "../artifacts/ArtifactPreviewModal.tsx";
 
 type ArtifactCardData = Extract<ProtocolCard, { type: "artifact" }>;
 type DeploymentCardData = Extract<ProtocolCard, { type: "deployment" }> & {
   readonly lastError?: string;
   readonly logs?: readonly string[];
 };
+type ArtifactPreviewState = { readonly path: string; readonly name: string; readonly content?: string | undefined; readonly error?: string | undefined; readonly loading?: boolean | undefined; readonly mimeType?: string | undefined; readonly sizeBytes?: number | undefined };
+type LoadArtifactPreviewStateInput = { readonly artifactId: string; readonly title: string; readonly csrfFetch: typeof fetch; readonly shouldApply?: (() => boolean) | undefined };
 type DeploymentAction = "redeploy" | "retry" | "cancel" | "unpublish";
 type DeploymentStage = "pending" | "active" | "complete" | "failed" | "muted";
 
-export function PreviewArtifactCard({ card }: { readonly card: ArtifactCardData }) {
+export function PreviewArtifactCard({ card, csrfFetch }: { readonly card: ArtifactCardData; readonly csrfFetch: typeof fetch }) {
   const downloadUrl = artifactDownloadUrl(card.artifactId);
   return (
     <Card variant="default" data-testid="preview-card">
@@ -32,12 +36,13 @@ export function PreviewArtifactCard({ card }: { readonly card: ArtifactCardData 
       </Card.Content>
       <Card.Footer className="flex-wrap gap-2">
         <a className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-semibold text-foreground hover:bg-surface-secondary" href={downloadUrl}>Download</a>
+        <ArtifactExpandAction card={card} csrfFetch={csrfFetch} />
       </Card.Footer>
     </Card>
   );
 }
 
-export function DocumentCard({ card }: { readonly card: ArtifactCardData }) {
+export function DocumentCard({ card, csrfFetch }: { readonly card: ArtifactCardData; readonly csrfFetch: typeof fetch }) {
   return (
     <Card variant="default" data-testid="document-card">
       <Card.Header>
@@ -55,12 +60,13 @@ export function DocumentCard({ card }: { readonly card: ArtifactCardData }) {
       </Card.Content>
       <Card.Footer className="flex-wrap gap-2">
         <a className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-semibold text-foreground hover:bg-surface-secondary" href={artifactDownloadUrl(card.artifactId)}>Download</a>
+        <ArtifactExpandAction card={card} csrfFetch={csrfFetch} />
       </Card.Footer>
     </Card>
   );
 }
 
-export function PresentationCard({ card }: { readonly card: ArtifactCardData }) {
+export function PresentationCard({ card, csrfFetch }: { readonly card: ArtifactCardData; readonly csrfFetch: typeof fetch }) {
   const isPptx = card.kind === "presentation_pptx";
   return (
     <Card variant="default" data-testid="presentation-card">
@@ -86,6 +92,7 @@ export function PresentationCard({ card }: { readonly card: ArtifactCardData }) 
       </Card.Content>
       <Card.Footer className="flex-wrap gap-2">
         <a className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-semibold text-foreground hover:bg-surface-secondary" href={artifactDownloadUrl(card.artifactId)}>Download</a>
+        <ArtifactExpandAction card={card} csrfFetch={csrfFetch} />
       </Card.Footer>
     </Card>
   );
@@ -209,6 +216,85 @@ export function DeploymentCard({ card, csrfFetch }: { readonly card: DeploymentC
 
 function artifactDownloadUrl(artifactId: string): string {
   return `/artifacts/${encodeURIComponent(artifactId)}/download`;
+}
+
+function ArtifactExpandAction({ card, csrfFetch }: { readonly card: ArtifactCardData; readonly csrfFetch: typeof fetch }) {
+  const [preview, setPreview] = useState<ArtifactPreviewState | undefined>(undefined);
+  const requestGenerationRef = useRef(0);
+  const openPreview = async () => {
+    const generation = requestGenerationRef.current + 1;
+    requestGenerationRef.current = generation;
+    setPreview({ path: "artifact.txt", name: card.title, loading: true });
+    const loaded = await loadArtifactPreviewState({
+      artifactId: card.artifactId,
+      title: card.title,
+      csrfFetch,
+      shouldApply: () => requestGenerationRef.current === generation
+    });
+    if (loaded !== undefined) setPreview(loaded);
+  };
+
+  return (
+    <>
+      <Button size="sm" variant="secondary" onPress={() => void openPreview()}>Expand</Button>
+      <ArtifactPreviewModal
+        isOpen={preview !== undefined}
+        name={preview?.name ?? card.title}
+        mimeType={preview?.mimeType}
+        sizeBytes={preview?.sizeBytes}
+        previewKind={normalizePreviewKind(undefined, preview?.mimeType, preview?.name ?? card.title)}
+        content={preview?.content}
+        error={preview?.error}
+        loading={preview?.loading}
+        downloadUrl={preview ? artifactFileRawPath(card.artifactId, preview.path) : artifactDownloadUrl(card.artifactId)}
+        onRetry={() => void openPreview()}
+        onOpenChange={(open) => {
+          if (!open) {
+            requestGenerationRef.current += 1;
+            setPreview(undefined);
+          }
+        }}
+      />
+    </>
+  );
+}
+
+export async function loadArtifactPreviewState(input: LoadArtifactPreviewStateInput): Promise<ArtifactPreviewState | undefined> {
+  const shouldApply = input.shouldApply ?? (() => true);
+  try {
+    const filesRes = await input.csrfFetch(`/artifacts/${encodeURIComponent(input.artifactId)}/files`);
+    if (!filesRes.ok) throw new Error(`files ${filesRes.status}`);
+    if (!shouldApply()) return undefined;
+    const filesData = await filesRes.json() as { readonly files?: Array<{ readonly path?: unknown }> };
+    if (!shouldApply()) return undefined;
+    const file = Array.isArray(filesData.files) ? filesData.files.find((item) => typeof item.path === "string") : undefined;
+    const path = typeof file?.path === "string" ? file.path : "artifact.txt";
+    const contentRes = await input.csrfFetch(artifactFileContentPath(input.artifactId, path));
+    if (!contentRes.ok) throw new Error(`content ${contentRes.status}`);
+    if (!shouldApply()) return undefined;
+    const contentData = await contentRes.json() as { readonly content?: { readonly content?: unknown } | null };
+    if (!shouldApply()) return undefined;
+    const content = contentData.content && typeof contentData.content.content === "string" ? contentData.content.content : "";
+    return {
+      path,
+      name: path,
+      content,
+      loading: false,
+      mimeType: artifactContentTypeFor(path),
+      sizeBytes: new TextEncoder().encode(content).byteLength
+    };
+  } catch (error) {
+    if (!shouldApply()) return undefined;
+    return { path: "artifact.txt", name: input.title, error: error instanceof Error ? error.message : String(error), loading: false };
+  }
+}
+
+function artifactFileContentPath(artifactId: string, path: string): string {
+  return `/artifacts/${encodeURIComponent(artifactId)}/files/${encodeURIComponent(path)}`;
+}
+
+function artifactFileRawPath(artifactId: string, path: string): string {
+  return `${artifactFileContentPath(artifactId, path)}/raw`;
 }
 
 function statusColor(status: DeploymentCardData["status"]): "default" | "success" | "warning" | "danger" {
