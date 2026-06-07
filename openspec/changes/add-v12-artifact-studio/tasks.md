@@ -272,7 +272,7 @@
   - `Reference in Chat` 注入 structured pill，不只是字符串
   - 发送时序列化 token string + structured refs（或 deterministic parser）
 
-- [ ] **4.8** RoomList + Pinned Context drawer + message actions
+- [x] **4.8** RoomList + Pinned Context drawer + message actions
   - RoomList：搜索（debounce 200ms）、置顶排序、归档区折叠、participantContactNames
   - 消息操作：Reply / Quote / Regenerate / Copy Code / Apply Diff / Expand Preview / Pin
   - 顶部 Pinned Context drawer：badge count、展开列表、unpin、大 artifact compact ref warning
