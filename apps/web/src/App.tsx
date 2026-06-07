@@ -10,6 +10,7 @@ import { ChatStream } from "./components/chat/ChatStream.tsx";
 import { InputBox } from "./components/chat/InputBox.tsx";
 import { PendingTurnList } from "./components/chat/PendingTurnList.tsx";
 import { SidePanel } from "./components/panels/SidePanel.tsx";
+import { ArtifactsRailContainer, ContactsRailContainer } from "./components/rail/RailViews.tsx";
 import { RunDetailDrawer } from "./components/run/RunDetailDrawer.tsx";
 import { CommandPalette, type PaletteCommand } from "./components/CommandPalette.tsx";
 import { KeymapModal } from "./components/KeymapModal.tsx";
@@ -42,6 +43,12 @@ export function messagePinRequestFor(roomId: string, messageId: string, isPinned
     url: `/rooms/${encodeURIComponent(roomId)}/messages/${encodeURIComponent(messageId)}/pin`,
     method: isPinned ? "DELETE" : "POST"
   };
+}
+
+export function workbenchCenterModeForRail(rail: RailItem, hasActiveRoom: boolean): "home" | "room" | "contacts" | "artifacts" {
+  if (rail === "contacts") return "contacts";
+  if (rail === "artifacts") return "artifacts";
+  return hasActiveRoom ? "room" : "home";
 }
 
 export default function App() {
@@ -291,7 +298,8 @@ export default function App() {
     return list;
   }, [rooms, openNewRoom, openSettings, leftCollapsed, rightCollapsed, setTheme, setDensity]);
 
-  const center = activeRoom ? (
+  const centerMode = workbenchCenterModeForRail(rail, activeRoom !== undefined);
+  const roomCenter = activeRoom ? (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
       {(activeRoom.skillErrors?.length ?? 0) > 0 ? (
         <div className="shrink-0 border-b border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-900 dark:border-danger-800 dark:bg-danger-950/40 dark:text-danger-100">
@@ -365,6 +373,11 @@ export default function App() {
   ) : (
     <HomeView rooms={rooms} onOpenRoom={setActiveRoomId} onCreate={openNewRoom} />
   );
+  const center = centerMode === "contacts"
+    ? <ContactsRailContainer fetchImpl={csrfFetch} onStartChat={openNewRoom} onEditContact={() => setSettingsOpen(true)} />
+    : centerMode === "artifacts"
+      ? <ArtifactsRailContainer fetchImpl={csrfFetch} />
+      : roomCenter;
 
   return (
     <>

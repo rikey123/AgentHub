@@ -42,24 +42,29 @@ describe("SettingsModal integration contract", () => {
     expect(onSelect).not.toHaveBeenCalledWith("settings");
   });
 
-  it("labels the product rail as V1.0", () => {
+  it("labels the product rail as V1.2", () => {
     const html = renderToStaticMarkup(createElement(FeatureRail, {
       active: "chat",
       onSelect: vi.fn(),
       onOpenSettings: vi.fn()
     }));
 
-    expect(html).toContain("v1.0");
+    expect(html).toContain("v1.2");
+    expect(html).not.toContain("v1.0");
     expect(html).not.toContain("v0.5");
   });
 
-  it("does not expose contacts rail entry before a contacts view exists", () => {
+  it("exposes contacts rail entry once the contacts view exists", () => {
     const onSelect = vi.fn();
     const tree = FeatureRail({ active: "chat", onSelect, onOpenSettings: vi.fn() });
     const contactsButton = findElementByProp(tree, "aria-label", "Contacts");
 
-    expect(contactsButton).toBeUndefined();
-    expect(onSelect).not.toHaveBeenCalled();
+    expect(contactsButton).toBeDefined();
+    const onClick = contactsButton?.props.onClick;
+    expect(typeof onClick).toBe("function");
+    if (typeof onClick === "function") onClick();
+
+    expect(onSelect).toHaveBeenCalledWith("contacts");
   });
 
   it("bootstraps settings with seven parallel REST requests including skills and permission rules, then workspace metadata, and no EventSource", async () => {

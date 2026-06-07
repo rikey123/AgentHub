@@ -42,6 +42,10 @@ vi.mock("./components/shell/TopBar.tsx", () => ({ TopBar: () => null }));
 vi.mock("./components/shell/FeatureRail.tsx", () => ({ FeatureRail: () => null }));
 vi.mock("./components/rooms/RoomList.tsx", () => ({ RoomList: () => null }));
 vi.mock("./components/home/HomeView.tsx", () => ({ HomeView: () => null }));
+vi.mock("./components/rail/RailViews.tsx", () => ({
+  ContactsRailContainer: () => createElement("section", { "data-testid": "contacts-rail-view" }, "Contacts rail view"),
+  ArtifactsRailContainer: () => createElement("section", { "data-testid": "artifacts-rail-view" }, "Artifacts rail view")
+}));
 vi.mock("./components/chat/ChatStream.tsx", () => ({ ChatStream: () => null }));
 vi.mock("./components/chat/InputBox.tsx", () => ({ InputBox: () => null }));
 vi.mock("./components/chat/PendingTurnList.tsx", () => ({ PendingTurnList: () => null }));
@@ -51,7 +55,7 @@ vi.mock("./components/CommandPalette.tsx", () => ({ CommandPalette: () => null }
 vi.mock("./components/KeymapModal.tsx", () => ({ KeymapModal: () => null }));
 vi.mock("./components/NewRoomDialog.tsx", () => ({ NewRoomDialog: mocks.newRoomDialog }));
 
-import App, { ChatRoomLayout, messagePinRequestFor } from "./App.tsx";
+import App, { ChatRoomLayout, messagePinRequestFor, workbenchCenterModeForRail } from "./App.tsx";
 
 describe("App integration wiring", () => {
   beforeEach(() => {
@@ -127,5 +131,12 @@ describe("App integration wiring", () => {
       url: "/rooms/room-1/messages/message-unpinned/pin",
       method: "POST"
     });
+  });
+
+  it("maps contacts and artifacts rail selection to dedicated center views", () => {
+    expect(workbenchCenterModeForRail("contacts", false)).toBe("contacts");
+    expect(workbenchCenterModeForRail("artifacts", false)).toBe("artifacts");
+    expect(workbenchCenterModeForRail("chat", true)).toBe("room");
+    expect(workbenchCenterModeForRail("chat", false)).toBe("home");
   });
 });
