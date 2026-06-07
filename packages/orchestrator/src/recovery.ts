@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import type { AgentHubDatabase } from "@agenthub/db";
 import type { EventBus } from "@agenthub/bus";
 
@@ -174,7 +176,10 @@ export class ReclaimStaleClaimedRun {
       return;
     }
     if (adapter.crashRecovery === "restartable") {
-      this.lifecycle.fail(null, run.id, "daemon_restarted", "transient");
+      this.database.sqlite.transaction(() => {
+        this.lifecycle.fail(null, run.id, "daemon_restarted", "transient");
+        this.enqueueRestartRecoveryWake(run);
+      })();
       return;
     }
 
@@ -193,5 +198,17 @@ export class ReclaimStaleClaimedRun {
     } catch (error) {
       this.lifecycle.fail(null, run.id, "reclaim_attach_failed", "fresh_session_required", error instanceof Error ? error.message : String(error));
     }
+  }
+
+  private enqueueRestartRecoveryWake(run: RunRow): void {
+    if (run.room_id === null || run.agent_id === null) return;
+    const payload = JSON.stringify({ runId: run.id });
+    const existing = this.database.sqlite
+      .prepare("SELECT id FROM wake_outbox WHERE room_id = ? AND agent_id = ? AND reason = 'restart_recovery' AND payload = ? AND status IN ('pending', 'dispatching', 'dispatched') LIMIT 1")
+      .get(run.room_id, run.agent_id, payload);
+    if (existing !== undefined) return;
+    this.database.sqlite
+      .prepare("INSERT INTO wake_outbox (id, room_id, agent_id, reason, payload, status, attempt_count, max_attempts, created_at, dispatch_after) VALUES (?, ?, ?, 'restart_recovery', ?, 'pending', 0, 3, ?, NULL)")
+      .run(randomUUID(), run.room_id, run.agent_id, payload, this.now());
   }
 }

@@ -244,6 +244,7 @@ function addParticipant(options: DaemonCommandHandlersOptions, command: Command,
   const mailboxMessageId = randomUUID();
 
   options.database.sqlite.transaction(() => {
+    options.database.sqlite.prepare("UPDATE rooms SET last_activity_at = ?, updated_at = ? WHERE id = ?").run(now, now, roomId);
     options.database.sqlite
       .prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES (?, ?, 'agent', ?, ?, NULL, ?, ?, ?)")
       .run(roomId, agentBindingId, role, adapterId, agentBindingId, presence, now);
@@ -307,6 +308,7 @@ function sendMessage(options: DaemonCommandHandlersOptions, command: Command, me
   }
 
   options.database.sqlite.transaction(() => {
+    options.database.sqlite.prepare("UPDATE rooms SET last_activity_at = ?, updated_at = ? WHERE id = ?").run(now, now, roomId);
     options.database.sqlite
       .prepare(
         `INSERT INTO messages (

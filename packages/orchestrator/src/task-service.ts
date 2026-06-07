@@ -106,6 +106,11 @@ export type UpdateTaskStatusInput = {
   readonly status: TaskStatus;
   readonly reason?: string;
   readonly blockerReason?: string;
+  readonly leaderWake?: {
+    readonly agentId: string;
+    readonly reason: "task_review" | "task_blocked";
+    readonly payload: Record<string, unknown>;
+  };
 };
 
 export type MoveTaskColumnInput = {
@@ -124,6 +129,10 @@ export type CompleteTaskInput = {
   readonly blockerReason?: string;
   readonly artifactIds?: readonly string[];
   readonly filesChanged?: readonly string[];
+  readonly leaderWake?: {
+    readonly agentId: string;
+    readonly payload?: Record<string, unknown>;
+  };
 };
 
 export type TaskActivityKind = "comment" | "artifact_linked" | "blocker_set" | "priority_change" | "status_change";
@@ -229,12 +238,16 @@ export class TaskService {
       } else {
         this.options.database.sqlite.prepare("UPDATE tasks SET status = ?, blocker_reason = NULL, updated_at = ? WHERE id = ?").run(nextStatus, now, input.taskId);
       }
+      if (existing.room_id !== null) this.touchRoomActivityInTransaction(existing.room_id, now);
       this.options.eventBus.publish(taskEvent("task.status.changed", existing.workspace_id, existing.room_id ?? "", input.taskId, { taskId: input.taskId, prevStatus: existing.status, nextStatus, ...(input.reason !== undefined ? { reason: input.reason } : {}), ...(input.blockerReason !== undefined ? { blockerReason: input.blockerReason } : {}), ...(clearsBoardOverride ? { boardColumn: null } : {}) }, now));
+      if (input.leaderWake !== undefined && existing.room_id !== null) {
+        this.enqueueWakeOutboxInTransaction(existing.room_id, input.leaderWake.agentId, input.leaderWake.reason, input.leaderWake.payload, now);
+      }
+      if (isAggregateTerminalStatus(nextStatus)) {
+        const terminalTask = this.options.database.sqlite.prepare("SELECT * FROM tasks WHERE id = ?").get(input.taskId) as TaskRow | undefined;
+        if (terminalTask !== undefined) this.options.onTaskCompleted?.(terminalTask);
+      }
     })();
-    if (nextStatus === "completed") {
-      const completedTask = this.task(input.taskId);
-      if (completedTask) this.options.onTaskCompleted?.(completedTask);
-    }
     const task = this.task(input.taskId);
     if (!task) return failed("internal_error", `Task '${input.taskId}' was not persisted`);
     return { ok: true, data: { task: taskView(task), taskId: input.taskId }, emittedEvents: latestTaskEvents(this.options.database, input.taskId) };
@@ -288,6 +301,7 @@ export class TaskService {
       } else {
         this.options.database.sqlite.prepare("UPDATE tasks SET status = ?, blocker_reason = NULL, updated_at = ? WHERE id = ?").run(nextStatus, now, input.taskId);
       }
+      this.touchRoomActivityInTransaction(input.roomId, now);
       this.options.database.sqlite
         .prepare("INSERT INTO task_activities (id, task_id, kind, by_kind, by, payload, created_at) VALUES (?, ?, 'comment', 'role', ?, ?, ?)")
         .run(
@@ -330,6 +344,16 @@ export class TaskService {
         ...(input.artifactIds !== undefined ? { artifactIds: input.artifactIds } : {}),
         ...(input.filesChanged !== undefined ? { filesChanged: input.filesChanged } : {})
       }, now));
+      if (nextStatus === "completed") {
+        this.unblockDependentsInTransaction(existing.workspace_id, input.roomId, input.taskId, now);
+      }
+      if (input.leaderWake !== undefined && (nextStatus === "blocked" || nextStatus === "review")) {
+        this.enqueueWakeOutboxInTransaction(input.roomId, input.leaderWake.agentId, nextStatus === "blocked" ? "task_blocked" : "task_review", input.leaderWake.payload ?? { taskId: input.taskId, status: nextStatus, summary: input.summary }, now);
+      }
+      if (isAggregateTerminalStatus(nextStatus)) {
+        const terminalTask = this.options.database.sqlite.prepare("SELECT * FROM tasks WHERE id = ?").get(input.taskId) as TaskRow | undefined;
+        if (terminalTask !== undefined) this.options.onTaskCompleted?.(terminalTask);
+      }
     })();
 
     const task = this.task(input.taskId);
@@ -503,6 +527,61 @@ export class TaskService {
     return failed("conflict", "invalid_task_transition", { from: existing.status, to: nextStatus });
   }
 
+  private unblockDependentsInTransaction(workspaceId: string, roomId: string, completedTaskId: string, now: number): void {
+    const candidates = this.options.database.sqlite
+      .prepare(
+        `SELECT * FROM tasks
+         WHERE room_id = ?
+           AND status = 'blocked'
+           AND dependencies LIKE ?
+         ORDER BY created_at ASC, id ASC`
+      )
+      .all(roomId, `%"${completedTaskId}"%`) as TaskRow[];
+    for (const candidate of candidates) {
+      const dependencies = parseDependencies(candidate.dependencies);
+      if (!dependencies.includes(completedTaskId)) continue;
+      if (!this.allDependenciesCompleted(dependencies)) continue;
+      const updated = this.options.database.sqlite
+        .prepare("UPDATE tasks SET status = 'pending', blocker_reason = NULL, last_unblocked_at = ?, updated_at = ? WHERE id = ? AND status = 'blocked'")
+        .run(now, now, candidate.id);
+      if (updated.changes !== 1) continue;
+      this.options.eventBus.publish(taskEvent("task.unblocked", workspaceId, roomId, candidate.id, {
+        taskId: candidate.id,
+        roomId,
+        unlockedBy: completedTaskId
+      }, now));
+      if (candidate.assignee_agent_id !== null) {
+        this.options.database.sqlite
+          .prepare("INSERT INTO wake_outbox (id, room_id, agent_id, reason, payload, status, attempt_count, max_attempts, created_at, dispatch_after) VALUES (?, ?, ?, 'delegated_task', ?, 'pending', 0, 3, ?, NULL)")
+          .run(randomUUID(), roomId, candidate.assignee_agent_id, JSON.stringify({ taskId: candidate.id, unlockedBy: completedTaskId }), now);
+      }
+    }
+  }
+
+  private touchRoomActivityInTransaction(roomId: string, now: number): void {
+    this.options.database.sqlite.prepare("UPDATE rooms SET last_activity_at = ?, updated_at = ? WHERE id = ?").run(now, now, roomId);
+  }
+
+  private enqueueWakeOutboxInTransaction(roomId: string, agentId: string, reason: "task_review" | "task_blocked", payload: Record<string, unknown>, now: number): void {
+    const payloadJson = JSON.stringify(payload);
+    const existing = this.options.database.sqlite
+      .prepare("SELECT id FROM wake_outbox WHERE room_id = ? AND agent_id = ? AND reason = ? AND payload = ? AND status IN ('pending', 'dispatching', 'dispatched') LIMIT 1")
+      .get(roomId, agentId, reason, payloadJson);
+    if (existing !== undefined) return;
+    this.options.database.sqlite
+      .prepare("INSERT INTO wake_outbox (id, room_id, agent_id, reason, payload, status, attempt_count, max_attempts, created_at, dispatch_after) VALUES (?, ?, ?, ?, ?, 'pending', 0, 3, ?, NULL)")
+      .run(randomUUID(), roomId, agentId, reason, payloadJson, now);
+  }
+
+  private allDependenciesCompleted(taskIds: readonly string[]): boolean {
+    if (taskIds.length === 0) return true;
+    const placeholders = taskIds.map(() => "?").join(", ");
+    const row = this.options.database.sqlite
+      .prepare(`SELECT COUNT(*) AS count FROM tasks WHERE id IN (${placeholders}) AND status = 'completed'`)
+      .get(...taskIds) as { readonly count: number };
+    return row.count === taskIds.length;
+  }
+
   private transitionDelegatedTask(
     taskId: string,
     nextStatus: "in_progress" | "blocked" | "completed",
@@ -526,6 +605,7 @@ export class TaskService {
           this.options.database.sqlite.prepare("UPDATE tasks SET status = ?, blocker_reason = NULL, updated_at = ? WHERE id = ?").run(nextStatus, now, taskId);
         }
       }
+      if (existing.room_id !== null) this.touchRoomActivityInTransaction(existing.room_id, now);
       this.options.eventBus.publish(taskEvent("task.status.changed", existing.workspace_id, existing.room_id ?? "", taskId, { taskId, prevStatus: existing.status, nextStatus, reason: input.reason, ...(input.blockerReason !== undefined ? { blockerReason: input.blockerReason } : {}), ...(isTerminalStatus(nextStatus) ? { boardColumn: null } : {}) }, now));
     })();
 
@@ -623,6 +703,10 @@ function isTerminalStatus(status: TaskStatus): boolean {
   return status === "completed" || status === "cancelled";
 }
 
+function isAggregateTerminalStatus(status: TaskStatus): boolean {
+  return status === "completed" || status === "blocked" || status === "review";
+}
+
 function normalizeBoardColumn(column: string): string | undefined {
   return KANBAN_COLUMNS.includes(column as (typeof KANBAN_COLUMNS)[number]) ? column : undefined;
 }
@@ -672,7 +756,7 @@ function taskView(row: TaskRow): TaskView {
   };
 }
 
-function taskEvent(type: "task.created" | "task.assigned" | "task.status.changed" | "task.status.changed.rejected" | "task.activity.added" | "task.delegation.completed" | "task.column.moved", workspaceId: string, roomId: string, taskId: string, payload: Record<string, unknown>, createdAt: number): PublishInput {
+function taskEvent(type: "task.created" | "task.assigned" | "task.status.changed" | "task.status.changed.rejected" | "task.activity.added" | "task.delegation.completed" | "task.column.moved" | "task.unblocked", workspaceId: string, roomId: string, taskId: string, payload: Record<string, unknown>, createdAt: number): PublishInput {
   return { id: randomUUID(), type, schemaVersion: 1, workspaceId, roomId, taskId, payload: withoutUndefined(payload), createdAt };
 }
 
@@ -686,6 +770,17 @@ function ensureTaskTimeoutMailbox(database: AgentHubDatabase, eventBus: EventBus
   database.sqlite.prepare("INSERT INTO mailbox_messages (id, workspace_id, room_id, from_type, from_id, to_agent_id, kind, content, files, read, claimed_run_id, claimed_at, delivery_batch_id, created_at, consumed_at) VALUES (?, ?, ?, 'system', ?, ?, 'task_timeout', ?, '[]', 0, NULL, NULL, NULL, ?, NULL)").run(mailboxMessageId, workspaceId, roomId, taskId, agentId, JSON.stringify({ taskId, reason: 'timeout' }), now);
   eventBus.publish({ id: randomUUID(), type: "mailbox.message.created", schemaVersion: 1, workspaceId, roomId, agentId, payload: { mailboxMessageId, roomId, fromAgentId: null, targetAgentId: agentId, taskId, reason: "timeout" }, createdAt: now });
   return mailboxMessageId;
+}
+
+function enqueueTaskTimeoutWake(database: AgentHubDatabase, roomId: string, agentId: string, taskId: string, mailboxMessageId: string, now: number): void {
+  const payload = JSON.stringify({ taskId, mailboxMessageId, reason: "timeout" });
+  const existing = database.sqlite
+    .prepare("SELECT id FROM wake_outbox WHERE room_id = ? AND agent_id = ? AND reason = 'task_blocked' AND payload = ? AND status IN ('pending', 'dispatching', 'dispatched') LIMIT 1")
+    .get(roomId, agentId, payload);
+  if (existing !== undefined) return;
+  database.sqlite
+    .prepare("INSERT INTO wake_outbox (id, room_id, agent_id, reason, payload, status, attempt_count, max_attempts, created_at, dispatch_after) VALUES (?, ?, ?, 'task_blocked', ?, 'pending', 0, 3, ?, NULL)")
+    .run(randomUUID(), roomId, agentId, payload, now);
 }
 
 export function normalizeTaskPriority(value: unknown): string | undefined {
@@ -715,7 +810,9 @@ export function checkTaskTimeouts(database: AgentHubDatabase, eventBus: EventBus
        if (updated.changes !== 1) continue;
        eventBus.publish(taskEvent("task.status.changed", row.workspace_id, row.room_id, row.id, { taskId: row.id, prevStatus: row.status, nextStatus: "blocked", reason: "timeout", blockerReason: "timeout" }, now));
       if (row.primary_agent_id === null) continue;
-      wakes.push({ taskId: row.id, roomId: row.room_id, workspaceId: row.workspace_id, agentId: row.primary_agent_id, mailboxMessageId: ensureTaskTimeoutMailbox(database, eventBus, row.workspace_id, row.room_id, row.primary_agent_id, row.id, now) });
+      const mailboxMessageId = ensureTaskTimeoutMailbox(database, eventBus, row.workspace_id, row.room_id, row.primary_agent_id, row.id, now);
+      enqueueTaskTimeoutWake(database, row.room_id, row.primary_agent_id, row.id, mailboxMessageId, now);
+      wakes.push({ taskId: row.id, roomId: row.room_id, workspaceId: row.workspace_id, agentId: row.primary_agent_id, mailboxMessageId });
     }
   })();
 

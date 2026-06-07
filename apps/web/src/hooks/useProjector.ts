@@ -1026,6 +1026,7 @@ class Projector {
             }),
             id: payload.deploymentId,
             status,
+            kind: typeof payload.kind === "string" ? payload.kind as DeploymentViewModel["kind"] : existing?.kind ?? "preview-url",
             url: typeof payload.url === "string" ? payload.url : existing?.url,
             downloadUrl: typeof payload.downloadUrl === "string" ? payload.downloadUrl : existing?.downloadUrl,
             imageTag: typeof payload.imageTag === "string" ? payload.imageTag : existing?.imageTag,

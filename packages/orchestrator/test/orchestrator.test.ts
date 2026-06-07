@@ -92,6 +92,21 @@ describe("RunLifecycleService", () => {
     expect(eventPayload("agent.run.completed", "run_life")).toMatchObject({ cost: zeroCost() });
   });
 
+  test("run start and completion update room last_activity_at in the run transaction", () => {
+    seedRoom("room_activity_run", "agent_activity");
+    createRun("run_activity", { roomId: "room_activity_run", agentId: "agent_activity" });
+    currentLifecycle().markClaimed(null, "run_activity");
+
+    now = 2_000;
+    currentLifecycle().markStarting(null, "run_activity", 123);
+    expect(currentDatabase().sqlite.prepare("SELECT last_activity_at FROM rooms WHERE id = 'room_activity_run'").get()).toMatchObject({ last_activity_at: 2_000 });
+
+    now = 3_000;
+    currentLifecycle().markRunning(null, "run_activity", "session_activity");
+    currentLifecycle().complete(null, "run_activity", zeroCost());
+    expect(currentDatabase().sqlite.prepare("SELECT last_activity_at FROM rooms WHERE id = 'room_activity_run'").get()).toMatchObject({ last_activity_at: 3_000 });
+  });
+
   test("persists cost fields on run completion", () => {
     const cost = {
       inputTokens: 100,
@@ -582,9 +597,12 @@ describe("TaskService and RoomMcpServer", () => {
     expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'team.dispatch.started' AND json_extract(payload, '$.sourceRunId') = ?").get("run_team_leader")).toMatchObject({ count: 1 });
     await handleTeamDispatchReviewTerminal({ database: currentDatabase(), eventBus: currentBus(), commandBus, taskService: service, taskModeGroupChatPresenter: presenter, now: () => now }, "run_review_2");
     expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'team.dispatch.started' AND json_extract(payload, '$.sourceRunId') = ?").get("run_team_leader")).toMatchObject({ count: 1 });
-    const leaderWakes = dispatched.filter((command) => command.reason === "task_review");
-    expect(leaderWakes).toHaveLength(1);
-    expect(leaderWakes[0]).toMatchObject({ taskId: created2.data.taskId });
+    expect(dispatched.filter((command) => command.reason === "task_review")).toHaveLength(0);
+    const reviewWake = currentDatabase().sqlite.prepare("SELECT room_id, agent_id, reason, payload, status FROM wake_outbox WHERE reason = 'task_review'").get() as { readonly room_id: string; readonly agent_id: string; readonly reason: string; readonly payload: string; readonly status: string };
+    expect(reviewWake).toMatchObject({ room_id: "room_team_review", agent_id: "agent_leader", reason: "task_review", status: "pending" });
+    const reviewPayload = JSON.parse(reviewWake.payload) as { readonly taskIds: readonly string[]; readonly sourceRunId: string };
+    expect(reviewPayload.sourceRunId).toBe("run_team_leader");
+    expect(reviewPayload.taskIds).toEqual(expect.arrayContaining([created1.data.taskId, created2.data.taskId]));
     expect(publicMessageTexts("room_team_review")).toContain("Leader：我开始 review 这 2 个结果，稍后给你收束。");
   });
 
@@ -625,6 +643,66 @@ describe("TaskService and RoomMcpServer", () => {
       "Builder，我把「Review me」交给你，先从你的角度推进。",
       "Leader：这组任务已经 review 完成，我来给你合并结论。"
     ]));
+    expect(currentDatabase().sqlite.prepare("SELECT room_id, agent_id, reason, status FROM wake_outbox WHERE reason = 'aggregate'").all()).toEqual([
+      expect.objectContaining({ room_id: "room_team_approve", agent_id: "agent_leader", reason: "aggregate", status: "pending" })
+    ]);
+    const aggregate = currentDatabase().sqlite.prepare("SELECT payload FROM wake_outbox WHERE reason = 'aggregate'").get() as { readonly payload: string };
+    expect(JSON.parse(aggregate.payload)).toMatchObject({
+      completedTaskIds: [],
+      blockedTaskIds: [],
+      reviewTaskIds: [created.data.taskId],
+      artifactIds: []
+    });
+  });
+
+  test("aggregate wake is queued when sibling tasks are completed blocked or still in review", async () => {
+    seedDelegatedRoom("room_team_terminal_aggregate", "agent_leader", "role_leader", "role_builder", "binding_leader", "binding_builder", "agent_builder");
+    currentDatabase().sqlite.prepare("UPDATE rooms SET mode = 'team' WHERE id = 'room_team_terminal_aggregate'").run();
+    const presenter = new TaskModeGroupChatPresenter({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now, onTaskCompleted: (task) => maybePublishTeamDispatchCompleted({ database: currentDatabase(), eventBus: currentBus(), taskModeGroupChatPresenter: presenter, now: () => now }, task) });
+    const commandBus = new CommandBus({ database: currentDatabase(), handlers: { WakeAgent: createWakeAgentHandler({ database: currentDatabase(), activeWakes: currentActiveWakes(), mailbox: currentMailbox(), lifecycle: currentLifecycle() }) as CommandHandler, UpdateTask: createUpdateTaskHandler(service), CompleteTask: createCompleteTaskHandler(service) } });
+    const mcp = new RoomMcpServer({ commandBus, taskService: service, database: currentDatabase(), eventBus: currentBus(), taskModeGroupChatPresenter: presenter, now: () => now });
+    const leaderSession = { roomId: "room_team_terminal_aggregate", runId: "run_team_terminal_leader", agentId: "agent_leader" };
+
+    const completed = await mcp.callTool("room.delegate", { toRoleId: "role_builder", title: "Completed", expectsReview: true }, leaderSession);
+    const blocked = await mcp.callTool("room.delegate", { toRoleId: "role_builder", title: "Blocked", expectsReview: true }, leaderSession);
+    const review = await mcp.callTool("room.delegate", { toRoleId: "role_builder", title: "Review", expectsReview: true }, leaderSession);
+    if (!completed.ok || !blocked.ok || !review.ok || !isRecord(completed.data) || !isRecord(blocked.data) || !isRecord(review.data) || typeof completed.data.taskId !== "string" || typeof blocked.data.taskId !== "string" || typeof review.data.taskId !== "string") throw new Error("expected delegated tasks");
+    expect(service.review(completed.data.taskId)).toMatchObject({ ok: true });
+    expect(await mcp.callTool("room.update_task", { taskId: completed.data.taskId, status: "completed" }, leaderSession)).toMatchObject({ ok: true });
+    currentDatabase().sqlite.prepare("UPDATE tasks SET status = 'blocked', blocker_reason = 'waiting', updated_at = ? WHERE id = ?").run(now, blocked.data.taskId);
+    currentBus().publish({ id: "evt-blocked-terminal", type: "task.status.changed", schemaVersion: 1, workspaceId: "ws_1", roomId: "room_team_terminal_aggregate", taskId: blocked.data.taskId, payload: { taskId: blocked.data.taskId, prevStatus: "review", nextStatus: "blocked", blockerReason: "waiting" }, createdAt: now });
+    expect(service.review(review.data.taskId)).toMatchObject({ ok: true });
+
+    maybePublishTeamDispatchCompleted({ database: currentDatabase(), eventBus: currentBus(), taskModeGroupChatPresenter: presenter, now: () => now }, currentDatabase().sqlite.prepare("SELECT * FROM tasks WHERE id = ?").get(completed.data.taskId) as never);
+
+    const aggregate = currentDatabase().sqlite.prepare("SELECT payload FROM wake_outbox WHERE reason = 'aggregate' AND room_id = 'room_team_terminal_aggregate'").get() as { readonly payload: string };
+    expect(JSON.parse(aggregate.payload)).toMatchObject({
+      completedTaskIds: [completed.data.taskId],
+      blockedTaskIds: [blocked.data.taskId],
+      reviewTaskIds: [review.data.taskId],
+      artifactIds: []
+    });
+  });
+
+  test("room.complete_task queues review wake through wake_outbox instead of direct WakeAgent dispatch", async () => {
+    seedDelegatedRoom("room_complete_review_outbox", "agent_leader", "role_leader", "role_builder", "binding_leader", "binding_builder", "agent_builder");
+    const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const dispatched: unknown[] = [];
+    const commandBus = { dispatch: (command: unknown) => { dispatched.push(command); return { ok: true, data: { runId: "direct_run" }, emittedEvents: [] }; } } as unknown as CommandBus;
+    const mcp = new RoomMcpServer({ commandBus, taskService: service, database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const leaderSession = { roomId: "room_complete_review_outbox", runId: "run_leader_review_outbox", agentId: "agent_leader" };
+    const created = await mcp.callTool("room.delegate", { toRoleId: "role_builder", title: "Review outbox", expectsReview: true }, leaderSession);
+    if (!created.ok || !isRecord(created.data) || typeof created.data.taskId !== "string") throw new Error("expected delegated task");
+    dispatched.length = 0;
+
+    const result = await mcp.callTool("room.complete_task", { taskId: created.data.taskId, status: "completed", summary: "Ready for review" }, { roomId: "room_complete_review_outbox", runId: "run_builder_review_outbox", agentId: "agent_builder" });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(dispatched.filter((command) => isRecord(command) && command.type === "WakeAgent")).toHaveLength(0);
+    const wake = currentDatabase().sqlite.prepare("SELECT room_id, agent_id, reason, payload, status FROM wake_outbox WHERE room_id = 'room_complete_review_outbox' AND reason = 'task_review'").get() as { readonly room_id: string; readonly agent_id: string; readonly reason: string; readonly payload: string; readonly status: string };
+    expect(wake).toMatchObject({ room_id: "room_complete_review_outbox", agent_id: "agent_leader", reason: "task_review", status: "pending" });
+    expect(JSON.parse(wake.payload)).toMatchObject({ taskId: created.data.taskId, status: "review", summary: "Ready for review" });
   });
 
   test("team mode wakes leader with task_blocked when a sibling run fails", async () => {
@@ -649,9 +727,14 @@ describe("TaskService and RoomMcpServer", () => {
     await handleTeamDispatchReviewTerminal({ database: currentDatabase(), eventBus: currentBus(), commandBus, taskService: service, now: () => now }, "run_blocked_1");
 
     expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'team.dispatch.started' AND json_extract(payload, '$.sourceRunId') = ?").get("run_team_blocked")).toMatchObject({ count: 1 });
-    const blockedWakes = dispatched.filter((command) => command.reason === "task_blocked");
-    expect(blockedWakes).toHaveLength(1);
-    expect(blockedWakes[0]).toMatchObject({ taskId: task1Result.data.taskId });
+    expect(dispatched.filter((command) => command.reason === "task_blocked")).toHaveLength(0);
+    const blockedWake = currentDatabase().sqlite.prepare("SELECT room_id, agent_id, reason, payload, status FROM wake_outbox WHERE reason = 'task_blocked'").get() as { readonly room_id: string; readonly agent_id: string; readonly reason: string; readonly payload: string; readonly status: string };
+    expect(blockedWake).toMatchObject({ room_id: "room_team_blocked", agent_id: "agent_leader", reason: "task_blocked", status: "pending" });
+    const blockedPayload = JSON.parse(blockedWake.payload) as { readonly taskIds: readonly string[]; readonly sourceRunId: string };
+    expect(blockedPayload.sourceRunId).toBe("run_team_blocked");
+    expect(blockedPayload.taskIds).toEqual(expect.arrayContaining([task1Result.data.taskId, task2Result.data.taskId]));
+    expect(systemMessageTexts("room_team_blocked").join("\n")).toContain("timeout");
+    expect(currentDatabase().sqlite.prepare("SELECT last_activity_at FROM rooms WHERE id = 'room_team_blocked'").get()).toMatchObject({ last_activity_at: now });
   });
 
   test("room.delegate rejects non-leader callers without writes or events", async () => {
@@ -1513,6 +1596,19 @@ function publicMessageTexts(roomId: string): string[] {
      WHERE m.room_id = ?
        AND m.sender_type = 'agent'
        AND m.role = 'assistant'
+     ORDER BY m.created_at ASC, m.id ASC, mp.seq ASC`
+  ).all(roomId) as Array<{ readonly payload: string }>;
+  return rows.map((row) => (JSON.parse(row.payload) as { readonly text: string }).text);
+}
+
+function systemMessageTexts(roomId: string): string[] {
+  const rows = currentDatabase().sqlite.prepare(
+    `SELECT mp.payload
+     FROM messages m
+     JOIN message_parts mp ON mp.message_id = m.id AND mp.part_type = 'text'
+     WHERE m.room_id = ?
+       AND m.sender_type = 'system'
+       AND m.role = 'system'
      ORDER BY m.created_at ASC, m.id ASC, mp.seq ASC`
   ).all(roomId) as Array<{ readonly payload: string }>;
   return rows.map((row) => (JSON.parse(row.payload) as { readonly text: string }).text);

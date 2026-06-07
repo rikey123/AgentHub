@@ -216,6 +216,9 @@ The canonical event registry SHALL be extended with the following V1.0 event typ
 | `deployment.cancelled` | deployment | durable | main | deployment-publish | 需要 projector handler |
 | `deployment.expired` | deployment | durable | main | deployment-publish | 需要 projector handler（preview-url 过期） |
 | `deployment.unpublished` | deployment | durable | main | deployment-publish | 需要 projector handler（static-site stop / unpublish） |
+| `deployment.provider.created` | deployment | durable | detail | deployment-publish | provider CRUD audit/settings refresh |
+| `deployment.provider.updated` | deployment | durable | detail | deployment-publish | provider CRUD audit/settings refresh |
+| `deployment.provider.deleted` | deployment | durable | detail | deployment-publish | provider CRUD audit/settings refresh |
 | `room.pinned` | room | durable | both | collab-visualization | 需要 projector handler（房间置顶排序） |
 | `room.unpinned` | room | durable | both | collab-visualization | 需要 projector handler（房间取消置顶） |
 | `message.pinned` | message | durable | both | im-chat-core-completion | Required for `messages.pinned_at` live/replay state |
