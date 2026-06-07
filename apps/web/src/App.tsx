@@ -20,6 +20,7 @@ import type { SettingsTabId } from "./components/settings/SettingsModal.tsx";
 import { useProjector } from "./hooks/useProjector.ts";
 import { useSdk, useCsrfFetch } from "./hooks/useSdk.ts";
 import { useTheme } from "./hooks/useTheme.ts";
+import type { ContextItemViewModel } from "./types.ts";
 
 type ChatRoomLayoutProps = {
   readonly chat: React.ReactNode;
@@ -58,6 +59,7 @@ export default function App() {
   const [rail, setRail] = useState<RailItem>("chat");
   const [bannerError, setBannerError] = useState<string | undefined>();
   const [unstallPending, setUnstallPending] = useState(false);
+  const [contextOverlay, setContextOverlay] = useState<{ readonly roomId: string; readonly items: ContextItemViewModel[] } | undefined>();
 
   const projector = useProjector("main", activeRoomId);
   const sdk = useSdk();
@@ -75,6 +77,35 @@ export default function App() {
 
   const rooms = useMemo(() => Array.from(projector.rooms.values()), [projector.rooms]);
   const activeRoom = activeRoomId ? projector.rooms.get(activeRoomId) : undefined;
+  const panelRoom = activeRoom && contextOverlay?.roomId === activeRoom.id
+    ? { ...activeRoom, contextItems: contextOverlay.items }
+    : activeRoom;
+
+  useEffect(() => {
+    if (!activeRoomId) {
+      setContextOverlay(undefined);
+      return;
+    }
+    let cancelled = false;
+    void csrfFetch(`/context?roomId=${encodeURIComponent(activeRoomId)}`, { credentials: "same-origin", headers: { accept: "application/json" } })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`Load context failed: ${response.status}`);
+        return response.json() as Promise<{ readonly items?: readonly RawContextItem[] | undefined }>;
+      })
+      .then((payload) => {
+        if (cancelled) return;
+        setContextOverlay({
+          roomId: activeRoomId,
+          items: (payload.items ?? []).map(contextItemFromRow)
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setContextOverlay(undefined);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeRoomId, csrfFetch]);
 
   const handleCreateRoom = useCallback(async (input: CreateRoomInput) => {
     setBannerError(undefined);
@@ -384,7 +415,7 @@ export default function App() {
           />
         }
         center={center}
-        panel={activeRoom ? <SidePanel key={`${activeRoom.id}:${sidePanelTab}`} room={activeRoom} csrfFetch={csrfFetch} initialTab={sidePanelTab} onOpenArtifact={handleOpenArtifact} /> : null}
+        panel={panelRoom ? <SidePanel key={`${panelRoom.id}:${sidePanelTab}`} room={panelRoom} csrfFetch={csrfFetch} initialTab={sidePanelTab} onOpenArtifact={handleOpenArtifact} /> : null}
         roomsCollapsed={leftCollapsed}
         panelCollapsed={rightCollapsed || !activeRoom}
       />
@@ -408,6 +439,49 @@ export default function App() {
       />
     </>
   );
+}
+
+type RawContextItem = {
+  readonly id?: unknown;
+  readonly type?: unknown;
+  readonly scope?: unknown;
+  readonly content?: unknown;
+  readonly status?: unknown;
+  readonly pinned?: unknown;
+  readonly run_id?: unknown;
+  readonly runId?: unknown;
+};
+
+function contextItemFromRow(row: RawContextItem): ContextItemViewModel {
+  const content = typeof row.content === "string" ? row.content : "";
+  const type = typeof row.type === "string" ? row.type : "context";
+  return {
+    id: typeof row.id === "string" ? row.id : crypto.randomUUID(),
+    title: contextItemTitle(type, content),
+    content,
+    status: contextItemStatus(row.status),
+    scope: typeof row.scope === "string" ? row.scope : "conversation",
+    pinned: row.pinned === true || row.pinned === 1,
+    runId: typeof row.runId === "string" ? row.runId : typeof row.run_id === "string" ? row.run_id : undefined
+  };
+}
+
+function contextItemStatus(status: unknown): ContextItemViewModel["status"] {
+  if (status === "confirmed" || status === "deprecated" || status === "disputed") return status;
+  return "draft";
+}
+
+function contextItemTitle(type: string, content: string): string {
+  const prefix: Record<string, string> = {
+    artifact: "Artifact",
+    constraint: "约束",
+    decision: "决策",
+    fact: "事实",
+    issue: "问题",
+    preference: "偏好",
+    summary: "摘要"
+  };
+  return `${prefix[type] ?? "上下文"} · ${content.replace(/^【[^】]+】/u, "").trim().slice(0, 28) || "未命名"}`;
 }
 
 function StalledRoomBanner({ reason, taskIds, tasks, pending, onDismiss }: { reason?: string | undefined; taskIds: readonly string[]; tasks: ReadonlyArray<{ readonly id: string; readonly title: string }>; pending: boolean; onDismiss: () => void }) {
