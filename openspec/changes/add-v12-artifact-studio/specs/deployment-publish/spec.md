@@ -40,7 +40,7 @@ The system SHALL insert a DeploymentCard into the chat timeline when a deploymen
 
 **触发方式：**
 1. Agent 调用 `room.deploy_artifact({ artifactId, kind, providerId? })` MCP tool
-2. 用户点击 ArtifactCard 操作区的"Deploy"按钮（调用同一 REST 端点）
+2. 用户点击 ArtifactCard 操作区的 `Deploy` 按钮（调用同一 REST 端点）
 
 **原子写路径（同一 SQLite 事务）：**
 1. 写 `deployments` 行（`status='queued'`）
@@ -50,23 +50,34 @@ The system SHALL insert a DeploymentCard into the chat timeline when a deploymen
 
 `artifact.created` / `deployment.created` 单独不能驱动聊天 timeline 插卡片，`message.part.added` 是唯一信号。
 
-**DeploymentCard 字段：**
-- kind badge（preview-url / static-site / source-zip / container-export / container-build / self-hosted）
-- status（queued / in_progress / ready / failed / cancelled / expired / unpublished）
-- build → deploy 两阶段进度条（container-build 和 self-hosted 显示）
-- URL / download link（ready 后显示）
-- 操作区（根据 kind 显示不同子集）
+**DeploymentCard payload：**
+```typescript
+type DeploymentCardPayload = {
+  type: "deployment"
+  deploymentId: string
+  artifactId: string
+  kind: "preview-url" | "static-site" | "source-zip" | "container-export" | "container-build" | "self-hosted"
+  provider?: string
+  status: "queued" | "in_progress" | "ready" | "failed" | "cancelled" | "expired" | "unpublished"
+  url?: string
+  downloadUrl?: string
+  imageTag?: string
+  expiresAt?: number
+  lastError?: string
+  logPreview?: string[]
+}
+```
 
-**操作区按钮：**
+**DeploymentCard UI 结构：**
+- Header：icon + title / artifact filename + kind chip + status badge
+- Body：kind-specific subtitle、Build → Deploy 两阶段进度、URL / imageTag / downloadUrl、collapsible logs、failure reason
+- Footer：Open / View Logs / Redeploy / Stop or Cancel / Unpublish / Download / Copy URL / Copy Docker Command（按 kind 过滤）
 
-| kind | 操作 |
-|------|------|
-| preview-url | Open Preview · Redeploy · 倒计时 |
-| static-site | Open · Stop · Unpublish · Redeploy |
-| source-zip | Download ZIP |
-| container-export | Download Dockerfile · Download Build Context |
-| container-build | Open（如有 URL）· Copy Docker Run · View Logs · Retry（失败时）|
-| self-hosted | Open · View Logs · Redeploy · Retry（失败时）|
+**日志行为：**
+- `deployment.log.appended` 只做 live append，不 durable replay
+- 点击 `View Logs` 时调用 `GET /deployments/:id/logs` 获取完整日志
+- 若 live logs 与 REST logs 重复，前端使用 full replace 或 line-offset 去重策略，MUST NOT 出现重复刷屏
+- Cancel / Retry / Redeploy / Unpublish 按钮必须防重复点击（运行中置 disabled）
 
 #### Scenario: Agent 部署指令触发 DeploymentCard
 
@@ -169,12 +180,12 @@ The system SHALL generate a Dockerfile and build context zip without requiring D
 The system SHALL attempt to build a container image using Nixpacks or Docker CLI, with graceful fallback to container-export if neither is available.
 
 **检测流程：**
-1. `which nixpacks` — 优先使用 Nixpacks（自动框架检测）
-2. `which docker` — 次之
+1. 优先执行 `nixpacks --version`（Windows 可用 `where.exe nixpacks`，macOS/Linux 可用 `command -v nixpacks`）
+2. 次之执行 `docker --version`（Windows 可用 `where.exe docker`，macOS/Linux 可用 `command -v docker`）
 3. 均无 → 降级为 `container-export`，DeploymentCard 显示"本机未检测到 Docker/Nixpacks，已生成构建包供手动构建"+ Install Nixpacks 链接
 
 **构建流程（有 Nixpacks 时）：**
-1. 将 artifact content 写入临时目录 `{workspace}/.agenthub/builds/<deploymentId}/`。
+1. 将 artifact content 写入临时目录 `{workspace}/.agenthub/builds/<deploymentId>/`。
 2. 调用 `nixpacks build {buildDir} --name {imageTag}` — imageTag 格式 `agenthub-{artifactId[:8]}:v{version}`。
 3. stdout/stderr 实时推送 `deployment.log.appended`（ephemeral, main）→ DeploymentCard 日志面板追加。
 4. 构建成功：`status='ready'`，`image_tag` 设置，发 `deployment.ready`；DeploymentCard 显示 image tag + "Copy Docker Run Command"。

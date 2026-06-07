@@ -8,30 +8,39 @@
 
 ### Requirement: Agent Contact Directory
 
-The system SHALL expose a contacts panel in the left sidebar listing all configured `agent_bindings` with avatar, display name, capabilities, and real-time status.
+The system SHALL expose a contacts panel in the left sidebar listing all configured `agent_bindings` as IM-style contacts, while preserving `agent_binding_id` as the stable execution identity.
 
 `GET /agents/contacts` 返回：
 
 ```typescript
 type AgentContact = {
   agentBindingId: string
-  displayName: string           // contact_name || role.name
+  displayName: string           // contact_name || `${role.name} · ${runtime.name}`
+  roleName: string
+  runtimeName: string
+  modelName?: string
   avatarUrl?: string
-  roleId: string
-  runtimeKind: string           // 'claude-code' | 'opencode' | 'codex' | ...
   capabilities: string[]
+  skills: string[]
   status: "available" | "busy" | "offline"
   description?: string
-  lastUsedAt?: number           // 最近一次 run 的 started_at timestamp
+  lastUsedAt?: number
+  isArchived?: boolean
+  isDisabled?: boolean
 }
 ```
+
+**身份模型：**
+- Contact 是 `agent_binding` 的展示层，不是独立执行实体
+- 改 `displayName` / avatar / description 只影响 UI 和 `@` 自动补全，不改变 `role.name`、capabilities、prompt 职责
+- 提及、任务分派、成员身份、assignee 一律稳定指向 `agent_binding_id`
 
 **status 推导：**
 - `"busy"` — 该 binding 有 `runs.status IN ('running', 'queued')` 的 run
 - `"offline"` — `GET /runtimes/:id/health` 返回非 200（runtime 不可达）
 - `"available"` — 其他情况
 
-**UI：** 左侧 Contacts 面板（可折叠），每个联系人卡片显示：avatar / displayName / runtimeKind chip / capabilities tags（最多显示 3 个，其余折叠）/ status badge（绿色 available / 黄色 busy / 灰色 offline）/ lastUsedAt（"3 天前"）。点击卡片展开详情，详情底部有"Start Chat"按钮。
+**UI：** 左侧 Contacts 面板（可折叠），每个联系人卡片显示：avatar / displayName（主）/ `roleName · runtimeName`（副）/ runtime 或 model chip / capability tags（最多显示 3 个，其余折叠）/ status badge（绿色 available / 黄色 busy / 灰色 offline）/ lastUsedAt。点击卡片展开详情，详情底部有 `Start Chat` 与 `Edit / Configure` 按钮。
 
 #### Scenario: Status 实时更新
 
@@ -54,9 +63,12 @@ type AgentContact = {
 
 The system SHALL allow users to create a custom agent through an inline wizard without leaving the current view.
 
+**UI 约束：** InlineAgentEditor MUST render as a HeroUI Modal with a dense, stepper-like single-page layout. It MUST NOT navigate away from the current workbench surface.
+
 **触发路径：**
-1. Contacts 面板右上角"+ New Agent"按钮
+1. Contacts 面板右上角 `+ New Agent` 按钮
 2. Chat InputBox 输入 `/create-agent` slash command
+3. 联系人详情中的 `Edit / Configure`
 
 **向导表单（覆盖式，不跳转页面）：**
 
@@ -87,7 +99,20 @@ type AgentCreationDraft = {
 3. Contacts 面板刷新，新 Agent 出现在列表顶部。
 4. Toast 提示"Agent 创建成功"，附"Start Chat"快捷按钮。
 
-**编辑已有 Agent：** 联系人详情页有"Edit"按钮，打开相同向导（预填已有数据），保存后更新 `roles` + `agent_bindings`。
+**编辑已有 Agent：** 联系人详情页有 `Edit / Configure` 按钮，打开相同向导（预填已有数据），通过 `PATCH /agents/contacts/:agentBindingId` 保存 contact fields / binding config，必要时同步更新 `roles`；删除入口使用 `DELETE /agents/contacts/:agentBindingId`。
+
+**联系人详情页字段：**
+- display name
+- avatar
+- description
+- role
+- runtime
+- model config
+- skills
+- capabilities
+- system prompt
+- Test Connection
+- Save
 
 #### Scenario: 成功创建自建 Agent
 

@@ -151,23 +151,35 @@ The system SHALL insert a system message into the chat timeline when a teammate 
 
 The system SHALL allow users to @mention one or more agents in a message to direct the Orchestrator's attention or force-include specific agents.
 
-`@AgentName` 语法在 InputBox 中触发自动补全（从 room participants 和 agent contacts 列表中搜索）；发送时消息携带 `mentions: AgentBindingId[]`。
+`@AgentName` autocomplete 在 InputBox 中同时搜索 room participants 和 agent contacts。UI 显示可读名称，但消息 payload 的稳定目标 MUST 是 `mentions?: MentionPayload[]`，且每个 mention item 都必须包含 `agentBindingId`。
+
+mention 规则：
+- `@联系人名`：精确解析到某个 `agent_binding_id`
+- `@角色名`：若房间内只有一个该 role，直接解析；若多个同 role，必须弹出 disambiguation（如 `Builder · Claude Code` / `Builder · OpenCode`）
+- `@all`：包含所有 room participants
 
 Orchestrator prompt 对 mentions 的处理指令：
 ```
-If the user @mentions specific agents, prioritize delegating to those agents for this task.
+If the user @mentions specific agents, prioritize delegating to those agent bindings for this task.
 If @all is used, involve all room participants.
 ```
 
-#### Scenario: @ 指定 Agent
+#### Scenario: @ 指定联系人
 
-- **WHEN** 用户发送"@Builder 帮我优化这个函数的性能"
-- **THEN** Orchestrator 优先将该任务分配给 Builder Agent；分派公告中显示"已将任务分配给 Builder（@指定）"
+- **WHEN** 用户发送"@前端构建者 帮我优化这个函数的性能"
+- **THEN** payload 中保存对应的 `agentBindingId`
+- **AND** Orchestrator 优先将该任务分配给该 binding；分派公告中显示联系人显示名
+
+#### Scenario: @角色名歧义时弹出选择
+
+- **WHEN** 房间里同时存在 `Builder · Claude Code` 和 `Builder · OpenCode`，用户输入 `@Builder`
+- **THEN** 输入框弹出 disambiguation 选项
+- **AND** 用户选择其一后，payload 保存选中的 `agentBindingId`
 
 #### Scenario: @ 自动补全
 
-- **WHEN** 用户在 InputBox 输入 "@B"
-- **THEN** 显示下拉列表，包含名称以 B 开头的 room participants（如 "Builder", "Backend"）
+- **WHEN** 用户在 InputBox 输入 `@B`
+- **THEN** 显示下拉列表，结果以联系人 `displayName` 为主、`roleName · runtimeName` 为副
 
 ---
 

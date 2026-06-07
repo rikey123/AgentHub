@@ -27,23 +27,39 @@ The system SHALL support fuzzy search over rooms via `GET /rooms?q=<keyword>`.
 
 ---
 
-### Requirement: 新建对话选择 Agent
+### Requirement: 联系人优先的新建对话流程
 
-The system SHALL present an Agent Contact Directory panel when the user initiates a new room, allowing selection of one or more agents before room creation.
+The system SHALL make Agent contacts the default entry point for creating a new room, while preserving the existing role/runtime/model/skills controls under an Advanced configuration section.
 
-选一个 Agent → 创建 `assisted` 模式 room，预加入该 Agent。  
-选多个 Agent → 用户选择 `squad` 或 `team` 模式 → 创建 room，预加入所有选中 Agent。  
-旧的 role/runtime/model picker 保留为"高级"折叠项，供需要精细配置的用户使用。
+默认流程：
+1. 选择联系人（搜索 Agent，显示 avatar / displayName / runtime chip / capability tags / status）
+2. 选择模式
+   - 单人默认可选 `Solo` 或 `Assisted`
+   - 多人默认可选 `Assisted` 或 `Team`
+   - `Squad` MAY 仅在 Advanced 中显示为 lightweight Team preset
+3. Advanced Configuration
+   - 对每个选中联系人可展开配置：role / runtime / model / skills / presence
+   - 旧的 role/runtime/model picker 不删除，只移动到 Advanced
+
+联系人本质上仍然是 `agent_binding` 的展示壳。最终创建 room 时保存的是 `agent_binding_id` 与相关高级配置，不创建第二套联系人实体。
 
 #### Scenario: 从联系人发起单聊
 
 - **WHEN** 用户点击联系人卡片上的"Start Chat"
-- **THEN** 创建 `assisted` room，Agent 预加入，用户进入该 room
+- **THEN** 打开 New Chat 流程并预选该联系人
+- **AND** 用户可在 `Solo` 与 `Assisted` 间选择其一后创建 room
 
-#### Scenario: 选多个 Agent 发起群聊
+#### Scenario: 多联系人默认可选 Assisted / Team
 
-- **WHEN** 用户在新建对话面板勾选 3 个 Agent，选择 `squad` 模式
-- **THEN** 创建 `squad` room，3 个 Agent 均作为初始参与者加入
+- **WHEN** 用户在新建对话面板勾选 3 个联系人
+- **THEN** 模式选择优先显示 `Assisted` 和 `Team`
+- **AND** `Squad` 仅在 Advanced 中可见（如启用）
+
+#### Scenario: Advanced 保留精细配置
+
+- **WHEN** 用户展开 Advanced Configuration
+- **THEN** 仍可逐联系人修改 role/runtime/model/skills/presence
+- **AND** 创建结果使用修改后的 `agent_binding` 配置，而不是默认联系人配置
 
 ---
 
@@ -142,9 +158,15 @@ The system SHALL allow users to pin messages as persistent context for Agent run
 
 **Pin 操作：**
 ```
-POST   /rooms/:id/messages/:msgId/pin   → messages.pinned_at = now()
-DELETE /rooms/:id/messages/:msgId/pin   → messages.pinned_at = NULL
+POST   /rooms/:id/messages/:msgId/pin   → messages.pinned_at = now()，并 publish `message.pinned`
+DELETE /rooms/:id/messages/:msgId/pin   → messages.pinned_at = NULL，并 publish `message.unpinned`
 ```
+
+事件 payload：
+- `message.pinned`（durable, both）`{ roomId, messageId, pinnedAt }`
+- `message.unpinned`（durable, both）`{ roomId, messageId }`
+
+前端主路径通过上述事件 patch Pinned Context drawer；REST response 可作为兜底刷新。
 
 **Context Assembly 优先级（更新后）：**
 1. Workspace-scoped pinned ContextItems（现有）

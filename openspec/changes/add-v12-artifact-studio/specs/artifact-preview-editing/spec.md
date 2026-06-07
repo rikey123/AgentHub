@@ -67,36 +67,42 @@ The system SHALL support generating web page, document, and presentation artifac
 
 ---
 
-### Requirement: Artifact 预览
+### Requirement: Artifact 预览与 Card UI Anatomy
 
-The system SHALL render artifact content inline in the chat and in a full-screen preview modal, with type-appropriate rendering.
+The system SHALL render artifact content inline in the chat and in a full-screen Artifact Studio modal, with type-appropriate rendering and a fixed HeroUI card anatomy.
+
+**所有 card 统一结构：**
+1. Header：图标 + title/filename + kind chip + status/version badge
+2. Body：缩略预览 / 摘要 / 页数 / 状态说明
+3. Footer actions：按卡片类型显示操作按钮
 
 **PreviewCard（web_page / web_app）：**
-- 内嵌 sandbox iframe，`sandbox="allow-scripts"`（不开放 allow-same-origin）
-- iframe src 指向 daemon preview server 颁发的短期 token URL（独立端口）
-- 操作区：Edit / Deploy / Download / Expand（全屏）
+- Body：固定比例 sandbox iframe 缩略预览
+- Footer：Edit / Deploy / Download / Expand
 
 **DocumentCard（document）：**
-- 内嵌 Markdown renderer（sanitized HTML，不执行脚本）
-- 操作区：Edit / Download / Expand
+- Body：Markdown 前几段摘要，sanitized renderer
+- Footer：Edit / Reference / Download / Expand
 
-**PresentationCard（presentation）：**
-- 内嵌 HTML slides viewer：
-  - 显示第 1 页幻灯片缩略图 + "N 页" 标注
-  - 点击 Expand 进入全屏幻灯片模式
-  - 全屏模式：方向键 / 左右滑动翻页，ESC 退出
-- 操作区：Edit / Download / Expand
+**PresentationCard（presentation / presentation_pptx）：**
+- `presentation`：HTML slides viewer，第 1 页缩略图 + slide count
+- `presentation_pptx`：PptViewer（officecli watch iframe）
+  - 状态：loading / installing officecli / ready / startFailed / installFailed
+  - fallback：Download
+- Footer：Prev / Next / Reference Slide / Download / Expand
 
-**ArtifactPreviewModal（全屏）：**
+**DeploymentCard** 由 deployment-publish capability 定义，但也遵守相同 Card anatomy。
+
+**ArtifactPreviewModal（Artifact Studio，全屏）：**
 
 所有 Card 点击 Expand 后打开 `ArtifactPreviewModal`，包含以下 tab：
 
 | Tab | 显示条件 | 内容 |
 |-----|---------|------|
 | Preview | 所有 kind | type-appropriate 渲染 |
-| Editor | kind != diff/worktree_diff/terminal | Monaco 编辑器 |
+| Editor | kind != diff/worktree_diff/terminal 且 binary != 1 | Monaco 编辑器 |
 | History | 有 artifact_versions | 版本历史列表 |
-| Raw | 所有 kind | 原始内容 + Copy 按钮 |
+| Raw | 所有 kind | 文本原始内容或 binary metadata + Download |
 
 #### Scenario: HTML 预览严格沙箱
 
@@ -112,9 +118,23 @@ The system SHALL render artifact content inline in the chat and in a full-screen
 
 ### Requirement: Artifact 版本历史
 
-The system SHALL record a new version snapshot each time an artifact's content changes, and allow restoring any prior version.
+The system SHALL record a new version snapshot each time an artifact's content changes, and allow restoring any prior version. Text and binary artifacts follow different storage branches.
 
-`artifact_versions` 表存储每次保存的内容快照（不可变追加写）。内容存储在 `artifact_files.new_content`；`artifact_versions.content` 是独立快照列。`artifacts` 表**不**新增 `content` 列。
+**文本版本分支：**
+- 内容存储在 `artifact_files.new_content`
+- `artifact_versions.content_encoding='text'`
+- `artifact_versions.content = 文本快照`
+- `artifact_versions.storage_path = NULL`
+
+**二进制版本分支（presentation_pptx / generic_file with binary）：**
+- 当前内容存储在 `artifact_files.content_path`
+- `artifact_files.binary = 1`
+- `artifact_files.new_sha256 = 当前文件 hash`
+- `artifact_versions.content_encoding='binary'`
+- `artifact_versions.content = NULL`
+- `artifact_versions.storage_path = 该版本受控文件路径`
+
+`artifacts` 表**不**新增 `content` 列。
 
 **版本创建触发点：**
 1. 用户在 Editor tab 点击 Save（可选 commit message）
@@ -124,30 +144,40 @@ The system SHALL record a new version snapshot each time an artifact's content c
 **API：**
 ```
 GET    /artifacts/:id/versions                   → 版本列表
-GET    /artifacts/:id/versions/:version          → 单个版本详情（含 content）
-POST   /artifacts/:id/versions/:version/restore  → 创建新版本（内容 = 指定版本快照）
-GET    /artifacts/:id/versions/:from/diff/:to    → 两版本间 unified diff
+GET    /artifacts/:id/versions/:version          → 文本返回 content；binary 返回 storagePath/filename/mimeType/sizeBytes/newSha256/downloadUrl
+POST   /artifacts/:id/versions/:version/restore  → 创建新版本
+GET    /artifacts/:id/versions/:from/diff/:to    → 文本返回 unified diff；binary 返回 metadata diff（filename/size/hash）
 ```
 
 **History tab UI：**
 - 版本列表：version number / created_at（相对时间）/ created_by / message
-- 点击某版本加载只读预览（带 "当前查看版本 N" 提示）
-- "Compare with current" → 只读 DiffModal（unified diff）
-- Restore 按钮：创建新版本（内容 = 历史版本快照），更新 `artifact_files.new_content`，发 `artifact.version.created`
+- 文本产物：点击某版本加载只读预览；"Compare with current" → 只读 DiffModal（unified diff）
+- 二进制产物：点击某版本显示元数据（filename / mimeType / sizeBytes / newSha256）；提供 Download / Restore，不显示 Monaco diff
+- Restore：文本恢复 `artifact_files.new_content`；binary 复制 `storage_path` 到新版本路径并更新 `artifact_files.content_path` / `new_sha256` / `size_bytes`
 
-#### Scenario: 保存创建新版本
+#### Scenario: 文本保存创建新版本
 
-- **WHEN** 用户在 Editor tab 修改内容后点击 Save，输入 message "修改按钮颜色为蓝色"
-- **THEN** `artifact_versions` 新增一行（version = 旧版本 + 1，message = "修改按钮颜色为蓝色"）；History tab 出现新条目；artifact card 版本 badge 更新
+- **WHEN** 用户在 Editor tab 修改 HTML 内容后点击 Save，输入 message "修改按钮颜色为蓝色"
+- **THEN** `artifact_versions` 新增一行（`content_encoding='text'`，version = 旧版本 + 1）；History tab 出现新条目；artifact card 版本 badge 更新
 
-#### Scenario: 恢复历史版本
+#### Scenario: 文本恢复历史版本
 
 - **WHEN** 用户在 History tab 选择版本 2（当前是版本 5），点击 Restore
-- **THEN** `artifact_versions` 新增版本 6（content = 版本 2 快照），`artifact_files.new_content` 更新为版本 2 内容；不是 in-place 覆盖，历史始终向前
+- **THEN** `artifact_versions` 新增版本 6（`content = 版本 2 快照`），`artifact_files.new_content` 更新为版本 2 内容；不是 in-place 覆盖，历史始终向前
+
+#### Scenario: 二进制恢复历史版本
+
+- **WHEN** 用户在 History tab 选择一个 PPTX 历史版本，点击 Restore
+- **THEN** 系统复制该版本的 `storage_path` 到新的受控路径，创建新版本（`content_encoding='binary'`），更新 `artifact_files.content_path` / `new_sha256` / `size_bytes`
+
+#### Scenario: 二进制版本比较
+
+- **WHEN** 用户比较两个 PPTX 版本
+- **THEN** UI 显示 metadata diff（文件名、大小、hash 变化），并提供两个版本的 Download 链接；不显示文本 unified diff
 
 #### Scenario: Agent 更新产物创建新版本
 
-- **WHEN** Agent 对已存在的 artifact 再次调用 `room.publish_artifact`（例如用户说"把标题改成红色"）
+- **WHEN** Agent 对已存在的 artifact 再次调用 `room.publish_artifact`
 - **THEN** 自动创建新版本（created_by = agentId）；聊天流出现更新后的 Card；旧版本保留在 History tab
 
 ---
@@ -178,28 +208,30 @@ The system SHALL provide a Monaco-based code editor in `ArtifactPreviewModal` fo
 
 ### Requirement: 选区引用入聊天（@artifact / @workspace pill 语法）
 
-The system SHALL support inserting artifact line-range references into the chat InputBox as interactive pills.
+The system SHALL support inserting artifact line-range references into the chat InputBox as structured pills.
 
-**两种引用 token：**
+**支持的 token：**
 
 ```
 @artifact:<artifactId>#L12-L30    → artifact 指定行范围
+@artifact:<artifactId>#slide=3    → artifact 指定 slide
 @artifact:<artifactId>            → artifact 整体（< 2KB 注入全文，≥ 2KB 注入前 50 行 + 提示）
 @workspace:<relativePath>#L5-L20  → workspace 文件指定行范围
+@AgentName                        → agent mention（解析到 agent_binding_id）
 ```
 
 **插入触发：**
-1. 在 Editor tab 选中代码行 → 悬浮工具栏"Reference in Chat"按钮
-2. 在 Presentation/Document 选中段落 → 同样有"Reference in Chat"选项
-3. 在 ArtifactCard 右键菜单 → "Copy Reference"
+1. 在 Editor tab 选中代码行 → 悬浮工具栏 `Reference in Chat`
+2. 在 Presentation/Document 选中段落 / 当前 slide → `Reference in Chat`
+3. 在 ArtifactCard 右键菜单 → `Copy Reference`
 
-**InputBox pill 渲染：** `@filename.html#L12-L30`（蓝色 pill，带 × 删除按钮）；不展开内容，只在发送时解析。
+**InputBox pill 渲染：** 友好名称如 `@report.md#L10-L25`、`@deck.pptx#slide=3`；pill 可删除；前端可同时保留 token string 与 structured ref metadata。
 
 **发送时处理（daemon context-ref resolver）：**
-1. 解析消息中的所有 `@artifact:<id>#Lx-Ly` token。
-2. 从 `artifact_files.new_content`（当前版本）或 `artifact_versions.content`（历史版本）提取对应行范围。
-3. 注入 `<context-ref type="artifact" id="..." lines="12-30">` XML 块到 prompt context assembly（在 MissionBrief 之后、正文上下文之前）。
-4. `@workspace:<path>#Lx-Ly` 同理，从 workspace 文件系统读取。
+1. 解析 `@artifact:<id>#Lx-Ly` / `@artifact:<id>#slide=N` / `@workspace:<path>#Lx-Ly`
+2. 文本内容从 `artifact_files.new_content`（当前版本）或 `artifact_versions.content`（历史版本）提取行范围
+3. slide 引用按 capability 定义映射为对应内容
+4. 注入 `<context-ref>` XML block 到 prompt context assembly（在 MissionBrief 之后、正文上下文之前）
 
 #### Scenario: 选区引用 → Agent 修改
 

@@ -156,14 +156,20 @@ The system SHALL provide a unified preview contract that derives preview behavio
 
 The system SHALL remove the `type=deployment` 501 placeholder. Deployments are now handled by the independent `deployments` table and `deployment-publish` capability.
 
-`POST /artifacts { type: "deployment", ... }` 不再返回 501。
+`POST /artifacts { type: "deployment", ... }` MUST NOT create an artifact row. The route SHALL either be removed or return `400/410 { error: "deployment moved to /deployments" }`.
 
-Agent 调用 `room.deploy_artifact(...)` 创建 `deployments` 行，而不是 `artifacts` 行。
+Agent deployments MUST use `room.deploy_artifact(...)` or `POST /deployments`, which create `deployments` rows rather than `artifacts` rows.
 
-#### Scenario: deployment 501 不再返回
+#### Scenario: 旧 artifacts deployment 路径不再创建 artifact
+
+- **WHEN** 客户端调用 `POST /artifacts { type: "deployment", ... }`
+- **THEN** 系统返回 `400` 或 `410`，提示 deployment 已迁移到 `/deployments`
+- **AND** 不创建 `artifacts` 行
+
+#### Scenario: room.deploy_artifact 创建 deployment
 
 - **WHEN** Agent 调用 `room.deploy_artifact({ artifactId, kind: "preview-url" })`
-- **THEN** 返回成功，创建 `deployments` 行；不返回 501
+- **THEN** 返回成功，创建 `deployments` 行；不触发旧 501 占位逻辑
 
 ## REMOVED Requirements
 
