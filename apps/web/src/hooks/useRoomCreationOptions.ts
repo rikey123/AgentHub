@@ -9,6 +9,7 @@ export interface AgentBindingSummary {
   roleId: string;
   runtimeId: string;
   modelConfigId: string | null;
+  disabledAt?: number;
 }
 
 export interface RoomCreationOptions {
@@ -97,11 +98,13 @@ function normalizeAgentBindings(payload: unknown): AgentBindingSummary[] {
     const roleId = stringField(record.roleId ?? record.role_id);
     const runtimeId = stringField(record.runtimeId ?? record.runtime_id);
     if (!id || !roleId || !runtimeId) return [];
+    const disabledAt = numberField(record.disabledAt ?? record.disabled_at);
     return [{
       id,
       roleId,
       runtimeId,
-      modelConfigId: nullableString(record.modelConfigId ?? record.model_config_id)
+      modelConfigId: nullableString(record.modelConfigId ?? record.model_config_id),
+      ...(disabledAt !== undefined ? { disabledAt } : {})
     }];
   });
 }
@@ -122,4 +125,8 @@ function stringField(value: unknown): string | undefined {
 
 function nullableString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function numberField(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }

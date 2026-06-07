@@ -1947,6 +1947,19 @@ describe("daemon M1.4 composition", () => {
     expect(listed.status).toBe(200);
     expect(listBody.agentBindings.map((binding) => binding.id)).toContain(bindingId);
 
+    const disabledAt = Date.now();
+    daemon.database.sqlite.prepare("UPDATE agent_bindings SET disabled_at = ?, updated_at = ? WHERE id = ?").run(disabledAt, disabledAt, bindingId);
+
+    const defaultList = await fetch(`${baseUrl}/agent-bindings?workspaceId=${encodeURIComponent(workspaceId)}`);
+    const defaultListBody = await defaultList.json() as { readonly agentBindings: readonly { readonly id: string }[] };
+    expect(defaultList.status).toBe(200);
+    expect(defaultListBody.agentBindings.map((binding) => binding.id)).not.toContain(bindingId);
+
+    const includeDisabledList = await fetch(`${baseUrl}/agent-bindings?workspaceId=${encodeURIComponent(workspaceId)}&includeDisabled=true`);
+    const includeDisabledBody = await includeDisabledList.json() as { readonly agentBindings: readonly { readonly id: string; readonly disabledAt?: number; readonly isDisabled?: boolean }[] };
+    expect(includeDisabledList.status).toBe(200);
+    expect(includeDisabledBody.agentBindings).toContainEqual(expect.objectContaining({ id: bindingId, disabledAt, isDisabled: true }));
+
     const fetched = await fetch(`${baseUrl}/agent-bindings/${bindingId}`);
     const fetchedBody = await fetched.json() as { readonly agentBinding?: { readonly id: string; readonly runtime: { readonly kind: string } } };
     expect(fetched.status).toBe(200);

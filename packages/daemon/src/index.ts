@@ -3117,6 +3117,14 @@ function deleteRole(ctx: RouteContext, roleId: string): void {
 
 function agentBindings(ctx: RouteContext, url: URL): void {
   const workspaceId = url.searchParams.get("workspaceId");
+  const includeDisabled = url.searchParams.get("includeDisabled") === "true" || url.searchParams.get("includeDisabled") === "1";
+  const where: string[] = [];
+  const params: unknown[] = [];
+  if (workspaceId !== null) {
+    where.push("agent_bindings.workspace_id = ?");
+    params.push(workspaceId);
+  }
+  if (!includeDisabled) where.push("agent_bindings.disabled_at IS NULL");
   const rows = all(
     ctx.database,
     `SELECT
@@ -3137,9 +3145,9 @@ function agentBindings(ctx: RouteContext, url: URL): void {
     LEFT JOIN roles ON roles.id = agent_bindings.role_id
     LEFT JOIN runtimes ON runtimes.id = agent_bindings.runtime_id
     LEFT JOIN model_configs ON model_configs.id = agent_bindings.model_config_id
-    ${workspaceId === null ? "" : "WHERE agent_bindings.workspace_id = ?"}
+    ${where.length === 0 ? "" : `WHERE ${where.join(" AND ")}`}
     ORDER BY agent_bindings.created_at ASC`,
-    ...(workspaceId === null ? [] : [workspaceId])
+    ...params
   ).map((row) => normalizeAgentBindingRow(row as Record<string, unknown>));
   json(ctx.res, 200, { agentBindings: rows });
 }
@@ -3380,6 +3388,7 @@ function normalizeAgentBindingRow(row: Record<string, unknown>): Record<string, 
     runtimeId: row.runtime_id,
     modelConfigId: row.model_config_id,
     overridePermissionProfileId: row.override_permission_profile_id,
+    ...(typeof row.disabled_at === "number" ? { disabledAt: row.disabled_at, isDisabled: true } : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };

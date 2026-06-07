@@ -459,6 +459,7 @@ export async function ensureAgentBindingsForParticipants(options: {
 }): Promise<{ readonly bindingIds: string[]; readonly ensuredBindings: AgentBindingSummary[]; readonly createdBindings: AgentBindingSummary[] }> {
   const known = new Map<string, AgentBindingSummary>();
   for (const binding of options.existingBindings) {
+    if (binding.disabledAt !== undefined) continue;
     known.set(agentBindingKey(binding.roleId, binding.runtimeId, binding.modelConfigId), binding);
   }
 

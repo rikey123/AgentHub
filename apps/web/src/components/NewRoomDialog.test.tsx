@@ -277,4 +277,47 @@ describe("NewRoomDialog create-room contract", () => {
       }
     ]);
   });
+
+  it("does not reuse disabled existing bindings when preparing room participants", async () => {
+    const requests: Array<{ path: string; body: unknown }> = [];
+    const fetchImpl = (async (input, init) => {
+      requests.push({ path: String(input), body: JSON.parse(String(init?.body ?? "{}")) });
+      return new Response(JSON.stringify({
+        agentBinding: {
+          id: "binding_active_lead",
+          roleId: "role_lead",
+          runtimeId: "native-default",
+          modelConfigId: "mc_gpt4o"
+        }
+      }), { status: 201, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+
+    const result = await ensureAgentBindingsForParticipants({
+      fetchImpl,
+      existingBindings: [{
+        id: "binding_disabled_lead",
+        roleId: "role_lead",
+        runtimeId: "native-default",
+        modelConfigId: "mc_gpt4o",
+        disabledAt: 1234
+      }],
+      participants: [
+        {
+          roleId: "role_lead",
+          runtimeId: "native-default",
+          runtimeKind: "native",
+          modelConfigId: "mc_gpt4o",
+          defaultPresence: "active"
+        }
+      ]
+    });
+
+    expect(result.bindingIds).toEqual(["binding_active_lead"]);
+    expect(requests).toEqual([
+      {
+        path: "/agent-bindings",
+        body: { roleId: "role_lead", runtimeId: "native-default", modelConfigId: "mc_gpt4o" }
+      }
+    ]);
+  });
 });
