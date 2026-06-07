@@ -32,22 +32,12 @@ export function MessageItem(props: MessageItemProps) {
   const testId = `message-bubble-${isUser ? "user" : isSystem ? "system" : "agent"}`;
   const textPreview = publicAgentTextPreview(message.text, message.senderType, isStreaming);
   const visibleText = textPreview.collapsed && !expanded ? textPreview.preview : message.text;
+  const selectMessage = () => {
+    onSelect?.();
+  };
 
   return (
     <div
-      role="button"
-      tabIndex={0}
-      onClick={(e) => {
-        e.stopPropagation();
-        onSelect?.();
-      }}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          e.stopPropagation();
-          onSelect?.();
-        }
-      }}
       className={[
         "group mx-auto my-1.5 w-full max-w-[1280px] px-6 py-1 transition-colors",
         isSelected ? "rounded-2xl bg-accent-soft" : ""
@@ -82,6 +72,11 @@ export function MessageItem(props: MessageItemProps) {
           ) : null}
 
           <div
+            onClick={(e) => {
+              e.stopPropagation();
+              if (!shouldSelectMessageFromTarget(e.target)) return;
+              selectMessage();
+            }}
             className={[
               "relative w-fit rounded-[20px] px-4 py-3 text-sm leading-6 shadow-sm",
               isUser
@@ -139,7 +134,10 @@ export function MessageItem(props: MessageItemProps) {
             ) : null}
           </div>
 
-          <footer className={["mt-1 flex items-center gap-1.5 text-xs", isUser ? "justify-end" : "justify-start"].join(" ")}>
+          <footer
+            className={["mt-1 flex items-center gap-1.5 text-xs", isUser ? "justify-end" : "justify-start"].join(" ")}
+            onClick={(e) => e.stopPropagation()}
+          >
             <span className="shrink-0 text-muted">{formatTime(message.createdAt)}</span>
             <Dropdown>
               <Dropdown.Trigger
@@ -214,11 +212,7 @@ function PartView({ part, csrfFetch }: { part: MessageViewModel["parts"][number]
     case "text":
       return <p className="text-sm whitespace-pre-wrap">{part.text}</p>;
     case "code":
-      return (
-        <pre className="ah-mono overflow-auto rounded bg-surface-secondary p-2 text-xs">
-          {part.text}
-        </pre>
-      );
+      return <CodePartView part={part} />;
     case "tool_call":
       return (
         <Card variant="transparent" className="border border-border">
@@ -251,6 +245,52 @@ function PartView({ part, csrfFetch }: { part: MessageViewModel["parts"][number]
       return null;
     }
   }
+}
+
+const MESSAGE_ACTION_SELECTOR = "button,a,input,textarea,select,[role='button'],[data-message-action]";
+
+export function shouldSelectMessageFromTarget(target: EventTarget | null): boolean {
+  if (!target || typeof target !== "object" || !("closest" in target)) return true;
+  const closest = (target as { readonly closest?: unknown }).closest;
+  return typeof closest !== "function" || closest.call(target, MESSAGE_ACTION_SELECTOR) === null;
+}
+
+function CodePartView({ part }: { part: Extract<MessageViewModel["parts"][number], { type: "code" }> }) {
+  const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState<string | undefined>(undefined);
+
+  const copyCode = () => {
+    setCopyError(undefined);
+    const writer = globalThis.navigator?.clipboard?.writeText;
+    if (!writer) {
+      setCopyError("Clipboard is unavailable.");
+      return;
+    }
+
+    void writer.call(globalThis.navigator.clipboard, part.text)
+      .then(() => {
+        setCopied(true);
+        globalThis.setTimeout(() => setCopied(false), 1500);
+      })
+      .catch((err: unknown) => {
+        setCopyError(err instanceof Error ? err.message : String(err));
+      });
+  };
+
+  return (
+    <div className="overflow-hidden rounded bg-surface-secondary">
+      <div className="flex items-center justify-between gap-2 border-b border-border/70 px-2 py-1">
+        <span className="text-[11px] font-semibold text-muted">{part.lang}</span>
+        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onPress={copyCode} aria-label="Copy code block">
+          {copied ? "Copied" : "Copy Code"}
+        </Button>
+      </div>
+      <pre className="ah-mono overflow-auto p-2 text-xs">
+        {part.text}
+      </pre>
+      {copyError ? <p className="px-2 pb-2 text-xs text-danger">{copyError}</p> : null}
+    </div>
+  );
 }
 
 function ArtifactAttachmentCard({ part, csrfFetch }: { part: Extract<MessageViewModel["parts"][number], { type: "attachment" }>; csrfFetch: typeof fetch }) {

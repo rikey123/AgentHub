@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { MessageViewModel } from "../../types.ts";
-import { MessageItem } from "./MessageItem.tsx";
+import { MessageItem, shouldSelectMessageFromTarget } from "./MessageItem.tsx";
 
 describe("MessageItem public chat rendering", () => {
   it("collapses long completed agent text in the public chat bubble", () => {
@@ -94,6 +94,43 @@ describe("MessageItem public chat rendering", () => {
     expect(html).toContain("Markdown");
     expect(html).toContain("4.0 KB");
     expect(html).toContain("Open file preview");
+  });
+
+  it("renders a Copy Code action for code parts", () => {
+    const html = renderToStaticMarkup(createElement(MessageItem, {
+      message: messageFixture({
+        text: "Use this snippet.",
+        parts: [{ type: "code", seq: 1, lang: "ts", text: "const apiBase = '/api/v2';" }]
+      }),
+      csrfFetch: vi.fn<typeof fetch>()
+    }));
+
+    expect(html).toContain("const apiBase = &#x27;/api/v2&#x27;;");
+    expect(html).toContain("Copy Code");
+    expect(html).toContain("Copy code block");
+  });
+
+  it("does not expose the message wrapper as a button when nested actions render", () => {
+    const html = renderToStaticMarkup(createElement(MessageItem, {
+      message: messageFixture({
+        text: "Use this snippet.",
+        parts: [{ type: "code", seq: 1, lang: "ts", text: "const apiBase = '/api/v2';" }]
+      }),
+      onSelect: vi.fn(),
+      csrfFetch: vi.fn<typeof fetch>()
+    }));
+
+    expect(html).toContain("Copy Code");
+    expect(html).not.toContain("role=\"button\"");
+  });
+
+  it("does not select the message when a nested action is clicked", () => {
+    const actionTarget = {
+      closest: vi.fn((selector: string) => selector.includes("button") ? {} : null)
+    } as unknown as Element;
+
+    expect(shouldSelectMessageFromTarget(actionTarget)).toBe(false);
+    expect(actionTarget.closest).toHaveBeenCalledWith("button,a,input,textarea,select,[role='button'],[data-message-action]");
   });
 });
 
