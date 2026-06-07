@@ -34,16 +34,23 @@ describe("RoomList V1.2 behavior", () => {
     expect(orderedRoomsForList(rooms, "provider").map((room) => room.id)).toEqual(["message"]);
   });
 
-  it("does not render inert pin archive action labels before handlers exist", () => {
+  it("renders pin and unpin room actions without exposing archive", () => {
     const html = renderToStaticMarkup(createElement(RoomList, {
-      rooms: [roomFixture({ id: "room-1", title: "Room 1", pinnedAt: 123 })],
+      rooms: [
+        roomFixture({ id: "room-1", title: "Room 1" }),
+        roomFixture({ id: "room-2", title: "Room 2", pinnedAt: 123 })
+      ],
       activeRoomId: "room-1",
       onSelect: vi.fn(),
-      onCreate: vi.fn()
+      onCreate: vi.fn(),
+      onTogglePin: vi.fn()
     }));
 
-    expect(html).not.toContain("Unpin");
-    expect(html).not.toContain("Pin");
+    expect(html).toContain("Pin room Room 1");
+    expect(html).toContain("Unpin room Room 2");
+    expect(html).toContain("Open room Room 1");
+    expect(html).not.toContain("role=\"listbox\"");
+    expect(html).not.toContain("role=\"option\"");
     expect(html).not.toContain("Archive");
   });
 });

@@ -87,7 +87,7 @@ vi.mock("./components/CommandPalette.tsx", () => ({ CommandPalette: mocks.comman
 vi.mock("./components/KeymapModal.tsx", () => ({ KeymapModal: () => null }));
 vi.mock("./components/NewRoomDialog.tsx", () => ({ NewRoomDialog: mocks.newRoomDialog }));
 
-import App, { ChatRoomLayout, createRoomInputForContactStartChat, messagePinRequestFor, workbenchCenterModeForRail, workbenchNavigationForRoomOpen } from "./App.tsx";
+import App, { ChatRoomLayout, createRoomInputForContactStartChat, messagePinRequestFor, roomPinRequestFor, workbenchCenterModeForRail, workbenchNavigationForRoomOpen } from "./App.tsx";
 
 function renderApp() {
   mocks.stateIndex = 0;
@@ -183,6 +183,17 @@ describe("App integration wiring", () => {
     });
   });
 
+  it("uses room-scoped pin routes when toggling a room pin", () => {
+    expect(roomPinRequestFor("room-1", true)).toEqual({
+      url: "/rooms/room-1/pin",
+      method: "DELETE"
+    });
+    expect(roomPinRequestFor("room-1", false)).toEqual({
+      url: "/rooms/room-1/pin",
+      method: "POST"
+    });
+  });
+
   it("maps contacts and artifacts rail selection to dedicated center views", () => {
     expect(workbenchCenterModeForRail("contacts", false)).toBe("contacts");
     expect(workbenchCenterModeForRail("artifacts", false)).toBe("artifacts");
@@ -242,6 +253,19 @@ describe("App integration wiring", () => {
       participants: []
     });
     expectRoomOpenState("room_created");
+  });
+
+  it("passes room pin toggles to RoomList and calls the daemon pin endpoint", async () => {
+    renderApp();
+
+    const [roomListProps] = mocks.roomList.mock.calls[0] as unknown as [{
+      readonly onTogglePin: (roomId: string, isPinned: boolean) => void;
+    }];
+    roomListProps.onTogglePin("room-1", false);
+    roomListProps.onTogglePin("room-2", true);
+
+    expect(mocks.csrfFetch).toHaveBeenNthCalledWith(1, "/rooms/room-1/pin", { method: "POST" });
+    expect(mocks.csrfFetch).toHaveBeenNthCalledWith(2, "/rooms/room-2/pin", { method: "DELETE" });
   });
 
   it("builds an assisted room input for starting chat from a contact", () => {

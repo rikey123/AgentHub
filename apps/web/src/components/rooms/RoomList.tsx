@@ -8,6 +8,7 @@ interface RoomListProps {
   activeRoomId?: string | undefined;
   onSelect: (id: string) => void;
   onCreate: () => void;
+  onTogglePin?: ((id: string, isPinned: boolean) => void) | undefined;
 }
 
 function roomInitials(title: string) {
@@ -70,7 +71,7 @@ function roomSearchText(room: RoomViewModel): string {
   ].join(" ").toLowerCase();
 }
 
-export function RoomList({ rooms, activeRoomId, onSelect, onCreate }: RoomListProps) {
+export function RoomList({ rooms, activeRoomId, onSelect, onCreate, onTogglePin }: RoomListProps) {
   const [query, setQuery] = useState("");
 
   const filtered = useMemo(() => {
@@ -118,7 +119,7 @@ export function RoomList({ rooms, activeRoomId, onSelect, onCreate }: RoomListPr
       </div>
 
       <ScrollShadow className="flex-1 overflow-auto" orientation="vertical">
-        <ul role="listbox" aria-label="Rooms" className="flex flex-col gap-2 p-2">
+        <ul aria-label="Rooms" className="flex flex-col gap-2 p-2">
           {filtered.length === 0 ? (
             <li className="rounded-2xl border border-dashed border-border bg-overlay/60 px-4 py-8 text-center text-sm text-muted">
               {query ? "没有查找到相应的房间。" : "No rooms yet. Create one to start."}
@@ -128,29 +129,25 @@ export function RoomList({ rooms, activeRoomId, onSelect, onCreate }: RoomListPr
             const active = room.id === activeRoomId;
             const hasActiveRun = room.runs.some((r) => r.status === "running" || r.status === "starting");
             const preview = roomPreview(room);
+            const isPinned = room.pinnedAt !== undefined;
             return (
               <li
                 key={room.id}
-                role="option"
-                aria-selected={active}
-                aria-current={active ? "true" : undefined}
                 data-testid={`room-list-item-${room.id}`}
-                onClick={() => onSelect(room.id)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    onSelect(room.id);
-                  }
-                }}
-                tabIndex={0}
                 className={[
-                  "group relative cursor-pointer rounded-2xl border px-3 py-3 text-sm shadow-sm transition-all",
+                  "group relative rounded-2xl border px-3 py-3 text-sm shadow-sm transition-all",
                   active
                     ? "border-accent bg-accent-soft text-accent-soft-foreground shadow-[0_14px_30px_color-mix(in_oklab,var(--accent)_18%,transparent)]"
                     : "border-transparent bg-overlay/68 hover:border-border hover:bg-overlay hover:shadow-[var(--surface-shadow)]"
                 ].join(" ")}
               >
-                <div className="flex gap-3">
+                <button
+                  type="button"
+                  aria-current={active ? "true" : undefined}
+                  aria-label={`Open room ${room.title}`}
+                  className="flex w-full gap-3 rounded-xl text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                  onClick={() => onSelect(room.id)}
+                >
                   <div
                     className={[
                       "flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-xs font-bold uppercase",
@@ -167,9 +164,21 @@ export function RoomList({ rooms, activeRoomId, onSelect, onCreate }: RoomListPr
                     </div>
                     <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted">{preview}</p>
                   </div>
-                </div>
+                </button>
 
                 <div className="mt-3 flex flex-wrap items-center gap-1.5 pl-[52px]">
+                  {onTogglePin ? (
+                    <Button
+                      size="sm"
+                      variant={isPinned ? "secondary" : "ghost"}
+                      className="h-7 px-2 text-xs"
+                      aria-label={`${isPinned ? "Unpin" : "Pin"} room ${room.title}`}
+                      data-testid={`room-list-${isPinned ? "unpin" : "pin"}-${room.id}`}
+                      onPress={() => onTogglePin(room.id, isPinned)}
+                    >
+                      {isPinned ? "Unpin" : "Pin"}
+                    </Button>
+                  ) : null}
                   <Chip size="sm" variant="soft" color="default">{roomModeLabel(room.mode)}</Chip>
                   <Chip size="sm" variant="soft" color="default">{room.participants.length} 名成员</Chip>
                   {hasActiveRun ? (

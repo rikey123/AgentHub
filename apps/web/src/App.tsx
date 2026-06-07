@@ -46,6 +46,13 @@ export function messagePinRequestFor(roomId: string, messageId: string, isPinned
   };
 }
 
+export function roomPinRequestFor(roomId: string, isPinned: boolean): { readonly url: string; readonly method: "POST" | "DELETE" } {
+  return {
+    url: `/rooms/${encodeURIComponent(roomId)}/pin`,
+    method: isPinned ? "DELETE" : "POST"
+  };
+}
+
 export function workbenchCenterModeForRail(rail: RailItem, hasActiveRoom: boolean): "home" | "room" | "contacts" | "artifacts" {
   if (rail === "contacts") return "contacts";
   if (rail === "artifacts") return "artifacts";
@@ -223,6 +230,11 @@ export default function App() {
     const request = messagePinRequestFor(activeRoomId, id, message?.pinnedAt !== undefined);
     await csrfFetch(request.url, { method: request.method });
   }, [activeRoom, activeRoomId, csrfFetch]);
+
+  const handleToggleRoomPin = useCallback(async (roomId: string, isPinned: boolean) => {
+    const request = roomPinRequestFor(roomId, isPinned);
+    await csrfFetch(request.url, { method: request.method });
+  }, [csrfFetch]);
 
   const handleRegenerate = useCallback(async (id: string) => {
     await csrfFetch(`/messages/${encodeURIComponent(id)}/regenerate`, { method: "POST" });
@@ -449,6 +461,7 @@ export default function App() {
             activeRoomId={activeRoomId}
             onSelect={openRoom}
             onCreate={openNewRoom}
+            onTogglePin={(roomId, isPinned) => void handleToggleRoomPin(roomId, isPinned)}
           />
         }
         center={center}
