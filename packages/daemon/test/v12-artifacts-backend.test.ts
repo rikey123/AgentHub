@@ -373,6 +373,11 @@ describe("V1.2 artifact backend routes", () => {
       adapter_id: "opencode",
       default_presence: "active"
     });
+    const joinedEvent = currentDaemon().database.sqlite.prepare("SELECT payload FROM events WHERE room_id = ? AND type = 'agent.joined' AND json_extract(payload, '$.agentId') = ?").get(payload.data?.roomId, created.agentBindingId) as { readonly payload: string } | undefined;
+    expect(JSON.parse(joinedEvent?.payload ?? "{}")).toMatchObject({
+      agentId: created.agentBindingId,
+      adapterId: "opencode"
+    });
   });
 
   it("rejects disabled role/runtime bindings as initial room participants", async () => {

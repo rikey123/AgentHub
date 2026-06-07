@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   roomList: vi.fn(() => null),
   projectorRooms: new Map<string, unknown>(),
   stateOverrides: new Map<number, unknown>(),
+  stateOverridesByInitialValue: new Map<unknown, unknown>(),
   stateCalls: [] as Array<{ readonly index: number; readonly value: unknown }>,
   stateIndex: 0
 }));
@@ -28,7 +29,11 @@ vi.mock("react", async () => {
       const [value] = actual.useState(initialState);
       const index = mocks.stateIndex;
       mocks.stateIndex += 1;
-      const currentValue = mocks.stateOverrides.has(index) ? mocks.stateOverrides.get(index) as T : value;
+      const currentValue = mocks.stateOverrides.has(index)
+        ? mocks.stateOverrides.get(index) as T
+        : mocks.stateOverridesByInitialValue.has(value)
+          ? mocks.stateOverridesByInitialValue.get(value) as T
+          : value;
       const setValue = (next: T | ((previous: T) => T)) => {
         mocks.stateCalls.push({
           index,
@@ -106,6 +111,7 @@ describe("App integration wiring", () => {
     mocks.roomList.mockClear();
     mocks.projectorRooms.clear();
     mocks.stateOverrides.clear();
+    mocks.stateOverridesByInitialValue.clear();
     mocks.stateCalls = [];
     mocks.stateIndex = 0;
   });
@@ -257,7 +263,7 @@ describe("App integration wiring", () => {
 
   it("creates and opens a room from the contacts rail Start Chat action", async () => {
     mocks.sdk.createRoom.mockResolvedValue({ data: { roomId: "room_contact" } });
-    mocks.stateOverrides.set(12, "contacts");
+    mocks.stateOverridesByInitialValue.set("chat", "contacts");
     renderApp();
 
     const [contactsProps] = mocks.contactsRailContainer.mock.calls[0] as unknown as [{
@@ -286,5 +292,117 @@ describe("App integration wiring", () => {
       agentBindingId: "binding_builder"
     }));
     expectRoomOpenState("room_contact");
+  });
+
+  it("ignores repeated contact Start Chat requests while creation is pending", async () => {
+    let resolveCreateRoom: (value: { readonly data: { readonly roomId: string } }) => void = () => undefined;
+    mocks.sdk.createRoom.mockReturnValue(new Promise((resolve) => {
+      resolveCreateRoom = resolve;
+    }));
+    mocks.stateOverridesByInitialValue.set("chat", "contacts");
+    renderApp();
+
+    const [contactsProps] = mocks.contactsRailContainer.mock.calls[0] as unknown as [{
+      readonly onStartChat: (contact: {
+        readonly agentBindingId: string;
+        readonly displayName: string;
+        readonly roleId: string;
+        readonly runtimeKind: string;
+        readonly capabilities: readonly string[];
+        readonly status: "available";
+      }) => Promise<void>;
+    }];
+    const contact = {
+      agentBindingId: "binding_builder",
+      displayName: "Frontend Builder",
+      roleId: "role_builder",
+      runtimeKind: "opencode",
+      capabilities: ["code.edit"],
+      status: "available" as const
+    };
+
+    const first = contactsProps.onStartChat(contact);
+    const second = contactsProps.onStartChat(contact);
+
+    expect(mocks.sdk.createRoom).toHaveBeenCalledTimes(1);
+    resolveCreateRoom({ data: { roomId: "room_contact" } });
+    await Promise.all([first, second]);
+  });
+
+  it("allows different contacts to start chats while another contact is pending", async () => {
+    let resolveFirst: (value: { readonly data: { readonly roomId: string } }) => void = () => undefined;
+    let resolveSecond: (value: { readonly data: { readonly roomId: string } }) => void = () => undefined;
+    mocks.sdk.createRoom
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveFirst = resolve;
+      }))
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveSecond = resolve;
+      }));
+    mocks.stateOverridesByInitialValue.set("chat", "contacts");
+    renderApp();
+
+    const [contactsProps] = mocks.contactsRailContainer.mock.calls[0] as unknown as [{
+      readonly onStartChat: (contact: {
+        readonly agentBindingId: string;
+        readonly displayName: string;
+        readonly roleId: string;
+        readonly runtimeKind: string;
+        readonly capabilities: readonly string[];
+        readonly status: "available";
+      }) => Promise<void>;
+    }];
+
+    const first = contactsProps.onStartChat({
+      agentBindingId: "binding_builder",
+      displayName: "Frontend Builder",
+      roleId: "role_builder",
+      runtimeKind: "opencode",
+      capabilities: ["code.edit"],
+      status: "available"
+    });
+    const second = contactsProps.onStartChat({
+      agentBindingId: "binding_writer",
+      displayName: "Doc Writer",
+      roleId: "role_writer",
+      runtimeKind: "claude",
+      capabilities: ["docs.write"],
+      status: "available"
+    });
+
+    expect(mocks.sdk.createRoom).toHaveBeenCalledTimes(2);
+    expect(mocks.sdk.createRoom).toHaveBeenNthCalledWith(1, expect.objectContaining({ agentBindingId: "binding_builder" }));
+    expect(mocks.sdk.createRoom).toHaveBeenNthCalledWith(2, expect.objectContaining({ agentBindingId: "binding_writer" }));
+    resolveFirst({ data: { roomId: "room_builder" } });
+    resolveSecond({ data: { roomId: "room_writer" } });
+    await Promise.all([first, second]);
+  });
+
+  it("handles contact Start Chat creation failures without rethrowing", async () => {
+    mocks.sdk.createRoom.mockRejectedValue(new Error("room create failed"));
+    mocks.stateOverridesByInitialValue.set("chat", "contacts");
+    renderApp();
+
+    const [contactsProps] = mocks.contactsRailContainer.mock.calls[0] as unknown as [{
+      readonly onStartChat: (contact: {
+        readonly agentBindingId: string;
+        readonly displayName: string;
+        readonly roleId: string;
+        readonly runtimeKind: string;
+        readonly capabilities: readonly string[];
+        readonly status: "available";
+      }) => Promise<void>;
+    }];
+
+    await expect(contactsProps.onStartChat({
+      agentBindingId: "binding_builder",
+      displayName: "Frontend Builder",
+      roleId: "role_builder",
+      runtimeKind: "opencode",
+      capabilities: ["code.edit"],
+      status: "available"
+    })).resolves.toBeUndefined();
+
+    expect(mocks.stateCalls.some((call) => call.value === "room create failed")).toBe(true);
   });
 });

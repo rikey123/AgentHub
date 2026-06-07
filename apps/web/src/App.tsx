@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@heroui/react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { AppShell } from "./components/shell/AppShell.tsx";
@@ -93,6 +93,7 @@ export default function App() {
   const sdk = useSdk();
   const csrfFetch = useCsrfFetch();
   const { theme, setTheme, toggleTheme, setDensity } = useTheme();
+  const contactStartPendingRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -137,6 +138,8 @@ export default function App() {
   }, [openRoom, sdk]);
 
   const handleStartContactChat = useCallback(async (contact: AgentContactViewModel) => {
+    if (contactStartPendingRef.current.has(contact.agentBindingId)) return;
+    contactStartPendingRef.current.add(contact.agentBindingId);
     setBannerError(undefined);
     try {
       const res = await sdk.createRoom(createRoomInputForContactStartChat(contact)) as { data?: { roomId?: string }; id?: string; roomId?: string };
@@ -144,7 +147,8 @@ export default function App() {
       if (typeof roomId === "string") openRoom(roomId);
     } catch (err) {
       setBannerError(err instanceof Error ? err.message : String(err));
-      throw err;
+    } finally {
+      contactStartPendingRef.current.delete(contact.agentBindingId);
     }
   }, [openRoom, sdk]);
 
