@@ -2294,14 +2294,16 @@ describe("daemon M1.4 composition", () => {
     ]);
   });
 
-  it("pins messages into workspace context and regenerates assistant messages through WakeAgent", async () => {
+  it("pins messages as room context and regenerates assistant messages through WakeAgent", async () => {
     const client = new AgentHubClient({ baseUrl });
     const room = await client.createRoom({ title: "Pin Regen", mode: "solo", primaryAgentId: "mock-builder" }) as { readonly data: { readonly roomId: string } };
     const sent = await client.sendMessage(room.data.roomId, { text: "remember this", idempotencyKey: "pin-regen-1" }) as { readonly data: { readonly messageId: string } };
 
     const pinned = await fetch(`${baseUrl}/messages/${sent.data.messageId}/pin`, { method: "POST" });
     expect(pinned.status).toBe(200);
-    expect(daemon.database.sqlite.prepare("SELECT scope, pinned, content FROM context_items WHERE content = 'remember this'").get()).toMatchObject({ scope: "workspace", pinned: 1, content: "remember this" });
+    expect(daemon.database.sqlite.prepare("SELECT pinned_at FROM messages WHERE id = ?").get(sent.data.messageId)).toMatchObject({ pinned_at: expect.any(Number) });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM context_items WHERE source_message_id = ? AND pinned = 1").get(sent.data.messageId)).toMatchObject({ count: 0 });
+    expect(daemon.database.sqlite.prepare("SELECT type FROM events WHERE type = 'message.pinned' AND json_extract(payload, '$.messageId') = ?").get(sent.data.messageId)).toBeDefined();
 
     const assistant = daemon.database.sqlite.prepare("SELECT id FROM messages WHERE role = 'assistant' ORDER BY created_at DESC LIMIT 1").get() as { readonly id: string };
     const regenerated = await fetch(`${baseUrl}/messages/${assistant.id}/regenerate`, { method: "POST" });
@@ -2571,7 +2573,7 @@ describe("daemon M1.4 composition", () => {
     const listed = await fetch(`${baseUrl}/skills`);
     const listedPayload = await listed.json() as { readonly skills: readonly { readonly id: string; readonly name: string; readonly origin: string; readonly content?: string }[] };
     expect(listed.status).toBe(200);
-    expect(listedPayload.skills.map((skill) => skill.name).sort()).toEqual(["skill-creator", "task-planner"]);
+    expect(listedPayload.skills.map((skill) => skill.name).sort()).toEqual(["document-builder", "html-slides-builder", "officecli-pptx", "one-pager-builder", "skill-creator", "task-planner", "web-app-builder", "web-page-builder"]);
     expect(listedPayload.skills.every((skill) => skill.content === undefined)).toBe(true);
 
     const builtinId = listedPayload.skills.find((skill) => skill.name === "task-planner")?.id ?? "";

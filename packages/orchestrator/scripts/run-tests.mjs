@@ -16,6 +16,7 @@ const vitestArgs = [
   "packages/orchestrator/test/room-mcp-symlink.test.ts",
   "packages/orchestrator/test/complete-task.test.ts",
   "packages/orchestrator/test/mission-brief.test.ts",
+  "packages/orchestrator/test/context-ref-resolver.test.ts",
   "packages/orchestrator/test/planning-phase.test.ts",
   "packages/orchestrator/test/assisted-selector.test.ts",
   "packages/orchestrator/test/assisted-selector-routing.test.ts"

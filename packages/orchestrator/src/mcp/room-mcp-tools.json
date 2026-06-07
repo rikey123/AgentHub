@@ -39,6 +39,25 @@
     }
   },
   {
+    "name": "room.publish_artifact",
+    "description": "Publish a first-class Artifact Studio card. Use content for text artifacts or filePath for workspace-relative binary artifacts such as PPTX.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "kind": { "type": "string", "description": "Artifact kind: web_page, web_app, document, presentation, presentation_pptx, source_code, or generic_file." },
+        "artifactId": { "type": "string", "description": "Optional existing artifact id to update with a new version." },
+        "content": { "type": "string", "description": "Text artifact content for web_page, web_app, document, presentation, or source_code artifacts." },
+        "filePath": { "type": "string", "description": "Workspace-relative source file path for binary artifacts." },
+        "filename": { "type": "string", "description": "Published artifact filename." },
+        "title": { "type": "string", "description": "Human-readable artifact card title." },
+        "mimeType": { "type": "string", "description": "MIME type for binary artifacts." },
+        "message": { "type": "string", "description": "Optional version message." }
+      },
+      "required": ["kind"],
+      "additionalProperties": true
+    }
+  },
+  {
     "name": "room.read_mailbox",
     "description": "Read mailbox messages and queued next-turn inputs delivered to this run.",
     "inputSchema": {
