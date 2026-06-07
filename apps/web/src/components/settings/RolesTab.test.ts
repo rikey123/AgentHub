@@ -106,7 +106,7 @@ describe("RolesTab REST integration contract", () => {
       return jsonResponse(409, { error: "role_has_bindings", bindingCount: 2 });
     });
 
-    await expect(deleteRole(fetchImpl, "role_bound")).rejects.toThrow("Role has 2 agent bindings; remove bindings before deleting.");
+    await expect(deleteRole(fetchImpl, "role_bound")).rejects.toThrow("该角色仍有关联的 2 个 agent bindings；请先移除 bindings 再删除。");
     expect(roles).toEqual([expect.objectContaining({ id: "role_bound", name: "Bound Role" })]);
   });
 
