@@ -265,6 +265,24 @@ describe("App integration wiring", () => {
     })).toBe("You: Attachment - requirements.md");
   });
 
+  it("builds Reply previews from the first useful message part", () => {
+    expect(replyPreviewForMessage({
+      id: "message_1",
+      roomId: "room_1",
+      senderType: "agent",
+      senderId: "agent_1",
+      senderName: "Builder",
+      role: "teammate",
+      status: "completed",
+      text: "",
+      parts: [
+        { type: "text", seq: 1, text: "   " },
+        { type: "attachment", seq: 2, fileId: "file_1", name: "requirements.md", mimeType: "text/markdown", sizeBytes: 1024 }
+      ],
+      createdAt: 1_700_000_000
+    })).toBe("Builder: Attachment - requirements.md");
+  });
+
   it("maps contacts and artifacts rail selection to dedicated center views", () => {
     expect(workbenchCenterModeForRail("contacts", false)).toBe("contacts");
     expect(workbenchCenterModeForRail("artifacts", false)).toBe("artifacts");

@@ -81,7 +81,7 @@ export function draftWithQuotedText(draft: MessageDraftState, text: string): Mes
 }
 
 export function replyPreviewForMessage(message: MessageViewModel): string {
-  const summary = message.text.trim() || messagePartPreview(message.parts[0]) || message.id;
+  const summary = message.text.trim() || message.parts.map((part) => messagePartPreview(part)).find((preview) => preview !== undefined) || message.id;
   return `${message.senderName}: ${summary}`.slice(0, 80);
 }
 
