@@ -39,6 +39,12 @@ function roomPreview(room: RoomViewModel) {
   return "Start the room conversation";
 }
 
+function participantContactLabels(room: RoomViewModel): string[] {
+  return Object.values(room.participantContactNames)
+    .map((name) => name.trim())
+    .filter((name) => name.length > 0);
+}
+
 export function orderedRoomsForList(rooms: ReadonlyArray<RoomViewModel>, query: string): RoomViewModel[] {
   const q = query.trim().toLowerCase();
   const list = q
@@ -149,6 +155,9 @@ export function RoomList({ rooms, activeRoomId, onSelect, onCreate, onTogglePin,
             const hasActiveRun = room.runs.some((r) => r.status === "running" || r.status === "starting");
             const preview = roomPreview(room);
             const isPinned = room.pinnedAt !== undefined;
+            const contactNames = participantContactLabels(room);
+            const visibleContactNames = contactNames.slice(0, 3);
+            const hiddenContactCount = Math.max(0, contactNames.length - visibleContactNames.length);
             return (
               <li
                 key={room.id}
@@ -199,6 +208,14 @@ export function RoomList({ rooms, activeRoomId, onSelect, onCreate, onTogglePin,
                     </Button>
                   ) : null}
                   <Chip size="sm" variant="soft" color="default">{roomModeLabel(room.mode)}</Chip>
+                  {visibleContactNames.map((name, index) => (
+                    <Chip key={`${name}-${index}`} size="sm" variant="soft" color="default">
+                      <span className="block max-w-[132px] truncate" title={name}>{name}</span>
+                    </Chip>
+                  ))}
+                  {hiddenContactCount > 0 ? (
+                    <Chip size="sm" variant="soft" color="default">+{hiddenContactCount}</Chip>
+                  ) : null}
                   <Chip size="sm" variant="soft" color="default">{room.participants.length} 名成员</Chip>
                   {hasActiveRun ? (
                     <Chip size="sm" variant="soft" color="accent">在线</Chip>

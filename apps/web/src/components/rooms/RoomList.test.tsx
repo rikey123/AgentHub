@@ -34,6 +34,28 @@ describe("RoomList V1.2 behavior", () => {
     expect(orderedRoomsForList(rooms, "provider").map((room) => room.id)).toEqual(["message"]);
   });
 
+  it("renders participant contact names in each room row", () => {
+    const html = renderToStaticMarkup(createElement(RoomList, {
+      rooms: [
+        roomFixture({
+          id: "contacts",
+          title: "Contact Room",
+          participantContactNames: {
+            "agent-builder": "Builder Contact",
+            "agent-reviewer": "Reviewer Contact"
+          }
+        })
+      ],
+      activeRoomId: "contacts",
+      onSelect: vi.fn(),
+      onCreate: vi.fn()
+    }));
+
+    expect(html).toContain("Builder Contact");
+    expect(html).toContain("Reviewer Contact");
+    expect(html).toContain("max-w-[132px]");
+  });
+
   it("notifies the parent when the search query changes", () => {
     const setQuery = vi.fn();
     const onSearchQueryChange = vi.fn();
