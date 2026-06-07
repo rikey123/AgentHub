@@ -18,6 +18,7 @@ import { NewRoomDialog, type CreateRoomInput } from "./components/NewRoomDialog.
 import { SettingsModal } from "./components/settings/index.ts";
 import { getSettingsSearch, getSettingsStateFromSearch } from "./components/settings/settingsUrl.ts";
 import type { SettingsTabId } from "./components/settings/SettingsModal.tsx";
+import type { AgentContactViewModel } from "./types.ts";
 import { useProjector } from "./hooks/useProjector.ts";
 import { useSdk, useCsrfFetch } from "./hooks/useSdk.ts";
 import { useTheme } from "./hooks/useTheme.ts";
@@ -54,6 +55,16 @@ export function workbenchCenterModeForRail(rail: RailItem, hasActiveRoom: boolea
 export function workbenchNavigationForRoomOpen(roomId: string, currentRail: RailItem): { readonly activeRoomId: string; readonly rail: RailItem } {
   void currentRail;
   return { activeRoomId: roomId, rail: "chat" };
+}
+
+export function createRoomInputForContactStartChat(contact: AgentContactViewModel): CreateRoomInput & { readonly agentBindingId: string } {
+  return {
+    title: `Chat with ${contact.displayName}`,
+    mode: "assisted",
+    primaryAgentId: contact.agentBindingId,
+    agentBindingId: contact.agentBindingId,
+    participants: []
+  };
 }
 
 export default function App() {
@@ -119,6 +130,18 @@ export default function App() {
         // member roster on first render and any future refresh — no local synthesis needed.
         openRoom(roomId);
       }
+    } catch (err) {
+      setBannerError(err instanceof Error ? err.message : String(err));
+      throw err;
+    }
+  }, [openRoom, sdk]);
+
+  const handleStartContactChat = useCallback(async (contact: AgentContactViewModel) => {
+    setBannerError(undefined);
+    try {
+      const res = await sdk.createRoom(createRoomInputForContactStartChat(contact)) as { data?: { roomId?: string }; id?: string; roomId?: string };
+      const roomId = res?.data?.roomId ?? res?.roomId ?? res?.id;
+      if (typeof roomId === "string") openRoom(roomId);
     } catch (err) {
       setBannerError(err instanceof Error ? err.message : String(err));
       throw err;
@@ -385,7 +408,7 @@ export default function App() {
     <HomeView rooms={rooms} onOpenRoom={openRoom} onCreate={openNewRoom} />
   );
   const center = centerMode === "contacts"
-    ? <ContactsRailContainer fetchImpl={csrfFetch} onStartChat={openNewRoom} onEditContact={() => setSettingsOpen(true)} />
+    ? <ContactsRailContainer fetchImpl={csrfFetch} onStartChat={handleStartContactChat} onEditContact={() => setSettingsOpen(true)} />
     : centerMode === "artifacts"
       ? <ArtifactsRailContainer fetchImpl={csrfFetch} />
       : roomCenter;

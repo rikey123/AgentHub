@@ -349,6 +349,32 @@ describe("V1.2 artifact backend routes", () => {
     expect(currentDaemon().database.sqlite.prepare("SELECT id FROM events WHERE type = 'room.created' AND json_extract(payload, '$.title') = ?").get(title)).toBeUndefined();
   });
 
+  it("uses the contact binding runtime when creating a room from an agentBindingId", async () => {
+    const runtimeId = seedRuntime("runtime_contact_start_chat", "opencode");
+    const created = await createCustomAgent("Contact Starter", runtimeId);
+
+    const response = await fetch(`${baseUrl}/rooms`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        title: "Contact Start Chat",
+        mode: "assisted",
+        primaryAgentId: created.agentBindingId,
+        agentBindingId: created.agentBindingId
+      })
+    });
+    const payload = await response.json() as { readonly data?: { readonly roomId?: string } };
+
+    expect(response.status).toBe(201);
+    expect(currentDaemon().database.sqlite.prepare("SELECT primary_agent_id FROM rooms WHERE id = ?").get(payload.data?.roomId)).toMatchObject({ primary_agent_id: created.agentBindingId });
+    expect(currentDaemon().database.sqlite.prepare("SELECT participant_id, agent_binding_id, adapter_id, default_presence FROM room_participants WHERE room_id = ? AND role = 'primary'").get(payload.data?.roomId)).toMatchObject({
+      participant_id: created.agentBindingId,
+      agent_binding_id: created.agentBindingId,
+      adapter_id: "opencode",
+      default_presence: "active"
+    });
+  });
+
   it("rejects disabled role/runtime bindings as initial room participants", async () => {
     const runtimeId = seedRuntime("runtime_disabled_room_participant", "opencode");
     const disabled = await createCustomAgent("Disabled Participant", runtimeId);

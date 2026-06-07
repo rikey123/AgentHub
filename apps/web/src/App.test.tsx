@@ -11,9 +11,11 @@ const mocks = vi.hoisted(() => ({
   newRoomDialog: vi.fn(() => null),
   settingsModal: vi.fn(() => null),
   commandPalette: vi.fn(() => null),
+  contactsRailContainer: vi.fn(() => null),
   homeView: vi.fn(() => null),
   roomList: vi.fn(() => null),
   projectorRooms: new Map<string, unknown>(),
+  stateOverrides: new Map<number, unknown>(),
   stateCalls: [] as Array<{ readonly index: number; readonly value: unknown }>,
   stateIndex: 0
 }));
@@ -26,13 +28,14 @@ vi.mock("react", async () => {
       const [value] = actual.useState(initialState);
       const index = mocks.stateIndex;
       mocks.stateIndex += 1;
+      const currentValue = mocks.stateOverrides.has(index) ? mocks.stateOverrides.get(index) as T : value;
       const setValue = (next: T | ((previous: T) => T)) => {
         mocks.stateCalls.push({
           index,
-          value: typeof next === "function" ? (next as (previous: T) => T)(value) : next
+          value: typeof next === "function" ? (next as (previous: T) => T)(currentValue) : next
         });
       };
-      return [value, setValue] as const;
+      return [currentValue, setValue] as const;
     }
   };
 });
@@ -67,7 +70,7 @@ vi.mock("./components/shell/FeatureRail.tsx", () => ({ FeatureRail: () => null }
 vi.mock("./components/rooms/RoomList.tsx", () => ({ RoomList: mocks.roomList }));
 vi.mock("./components/home/HomeView.tsx", () => ({ HomeView: mocks.homeView }));
 vi.mock("./components/rail/RailViews.tsx", () => ({
-  ContactsRailContainer: () => createElement("section", { "data-testid": "contacts-rail-view" }, "Contacts rail view"),
+  ContactsRailContainer: mocks.contactsRailContainer,
   ArtifactsRailContainer: () => createElement("section", { "data-testid": "artifacts-rail-view" }, "Artifacts rail view")
 }));
 vi.mock("./components/chat/ChatStream.tsx", () => ({ ChatStream: () => null }));
@@ -79,7 +82,7 @@ vi.mock("./components/CommandPalette.tsx", () => ({ CommandPalette: mocks.comman
 vi.mock("./components/KeymapModal.tsx", () => ({ KeymapModal: () => null }));
 vi.mock("./components/NewRoomDialog.tsx", () => ({ NewRoomDialog: mocks.newRoomDialog }));
 
-import App, { ChatRoomLayout, messagePinRequestFor, workbenchCenterModeForRail, workbenchNavigationForRoomOpen } from "./App.tsx";
+import App, { ChatRoomLayout, createRoomInputForContactStartChat, messagePinRequestFor, workbenchCenterModeForRail, workbenchNavigationForRoomOpen } from "./App.tsx";
 
 function renderApp() {
   mocks.stateIndex = 0;
@@ -98,9 +101,11 @@ describe("App integration wiring", () => {
     mocks.newRoomDialog.mockClear();
     mocks.settingsModal.mockClear();
     mocks.commandPalette.mockClear();
+    mocks.contactsRailContainer.mockClear();
     mocks.homeView.mockClear();
     mocks.roomList.mockClear();
     mocks.projectorRooms.clear();
+    mocks.stateOverrides.clear();
     mocks.stateCalls = [];
     mocks.stateIndex = 0;
   });
@@ -231,5 +236,55 @@ describe("App integration wiring", () => {
       participants: []
     });
     expectRoomOpenState("room_created");
+  });
+
+  it("builds an assisted room input for starting chat from a contact", () => {
+    expect(createRoomInputForContactStartChat({
+      agentBindingId: "binding_builder",
+      displayName: "Frontend Builder",
+      roleId: "role_builder",
+      runtimeKind: "opencode",
+      capabilities: ["code.edit"],
+      status: "available"
+    })).toEqual({
+      title: "Chat with Frontend Builder",
+      mode: "assisted",
+      primaryAgentId: "binding_builder",
+      agentBindingId: "binding_builder",
+      participants: []
+    });
+  });
+
+  it("creates and opens a room from the contacts rail Start Chat action", async () => {
+    mocks.sdk.createRoom.mockResolvedValue({ data: { roomId: "room_contact" } });
+    mocks.stateOverrides.set(12, "contacts");
+    renderApp();
+
+    const [contactsProps] = mocks.contactsRailContainer.mock.calls[0] as unknown as [{
+      readonly onStartChat: (contact: {
+        readonly agentBindingId: string;
+        readonly displayName: string;
+        readonly roleId: string;
+        readonly runtimeKind: string;
+        readonly capabilities: readonly string[];
+        readonly status: "available";
+      }) => Promise<void>;
+    }];
+    mocks.stateCalls = [];
+    await contactsProps.onStartChat({
+      agentBindingId: "binding_builder",
+      displayName: "Frontend Builder",
+      roleId: "role_builder",
+      runtimeKind: "opencode",
+      capabilities: ["code.edit"],
+      status: "available"
+    });
+
+    expect(mocks.sdk.createRoom).toHaveBeenCalledWith(expect.objectContaining({
+      mode: "assisted",
+      primaryAgentId: "binding_builder",
+      agentBindingId: "binding_builder"
+    }));
+    expectRoomOpenState("room_contact");
   });
 });

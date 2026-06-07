@@ -69,6 +69,19 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
   const roomId = randomUUID();
   const now = options.now?.() ?? Date.now();
   const lookupAgent = (agentId: string): { adapterId: string; name: string } => {
+    const binding = options.database.sqlite
+      .prepare(
+        `SELECT
+          COALESCE(roles.name, runtimes.name, agent_bindings.id) AS name,
+          runtimes.kind AS runtime_kind
+         FROM agent_bindings
+         LEFT JOIN roles ON roles.id = agent_bindings.role_id
+         LEFT JOIN runtimes ON runtimes.id = agent_bindings.runtime_id
+         WHERE agent_bindings.id = ?
+         LIMIT 1`
+      )
+      .get(agentId) as { readonly runtime_kind?: string | null; readonly name?: string | null } | undefined;
+    if (binding !== undefined) return { adapterId: binding.runtime_kind ?? "mock", name: binding.name ?? agentId };
     const row = options.database.sqlite
       .prepare("SELECT adapter_id, name FROM agent_profiles WHERE id = ?")
       .get(agentId) as { adapter_id?: string; name?: string } | undefined;
