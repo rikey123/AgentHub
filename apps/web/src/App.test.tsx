@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   contactsRailContainer: vi.fn(() => null),
   homeView: vi.fn(() => null),
   roomList: vi.fn(() => null),
+  useProjector: vi.fn(),
   projectorRooms: new Map<string, unknown>(),
   stateOverrides: new Map<number, unknown>(),
   stateOverridesByInitialValue: new Map<unknown, unknown>(),
@@ -46,11 +47,8 @@ vi.mock("react", async () => {
 });
 vi.mock("react-hotkeys-hook", () => ({ useHotkeys: vi.fn() }));
 vi.mock("./hooks/useProjector.ts", () => ({
-  useProjector: () => ({
-    rooms: new Map(mocks.projectorRooms),
-    connectionStatus: "connected",
-    connectionError: undefined
-  })
+  normalizedRoomSearchQuery: (query: string) => query.trim(),
+  useProjector: (...args: unknown[]) => mocks.useProjector(...args)
 }));
 vi.mock("./hooks/useSdk.ts", () => ({
   useSdk: () => mocks.sdk,
@@ -109,6 +107,12 @@ describe("App integration wiring", () => {
     mocks.contactsRailContainer.mockClear();
     mocks.homeView.mockClear();
     mocks.roomList.mockClear();
+    mocks.useProjector.mockReset();
+    mocks.useProjector.mockImplementation(() => ({
+      rooms: new Map(mocks.projectorRooms),
+      connectionStatus: "connected",
+      connectionError: undefined
+    }));
     mocks.projectorRooms.clear();
     mocks.stateOverrides.clear();
     mocks.stateOverridesByInitialValue.clear();
@@ -266,6 +270,80 @@ describe("App integration wiring", () => {
 
     expect(mocks.csrfFetch).toHaveBeenNthCalledWith(1, "/rooms/room-1/pin", { method: "POST" });
     expect(mocks.csrfFetch).toHaveBeenNthCalledWith(2, "/rooms/room-2/pin", { method: "DELETE" });
+  });
+
+  it("wires RoomList search into projector room search", () => {
+    renderApp();
+
+    const [roomListProps] = mocks.roomList.mock.calls[0] as unknown as [{
+      readonly onSearchQueryChange: (query: string) => void;
+    }];
+    roomListProps.onSearchQueryChange("Builder");
+
+    expect(mocks.stateCalls.some((call) => call.value === "Builder")).toBe(true);
+
+    mocks.stateOverridesByInitialValue.set("", "Builder");
+    renderApp();
+
+    expect(mocks.useProjector).toHaveBeenLastCalledWith("main", undefined, undefined, "Builder");
+  });
+
+  it("uses backend room search result ids instead of local message-text filtering", () => {
+    mocks.projectorRooms.set("server-only", {
+      id: "server-only",
+      title: "Architecture",
+      mode: "assisted",
+      participants: [],
+      participantContactNames: {},
+      messages: []
+    });
+    mocks.useProjector.mockImplementation(() => ({
+      rooms: new Map(mocks.projectorRooms),
+      roomSearchResultIds: ["server-only"],
+      roomSearchResultQuery: "deploy provider",
+      connectionStatus: "connected",
+      connectionError: undefined
+    }));
+    mocks.stateOverridesByInitialValue.set("", "deploy provider");
+
+    renderApp();
+
+    const [roomListProps] = mocks.roomList.mock.calls[0] as unknown as [{
+      readonly rooms: ReadonlyArray<{ readonly id: string }>;
+      readonly useServerSearchResults?: boolean;
+    }];
+
+    expect(roomListProps.rooms.map((room) => room.id)).toEqual(["server-only"]);
+    expect(roomListProps.useServerSearchResults).toBe(true);
+  });
+
+  it("does not treat stale backend room search ids as authoritative for a new query", () => {
+    mocks.projectorRooms.set("stale-result", {
+      id: "stale-result",
+      title: "Deploy Room",
+      mode: "assisted",
+      participants: [],
+      participantContactNames: {},
+      messages: []
+    });
+    mocks.useProjector.mockImplementation(() => ({
+      rooms: new Map(mocks.projectorRooms),
+      roomSearchResultIds: ["stale-result"],
+      roomSearchResultQuery: "deploy",
+      connectionStatus: "connected",
+      connectionError: undefined
+    }));
+    mocks.stateOverridesByInitialValue.set("", "captain");
+
+    renderApp();
+
+    const [roomListProps] = mocks.roomList.mock.calls[0] as unknown as [{
+      readonly rooms: ReadonlyArray<{ readonly id: string }>;
+      readonly useServerSearchResults?: boolean;
+    }];
+
+    expect(roomListProps.rooms.map((room) => room.id)).toEqual(["stale-result"]);
+    expect(roomListProps.useServerSearchResults).toBe(false);
   });
 
   it("builds an assisted room input for starting chat from a contact", () => {

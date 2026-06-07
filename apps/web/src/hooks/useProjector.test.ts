@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
-import { getProjector } from "./useProjector.ts";
+import { getProjector, roomListFetchDelayMs, roomsListRequestPath } from "./useProjector.ts";
 import type { ProjectorState } from "../types.ts";
 import type { EventType } from "@agenthub/protocol/events";
 
@@ -40,6 +40,18 @@ describe("useProjector replay handling", () => {
   afterEach(() => {
     unsubscribe?.();
     unsubscribe = undefined;
+  });
+
+  it("builds room list request paths with encoded search queries", () => {
+    expect(roomsListRequestPath("")).toBe("/rooms");
+    expect(roomsListRequestPath(" Builder Captain ")).toBe("/rooms?q=Builder+Captain");
+    expect(roomsListRequestPath("a/b?c")).toBe("/rooms?q=a%2Fb%3Fc");
+  });
+
+  it("debounces room list searches by 200ms while loading the default list immediately", () => {
+    expect(roomListFetchDelayMs("")).toBe(0);
+    expect(roomListFetchDelayMs("   ")).toBe(0);
+    expect(roomListFetchDelayMs("Builder")).toBe(200);
   });
 
   it("hydrates V1.2 room list fields from room.created payloads", () => {
@@ -85,6 +97,27 @@ describe("useProjector replay handling", () => {
       "Builder Contact",
       "Reviewer Contact"
     ]);
+  });
+
+  it("tracks backend room search result ids for server-only matches", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+
+    projector.applyRoomSearchResults("deploy provider", [
+      {
+        id: roomId,
+        title: "Server-only match",
+        mode: "assisted",
+        participantContactNames: []
+      }
+    ]);
+
+    expect(emittedState.roomSearchResultIds).toEqual([roomId]);
+    expect(emittedState.roomSearchResultQuery).toBe("deploy provider");
+    expect(emittedState.rooms.get(roomId)).toMatchObject({
+      title: "Server-only match",
+      mode: "assisted"
+    });
   });
 
   it("projects room archive and unarchive events for live RoomList updates", () => {

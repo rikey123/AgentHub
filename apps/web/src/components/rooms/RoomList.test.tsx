@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { RoomViewModel } from "../../types.ts";
-import { orderedRoomsForList, RoomList } from "./RoomList.tsx";
+import { orderedRoomsForList, RoomList, updateRoomListSearchQuery } from "./RoomList.tsx";
 
 describe("RoomList V1.2 behavior", () => {
   it("orders pinned rooms first then by last activity", () => {
@@ -32,6 +32,30 @@ describe("RoomList V1.2 behavior", () => {
 
     expect(orderedRoomsForList(rooms, "captain").map((room) => room.id)).toEqual(["contact"]);
     expect(orderedRoomsForList(rooms, "provider").map((room) => room.id)).toEqual(["message"]);
+  });
+
+  it("notifies the parent when the search query changes", () => {
+    const setQuery = vi.fn();
+    const onSearchQueryChange = vi.fn();
+
+    updateRoomListSearchQuery("Builder", setQuery, onSearchQueryChange);
+
+    expect(setQuery).toHaveBeenCalledWith("Builder");
+    expect(onSearchQueryChange).toHaveBeenCalledWith("Builder");
+  });
+
+  it("can render server search results without re-filtering by local message text", () => {
+    const html = renderToStaticMarkup(createElement(RoomList, {
+      rooms: [
+        roomFixture({ id: "server-only", title: "Architecture", messages: [] })
+      ],
+      activeRoomId: "server-only",
+      onSelect: vi.fn(),
+      onCreate: vi.fn(),
+      useServerSearchResults: true
+    }));
+
+    expect(html).toContain("data-testid=\"room-list-item-server-only\"");
   });
 
   it("renders pin and unpin room actions without exposing archive", () => {

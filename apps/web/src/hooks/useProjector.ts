@@ -14,6 +14,8 @@ type DeltaBatch = {
 
 class Projector {
   private rooms = new Map<string, RoomViewModel>();
+  private roomSearchResultIds: string[] | undefined;
+  private roomSearchResultQuery: string | undefined;
   private listeners = new Set<ProjectorListener>();
   private eventSource: EventSource | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -156,7 +158,51 @@ class Projector {
     if (this.connectionError !== undefined) {
       (state as Record<string, unknown>).connectionError = this.connectionError;
     }
+    if (this.roomSearchResultIds !== undefined) {
+      (state as Record<string, unknown>).roomSearchResultIds = this.roomSearchResultIds;
+    }
+    if (this.roomSearchResultQuery !== undefined) {
+      (state as Record<string, unknown>).roomSearchResultQuery = this.roomSearchResultQuery;
+    }
     return state;
+  }
+
+  applyRoomSearchResults(query: string, rooms: Array<{ id: string; title: string; mode: string; pinnedAt?: number; lastActivityAt?: number; archivedAt?: number; participantContactNames?: unknown }>): void {
+    this.roomSearchResultQuery = normalizedRoomSearchQuery(query);
+    this.roomSearchResultIds = rooms.map((room) => room.id);
+    for (const room of rooms) {
+      this.applyRoomListRow(room);
+    }
+    this.notify();
+  }
+
+  clearRoomSearchResults(): void {
+    if (this.roomSearchResultIds === undefined && this.roomSearchResultQuery === undefined) return;
+    this.roomSearchResultIds = undefined;
+    this.roomSearchResultQuery = undefined;
+    this.notify();
+  }
+
+  applyRoomListRow(room: { id: string; title: string; mode: string; pinnedAt?: number; lastActivityAt?: number; archivedAt?: number; participantContactNames?: unknown }): void {
+    this.apply({
+      id: room.id,
+      type: "room.created",
+      schemaVersion: 1,
+      durability: "durable",
+      visibility: "both",
+      workspaceId: "default-workspace",
+      roomId: room.id,
+      payload: {
+        roomId: room.id,
+        title: room.title,
+        mode: room.mode,
+        pinnedAt: room.pinnedAt,
+        lastActivityAt: room.lastActivityAt,
+        archivedAt: room.archivedAt,
+        participantContactNames: room.participantContactNames
+      },
+      createdAt: Date.now()
+    });
   }
 
   private flushDeltaBatch(messageId: string): void {
@@ -1581,7 +1627,22 @@ if (typeof window !== "undefined") {
   (window as unknown as Record<string, unknown>).__PROJECTOR__ = globalProjector;
 }
 
-export function useProjector(view: "main" | "detail", roomId?: string, runId?: string): ProjectorState {
+export function roomsListRequestPath(query: string): string {
+  const trimmed = normalizedRoomSearchQuery(query);
+  if (trimmed.length === 0) return "/rooms";
+  const params = new URLSearchParams({ q: trimmed });
+  return `/rooms?${params.toString()}`;
+}
+
+export function roomListFetchDelayMs(query: string): number {
+  return normalizedRoomSearchQuery(query).length > 0 ? 200 : 0;
+}
+
+export function normalizedRoomSearchQuery(query: string): string {
+  return query.trim();
+}
+
+export function useProjector(view: "main" | "detail", roomId?: string, runId?: string, roomSearchQuery = ""): ProjectorState {
   const [state, setState] = useState<ProjectorState>({
     rooms: new Map(),
     connectionStatus: "disconnected"
@@ -1622,44 +1683,35 @@ export function useProjector(view: "main" | "detail", roomId?: string, runId?: s
     return globalProjector.subscribe(setState);
   }, []);
 
-  // Initial fetch of rooms list so UI is populated even before SSE events arrive
+  // Initial fetch and debounced search hydration so UI is populated even before SSE events arrive.
   useEffect(() => {
     if (view !== "main") return;
     let cancelled = false;
-    ensureAuthSession()
-      .then(() => fetch("/rooms", { credentials: "same-origin" }))
+    const delayMs = roomListFetchDelayMs(roomSearchQuery);
+    const timeoutId = globalThis.setTimeout(() => {
+      ensureAuthSession()
+      .then(() => fetch(roomsListRequestPath(roomSearchQuery), { credentials: "same-origin" }))
       .then((res) => res.json())
       .then((data: { rooms: Array<{ id: string; title: string; mode: string; pinnedAt?: number; lastActivityAt?: number; archivedAt?: number; participantContactNames?: unknown }> }) => {
         if (cancelled) return;
+        if (normalizedRoomSearchQuery(roomSearchQuery).length > 0) {
+          globalProjector.applyRoomSearchResults(roomSearchQuery, data.rooms);
+          return;
+        }
+        globalProjector.clearRoomSearchResults();
         for (const room of data.rooms) {
-          globalProjector.apply({
-            id: room.id,
-            type: "room.created",
-            schemaVersion: 1,
-            durability: "durable",
-            visibility: "both",
-            workspaceId: "default-workspace",
-            roomId: room.id,
-            payload: {
-              roomId: room.id,
-              title: room.title,
-              mode: room.mode,
-              pinnedAt: room.pinnedAt,
-              lastActivityAt: room.lastActivityAt,
-              archivedAt: room.archivedAt,
-              participantContactNames: room.participantContactNames
-            },
-            createdAt: Date.now()
-          });
+          globalProjector.applyRoomListRow(room);
         }
       })
       .catch(() => {
         // ignore fetch errors
       });
+    }, delayMs);
     return () => {
       cancelled = true;
+      globalThis.clearTimeout(timeoutId);
     };
-  }, [view]);
+  }, [view, roomSearchQuery]);
 
   return state;
 }

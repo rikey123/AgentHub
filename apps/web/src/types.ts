@@ -279,6 +279,8 @@ export type RoomViewModel = {
 
 export type ProjectorState = {
   readonly rooms: Map<string, RoomViewModel>;
+  readonly roomSearchResultIds?: readonly string[] | undefined;
+  readonly roomSearchResultQuery?: string | undefined;
   readonly activeRoomId?: string | undefined;
   readonly activeRunId?: string | undefined;
   readonly connectionStatus: "connected" | "connecting" | "reconnecting" | "offline" | "disconnected";

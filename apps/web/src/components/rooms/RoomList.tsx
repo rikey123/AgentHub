@@ -9,6 +9,8 @@ interface RoomListProps {
   onSelect: (id: string) => void;
   onCreate: () => void;
   onTogglePin?: ((id: string, isPinned: boolean) => void) | undefined;
+  onSearchQueryChange?: ((query: string) => void) | undefined;
+  useServerSearchResults?: boolean | undefined;
 }
 
 function roomInitials(title: string) {
@@ -71,7 +73,16 @@ function roomSearchText(room: RoomViewModel): string {
   ].join(" ").toLowerCase();
 }
 
-export function RoomList({ rooms, activeRoomId, onSelect, onCreate, onTogglePin }: RoomListProps) {
+export function updateRoomListSearchQuery(
+  query: string,
+  setQuery: (query: string) => void,
+  onSearchQueryChange?: ((query: string) => void) | undefined
+): void {
+  setQuery(query);
+  onSearchQueryChange?.(query);
+}
+
+export function RoomList({ rooms, activeRoomId, onSelect, onCreate, onTogglePin, onSearchQueryChange, useServerSearchResults }: RoomListProps) {
   const [query, setQuery] = useState("");
 
   const activeRooms = useMemo(() => {
@@ -83,8 +94,8 @@ export function RoomList({ rooms, activeRoomId, onSelect, onCreate, onTogglePin 
   }, [rooms]);
 
   const filtered = useMemo(() => {
-    return orderedRoomsForList(activeRooms, query);
-  }, [activeRooms, query]);
+    return orderedRoomsForList(activeRooms, useServerSearchResults ? "" : query);
+  }, [activeRooms, query, useServerSearchResults]);
 
   const liveCount = activeRooms.filter((room) => room.runs.some((run) => run.status === "running" || run.status === "starting")).length;
   const totalPending = activeRooms.reduce((sum, room) => sum + room.pendingTurns.length, 0);
@@ -113,7 +124,7 @@ export function RoomList({ rooms, activeRoomId, onSelect, onCreate, onTogglePin 
           </div>
         </div>
 
-        <SearchField aria-label="搜索房间" value={query} onChange={setQuery}>
+        <SearchField aria-label="搜索房间" value={query} onChange={(value) => updateRoomListSearchQuery(value, setQuery, onSearchQueryChange)}>
           <SearchField.Group className="rounded-xl border border-border bg-overlay shadow-sm">
             <SearchField.Input placeholder="搜索房间 / 模式" className="placeholder:text-muted" />
           </SearchField.Group>

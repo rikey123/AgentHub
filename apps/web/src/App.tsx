@@ -19,7 +19,7 @@ import { SettingsModal } from "./components/settings/index.ts";
 import { getSettingsSearch, getSettingsStateFromSearch } from "./components/settings/settingsUrl.ts";
 import type { SettingsTabId } from "./components/settings/SettingsModal.tsx";
 import type { AgentContactViewModel } from "./types.ts";
-import { useProjector } from "./hooks/useProjector.ts";
+import { normalizedRoomSearchQuery, useProjector } from "./hooks/useProjector.ts";
 import { useSdk, useCsrfFetch } from "./hooks/useSdk.ts";
 import { useTheme } from "./hooks/useTheme.ts";
 
@@ -95,8 +95,9 @@ export default function App() {
   const [rail, setRail] = useState<RailItem>("chat");
   const [bannerError, setBannerError] = useState<string | undefined>();
   const [unstallPending, setUnstallPending] = useState(false);
+  const [roomSearchQuery, setRoomSearchQuery] = useState("");
 
-  const projector = useProjector("main", activeRoomId);
+  const projector = useProjector("main", activeRoomId, undefined, roomSearchQuery);
   const sdk = useSdk();
   const csrfFetch = useCsrfFetch();
   const { theme, setTheme, toggleTheme, setDensity } = useTheme();
@@ -113,7 +114,14 @@ export default function App() {
     window.history.replaceState(window.history.state, "", nextUrl);
   }, [settingsOpen, settingsTab]);
 
-  const rooms = useMemo(() => Array.from(projector.rooms.values()), [projector.rooms]);
+  const activeSearchQuery = normalizedRoomSearchQuery(roomSearchQuery);
+  const hasMatchingServerSearchResults = activeSearchQuery.length > 0 && projector.roomSearchResultQuery === activeSearchQuery && projector.roomSearchResultIds !== undefined;
+  const rooms = useMemo(() => {
+    const allRooms = Array.from(projector.rooms.values());
+    if (!hasMatchingServerSearchResults || projector.roomSearchResultIds === undefined) return allRooms;
+    const resultIds = new Set(projector.roomSearchResultIds);
+    return allRooms.filter((room) => resultIds.has(room.id));
+  }, [hasMatchingServerSearchResults, projector.roomSearchResultIds, projector.rooms]);
   const activeRoom = activeRoomId ? projector.rooms.get(activeRoomId) : undefined;
 
   const openRoom = useCallback((roomId: string) => {
@@ -462,6 +470,8 @@ export default function App() {
             onSelect={openRoom}
             onCreate={openNewRoom}
             onTogglePin={(roomId, isPinned) => void handleToggleRoomPin(roomId, isPinned)}
+            onSearchQueryChange={setRoomSearchQuery}
+            useServerSearchResults={hasMatchingServerSearchResults}
           />
         }
         center={center}
