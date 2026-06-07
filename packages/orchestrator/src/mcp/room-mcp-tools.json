@@ -45,6 +45,7 @@
       "type": "object",
       "properties": {
         "kind": { "type": "string", "description": "Artifact kind: web_page, web_app, document, presentation, presentation_pptx, source_code, or generic_file." },
+        "artifactId": { "type": "string", "description": "Optional existing artifact id to update with a new version." },
         "content": { "type": "string", "description": "Text artifact content for web_page, web_app, document, presentation, or source_code artifacts." },
         "filePath": { "type": "string", "description": "Workspace-relative source file path for binary artifacts." },
         "filename": { "type": "string", "description": "Published artifact filename." },

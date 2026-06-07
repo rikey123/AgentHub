@@ -22,9 +22,18 @@ export type PptPreviewBridgeOptions = {
   readonly findFreePort?: () => Promise<number>;
   readonly spawnWatch?: (filePath: string, port: number) => ChildProcessLike;
   readonly waitForReady?: (child: ChildProcessLike, port: number) => Promise<void>;
+  readonly readyTimeoutMs?: number;
 };
 
-type ChildProcessLike = Pick<ChildProcess, "pid" | "kill" | "once">;
+type ChildProcessStreamLike = {
+  readonly on: (event: "data", listener: (chunk: unknown) => void) => unknown;
+  readonly off: (event: "data", listener: (chunk: unknown) => void) => unknown;
+};
+
+type ChildProcessLike = Pick<ChildProcess, "pid" | "kill" | "once" | "removeListener"> & {
+  readonly stdout?: ChildProcessStreamLike | null;
+  readonly stderr?: ChildProcessStreamLike | null;
+};
 
 export function createPptPreviewBridge(options: PptPreviewBridgeOptions = {}): PptPreviewBridge {
   const sessions = new Map<number, { readonly filePath: string; readonly child: ChildProcessLike; status: PptPreviewSession["status"] }>();
@@ -33,7 +42,7 @@ export function createPptPreviewBridge(options: PptPreviewBridgeOptions = {}): P
   const installOfficecli = options.installOfficecli ?? defaultInstallOfficecli;
   const findFreePortImpl = options.findFreePort ?? findFreePort;
   const spawnWatch = options.spawnWatch ?? ((filePath, port) => spawn("officecli", ["watch", filePath, "--port", String(port)], { stdio: ["ignore", "pipe", "pipe"] }));
-  const waitForReady = options.waitForReady ?? defaultWaitForReady;
+  const waitForReady = options.waitForReady ?? ((child, port) => defaultWaitForReady(child, port, options.readyTimeoutMs));
 
   return {
     start: async (filePath) => {
@@ -121,6 +130,48 @@ async function findFreePort(): Promise<number> {
   });
 }
 
-async function defaultWaitForReady(_child: ChildProcessLike, _port: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 50));
+async function defaultWaitForReady(child: ChildProcessLike, port: number, timeoutMs = 10_000): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const cleanupCallbacks: Array<() => void> = [];
+    const timer = setTimeout(() => finish(new Error("ppt preview did not become ready")), timeoutMs);
+    const finish = (error?: Error): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      for (const cleanup of cleanupCallbacks) cleanup();
+      if (error !== undefined) reject(error);
+      else resolve();
+    };
+    const onData = (chunk: unknown): void => {
+      if (String(chunk).includes("Watch:")) finish();
+    };
+    const onExit = (): void => finish(new Error("ppt preview exited before becoming ready"));
+    child.once?.("exit", onExit);
+    cleanupCallbacks.push(() => {
+      child.removeListener?.("exit", onExit);
+    });
+    for (const stream of [child.stdout, child.stderr]) {
+      if (stream === null || stream === undefined) continue;
+      stream.on("data", onData);
+      cleanupCallbacks.push(() => stream.off("data", onData));
+    }
+    void pollPreviewReady(port, () => settled, finish);
+  });
+}
+
+async function pollPreviewReady(port: number, isSettled: () => boolean, finish: (error?: Error) => void): Promise<void> {
+  while (!isSettled()) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/`);
+      if (response.status === 200) {
+        finish();
+        return;
+      }
+    } catch {
+      // Keep polling until the bounded timeout in defaultWaitForReady fires.
+    }
+    if (isSettled()) return;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
 }

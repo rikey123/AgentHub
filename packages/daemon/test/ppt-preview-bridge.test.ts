@@ -1,3 +1,5 @@
+import { EventEmitter } from "node:events";
+
 import { describe, expect, it, vi } from "vitest";
 
 import { createPptPreviewBridge, type PptPreviewBridgeOptions } from "../src/services/ppt-preview-bridge.ts";
@@ -35,12 +37,50 @@ describe("PptPreviewBridge", () => {
     await expect(bridge.start("deck.pptx")).rejects.toThrow("officecli is not available");
     expect(install).toHaveBeenCalledTimes(1);
   });
+
+  it("waits for a Watch marker on stdout before reporting the preview ready", async () => {
+    const child = fakeChild(1235, true);
+    const bridge = createPptPreviewBridge({
+      detectOfficecli: async () => true,
+      findFreePort: async () => 61236,
+      spawnWatch: vi.fn(() => child)
+    });
+
+    const pending = bridge.start("deck.pptx");
+    await vi.waitFor(() => expect(child.stdout.listenerCount("data")).toBeGreaterThan(0));
+    expect(child.kill).not.toHaveBeenCalled();
+    child.stdout.emit("data", Buffer.from("Watch: http://127.0.0.1:61236"));
+
+    await expect(pending).resolves.toMatchObject({ port: 61236, status: "ready" });
+  });
+
+  it("kills the watch child and removes the session when readiness times out", async () => {
+    const child = fakeChild(1236, true);
+    const bridge = createPptPreviewBridge({
+      detectOfficecli: async () => true,
+      findFreePort: async () => 61237,
+      spawnWatch: vi.fn(() => child),
+      readyTimeoutMs: 10
+    });
+
+    const pending = bridge.start("deck.pptx");
+
+    await expect(pending).rejects.toThrow("ppt preview did not become ready");
+    expect(child.kill).toHaveBeenCalled();
+    expect(bridge.isActivePreviewPort(61237)).toBe(false);
+  });
 });
 
-function fakeChild(pid: number): ReturnType<NonNullable<PptPreviewBridgeOptions["spawnWatch"]>> & { readonly kill: ReturnType<typeof vi.fn> } {
+function fakeChild(pid: number, withStreams = false): ReturnType<NonNullable<PptPreviewBridgeOptions["spawnWatch"]>> & { readonly kill: ReturnType<typeof vi.fn>; readonly stdout: EventEmitter; readonly stderr: EventEmitter } {
+  const stdout = new EventEmitter();
+  const stderr = new EventEmitter();
   return {
     pid,
     kill: vi.fn(() => true),
-    once: vi.fn()
+    once: vi.fn(),
+    removeListener: vi.fn(),
+    ...(withStreams ? { stdout, stderr } : {}),
+    stdout,
+    stderr
   };
 }

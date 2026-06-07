@@ -55,17 +55,27 @@ describe("V1.2 artifact backend routes", () => {
   it("pins and unpins messages with durable events in the same write path", async () => {
     const messageId = seedMessage("room_pin", "message_pin");
 
-    const pinned = await fetch(`${baseUrl}/messages/${messageId}/pin`, { method: "POST" });
+    const pinned = await fetch(`${baseUrl}/rooms/room_pin/messages/${messageId}/pin`, { method: "POST" });
     expect(pinned.status).toBe(200);
     expect(currentDaemon().database.sqlite.prepare("SELECT pinned_at FROM messages WHERE id = ?").get(messageId)).toMatchObject({ pinned_at: expect.any(Number) });
     expect(currentDaemon().database.sqlite.prepare("SELECT scope, pinned, content FROM context_items WHERE source_message_id = ?").get(messageId)).toMatchObject({ scope: "workspace", pinned: 1, content: "Pin this" });
     expect(currentDaemon().database.sqlite.prepare("SELECT type FROM events WHERE type = 'context.item.created' AND json_extract(payload, '$.contextId') IN (SELECT id FROM context_items WHERE source_message_id = ?)").get(messageId)).toBeDefined();
     expect(currentDaemon().database.sqlite.prepare("SELECT type FROM events WHERE type = 'message.pinned' AND json_extract(payload, '$.messageId') = ?").get(messageId)).toBeDefined();
 
-    const unpinned = await fetch(`${baseUrl}/messages/${messageId}/pin`, { method: "DELETE" });
+    const unpinned = await fetch(`${baseUrl}/rooms/room_pin/messages/${messageId}/pin`, { method: "DELETE" });
     expect(unpinned.status).toBe(200);
     expect(currentDaemon().database.sqlite.prepare("SELECT pinned_at FROM messages WHERE id = ?").get(messageId)).toMatchObject({ pinned_at: null });
     expect(currentDaemon().database.sqlite.prepare("SELECT type FROM events WHERE type = 'message.unpinned' AND json_extract(payload, '$.messageId') = ?").get(messageId)).toBeDefined();
+  });
+
+  it("rejects room-scoped pin requests when the message belongs to a different room", async () => {
+    const messageId = seedMessage("room_pin_owner", "message_pin_owner");
+    currentDaemon().database.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES ('room_pin_other', 'default-workspace', 'Other Room', 'assisted', 'conversation', 'agent', NULL, 1, 1)").run();
+
+    const pinned = await fetch(`${baseUrl}/rooms/room_pin_other/messages/${messageId}/pin`, { method: "POST" });
+
+    expect(pinned.status).toBe(404);
+    expect(currentDaemon().database.sqlite.prepare("SELECT pinned_at FROM messages WHERE id = ?").get(messageId)).toMatchObject({ pinned_at: null });
   });
 
   it("filters the artifact library by room, kind, search text, and recent limit with metadata", async () => {
@@ -138,6 +148,22 @@ describe("V1.2 artifact backend routes", () => {
     expect(await duplicate.json()).toMatchObject({ error: "agent_name_conflict" });
   });
 
+  it("reports contacts offline when runtime health/status is unavailable unless the agent is busy", async () => {
+    const offlineRuntimeId = seedRuntime("runtime_contacts_offline", "opencode", "unavailable");
+    const busyRuntimeId = seedRuntime("runtime_contacts_busy", "opencode", "unavailable");
+    const offline = await createCustomAgent("Offline Expert", offlineRuntimeId);
+    const busy = await createCustomAgent("Busy Expert", busyRuntimeId);
+    currentDaemon().database.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES ('room_busy_contact', 'default-workspace', 'Busy Contact', 'assisted', 'conversation', 'agent', NULL, 1, 1)").run();
+    currentDaemon().database.sqlite.prepare("INSERT INTO runs (id, workspace_id, task_id, room_id, agent_id, adapter_id, adapter_session_id, provider_conversation_id, parent_run_id, status, wake_reason, waiting_reason, workspace_path, work_dir, workspace_mode, context_version, target_files, mailbox_claim_count, pid_at_start, claimed_at, started_at, ended_at, input_tokens, output_tokens, cached_tokens, cost_usd, model_id, failure_class, error, created_at, updated_at) VALUES ('run_busy_contact', 'default-workspace', NULL, 'room_busy_contact', ?, 'opencode', NULL, NULL, NULL, 'running', 'manual', NULL, NULL, NULL, NULL, NULL, '[]', 0, NULL, NULL, 5, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 5, 5)").run(busy.agentBindingId);
+
+    const health = await fetch(`${baseUrl}/runtimes/${offlineRuntimeId}/health`);
+    const contacts = await (await fetch(`${baseUrl}/agents/contacts`)).json() as { readonly contacts: readonly { readonly agentBindingId: string; readonly status: string }[] };
+
+    expect(health.status).toBe(503);
+    expect(contacts.contacts).toContainEqual(expect.objectContaining({ agentBindingId: offline.agentBindingId, status: "offline" }));
+    expect(contacts.contacts).toContainEqual(expect.objectContaining({ agentBindingId: busy.agentBindingId, status: "busy" }));
+  });
+
   it("parses /create-agent prefill hints", async () => {
     seedRuntime("runtime_create_agent", "opencode");
     currentDaemon().database.sqlite.prepare("INSERT OR IGNORE INTO skills (id, workspace_id, name, description, content, origin, source_url, created_at, updated_at) VALUES ('skill_web_page', 'default-workspace', 'web-page-builder', 'Web pages', '---', 'builtin', NULL, 1, 1)").run();
@@ -181,8 +207,18 @@ function seedMessage(roomId: string, messageId: string): string {
   return messageId;
 }
 
-function seedRuntime(runtimeId: string, kind: string): string {
-  currentDaemon().database.sqlite.prepare("INSERT OR IGNORE INTO runtimes (id, workspace_id, kind, name, command, args, env, detected_at, detected_path, detected_version, supported_caps, version, status, manifest_json, created_at, updated_at) VALUES (?, 'default-workspace', ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, '[]', NULL, 'available', '{}', 1, 1)").run(runtimeId, kind, kind);
+async function createCustomAgent(name: string, runtimeId: string): Promise<{ readonly agentBindingId: string; readonly roleId: string }> {
+  const response = await fetch(`${baseUrl}/agents/custom`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name, runtimeId, systemPrompt: "Build web artifacts.", capabilities: ["chat"] })
+  });
+  expect(response.status).toBe(201);
+  return await response.json() as { readonly agentBindingId: string; readonly roleId: string };
+}
+
+function seedRuntime(runtimeId: string, kind: string, status = "available"): string {
+  currentDaemon().database.sqlite.prepare("INSERT OR IGNORE INTO runtimes (id, workspace_id, kind, name, command, args, env, detected_at, detected_path, detected_version, supported_caps, version, status, manifest_json, created_at, updated_at) VALUES (?, 'default-workspace', ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, '[]', NULL, ?, '{}', 1, 1)").run(runtimeId, kind, kind, status);
   return runtimeId;
 }
 

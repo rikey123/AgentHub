@@ -975,6 +975,7 @@ async function route(ctx: RouteContext): Promise<void> {
   }
   if (ctx.req.method === "POST" && parts[0] === "runtimes" && parts[1] && parts[2] === "detect") return detectRuntime(ctx, parts[1]);
   if (ctx.req.method === "POST" && parts[0] === "runtimes" && parts[1] && parts[2] === "test") return testRuntime(ctx, parts[1], await body(ctx));
+  if (ctx.req.method === "GET" && parts[0] === "runtimes" && parts[1] && parts[2] === "health") return runtimeHealth(ctx, parts[1]);
   if (ctx.req.method === "GET" && parts[0] === "runtimes" && parts[1] && parts[2] === "local-skills" && parts.length === 3) return runtimeLocalSkills(ctx, parts[1]);
   if (ctx.req.method === "POST" && parts[0] === "runtimes" && parts[1] && parts[2] === "local-skills" && parts[3] === "import") return importRuntimeLocalSkill(ctx, parts[1], await body(ctx));
   if (ctx.req.method === "DELETE" && parts[0] === "runtimes" && parts[1]) {
@@ -1038,6 +1039,8 @@ async function route(ctx: RouteContext): Promise<void> {
   if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "unarchive") return dispatch(ctx, { roomId: parts[1] }, "UnarchiveRoom");
   if (ctx.req.method === "GET" && url.pathname === "/messages") return messages(ctx, url);
   if (ctx.req.method === "GET" && parts[0] === "rooms" && parts[2] === "messages") return messages(ctx, url, parts[1] as string);
+  if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "messages" && parts[4] === "pin") return pinMessage(ctx, parts[3] as string, parts[1] as string);
+  if (ctx.req.method === "DELETE" && parts[0] === "rooms" && parts[2] === "messages" && parts[4] === "pin") return unpinMessage(ctx, parts[3] as string, parts[1] as string);
   if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "messages") return dispatch(ctx, { ...(await body(ctx)), roomId: parts[1] }, "SendMessage");
   if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "discussion" && parts[3] === "stop") return stopDiscussion(ctx, parts[1] as string);
   if (ctx.req.method === "DELETE" && parts[0] === "pending-turns" && parts[1]) return dispatch(ctx, { pendingTurnId: parts[1] }, "CancelPendingTurn");
@@ -1197,6 +1200,23 @@ async function testRuntime(ctx: RouteContext, runtimeId: string, input: Record<s
   }
   const result = await runRuntimeTest(runtime);
   return json(ctx.res, 200, result);
+}
+
+function runtimeHealth(ctx: RouteContext, runtimeId: string): void {
+  const runtime = get(ctx.database, "SELECT id, kind, name, status, detected_version FROM runtimes WHERE id = ?", runtimeId) as Record<string, unknown> | null;
+  if (runtime === null) return json(ctx.res, 404, { error: "runtime_not_found" });
+  const available = runtimeStatusAvailable(runtime.status);
+  return json(ctx.res, available ? 200 : 503, {
+    ok: available,
+    runtimeId,
+    status: stringField(runtime.status) ?? "unknown",
+    kind: runtime.kind,
+    ...(stringOrNull(runtime.detected_version) !== null ? { version: stringOrNull(runtime.detected_version) } : {})
+  });
+}
+
+function runtimeStatusAvailable(status: unknown): boolean {
+  return status === "available" || status === "connected" || status === "ready";
 }
 
 async function runRuntimeDetection(runtime: Record<string, unknown>): Promise<{ readonly ok: true; readonly detectedPath: string | null; readonly detectedVersion: string | null } | { readonly ok: false; readonly error: string }> {
@@ -2439,9 +2459,10 @@ function messages(ctx: RouteContext, url: URL, roomIdOverride?: string): void {
   });
 }
 
-function pinMessage(ctx: RouteContext, messageId: string): void {
+function pinMessage(ctx: RouteContext, messageId: string, roomId?: string): void {
   const row = get(ctx.database, "SELECT workspace_id, room_id FROM messages WHERE id = ? AND deleted_at IS NULL", messageId) as { readonly workspace_id: string; readonly room_id: string } | null;
   if (row === null) return json(ctx.res, 404, { error: "message_not_found" });
+  if (roomId !== undefined && row.room_id !== roomId) return json(ctx.res, 404, { error: "message_not_found" });
   const now = ctx.now?.() ?? Date.now();
   const text = messageText(ctx.database, messageId);
   const contextId = randomUUID();
@@ -2460,9 +2481,10 @@ function pinMessage(ctx: RouteContext, messageId: string): void {
   json(ctx.res, 200, { ok: true, messageId, pinnedAt: now });
 }
 
-function unpinMessage(ctx: RouteContext, messageId: string): void {
+function unpinMessage(ctx: RouteContext, messageId: string, roomId?: string): void {
   const row = get(ctx.database, "SELECT workspace_id, room_id FROM messages WHERE id = ? AND deleted_at IS NULL", messageId) as { readonly workspace_id: string; readonly room_id: string } | null;
   if (row === null) return json(ctx.res, 404, { error: "message_not_found" });
+  if (roomId !== undefined && row.room_id !== roomId) return json(ctx.res, 404, { error: "message_not_found" });
   const now = ctx.now?.() ?? Date.now();
   ctx.database.sqlite.transaction(() => {
     ctx.database.sqlite.prepare("UPDATE messages SET pinned_at = NULL, updated_at = ? WHERE id = ?").run(now, messageId);
@@ -2877,7 +2899,7 @@ function agentContacts(ctx: RouteContext): void {
   const rows = all(
     ctx.database,
     `SELECT ab.id, ab.role_id, ab.runtime_id, ab.contact_name, ab.avatar_url, ab.contact_description, ab.updated_at,
-            r.name AS role_name, r.capabilities, rt.kind AS runtime_kind,
+            r.name AS role_name, r.capabilities, rt.kind AS runtime_kind, rt.status AS runtime_status,
             (SELECT MAX(started_at) FROM runs WHERE runs.agent_id = ab.id OR runs.agent_id = r.id) AS last_used_at,
             (SELECT COUNT(*) FROM runs WHERE (runs.agent_id = ab.id OR runs.agent_id = r.id) AND runs.status IN ('running', 'queued', 'starting')) AS busy_count
      FROM agent_bindings ab
@@ -2963,7 +2985,7 @@ function contactRow(row: Record<string, unknown>): Record<string, unknown> {
     roleId: row.role_id,
     runtimeKind: row.runtime_kind,
     capabilities: parseJsonField(row.capabilities, []),
-    status: Number(row.busy_count ?? 0) > 0 ? "busy" : "available",
+    status: Number(row.busy_count ?? 0) > 0 ? "busy" : runtimeStatusAvailable(row.runtime_status) ? "available" : "offline",
     ...(stringField(row.contact_description) !== undefined ? { description: stringField(row.contact_description) } : {}),
     ...(typeof row.last_used_at === "number" ? { lastUsedAt: row.last_used_at } : {})
   };

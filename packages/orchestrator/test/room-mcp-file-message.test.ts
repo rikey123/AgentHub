@@ -54,6 +54,45 @@ describe("RoomMcpServer room.send_file_message", () => {
     expect(currentDatabase().sqlite.prepare("SELECT type FROM events WHERE type = 'message.part.added' AND json_extract(payload, '$.part.artifactId') = ?").get(artifactId)).toBeDefined();
   });
 
+  test("updates an existing artifact through publish_artifact when artifactId is provided", async () => {
+    const first = await currentServer().callTool("room.publish_artifact", {
+      kind: "document",
+      filename: "brief.md",
+      title: "Brief",
+      content: "# Brief v1"
+    }, session());
+    expect(first).toMatchObject({ ok: true });
+    const artifactId = first.ok && typeof first.data === "object" && first.data !== null ? (first.data as { artifactId: string }).artifactId : "";
+    now += 1;
+
+    const updated = await currentServer().callTool("room.publish_artifact", {
+      artifactId,
+      kind: "document",
+      filename: "brief.md",
+      title: "Brief",
+      content: "# Brief v2",
+      message: "revise existing"
+    }, session());
+
+    expect(updated).toMatchObject({ ok: true, data: { artifactId, kind: "document", version: 2, messageId: "msg_run_1" } });
+    expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM artifacts WHERE id = ?").get(artifactId)).toMatchObject({ count: 1 });
+    expect(currentDatabase().sqlite.prepare("SELECT version, content, message FROM artifact_versions WHERE artifact_id = ? ORDER BY version DESC LIMIT 1").get(artifactId)).toMatchObject({ version: 2, content: "# Brief v2", message: "revise existing" });
+    const parts = currentDatabase().sqlite.prepare("SELECT payload FROM message_parts WHERE part_type = 'artifact' ORDER BY seq ASC").all() as Array<{ readonly payload: string }>;
+    expect(parts.map((part) => JSON.parse(part.payload).artifactId as string)).toEqual([artifactId, artifactId]);
+  });
+
+  test("rejects publish_artifact input that includes both content and filePath", async () => {
+    const result = await currentServer().callTool("room.publish_artifact", {
+      kind: "presentation_pptx",
+      filename: "deck.pptx",
+      content: "not binary",
+      filePath: "deck.pptx"
+    }, session());
+
+    expect(result).toMatchObject({ ok: false, error: { code: "validation_failed" } });
+    expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM artifacts").get()).toMatchObject({ count: 0 });
+  });
+
   test("rejects publish_artifact filePath traversal before creating artifacts", async () => {
     const result = await currentServer().callTool("room.publish_artifact", {
       kind: "presentation_pptx",

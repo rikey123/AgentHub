@@ -32,6 +32,7 @@ export type ArtifactVersioningService = {
   readonly createBinaryVersion: (input: CreateArtifactVersionInput) => Promise<ArtifactVersionRecord>;
   readonly createVersionInTransaction: (input: CreateArtifactVersionInput) => ArtifactVersionRecord;
   readonly createBinaryVersionInTransaction: (input: CreateArtifactVersionInput) => ArtifactVersionRecord;
+  readonly restoreBinaryVersionInTransaction: (artifactId: string, version: number) => ArtifactVersionRecord;
   readonly listVersions: (artifactId: string) => Promise<readonly ArtifactVersionRecord[]>;
   readonly restoreVersion: (artifactId: string, version: number) => Promise<ArtifactVersionRecord>;
   readonly diffVersions: (artifactId: string, fromVersion: number, toVersion: number) => Promise<string>;
@@ -133,6 +134,42 @@ export function createArtifactVersioningService(options: ArtifactVersioningServi
       message: input.message
     });
   };
+  const restoreBinaryVersionInTransaction = (artifactId: string, sourceVersion: number): ArtifactVersionRecord => {
+    const artifact = requireArtifact(options.database, artifactId);
+    const workspaceRoot = workspaceRootFor(options.database, artifact.workspace_id);
+    const source = options.database.sqlite.prepare("SELECT storage_path FROM artifact_versions WHERE artifact_id = ? AND version = ? AND content_encoding = 'binary'").get(artifactId, sourceVersion) as { readonly storage_path: string | null } | undefined;
+    if (source === undefined || source.storage_path === null) throw new Error(`artifact version ${sourceVersion} not found`);
+    const sourcePath = resolveControlledStoragePath(workspaceRoot, artifactId, sourceVersion, source.storage_path);
+    const createdAt = now();
+    const version = nextVersion(options.database, artifactId);
+    const filename = normalizeFilename(basename(sourcePath));
+    const storagePath = join(workspaceRoot, ".agenthub", "artifacts", artifactId, `v${version}`, filename);
+    mkdirSync(dirname(storagePath), { recursive: true });
+    copyFileSync(sourcePath, storagePath);
+    const stats = statSync(storagePath);
+    const digest = fileSha256(storagePath);
+    options.database.sqlite
+      .prepare(
+        `INSERT INTO artifact_files (artifact_id, path, old_content, new_content, patch, additions, deletions, file_status, old_sha256, new_sha256, applied_state, content_path, created_at, binary, mime_type, size_bytes)
+         VALUES (?, ?, NULL, NULL, NULL, 0, 0, 'modified', NULL, ?, NULL, ?, ?, 1, ?, ?)
+         ON CONFLICT(artifact_id, path) DO UPDATE SET
+           new_content = NULL,
+           new_sha256 = excluded.new_sha256,
+           content_path = excluded.content_path,
+           binary = 1,
+           mime_type = excluded.mime_type,
+           size_bytes = excluded.size_bytes`
+      )
+      .run(artifactId, filename, digest, storagePath, createdAt, mimeTypeForPath(filename), stats.size);
+    return insertVersion(options, artifact, {
+      version,
+      content: null,
+      storagePath,
+      contentEncoding: "binary",
+      createdAt,
+      message: `Restore v${sourceVersion}`
+    });
+  };
   const service: ArtifactVersioningService = {
     createVersion: async (input) => {
       let record: ArtifactVersionRecord | undefined;
@@ -150,6 +187,7 @@ export function createArtifactVersioningService(options: ArtifactVersioningServi
     },
     createVersionInTransaction,
     createBinaryVersionInTransaction,
+    restoreBinaryVersionInTransaction,
     listVersions: async (artifactId) => {
       return (options.database.sqlite.prepare("SELECT * FROM artifact_versions WHERE artifact_id = ? ORDER BY version DESC").all(artifactId) as VersionRow[]).map(rowToRecord);
     },
@@ -157,8 +195,11 @@ export function createArtifactVersioningService(options: ArtifactVersioningServi
       const source = options.database.sqlite.prepare("SELECT content, storage_path, content_encoding, message FROM artifact_versions WHERE artifact_id = ? AND version = ?").get(artifactId, version) as { readonly content: string | null; readonly storage_path: string | null; readonly content_encoding: ArtifactVersionEncoding; readonly message: string | null } | undefined;
       if (source === undefined) throw new Error(`artifact version ${version} not found`);
       if (source.content_encoding === "binary") {
-        if (source.storage_path === null) throw new Error("binary version is missing storage_path");
-        return await service.createBinaryVersion({ artifactId, filePath: source.storage_path, filename: basename(source.storage_path), message: `Restore v${version}` });
+        let record: ArtifactVersionRecord | undefined;
+        options.database.sqlite.transaction(() => {
+          record = restoreBinaryVersionInTransaction(artifactId, version);
+        })();
+        return record!;
       }
       if (source.content === null) throw new Error("text version is missing content");
       return await service.createVersion({ artifactId, content: source.content, message: `Restore v${version}` });
@@ -249,6 +290,17 @@ function resolveWorkspaceFile(workspaceRoot: string, filePath: string): string {
   const target = isAbsolute(filePath) ? resolve(filePath) : resolve(root, filePath);
   const rel = relative(root, target);
   if (target !== root && (rel.startsWith("..") || rel.split(sep).includes("..") || isAbsolute(rel))) throw new Error("filePath must be within workspace");
+  return target;
+}
+
+function resolveControlledStoragePath(workspaceRoot: string, artifactId: string, version: number, storagePath: string): string {
+  const root = resolve(workspaceRoot);
+  const controlledRoot = resolve(root, ".agenthub", "artifacts", artifactId, `v${version}`);
+  const target = resolve(storagePath);
+  const rel = relative(controlledRoot, target);
+  if (target !== controlledRoot && (rel.startsWith("..") || rel.split(sep).includes("..") || isAbsolute(rel))) {
+    throw new Error("binary version storage_path must be within controlled artifact storage");
+  }
   return target;
 }
 

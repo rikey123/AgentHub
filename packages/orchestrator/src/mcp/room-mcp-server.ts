@@ -716,15 +716,23 @@ export class RoomMcpServer {
     const content = typeof input.content === "string" ? input.content : undefined;
     const filePath = typeof input.filePath === "string" ? input.filePath : undefined;
     if (content === undefined && filePath === undefined) return failure("validation_failed", "content or filePath is required");
+    if (content !== undefined && filePath !== undefined) return failure("validation_failed", "content and filePath are mutually exclusive");
+    const existingArtifactId = typeof input.artifactId === "string" && input.artifactId.length > 0 ? input.artifactId : undefined;
     const runId = this.requireRunId(session, context);
     const now = this.options.now?.() ?? Date.now();
-    const artifactId = randomUUID();
+    const artifactId = existingArtifactId ?? randomUUID();
     let messageId = "";
     let version = 0;
     try {
       this.options.database.sqlite.transaction(() => {
         messageId = this.ensureRunMessage(room.workspace_id, session, runId, now);
-        this.options.database.sqlite.prepare("INSERT INTO artifacts (id, workspace_id, room_id, run_id, message_id, type, kind, title, status, created_by, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'file', ?, ?, 'draft', ?, ?, ?, ?)").run(artifactId, room.workspace_id, session.roomId, runId, messageId, kind, title, session.agentId, JSON.stringify({ filename }), now, now);
+        if (existingArtifactId !== undefined) {
+          const existing = this.options.database.sqlite.prepare("SELECT id, workspace_id, room_id FROM artifacts WHERE id = ? AND deleted_at IS NULL").get(existingArtifactId) as { readonly id: string; readonly workspace_id: string; readonly room_id: string | null } | undefined;
+          if (existing === undefined || existing.workspace_id !== room.workspace_id || existing.room_id !== session.roomId) throw new Error("artifact_not_found");
+          this.options.database.sqlite.prepare("UPDATE artifacts SET run_id = ?, message_id = ?, kind = ?, title = ?, metadata = ?, updated_at = ? WHERE id = ?").run(runId, messageId, kind, title, JSON.stringify({ filename }), now, artifactId);
+        } else {
+          this.options.database.sqlite.prepare("INSERT INTO artifacts (id, workspace_id, room_id, run_id, message_id, type, kind, title, status, created_by, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'file', ?, ?, 'draft', ?, ?, ?, ?)").run(artifactId, room.workspace_id, session.roomId, runId, messageId, kind, title, session.agentId, JSON.stringify({ filename }), now, now);
+        }
         const record = filePath !== undefined
           ? versioning.createBinaryVersionInTransaction({ artifactId, filePath, filename, mimeType: typeof input.mimeType === "string" ? input.mimeType : undefined, createdBy: session.agentId, message: typeof input.message === "string" ? input.message : undefined })
           : versioning.createVersionInTransaction({ artifactId, content: content ?? "", filename, createdBy: session.agentId, message: typeof input.message === "string" ? input.message : undefined });
@@ -736,6 +744,7 @@ export class RoomMcpServer {
       })();
     } catch (error) {
       if (error instanceof Error && error.message.includes("within workspace")) return failure("permission_denied", "path_traversal_denied");
+      if (error instanceof Error && error.message === "artifact_not_found") return failure("not_found", "artifact not found in this room");
       throw error;
     }
     return { ok: true, data: { artifactId, messageId, kind, version, filename } };

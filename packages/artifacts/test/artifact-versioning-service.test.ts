@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 
 import { EventBus } from "@agenthub/bus";
 import { createDatabase, type AgentHubDatabase } from "@agenthub/db";
@@ -79,6 +79,42 @@ describe("ArtifactVersioningService", () => {
     expect(String(row.content_path)).toContain(join(".agenthub", "artifacts", "artifact_1", "v1", "deck.pptx"));
     expect(readFileSync(String(row.content_path), "utf8")).toBe("pptx bytes");
     expect(versionRow).toMatchObject({ content: null, storage_path: row.content_path, content_encoding: "binary" });
+  });
+
+  it("restores binary versions from controlled storage without resolving through workspace public paths", async () => {
+    const source = join(currentRoot(), "output", "deck.pptx");
+    mkdirSync(dirname(source), { recursive: true });
+    writeFileSync(source, Buffer.from("original deck"));
+    const service = createArtifactVersioningService({ database: currentDb(), eventBus: currentBus(), now: () => now });
+    await service.createBinaryVersion({ artifactId: "artifact_1", filePath: "output/deck.pptx", filename: "deck.pptx", createdBy: "agent_1", message: "initial" });
+    const firstStorage = currentDb().sqlite.prepare("SELECT storage_path FROM artifact_versions WHERE artifact_id = ? AND version = 1").get("artifact_1") as { readonly storage_path: string };
+    writeFileSync(join(currentRoot(), ".agenthub", "artifacts", "artifact_1", "v1", basename(firstStorage.storage_path)), Buffer.from("restored deck"));
+
+    const restored = await service.restoreVersion("artifact_1", 1);
+
+    const row = currentDb().sqlite.prepare("SELECT content_path, new_sha256, size_bytes FROM artifact_files WHERE artifact_id = ?").get("artifact_1") as { readonly content_path: string; readonly new_sha256: string; readonly size_bytes: number };
+    const versionRow = currentDb().sqlite.prepare("SELECT storage_path, content_encoding FROM artifact_versions WHERE artifact_id = ? AND version = 2").get("artifact_1") as { readonly storage_path: string; readonly content_encoding: string };
+    expect(restored).toMatchObject({ version: 2, contentEncoding: "binary", message: "Restore v1" });
+    expect(versionRow).toMatchObject({ content_encoding: "binary", storage_path: row.content_path });
+    expect(row.content_path).toContain(join(".agenthub", "artifacts", "artifact_1", "v2", "deck.pptx"));
+    expect(readFileSync(row.content_path, "utf8")).toBe("restored deck");
+    expect(row.size_bytes).toBe(Buffer.byteLength("restored deck"));
+    expect(row.new_sha256).toHaveLength(64);
+  });
+
+  it("rejects binary restore when the selected version points outside controlled artifact storage", async () => {
+    const source = join(currentRoot(), "output", "deck.pptx");
+    mkdirSync(dirname(source), { recursive: true });
+    writeFileSync(source, Buffer.from("original deck"));
+    const tampered = join(currentRoot(), "output", "tampered.pptx");
+    writeFileSync(tampered, Buffer.from("tampered deck"));
+    const service = createArtifactVersioningService({ database: currentDb(), eventBus: currentBus(), now: () => now });
+    await service.createBinaryVersion({ artifactId: "artifact_1", filePath: "output/deck.pptx", filename: "deck.pptx", createdBy: "agent_1", message: "initial" });
+    currentDb().sqlite.prepare("UPDATE artifact_versions SET storage_path = ? WHERE artifact_id = ? AND version = 1").run(tampered, "artifact_1");
+
+    await expect(service.restoreVersion("artifact_1", 1)).rejects.toThrow("controlled artifact storage");
+
+    expect(currentDb().sqlite.prepare("SELECT COUNT(*) AS count FROM artifact_versions WHERE artifact_id = ?").get("artifact_1")).toMatchObject({ count: 1 });
   });
 });
 
