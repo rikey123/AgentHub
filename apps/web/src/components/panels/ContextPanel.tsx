@@ -1,7 +1,8 @@
-import { Card, Chip, Disclosure, DisclosureGroup } from "@heroui/react";
+import { Chip } from "@heroui/react";
 import type { ContextItemViewModel } from "../../types.ts";
 import { contextStatusColor } from "../../lib/status.ts";
 import { truncate } from "../../lib/format.ts";
+import { contextScopeLabel, contextStatusLabel } from "../../lib/contextLabels.ts";
 
 export function ContextPanel({ items }: { items: ReadonlyArray<ContextItemViewModel> }) {
   if (items.length === 0) {
@@ -12,46 +13,48 @@ export function ContextPanel({ items }: { items: ReadonlyArray<ContextItemViewMo
   const deprecated = items.filter((i) => i.status === "deprecated" || i.status === "disputed");
 
   return (
-    <DisclosureGroup defaultExpandedKeys={["draft", "confirmed"]}>
-      <Disclosure id="draft">
-        <Disclosure.Trigger>
-          <span className="flex items-center gap-2">Draft <Chip size="sm" variant="soft" color="warning">{draft.length}</Chip></span>
-        </Disclosure.Trigger>
-        <Disclosure.Body><ItemList items={draft} /></Disclosure.Body>
-      </Disclosure>
-      <Disclosure id="confirmed">
-        <Disclosure.Trigger>
-          <span className="flex items-center gap-2">Confirmed <Chip size="sm" variant="soft" color="success">{confirmed.length}</Chip></span>
-        </Disclosure.Trigger>
-        <Disclosure.Body><ItemList items={confirmed} /></Disclosure.Body>
-      </Disclosure>
-      <Disclosure id="deprecated">
-        <Disclosure.Trigger>
-          <span className="flex items-center gap-2">Deprecated <Chip size="sm" variant="soft" color="default">{deprecated.length}</Chip></span>
-        </Disclosure.Trigger>
-        <Disclosure.Body><ItemList items={deprecated} /></Disclosure.Body>
-      </Disclosure>
-    </DisclosureGroup>
+    <div className="ah-context-panel">
+      <ContextSection title="待确认" tone="warning" items={draft} />
+      <ContextSection title="已确认" tone="success" items={confirmed} />
+      <ContextSection title="已失效" tone="default" items={deprecated} />
+    </div>
+  );
+}
+
+function ContextSection({ title, tone, items }: { title: string; tone: "warning" | "success" | "default"; items: ReadonlyArray<ContextItemViewModel> }) {
+  return (
+    <section className={`ah-context-section ah-context-section-${tone}`}>
+      <div className="ah-context-section-header">
+        <div>
+          <h3>{title}</h3>
+          <p>显示 {items.length} 个</p>
+        </div>
+        <Chip size="sm" variant="soft" color={tone}>{items.length}</Chip>
+      </div>
+      <ItemList items={items} />
+    </section>
   );
 }
 
 function ItemList({ items }: { items: ReadonlyArray<ContextItemViewModel> }) {
-  if (items.length === 0) return <p className="px-3 py-2 text-xs text-muted">None.</p>;
+  if (items.length === 0) return <p className="ah-context-empty">暂无条目</p>;
   return (
-    <ul className="flex flex-col gap-2 p-2">
+    <ul className="ah-context-list">
       {items.map((item) => (
         <li key={item.id}>
-          <Card variant="transparent" className="border border-border">
-            <Card.Header>
-              <div className="flex items-center gap-2">
-                <Card.Title className="flex-1 truncate">{item.title}</Card.Title>
-                <Chip size="sm" variant="soft" color={contextStatusColor(item.status)}>{item.status}</Chip>
-                {item.pinned ? <Chip size="sm" variant="soft" color="accent">pinned</Chip> : null}
+          <article className="ah-context-item">
+            <div className="ah-context-item-main">
+              <div className="ah-context-item-title-row">
+                <h4>{item.title}</h4>
+                <div className="ah-context-item-badges">
+                <Chip size="sm" variant="soft" color={contextStatusColor(item.status)}>{contextStatusLabel(item.status)}</Chip>
+                {item.pinned ? <Chip size="sm" variant="soft" color="accent">已置顶</Chip> : null}
+                </div>
               </div>
-              <Card.Description className="text-xs">{truncate(item.content, 120)}</Card.Description>
-              <span className="text-xs text-muted">{item.scope}</span>
-            </Card.Header>
-          </Card>
+              <p>{truncate(item.content, 128)}</p>
+              <span className="ah-context-item-scope">{contextScopeLabel(item.scope)}</span>
+            </div>
+          </article>
         </li>
       ))}
     </ul>
