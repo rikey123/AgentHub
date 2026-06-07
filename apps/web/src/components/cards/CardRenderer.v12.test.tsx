@@ -21,7 +21,7 @@ describe("V1.2 artifact cards", () => {
     expect(html).toContain("Launch brief.md");
     expect(html).toContain("v3");
     expect(html).toContain("/artifacts/artifact-doc-1/download");
-    expect(html).toContain("Expand");
+    expect(html).toContain("Expand Preview");
   });
 
   it("routes source code and generic file artifacts to generic ArtifactCard branches", () => {
@@ -51,7 +51,7 @@ describe("V1.2 artifact cards", () => {
     expect(sourceCode).toContain("source_code");
     expect(sourceCode).toContain("v4");
     expect(sourceCode).toContain("/artifacts/artifact-source-1/download");
-    expect(sourceCode).toContain("Expand");
+    expect(sourceCode).toContain("Expand Preview");
     expect(sourceCode).toContain('data-testid="artifact-card"');
     expect(sourceCode).not.toContain('data-slot="card-content"><pre');
 
@@ -60,7 +60,7 @@ describe("V1.2 artifact cards", () => {
     expect(genericFile).toContain("generic_file");
     expect(genericFile).toContain("v1");
     expect(genericFile).toContain("/artifacts/artifact-file-1/download");
-    expect(genericFile).toContain("Expand");
+    expect(genericFile).toContain("Expand Preview");
     expect(genericFile).toContain('data-testid="artifact-card"');
     expect(genericFile).not.toContain('data-slot="card-content"><pre');
   });
@@ -82,7 +82,7 @@ describe("V1.2 artifact cards", () => {
     expect(html).toContain("Download");
     expect(html).not.toContain("Edit");
     expect(html).not.toContain("Deploy");
-    expect(html).toContain("Expand");
+    expect(html).toContain("Expand Preview");
     expect(html).toContain("sandbox=\"allow-scripts\"");
   });
 
@@ -111,11 +111,11 @@ describe("V1.2 artifact cards", () => {
     expect(slides).toContain("HTML slides");
     expect(slides).not.toContain("Reference slide");
     expect(slides).not.toContain("Edit");
-    expect(slides).toContain("Expand");
+    expect(slides).toContain("Expand Preview");
     expect(pptx).toContain("PPTX preview");
     expect(pptx).toContain("Install failed");
     expect(pptx).toContain("/artifacts/artifact-pptx-1/download");
-    expect(pptx).toContain("Expand");
+    expect(pptx).toContain("Expand Preview");
   });
 
   it("routes failed deployment payloads to retry/log/download actions", () => {

@@ -260,7 +260,7 @@ function ArtifactExpandAction({ card, csrfFetch }: { readonly card: ArtifactCard
 
   return (
     <>
-      <Button size="sm" variant="secondary" onPress={() => void openPreview()}>Expand</Button>
+      <Button size="sm" variant="secondary" onPress={() => void openPreview()}>Expand Preview</Button>
       <ArtifactPreviewModal
         isOpen={preview !== undefined}
         name={preview?.name ?? card.title}
