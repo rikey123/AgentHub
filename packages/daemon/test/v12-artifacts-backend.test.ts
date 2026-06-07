@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -58,13 +58,13 @@ describe("V1.2 artifact backend routes", () => {
     const pinned = await fetch(`${baseUrl}/rooms/room_pin/messages/${messageId}/pin`, { method: "POST" });
     expect(pinned.status).toBe(200);
     expect(currentDaemon().database.sqlite.prepare("SELECT pinned_at FROM messages WHERE id = ?").get(messageId)).toMatchObject({ pinned_at: expect.any(Number) });
-    expect(currentDaemon().database.sqlite.prepare("SELECT scope, pinned, content FROM context_items WHERE source_message_id = ?").get(messageId)).toMatchObject({ scope: "workspace", pinned: 1, content: "Pin this" });
-    expect(currentDaemon().database.sqlite.prepare("SELECT type FROM events WHERE type = 'context.item.created' AND json_extract(payload, '$.contextId') IN (SELECT id FROM context_items WHERE source_message_id = ?)").get(messageId)).toBeDefined();
+    expect(currentDaemon().database.sqlite.prepare("SELECT COUNT(*) AS count FROM context_items WHERE source_message_id = ? AND pinned = 1").get(messageId)).toMatchObject({ count: 0 });
     expect(currentDaemon().database.sqlite.prepare("SELECT type FROM events WHERE type = 'message.pinned' AND json_extract(payload, '$.messageId') = ?").get(messageId)).toBeDefined();
 
     const unpinned = await fetch(`${baseUrl}/rooms/room_pin/messages/${messageId}/pin`, { method: "DELETE" });
     expect(unpinned.status).toBe(200);
     expect(currentDaemon().database.sqlite.prepare("SELECT pinned_at FROM messages WHERE id = ?").get(messageId)).toMatchObject({ pinned_at: null });
+    expect(currentDaemon().database.sqlite.prepare("SELECT COUNT(*) AS count FROM context_items WHERE source_message_id = ? AND pinned = 1").get(messageId)).toMatchObject({ count: 0 });
     expect(currentDaemon().database.sqlite.prepare("SELECT type FROM events WHERE type = 'message.unpinned' AND json_extract(payload, '$.messageId') = ?").get(messageId)).toBeDefined();
   });
 

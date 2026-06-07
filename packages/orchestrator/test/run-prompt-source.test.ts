@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -86,6 +86,38 @@ describe("buildRunPrompt", () => {
 
     expect(prompt).toContain("bound message text");
     expect(prompt).not.toContain("WRONG latest user message");
+  });
+
+  test("injects context refs from the real queued message into the run prompt", () => {
+    expect(tempDir).toBeDefined();
+    currentDatabase().sqlite.prepare("UPDATE workspaces SET root_path = ? WHERE id = 'ws_1'").run(tempDir as string);
+    mkdirSync(join(tempDir as string, "src"), { recursive: true });
+    writeFileSync(join(tempDir as string, "src", "app.ts"), ["workspace one", "workspace two"].join("\n"));
+    seedTextArtifact("artifact_prompt", "doc one\ndoc two\ndoc three", "doc.md");
+    seedUserMessage("msg_context_refs", "Use @artifact:artifact_prompt#L2-L2 and @workspace:src/app.ts#L1-L1", 1);
+    createRun("run_context_refs", "primary_turn", { messageId: "msg_context_refs" });
+
+    const prompt = buildRunPrompt(run("run_context_refs"), currentDatabase(), { now: () => now });
+
+    expect(prompt).toContain("## Context References");
+    expect(prompt).toContain('<context-ref type="artifact" id="artifact_prompt" lines="2-2"');
+    expect(prompt).toContain("doc two");
+    expect(prompt).toContain('<context-ref type="workspace" path="src/app.ts" lines="1-1"');
+    expect(prompt).toContain("workspace one");
+  });
+
+  test("injects room pinned messages and compact artifact refs for assisted runs", () => {
+    seedPinnedUserMessage("msg_pinned_text", "API base path is /api/v2", 1);
+    seedPinnedArtifactMessage("msg_pinned_artifact", "artifact_pinned", 2);
+    seedUserMessage("msg_followup_pin", "What base path should I use?", 3);
+    createRun("run_pinned_context", "primary_turn", { messageId: "msg_followup_pin" });
+
+    const prompt = buildRunPrompt(run("run_pinned_context"), currentDatabase(), { now: () => now });
+
+    expect(prompt).toContain("## Pinned Room Context");
+    expect(prompt).toContain("API base path is /api/v2");
+    expect(prompt).toContain("@artifact:artifact_pinned");
+    expect(prompt.indexOf("## Pinned Room Context")).toBeLessThan(prompt.indexOf("## Assisted Group Chat"));
   });
 
   test("team leader follow-up prompt includes prior room context", () => {
@@ -300,6 +332,32 @@ function seedFileAttachment(messageId: string, artifactId: string, path: string,
     sizeBytes: Buffer.byteLength(content, "utf8"),
     path,
     previewKind: "markdown"
+  }), createdAt);
+}
+
+function seedTextArtifact(artifactId: string, content: string, path: string): void {
+  currentDatabase().sqlite.prepare(
+    "INSERT INTO artifacts (id, workspace_id, room_id, type, kind, title, status, created_by, metadata, created_at, updated_at) VALUES (?, 'ws_1', 'room_1', 'file', 'document', ?, 'draft', 'agent_1', ?, 1, 1)"
+  ).run(artifactId, path, JSON.stringify({ filename: path }));
+  currentDatabase().sqlite.prepare(
+    "INSERT INTO artifact_files (artifact_id, path, old_content, new_content, patch, additions, deletions, file_status, old_sha256, new_sha256, applied_state, content_path, created_at, binary, mime_type, size_bytes) VALUES (?, ?, '', ?, NULL, 0, 0, 'modified', NULL, NULL, NULL, NULL, 1, 0, 'text/markdown', ?)"
+  ).run(artifactId, path, content, Buffer.byteLength(content, "utf8"));
+}
+
+function seedPinnedUserMessage(messageId: string, text: string, createdAt: number): void {
+  seedUserMessage(messageId, text, createdAt);
+  currentDatabase().sqlite.prepare("UPDATE messages SET pinned_at = ? WHERE id = ?").run(createdAt + 100, messageId);
+}
+
+function seedPinnedArtifactMessage(messageId: string, artifactId: string, createdAt: number): void {
+  currentDatabase().sqlite.prepare("INSERT INTO messages (id, workspace_id, room_id, sender_type, sender_id, run_id, role, status, quoted_message_id, turn_dispatch_mode, pending_turn_id, created_at, updated_at, deleted_at, pinned_at) VALUES (?, 'ws_1', 'room_1', 'agent', 'agent_2', NULL, 'assistant', 'completed', NULL, 'immediate', NULL, ?, ?, NULL, ?)").run(messageId, createdAt, createdAt, createdAt + 100);
+  currentDatabase().sqlite.prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, 1, 'artifact', ?, ?)").run(messageId, JSON.stringify({
+    type: "artifact",
+    artifactId,
+    kind: "document",
+    title: "Pinned artifact",
+    filename: "pinned.md",
+    version: 1
   }), createdAt);
 }
 

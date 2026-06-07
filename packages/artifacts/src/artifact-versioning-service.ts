@@ -207,7 +207,9 @@ export function createArtifactVersioningService(options: ArtifactVersioningServi
     diffVersions: async (artifactId, fromVersion, toVersion) => {
       const from = readVersionContent(options.database, artifactId, fromVersion);
       const to = readVersionContent(options.database, artifactId, toVersion);
-      if (from.encoding === "binary" || to.encoding === "binary") return JSON.stringify({ from, to });
+      if (from.encoding === "binary" || to.encoding === "binary") {
+        return JSON.stringify({ type: "binary", from, to, changed: binaryVersionChanged(from, to) });
+      }
       return unifiedDiff(`v${fromVersion}`, from.content ?? "", `v${toVersion}`, to.content ?? "");
     }
   };
@@ -328,12 +330,24 @@ function mimeTypeForPath(path: string): string {
   }
 }
 
-function readVersionContent(database: AgentHubDatabase, artifactId: string, version: number): { readonly encoding: ArtifactVersionEncoding; readonly content?: string; readonly storagePath?: string } {
+type VersionContent =
+  | { readonly encoding: "text"; readonly content: string }
+  | { readonly encoding: "binary"; readonly version: number; readonly sizeBytes: number; readonly sha256: string };
+
+function readVersionContent(database: AgentHubDatabase, artifactId: string, version: number): VersionContent {
   const row = database.sqlite.prepare("SELECT content, storage_path, content_encoding FROM artifact_versions WHERE artifact_id = ? AND version = ?").get(artifactId, version) as { readonly content: string | null; readonly storage_path: string | null; readonly content_encoding: ArtifactVersionEncoding } | undefined;
   if (row === undefined) throw new Error(`artifact version ${version} not found`);
-  return row.content_encoding === "binary"
-    ? { encoding: "binary", ...(row.storage_path !== null ? { storagePath: row.storage_path } : {}) }
-    : { encoding: "text", content: row.content ?? "" };
+  if (row.content_encoding === "binary") {
+    if (row.storage_path === null) throw new Error(`binary artifact version ${version} is missing storage_path`);
+    const stats = statSync(row.storage_path);
+    return { encoding: "binary", version, sizeBytes: stats.size, sha256: fileSha256(row.storage_path) };
+  }
+  return { encoding: "text", content: row.content ?? "" };
+}
+
+function binaryVersionChanged(from: VersionContent, to: VersionContent): boolean {
+  if (from.encoding !== "binary" || to.encoding !== "binary") return true;
+  return from.sizeBytes !== to.sizeBytes || from.sha256 !== to.sha256;
 }
 
 function unifiedDiff(fromName: string, fromContent: string, toName: string, toContent: string): string {

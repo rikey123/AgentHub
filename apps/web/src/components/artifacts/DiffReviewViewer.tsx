@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Button, Card, Chip, Disclosure, DisclosureGroup } from "@heroui/react";
 
 export type ReviewFileStatus = "added" | "modified" | "deleted" | "renamed" | "copied" | "mode_changed";

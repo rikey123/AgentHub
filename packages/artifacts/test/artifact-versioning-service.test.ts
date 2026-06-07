@@ -102,6 +102,35 @@ describe("ArtifactVersioningService", () => {
     expect(row.new_sha256).toHaveLength(64);
   });
 
+  it("diffs binary versions with size and hash comparison without exposing storage paths", async () => {
+    const source = join(currentRoot(), "output", "deck.pptx");
+    mkdirSync(dirname(source), { recursive: true });
+    writeFileSync(source, Buffer.from("first deck"));
+    const service = createArtifactVersioningService({ database: currentDb(), eventBus: currentBus(), now: () => now });
+    await service.createBinaryVersion({ artifactId: "artifact_1", filePath: "output/deck.pptx", filename: "deck.pptx", createdBy: "agent_1", message: "first" });
+    writeFileSync(source, Buffer.from("second deck"));
+    now += 1;
+    await service.createBinaryVersion({ artifactId: "artifact_1", filePath: "output/deck.pptx", filename: "deck.pptx", createdBy: "agent_1", message: "second" });
+
+    const diff = JSON.parse(await service.diffVersions("artifact_1", 1, 2)) as {
+      readonly type: string;
+      readonly changed: boolean;
+      readonly from: { readonly version: number; readonly sizeBytes: number; readonly sha256: string };
+      readonly to: { readonly version: number; readonly sizeBytes: number; readonly sha256: string };
+    };
+
+    expect(diff).toMatchObject({
+      type: "binary",
+      changed: true,
+      from: { version: 1, sizeBytes: Buffer.byteLength("first deck") },
+      to: { version: 2, sizeBytes: Buffer.byteLength("second deck") }
+    });
+    expect(diff.from.sha256).toHaveLength(64);
+    expect(diff.to.sha256).toHaveLength(64);
+    expect(JSON.stringify(diff)).not.toContain("storagePath");
+    expect(JSON.stringify(diff)).not.toContain(".agenthub");
+  });
+
   it("rejects binary restore when the selected version points outside controlled artifact storage", async () => {
     const source = join(currentRoot(), "output", "deck.pptx");
     mkdirSync(dirname(source), { recursive: true });

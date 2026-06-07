@@ -40,7 +40,7 @@ function notImplemented(method: string): never {
   throw new Error(`DeploymentService.${method} is not implemented in the V1.2 contract foundation`);
 }
 
-export function createDeploymentService(_options: DeploymentServiceOptions): DeploymentService {
+export function createDeploymentService(): DeploymentService {
   return {
     createDeployment: async () => notImplemented("createDeployment"),
     redeploy: async () => notImplemented("redeploy"),

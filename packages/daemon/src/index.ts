@@ -1695,17 +1695,6 @@ type TaskReportEvidenceCounts = {
   readonly unresolvedComments: number;
 };
 
-function taskDeliveryReportMarkdown(task: ReturnType<TaskService["list"]>[number]): string {
-  return taskDeliveryReportMarkdownFromEvidence({
-    id: task.id,
-    title: task.title,
-    description: task.description,
-    status: task.status,
-    assignee: task.assigneeRoleId ?? task.assigneeAgentId ?? "Unassigned",
-    sourceRunId: task.sourceRunId
-  });
-}
-
 function taskDeliveryReportMarkdownFromEvidence(input: {
   readonly id: string;
   readonly title: string;
@@ -2464,18 +2453,9 @@ function pinMessage(ctx: RouteContext, messageId: string, roomId?: string): void
   if (row === null) return json(ctx.res, 404, { error: "message_not_found" });
   if (roomId !== undefined && row.room_id !== roomId) return json(ctx.res, 404, { error: "message_not_found" });
   const now = ctx.now?.() ?? Date.now();
-  const text = messageText(ctx.database, messageId);
-  const contextId = randomUUID();
-  const source = { type: "user", id: "local" };
-  const item = { id: contextId, workspaceId: row.workspace_id, roomId: row.room_id, sourceMessageId: messageId, type: "fact", scope: "workspace", content: text, source, visibility: {}, status: "confirmed", confidence: "verified", version: 1, createdBy: "local", pinned: true, createdAt: now, updatedAt: now };
   ctx.database.sqlite.transaction(() => {
-    ctx.database.sqlite.prepare("INSERT INTO context_items (id, workspace_id, room_id, task_id, run_id, source_message_id, type, scope, content, source, visibility, status, confidence, version, owner_id, owner_type, created_by, pinned, created_at, updated_at, deprecated_at) VALUES (?, ?, ?, NULL, NULL, ?, 'fact', 'workspace', ?, ?, '{}', 'confirmed', 'verified', 1, NULL, NULL, 'local', 1, ?, ?, NULL)").run(contextId, row.workspace_id, row.room_id, messageId, text, JSON.stringify(source), now, now);
-    ctx.database.sqlite.prepare("INSERT INTO context_versions (context_id, version, payload, changed_by, changed_at) VALUES (?, 1, ?, 'local', ?)").run(contextId, JSON.stringify(item), now);
     ctx.database.sqlite.prepare("UPDATE messages SET pinned_at = ?, updated_at = ? WHERE id = ?").run(now, now, messageId);
-    ctx.eventBus.publish({ id: randomUUID(), type: "context.item.created", schemaVersion: 1, workspaceId: row.workspace_id, roomId: row.room_id, payload: { contextId, status: "confirmed", source }, createdAt: now });
-    ctx.eventBus.publish({ id: randomUUID(), type: "context.item.confirmed", schemaVersion: 1, workspaceId: row.workspace_id, roomId: row.room_id, payload: { contextId, byUserId: null, source: "user", downgraded: false }, createdAt: now });
-    ctx.eventBus.publish({ id: randomUUID(), type: "context.item.visibility.changed", schemaVersion: 1, workspaceId: row.workspace_id, roomId: row.room_id, payload: { contextId, scope: "workspace", pinned: true, visibility: {} }, createdAt: now });
-    ctx.eventBus.publish({ id: randomUUID(), type: "message.updated", schemaVersion: 1, workspaceId: row.workspace_id, roomId: row.room_id, payload: { messageId, pinnedAt: now, contextId }, createdAt: now });
+    ctx.eventBus.publish({ id: randomUUID(), type: "message.updated", schemaVersion: 1, workspaceId: row.workspace_id, roomId: row.room_id, payload: { messageId, pinnedAt: now }, createdAt: now });
     ctx.eventBus.publish({ id: randomUUID(), type: "message.pinned", schemaVersion: 1, workspaceId: row.workspace_id, roomId: row.room_id, payload: { roomId: row.room_id, messageId, pinnedAt: now }, createdAt: now });
   })();
   json(ctx.res, 200, { ok: true, messageId, pinnedAt: now });
