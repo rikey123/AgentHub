@@ -35,7 +35,7 @@ describe("ModelsTab REST integration contract", () => {
     expect(groups.openai.map((config) => config.id)).toEqual(["mc_openai"]);
     expect(groups.ollama.map((config) => config.id)).toEqual(["mc_ollama"]);
     expect(displayFingerprint(groups.openai[0]!.api_key_fingerprint)).toBe("sk-a...z9x1");
-    expect(displayFingerprint(groups.ollama[0]!.api_key_fingerprint)).toBe("No API key");
+    expect(displayFingerprint(groups.ollama[0]!.api_key_fingerprint)).toBe("无 api-key");
     expect(JSON.stringify(configs)).not.toContain("sk-abc-secret-z9x1");
   });
 
