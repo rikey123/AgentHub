@@ -53,17 +53,13 @@ describe("SettingsModal integration contract", () => {
     expect(html).not.toContain("v0.5");
   });
 
-  it("includes the V1.2 contacts rail entry", () => {
+  it("does not expose contacts rail entry before a contacts view exists", () => {
     const onSelect = vi.fn();
     const tree = FeatureRail({ active: "chat", onSelect, onOpenSettings: vi.fn() });
     const contactsButton = findElementByProp(tree, "aria-label", "Contacts");
 
-    expect(contactsButton).toBeDefined();
-    const onClick = contactsButton?.props.onClick;
-    expect(typeof onClick).toBe("function");
-    if (typeof onClick === "function") onClick();
-
-    expect(onSelect).toHaveBeenCalledWith("contacts");
+    expect(contactsButton).toBeUndefined();
+    expect(onSelect).not.toHaveBeenCalled();
   });
 
   it("bootstraps settings with seven parallel REST requests including skills and permission rules, then workspace metadata, and no EventSource", async () => {

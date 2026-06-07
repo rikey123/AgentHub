@@ -135,7 +135,7 @@ export function FeatureRail({ active, onSelect, onOpenSettings }: FeatureRailPro
       </div>
 
       <div className="flex w-full flex-1 flex-col items-center gap-1">
-        {items.map((item) => {
+        {items.filter((item) => item.key !== "contacts").map((item) => {
           const isSettings = item.key === "settings";
           const isActive = item.key === active;
           return (

@@ -181,14 +181,6 @@ export function RoomList({ rooms, activeRoomId, onSelect, onCreate }: RoomListPr
                   {room.unreadCount > 0 ? (
                     <Badge color="danger" variant="primary">{String(room.unreadCount)}</Badge>
                   ) : null}
-                  <span className="ml-auto flex gap-1 opacity-80">
-                    <button type="button" className="rounded-md border border-border px-2 py-1 text-[11px] hover:bg-default">
-                      {room.pinnedAt !== undefined ? "Unpin" : "Pin"}
-                    </button>
-                    <button type="button" className="rounded-md border border-border px-2 py-1 text-[11px] hover:bg-default">
-                      Archive
-                    </button>
-                  </span>
                 </div>
               </li>
             );

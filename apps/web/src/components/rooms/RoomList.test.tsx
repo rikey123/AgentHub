@@ -34,7 +34,7 @@ describe("RoomList V1.2 behavior", () => {
     expect(orderedRoomsForList(rooms, "provider").map((room) => room.id)).toEqual(["message"]);
   });
 
-  it("renders pin archive action labels for backend-backed room menu", () => {
+  it("does not render inert pin archive action labels before handlers exist", () => {
     const html = renderToStaticMarkup(createElement(RoomList, {
       rooms: [roomFixture({ id: "room-1", title: "Room 1", pinnedAt: 123 })],
       activeRoomId: "room-1",
@@ -42,8 +42,9 @@ describe("RoomList V1.2 behavior", () => {
       onCreate: vi.fn()
     }));
 
-    expect(html).toContain("Unpin");
-    expect(html).toContain("Archive");
+    expect(html).not.toContain("Unpin");
+    expect(html).not.toContain("Pin");
+    expect(html).not.toContain("Archive");
   });
 });
 
