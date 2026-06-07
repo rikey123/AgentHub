@@ -131,7 +131,7 @@ describe("RuntimesTab REST integration contract", () => {
       fetchImpl: vi.fn<typeof fetch>()
     }));
 
-    expect(html).toContain("Ready to test");
+    expect(html).toContain("待测试");
     expect(html).not.toContain(">Missing<");
   });
 });
