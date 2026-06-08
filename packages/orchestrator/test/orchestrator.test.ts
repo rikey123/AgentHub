@@ -500,7 +500,7 @@ describe("TaskService and RoomMcpServer", () => {
     expect(currentDatabase().sqlite.prepare("SELECT payload FROM events WHERE type = 'task.delegation.created' AND task_id = ?").get(result.data.taskId)).toMatchObject({
       payload: JSON.stringify({ taskId: result.data.taskId, delegationId: result.data.taskId, runId: result.data.runId, byRoleId: "role_leader", atRunId: "run_delegate", expectsReview: true })
     });
-    expect(publicMessageTexts("room_delegate")).toContain("Builder，我把「Implement login」交给你，先从你的角度推进。");
+    expect(systemMessageTexts("room_delegate")).toContain("已将任务「Implement login」分配给 Builder");
   });
 
   test("room.delegate can dispatch an existing pending backlog task", async () => {
@@ -639,10 +639,8 @@ describe("TaskService and RoomMcpServer", () => {
     expect(await mcp.callTool("room.update_task", { taskId: created.data.taskId, status: "completed" }, leaderSession)).toMatchObject({ ok: true });
     expect(currentDatabase().sqlite.prepare("SELECT status FROM tasks WHERE id = ?").get(created.data.taskId)).toMatchObject({ status: "completed" });
     expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'team.dispatch.completed' AND json_extract(payload, '$.sourceRunId') = ?").get("run_team_review_leader")).toMatchObject({ count: 1 });
-    expect(publicMessageTexts("room_team_approve")).toEqual(expect.arrayContaining([
-      "Builder，我把「Review me」交给你，先从你的角度推进。",
-      "Leader：这组任务已经 review 完成，我来给你合并结论。"
-    ]));
+    expect(systemMessageTexts("room_team_approve")).toContain("已将任务「Review me」分配给 Builder");
+    expect(publicMessageTexts("room_team_approve")).toContain("Leader：这组任务已经 review 完成，我来给你合并结论。");
     expect(currentDatabase().sqlite.prepare("SELECT room_id, agent_id, reason, status FROM wake_outbox WHERE reason = 'aggregate'").all()).toEqual([
       expect.objectContaining({ room_id: "room_team_approve", agent_id: "agent_leader", reason: "aggregate", status: "pending" })
     ]);

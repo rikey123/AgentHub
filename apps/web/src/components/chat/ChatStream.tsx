@@ -9,6 +9,7 @@ import { ConnectionBanner } from "./ConnectionBanner.tsx";
 import { RunBriefToasts } from "./RunBriefToasts.tsx";
 import { MailboxFailureCard } from "../cards/MailboxFailureCard.tsx";
 import { PermissionCard } from "../cards/PermissionCard.tsx";
+import type { ArtifactChatReference } from "../artifacts/ArtifactPreviewModal.tsx";
 
 interface ChatStreamProps {
   room: RoomViewModel;
@@ -25,6 +26,7 @@ interface ChatStreamProps {
   onCancelPending: (pendingTurnId: string) => void;
   onStopDiscussion?: ((runId: string) => void) | undefined;
   onEditPending: (id: string) => void;
+  onReferenceArtifact?: ((reference: ArtifactChatReference) => void) | undefined;
   csrfFetch: typeof fetch;
   connectionStatus: "connected" | "connecting" | "reconnecting" | "offline" | "disconnected";
   connectionError?: string | undefined;
@@ -250,6 +252,7 @@ export function ChatStream(props: ChatStreamProps) {
                         onDelete={() => props.onDelete(item.id)}
                         onCancelPending={item.data.pendingTurnId ? () => props.onCancelPending(item.data.pendingTurnId!) : undefined}
                         onEditPending={() => props.onEditPending(item.id)}
+                        onReferenceArtifact={props.onReferenceArtifact}
                         csrfFetch={props.csrfFetch}
                       />
                     ) : item.kind === "permission" ? (

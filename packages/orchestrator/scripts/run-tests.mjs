@@ -12,6 +12,7 @@ const vitestArgs = [
   "packages/orchestrator/test/run-prompt-source.test.ts",
   "packages/orchestrator/test/room-mcp-tools.test.ts",
   "packages/orchestrator/test/room-mcp-mature-tools.test.ts",
+  "packages/orchestrator/test/room-mcp-file-message.test.ts",
   "packages/orchestrator/test/room-mcp-file-shell.test.ts",
   "packages/orchestrator/test/room-mcp-symlink.test.ts",
   "packages/orchestrator/test/complete-task.test.ts",
@@ -19,7 +20,8 @@ const vitestArgs = [
   "packages/orchestrator/test/context-ref-resolver.test.ts",
   "packages/orchestrator/test/planning-phase.test.ts",
   "packages/orchestrator/test/assisted-selector.test.ts",
-  "packages/orchestrator/test/assisted-selector-routing.test.ts"
+  "packages/orchestrator/test/assisted-selector-routing.test.ts",
+  "packages/orchestrator/test/v12-phase5-orchestrator-acceptance.test.ts"
 ];
 const command = process.platform === "win32" ? "cmd.exe" : vitestBin;
 const args = process.platform === "win32" ? ["/c", vitestBin, ...vitestArgs] : vitestArgs;

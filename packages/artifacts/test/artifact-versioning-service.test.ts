@@ -73,12 +73,19 @@ describe("ArtifactVersioningService", () => {
     });
 
     const row = currentDb().sqlite.prepare("SELECT path, new_content, content_path, binary, new_sha256, mime_type, size_bytes FROM artifact_files WHERE artifact_id = ?").get("artifact_1") as Record<string, unknown>;
-    const versionRow = currentDb().sqlite.prepare("SELECT content, storage_path, content_encoding FROM artifact_versions WHERE artifact_id = ? AND version = 1").get("artifact_1") as Record<string, unknown>;
+    const versionRow = currentDb().sqlite.prepare("SELECT content, storage_path, content_encoding, metadata FROM artifact_versions WHERE artifact_id = ? AND version = 1").get("artifact_1") as Record<string, unknown>;
+    const versionMetadata = JSON.parse(String(versionRow.metadata)) as Record<string, unknown>;
     expect(version).toMatchObject({ version: 1, contentEncoding: "binary" });
     expect(row).toMatchObject({ path: "deck.pptx", new_content: null, binary: 1, mime_type: "application/vnd.openxmlformats-officedocument.presentationml.presentation", size_bytes: 10 });
     expect(String(row.content_path)).toContain(join(".agenthub", "artifacts", "artifact_1", "v1", "deck.pptx"));
     expect(readFileSync(String(row.content_path), "utf8")).toBe("pptx bytes");
     expect(versionRow).toMatchObject({ content: null, storage_path: row.content_path, content_encoding: "binary" });
+    expect(versionMetadata).toMatchObject({
+      filename: "deck.pptx",
+      mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      sizeBytes: 10,
+      newSha256: row.new_sha256
+    });
   });
 
   it("restores binary versions from controlled storage without resolving through workspace public paths", async () => {
@@ -93,13 +100,20 @@ describe("ArtifactVersioningService", () => {
     const restored = await service.restoreVersion("artifact_1", 1);
 
     const row = currentDb().sqlite.prepare("SELECT content_path, new_sha256, size_bytes FROM artifact_files WHERE artifact_id = ?").get("artifact_1") as { readonly content_path: string; readonly new_sha256: string; readonly size_bytes: number };
-    const versionRow = currentDb().sqlite.prepare("SELECT storage_path, content_encoding FROM artifact_versions WHERE artifact_id = ? AND version = 2").get("artifact_1") as { readonly storage_path: string; readonly content_encoding: string };
+    const versionRow = currentDb().sqlite.prepare("SELECT storage_path, content_encoding, metadata FROM artifact_versions WHERE artifact_id = ? AND version = 2").get("artifact_1") as { readonly storage_path: string; readonly content_encoding: string; readonly metadata: string };
+    const versionMetadata = JSON.parse(versionRow.metadata) as Record<string, unknown>;
     expect(restored).toMatchObject({ version: 2, contentEncoding: "binary", message: "Restore v1" });
     expect(versionRow).toMatchObject({ content_encoding: "binary", storage_path: row.content_path });
     expect(row.content_path).toContain(join(".agenthub", "artifacts", "artifact_1", "v2", "deck.pptx"));
     expect(readFileSync(row.content_path, "utf8")).toBe("restored deck");
     expect(row.size_bytes).toBe(Buffer.byteLength("restored deck"));
     expect(row.new_sha256).toHaveLength(64);
+    expect(versionMetadata).toMatchObject({
+      filename: "deck.pptx",
+      mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      sizeBytes: row.size_bytes,
+      newSha256: row.new_sha256
+    });
   });
 
   it("diffs binary versions with size and hash comparison without exposing storage paths", async () => {

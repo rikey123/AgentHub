@@ -2,10 +2,13 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import {
+  ContactFirstPicker,
   ROOM_MODE_OPTIONS,
   RoleBindingRow,
   RoleSelect,
+  buildContactFirstCreateRoomInput,
   buildCreateRoomInput,
+  defaultRoomModeForSelectedContacts,
   ensureAgentBindingsForParticipants
 } from "./NewRoomDialog.tsx";
 
@@ -17,6 +20,212 @@ describe("NewRoomDialog create-room contract", () => {
       "squad",
       "team"
     ]);
+  });
+
+  it("defaults contact-first room mode from selected contact count", () => {
+    expect(defaultRoomModeForSelectedContacts(0, "team")).toBe("team");
+    expect(defaultRoomModeForSelectedContacts(1, "assisted")).toBe("solo");
+    expect(defaultRoomModeForSelectedContacts(2, "solo")).toBe("assisted");
+  });
+
+  it("renders a contact-first picker before advanced participant configuration", () => {
+    const html = renderToStaticMarkup(createElement(ContactFirstPicker, {
+      contacts: [
+        {
+          agentBindingId: "binding_builder",
+          displayName: "Frontend Builder",
+          roleId: "role_builder",
+          runtimeKind: "opencode",
+          capabilities: ["code.edit", "file.write"],
+          status: "available"
+        },
+        {
+          agentBindingId: "binding_reviewer",
+          displayName: "Reviewer",
+          roleId: "role_reviewer",
+          runtimeKind: "claude-code",
+          capabilities: ["code.review"],
+          status: "busy"
+        }
+      ],
+      selectedIds: new Set(["binding_builder"]),
+      loading: false,
+      onToggle: () => undefined
+    }));
+
+    expect(html).toContain("Contacts");
+    expect(html).toContain("Frontend Builder");
+    expect(html).toContain("opencode");
+    expect(html).toContain("code.edit");
+    expect(html).toContain("selected");
+    expect(html).toContain("Reviewer");
+  });
+
+  it("builds a contact-first create-room payload from selected contacts", () => {
+    const input = buildContactFirstCreateRoomInput({
+      title: "Ship UI",
+      mode: "solo",
+      skillIds: ["skill_task_planner"],
+      contacts: [
+        {
+          agentBindingId: "binding_builder",
+          displayName: "Frontend Builder",
+          roleId: "role_builder",
+          runtimeKind: "opencode",
+          capabilities: ["code.edit"],
+          status: "available"
+        },
+        {
+          agentBindingId: "binding_reviewer",
+          displayName: "Reviewer",
+          roleId: "role_reviewer",
+          runtimeKind: "claude-code",
+          capabilities: ["code.review"],
+          status: "busy"
+        }
+      ]
+    });
+
+    expect(input).toEqual({
+      title: "Ship UI",
+      mode: "assisted",
+      primaryAgentId: "binding_builder",
+      agentBindingId: "binding_builder",
+      skillIds: ["skill_task_planner"],
+      participants: [
+        {
+          type: "agent",
+          agentId: "binding_reviewer",
+          agentBindingId: "binding_reviewer",
+          role: "teammate",
+          defaultPresence: "active"
+        }
+      ]
+    });
+  });
+
+  it("preserves Team mode for contact-first rooms and supplies a leader role", () => {
+    const input = buildContactFirstCreateRoomInput({
+      title: "Team launch",
+      mode: "team",
+      contacts: [
+        {
+          agentBindingId: "binding_lead",
+          displayName: "Team Lead",
+          roleId: "role_pm",
+          runtimeKind: "native",
+          capabilities: ["task.delegate"],
+          status: "available"
+        },
+        {
+          agentBindingId: "binding_builder",
+          displayName: "Builder",
+          roleId: "role_builder",
+          runtimeKind: "opencode",
+          capabilities: ["code.edit"],
+          status: "available"
+        }
+      ]
+    });
+
+    expect(input).toEqual({
+      title: "Team launch",
+      mode: "team",
+      primaryAgentId: "binding_lead",
+      agentBindingId: "binding_lead",
+      leaderRoleId: "role_pm",
+      participants: [
+        {
+          type: "agent",
+          agentId: "binding_builder",
+          agentBindingId: "binding_builder",
+          role: "teammate",
+          defaultPresence: "active"
+        }
+      ]
+    });
+  });
+
+  it("builds contact-first participant overrides and per-contact skill assignments", () => {
+    const input = buildContactFirstCreateRoomInput({
+      title: "Configured contact room",
+      mode: "team",
+      skillIds: ["skill_room"],
+      contacts: [
+        {
+          agentBindingId: "binding_lead",
+          displayName: "Team Lead",
+          roleId: "role_pm",
+          runtimeKind: "opencode",
+          capabilities: ["task.delegate"],
+          status: "available"
+        },
+        {
+          agentBindingId: "binding_builder",
+          displayName: "Builder",
+          roleId: "role_builder",
+          runtimeKind: "opencode",
+          capabilities: ["code.edit"],
+          status: "available"
+        }
+      ],
+      participantConfigs: [
+        {
+          agentBindingId: "binding_lead",
+          defaultPresence: "observing",
+          skillIds: ["skill_plan"]
+        },
+        {
+          agentBindingId: "binding_builder",
+          roleId: "role_reviewer",
+          runtimeId: "native-default",
+          runtimeKind: "native",
+          modelConfigId: "mc_gpt4o",
+          defaultPresence: "observing",
+          skillIds: ["skill_review"]
+        }
+      ],
+      resolvedBindingIds: {
+        binding_builder: "binding_reviewer_native"
+      }
+    } as Parameters<typeof buildContactFirstCreateRoomInput>[0]);
+
+    expect(input).toEqual({
+      title: "Configured contact room",
+      mode: "team",
+      primaryAgentId: "binding_lead",
+      agentBindingId: "binding_lead",
+      leaderRoleId: "role_pm",
+      skillIds: ["skill_room"],
+      participants: [
+        {
+          type: "agent",
+          agentId: "binding_lead",
+          agentBindingId: "binding_lead",
+          role: "primary",
+          defaultPresence: "observing"
+        },
+        {
+          type: "agent",
+          agentId: "binding_reviewer_native",
+          agentBindingId: "binding_reviewer_native",
+          role: "teammate",
+          defaultPresence: "observing"
+        }
+      ],
+      participantSkillAssignments: [
+        {
+          participantId: "binding_lead",
+          skillIds: ["skill_plan"],
+          mode: "add"
+        },
+        {
+          participantId: "binding_reviewer_native",
+          skillIds: ["skill_review"],
+          mode: "add"
+        }
+      ]
+    });
   });
 
   it("renders V1 role selection with HeroUI Select instead of a native select", () => {

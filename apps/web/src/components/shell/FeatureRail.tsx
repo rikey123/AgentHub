@@ -1,5 +1,6 @@
 import type React from "react";
 import { Tooltip } from "@heroui/react";
+import packageJson from "../../../package.json";
 
 export type RailItem = "chat" | "contacts" | "runs" | "tasks" | "context" | "artifacts" | "settings";
 
@@ -124,6 +125,8 @@ const items: Array<{ key: RailItem; label: string; cn: string }> = [
   { key: "settings", label: "Settings", cn: "设置" }
 ];
 
+const appVersion = typeof packageJson.version === "string" && packageJson.version.length > 0 ? packageJson.version : "0.0.0";
+
 export function FeatureRail({ active, onSelect, onOpenSettings }: FeatureRailProps) {
   return (
     <nav
@@ -170,7 +173,7 @@ export function FeatureRail({ active, onSelect, onOpenSettings }: FeatureRailPro
       </div>
 
       <div className="flex h-9 w-9 items-center justify-center rounded-full border border-border bg-overlay text-[10px] font-semibold text-muted shadow-sm">
-        v1.2
+        v{appVersion}
       </div>
     </nav>
   );

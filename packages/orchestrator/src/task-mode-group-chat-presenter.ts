@@ -38,13 +38,13 @@ export class TaskModeGroupChatPresenter {
     if (task === undefined) return undefined;
     const teammateAgentId = input.teammateAgentId ?? task.assigneeAgentId;
     const teammateName = teammateAgentId !== null && teammateAgentId !== undefined ? this.agentName(teammateAgentId) : "队友";
-    return this.publishAgentMessage(messageInput({
+    return this.publishSystemMessage(messageInput({
       workspaceId: room.workspaceId,
       roomId: input.roomId,
       agentId: input.leaderAgentId,
       runId: input.runId,
       taskId: input.taskId,
-      text: `${teammateName}，我把「${task.title}」交给你，先从你的角度推进。`
+      text: `已将任务「${task.title}」分配给 ${teammateName}`
     }));
   }
 
@@ -177,6 +177,30 @@ export class TaskModeGroupChatPresenter {
         .prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, 1, 'text', ?, ?)")
         .run(messageId, JSON.stringify({ text: input.text }), now);
       this.publishMessageEvent("message.created", input, messageId, { messageId, senderType: "agent", senderId: input.agentId, role: "assistant", status: "completed" }, now);
+      this.publishMessageEvent("message.completed", input, messageId, { messageId, text: input.text }, now);
+    })();
+    return messageId;
+  }
+
+  private publishSystemMessage(input: {
+    readonly workspaceId: string;
+    readonly roomId: string;
+    readonly agentId: string;
+    readonly text: string;
+    readonly runId?: string;
+    readonly taskId?: string;
+  }): string {
+    const now = this.nextMessageCreatedAt();
+    const messageId = `msg_task_chat_${randomUUID()}`;
+    this.options.database.sqlite.transaction(() => {
+      this.options.database.sqlite.prepare("UPDATE rooms SET last_activity_at = ?, updated_at = ? WHERE id = ?").run(now, now, input.roomId);
+      this.options.database.sqlite
+        .prepare("INSERT INTO messages (id, workspace_id, room_id, sender_type, sender_id, run_id, role, status, quoted_message_id, turn_dispatch_mode, pending_turn_id, created_at, updated_at, deleted_at) VALUES (?, ?, ?, 'system', 'orchestrator', ?, 'system', 'completed', NULL, 'immediate', NULL, ?, ?, NULL)")
+        .run(messageId, input.workspaceId, input.roomId, input.runId ?? null, now, now);
+      this.options.database.sqlite
+        .prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, 1, 'text', ?, ?)")
+        .run(messageId, JSON.stringify({ text: input.text }), now);
+      this.publishMessageEvent("message.created", input, messageId, { messageId, senderType: "system", senderId: "orchestrator", role: "system", status: "completed" }, now);
       this.publishMessageEvent("message.completed", input, messageId, { messageId, text: input.text }, now);
     })();
     return messageId;

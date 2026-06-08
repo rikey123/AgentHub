@@ -1,6 +1,8 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { existsSync } from "node:fs";
 import { createServer } from "node:net";
 import { platform } from "node:os";
+import { win32 } from "node:path";
 
 export type PptPreviewSession = {
   readonly port: number;
@@ -101,8 +103,32 @@ export function createPptPreviewBridge(options: PptPreviewBridgeOptions = {}): P
 }
 
 async function defaultDetectOfficecli(getPlatform: () => NodeJS.Platform): Promise<boolean> {
-  const command = getPlatform() === "win32" ? "where.exe" : "sh";
-  const args = getPlatform() === "win32" ? ["officecli"] : ["-c", "command -v officecli"];
+  if (getPlatform() === "win32") {
+    if (await commandSucceeds("where.exe", ["officecli"])) return true;
+    return detectWindowsOfficecliInstallDir();
+  }
+  return commandSucceeds("sh", ["-c", "command -v officecli"]);
+}
+
+function detectWindowsOfficecliInstallDir(): boolean {
+  const localAppData = process.env.LOCALAPPDATA;
+  if (localAppData === undefined || localAppData.length === 0) return false;
+  const installDir = win32.join(localAppData, "OfficeCLI");
+  if (!existsSync(win32.join(installDir, "officecli.exe"))) return false;
+  prependProcessPath(installDir);
+  return true;
+}
+
+function prependProcessPath(directory: string): void {
+  const pathKey = process.env.Path !== undefined ? "Path" : "PATH";
+  const currentPath = process.env[pathKey] ?? "";
+  const segments = currentPath.split(";").filter(Boolean);
+  if (segments.some((segment) => segment.toLowerCase() === directory.toLowerCase())) return;
+  process.env[pathKey] = currentPath.length > 0 ? `${directory};${currentPath}` : directory;
+  process.env.PATH = process.env[pathKey];
+}
+
+async function commandSucceeds(command: string, args: readonly string[]): Promise<boolean> {
   return await new Promise((resolve) => {
     execFile(command, args, (error) => resolve(error === null));
   });
@@ -111,8 +137,8 @@ async function defaultDetectOfficecli(getPlatform: () => NodeJS.Platform): Promi
 async function defaultInstallOfficecli(getPlatform: () => NodeJS.Platform): Promise<void> {
   const command = getPlatform() === "win32" ? "powershell.exe" : "sh";
   const args = getPlatform() === "win32"
-    ? ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "irm https://raw.githubusercontent.com/officecli/install/main/install.ps1 | iex"]
-    : ["-c", "curl -fsSL https://raw.githubusercontent.com/officecli/install/main/install.sh | sh"];
+    ? ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "irm https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.ps1 | iex"]
+    : ["-c", "curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.sh | sh"];
   await new Promise<void>((resolve, reject) => {
     execFile(command, args, (error) => error === null ? resolve() : reject(error));
   });

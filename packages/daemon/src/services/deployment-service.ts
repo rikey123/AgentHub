@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join, resolve as resolvePath } from "node:path";
+import { appendFileSync, createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { extname, isAbsolute, join, relative, resolve as resolvePath } from "node:path";
 import { gzipSync } from "node:zlib";
+
+import { ZipArchive } from "archiver";
 
 import type { EventBus } from "@agenthub/bus";
 import type { AgentHubDatabase } from "@agenthub/db";
@@ -76,6 +78,7 @@ type ArtifactRow = {
 type DeploymentRow = {
   readonly id: string;
   readonly artifact_id: string;
+  readonly artifact_version: number | null;
   readonly room_id: string | null;
   readonly workspace_id: string;
   readonly kind: DeploymentKind;
@@ -85,6 +88,8 @@ type DeploymentRow = {
   readonly image_tag: string | null;
   readonly log_path: string | null;
   readonly pid: string | null;
+  readonly zip_path: string | null;
+  readonly dockerfile_path: string | null;
   readonly provider_config_id: string | null;
   readonly expires_at?: number | null;
 };
@@ -93,7 +98,10 @@ type ArtifactFile = { readonly path: string; readonly new_content: string | null
 
 export function createDeploymentService(options: DeploymentServiceOptions): DeploymentService {
   const now = options.now ?? Date.now;
-  const root = resolvePath(options.deploymentRoot ?? process.cwd(), ".agenthub", "deployments");
+  const workspaceRoot = resolvePath(options.deploymentRoot ?? process.cwd());
+  const root = join(workspaceRoot, ".agenthub", "deployments");
+  const sitesRoot = join(workspaceRoot, ".agenthub", "sites");
+  const exportsRoot = join(workspaceRoot, ".agenthub", "exports");
   const fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
   const spawnImpl = options.spawnImpl ?? spawn;
   const capRoverPollIntervalMs = options.capRoverPollIntervalMs ?? 3_000;
@@ -107,15 +115,17 @@ export function createDeploymentService(options: DeploymentServiceOptions): Depl
     const createdAt = now();
     const paths = prepareDeploymentPaths(root, deploymentId);
     const initialKind = input.kind;
+    const artifactVersion = latestArtifactVersion(options.database, artifact.id);
     options.database.sqlite.transaction(() => {
       options.database.sqlite.prepare(
         `INSERT INTO deployments (
-          id, artifact_id, room_id, workspace_id, kind, provider, status, provider_config_id,
+          id, artifact_id, artifact_version, room_id, workspace_id, kind, provider, status, provider_config_id,
           log_path, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?)`
       ).run(
         deploymentId,
         artifact.id,
+        artifactVersion,
         roomId ?? null,
         artifact.workspace_id,
         initialKind,
@@ -140,9 +150,28 @@ export function createDeploymentService(options: DeploymentServiceOptions): Depl
         options.database.sqlite
           .prepare("INSERT INTO messages (id, workspace_id, room_id, sender_type, sender_id, run_id, role, status, quoted_message_id, turn_dispatch_mode, pending_turn_id, created_at, updated_at, deleted_at) VALUES (?, ?, ?, 'system', 'deployment', NULL, 'system', 'completed', NULL, 'immediate', NULL, ?, ?, NULL)")
           .run(messageId, artifact.workspace_id, roomId, createdAt, createdAt);
-        const part = { type: "deployment", deploymentId, artifactId: artifact.id, kind: initialKind, status: "queued" };
+        options.eventBus.publish({
+          id: randomUUID(),
+          type: "message.created",
+          schemaVersion: 1,
+          workspaceId: artifact.workspace_id,
+          roomId,
+          payload: { messageId, senderType: "system", senderId: "deployment", role: "system", status: "completed", text: "" },
+          createdAt
+        });
+        const part = {
+          type: "card",
+          card: {
+            type: "deployment",
+            deploymentId,
+            artifactId: artifact.id,
+            kind: initialKind,
+            provider: input.providerId !== undefined ? "caprover" : "agenthub-local",
+            status: "queued"
+          }
+        };
         options.database.sqlite
-          .prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, 1, 'deployment', ?, ?)")
+          .prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, 1, 'card', ?, ?)")
           .run(messageId, JSON.stringify(part), createdAt);
         options.eventBus.publish({
           id: randomUUID(),
@@ -212,6 +241,10 @@ export function createDeploymentService(options: DeploymentServiceOptions): Depl
         assignments.push("published_at = ?");
         values.push(patch.publishedAt);
       }
+      if (typeof patch.providerResourceId === "string") {
+        assignments.push("provider_resource_id = ?");
+        values.push(patch.providerResourceId);
+      }
       if (typeof patch.sourcePath === "string") {
         assignments.push("source_path = ?");
         values.push(patch.sourcePath);
@@ -259,10 +292,10 @@ export function createDeploymentService(options: DeploymentServiceOptions): Depl
         deployStaticSite(row);
         return;
       case "source-zip":
-        deploySourceZip(row);
+        await deploySourceZip(row);
         return;
       case "container-export":
-        deployContainerExport(row);
+        await deployContainerExport(row);
         return;
       case "container-build":
         await deployContainerBuild(row);
@@ -278,10 +311,19 @@ export function createDeploymentService(options: DeploymentServiceOptions): Depl
 
   const writeArtifactFilesToDir = (deploymentId: string, artifactId: string): string => {
     const dir = join(root, deploymentId, "site");
+    return writeArtifactFilesToTargetDir(dir, artifactId);
+  };
+
+  const writeStaticSiteFilesToDir = (deploymentId: string, artifactId: string): string => {
+    const dir = join(sitesRoot, deploymentId);
+    return writeArtifactFilesToTargetDir(dir, artifactId);
+  };
+
+  const writeArtifactFilesToTargetDir = (dir: string, artifactId: string): string => {
     mkdirSync(dir, { recursive: true });
     for (const file of artifactFiles(artifactId)) {
       const target = resolvePath(dir, file.path);
-      if (!target.startsWith(resolvePath(dir))) continue;
+      if (!pathInside(target, dir)) continue;
       mkdirSync(resolvePath(target, ".."), { recursive: true });
       if (file.binary !== 0 && file.content_path !== null && existsSync(file.content_path)) {
         writeFileSync(target, readFileSync(file.content_path));
@@ -292,36 +334,36 @@ export function createDeploymentService(options: DeploymentServiceOptions): Depl
     return dir;
   };
 
-  const bundleArtifactFiles = (deploymentId: string, artifactId: string, fileName: string, dockerfile?: string): string => {
-    const path = join(root, deploymentId, fileName);
-    mkdirSync(resolvePath(path, ".."), { recursive: true });
-    const entries = archiveEntries(artifactFiles(artifactId), dockerfile);
-    writeFileSync(path, createZip(entries));
-    return path;
+  const bundleArtifactFiles = async (artifactId: string, zipPath: string, dockerfile?: string): Promise<string> => {
+    await writeZipArchive(zipPath, archiveEntries(artifactFiles(artifactId), dockerfile));
+    return zipPath;
   };
 
   const deployPreviewUrl = (row: DeploymentRow): void => {
     const expiresAt = now() + 30 * 60 * 1000;
     const sourcePath = writeArtifactFilesToDir(row.id, row.artifact_id);
-    markStatus(row.id, "ready", "deployment.ready", { url: `http://127.0.0.1:${options.previewPort ?? 6677}/deployments/${row.id}/preview`, sourcePath, expiresAt, publishedAt: now() });
+    const token = randomUUID();
+    markStatus(row.id, "ready", "deployment.ready", { url: `http://127.0.0.1:${options.previewPort ?? 6677}/preview/${token}`, sourcePath, expiresAt, publishedAt: now(), providerResourceId: token });
   };
 
   const deployStaticSite = (row: DeploymentRow): void => {
-    const sourcePath = writeArtifactFilesToDir(row.id, row.artifact_id);
+    const sourcePath = writeStaticSiteFilesToDir(row.id, row.artifact_id);
     markStatus(row.id, "ready", "deployment.ready", { url: `http://127.0.0.1:${options.sitePort ?? 6677}/sites/${row.id}/`, sourcePath, publishedAt: now() });
   };
 
-  const deploySourceZip = (row: DeploymentRow): void => {
-    const zipPath = bundleArtifactFiles(row.id, row.artifact_id, "source.zip");
-    markStatus(row.id, "ready", "deployment.ready", { downloadUrl: zipPath, zipPath, publishedAt: now() });
+  const deploySourceZip = async (row: DeploymentRow): Promise<void> => {
+    const artifactVersion = row.artifact_version ?? latestArtifactVersion(options.database, row.artifact_id) ?? 1;
+    const zipPath = await bundleArtifactFiles(row.artifact_id, join(exportsRoot, `${row.artifact_id}-v${artifactVersion}.zip`));
+    markStatus(row.id, "ready", "deployment.ready", { downloadUrl: deploymentDownloadUrl(row.id), zipPath, publishedAt: now() });
   };
 
-  const deployContainerExport = (row: DeploymentRow, patch: Record<string, unknown> = {}): void => {
-    const dockerfile = "FROM nginx:alpine\nCOPY . /usr/share/nginx/html\n";
-    const zipPath = bundleArtifactFiles(row.id, row.artifact_id, "container-export.zip", dockerfile);
-    const dockerfilePath = join(root, row.id, "Dockerfile");
+  const deployContainerExport = async (row: DeploymentRow, patch: Record<string, unknown> = {}): Promise<void> => {
+    const dockerfile = dockerfileForArtifact(artifactForDeployment(options.database, row.artifact_id)?.kind ?? null, artifactFiles(row.artifact_id));
+    const zipPath = await bundleArtifactFiles(row.artifact_id, join(exportsRoot, `${row.artifact_id}-build-context.zip`), dockerfile);
+    const dockerfilePath = join(exportsRoot, `${row.artifact_id}-Dockerfile`);
+    mkdirSync(resolvePath(dockerfilePath, ".."), { recursive: true });
     writeFileSync(dockerfilePath, dockerfile, "utf8");
-    markStatus(row.id, "ready", "deployment.ready", { ...patch, downloadUrl: zipPath, zipPath, dockerfilePath, publishedAt: now() });
+    markStatus(row.id, "ready", "deployment.ready", { ...patch, downloadUrl: deploymentDownloadUrl(row.id), zipPath, dockerfilePath, publishedAt: now() });
   };
 
   const deployContainerBuild = async (row: DeploymentRow): Promise<void> => {
@@ -329,7 +371,7 @@ export function createDeploymentService(options: DeploymentServiceOptions): Depl
     const imageTag = `agenthub-${row.id}`;
     const buildTool = await detectBuildTool(options.commandProbe);
     if (buildTool === undefined) {
-      deployContainerExport({ ...row, kind: "container-export" }, { kind: "container-export" });
+      await deployContainerExport({ ...row, kind: "container-export" }, { kind: "container-export", error: "container_build_tools_missing" });
       return;
     }
     const command = buildTool === "nixpacks" ? "nixpacks" : "docker";
@@ -424,15 +466,17 @@ export function createDeploymentService(options: DeploymentServiceOptions): Depl
     cancel: async (deploymentId) => {
       const existing = readDeploymentOrThrow(options.database, deploymentId);
       if (existing.status !== "queued" && existing.status !== "in_progress") throw new Error("cancel_requires_active");
-      processes.get(deploymentId)?.kill();
+      const child = processes.get(deploymentId);
+      if (child !== undefined) child.kill();
+      else killPersistedPid(existing.pid);
       processes.delete(deploymentId);
       return markStatus(deploymentId, "cancelled", "deployment.cancelled");
     },
     unpublish: async (deploymentId) => {
       const existing = readDeploymentOrThrow(options.database, deploymentId);
       if (existing.kind !== "static-site" && existing.kind !== "self-hosted") throw new Error("unpublish_not_supported");
-      const deploymentDir = join(root, deploymentId);
-      if (existsSync(deploymentDir)) rmSync(deploymentDir, { recursive: true, force: true });
+      const publishDir = existing.kind === "static-site" ? join(sitesRoot, deploymentId) : join(root, deploymentId);
+      if (existsSync(publishDir)) rmSync(publishDir, { recursive: true, force: true });
       return markStatus(deploymentId, "unpublished", "deployment.unpublished");
     },
     appendLog: async (deploymentId, chunk) => {
@@ -465,7 +509,7 @@ export function createDeploymentService(options: DeploymentServiceOptions): Depl
     },
     downloadPath: async (deploymentId) => {
       const row = readDeployment(options.database, deploymentId);
-      return row?.download_url ?? undefined;
+      return row?.zip_path ?? row?.dockerfile_path ?? undefined;
     },
     testProvider: async (providerId) => {
       const provider = options.database.sqlite.prepare("SELECT * FROM deployment_providers WHERE id = ?").get(providerId) as { readonly base_url: string; readonly credential_ref: string } | undefined;
@@ -512,6 +556,30 @@ function artifactForDeployment(database: AgentHubDatabase, artifactId: string): 
   return database.sqlite.prepare("SELECT id, workspace_id, room_id, kind, title FROM artifacts WHERE id = ? AND deleted_at IS NULL").get(artifactId) as ArtifactRow | undefined;
 }
 
+function latestArtifactVersion(database: AgentHubDatabase, artifactId: string): number | null {
+  const row = database.sqlite.prepare("SELECT MAX(version) AS version FROM artifact_versions WHERE artifact_id = ?").get(artifactId) as { readonly version: number | null } | undefined;
+  return row?.version ?? null;
+}
+
+function killPersistedPid(pid: string | null): void {
+  if (pid === null || !/^\d+$/u.test(pid)) return;
+  try {
+    process.kill(Number(pid));
+  } catch {
+    // The persisted process may already be gone after daemon restart.
+  }
+}
+
+function deploymentDownloadUrl(deploymentId: string): string {
+  return `/deployments/${deploymentId}/download`;
+}
+
+function pathInside(target: string, parent: string): boolean {
+  const parentPath = resolvePath(parent);
+  const relativePath = relative(parentPath, target);
+  return relativePath.length === 0 || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
+}
+
 function isCancelled(database: AgentHubDatabase, deploymentId: string): boolean {
   const row = database.sqlite.prepare("SELECT status FROM deployments WHERE id = ?").get(deploymentId) as { readonly status: string } | undefined;
   return row?.status === "cancelled";
@@ -541,7 +609,8 @@ function payloadForDeploymentEvent(eventType: "deployment.status.changed" | "dep
       kind: patch.kind,
       url: patch.url,
       downloadUrl: patch.downloadUrl,
-      imageTag: patch.imageTag
+      imageTag: patch.imageTag,
+      expiresAt: patch.expiresAt
     });
   }
   return withoutUndefined({
@@ -550,7 +619,8 @@ function payloadForDeploymentEvent(eventType: "deployment.status.changed" | "dep
     kind: patch.kind,
     url: patch.url,
     downloadUrl: patch.downloadUrl,
-    imageTag: patch.imageTag
+    imageTag: patch.imageTag,
+    expiresAt: patch.expiresAt
   });
 }
 
@@ -573,72 +643,85 @@ function safeArchiveName(path: string): string {
   return normalized.length > 0 ? normalized : "index.html";
 }
 
-function createZip(entries: readonly { readonly name: string; readonly data: Buffer }[]): Buffer {
-  const localParts: Buffer[] = [];
-  const centralParts: Buffer[] = [];
-  let offset = 0;
-  for (const entry of entries) {
-    const name = Buffer.from(entry.name, "utf8");
-    const crc = crc32(entry.data);
-    const local = Buffer.alloc(30);
-    local.writeUInt32LE(0x04034b50, 0);
-    local.writeUInt16LE(20, 4);
-    local.writeUInt16LE(0, 6);
-    local.writeUInt16LE(0, 8);
-    local.writeUInt16LE(0, 10);
-    local.writeUInt16LE(0, 12);
-    local.writeUInt32LE(crc, 14);
-    local.writeUInt32LE(entry.data.length, 18);
-    local.writeUInt32LE(entry.data.length, 22);
-    local.writeUInt16LE(name.length, 26);
-    local.writeUInt16LE(0, 28);
-    localParts.push(local, name, entry.data);
-
-    const central = Buffer.alloc(46);
-    central.writeUInt32LE(0x02014b50, 0);
-    central.writeUInt16LE(20, 4);
-    central.writeUInt16LE(20, 6);
-    central.writeUInt16LE(0, 8);
-    central.writeUInt16LE(0, 10);
-    central.writeUInt16LE(0, 12);
-    central.writeUInt16LE(0, 14);
-    central.writeUInt32LE(crc, 16);
-    central.writeUInt32LE(entry.data.length, 20);
-    central.writeUInt32LE(entry.data.length, 24);
-    central.writeUInt16LE(name.length, 28);
-    central.writeUInt16LE(0, 30);
-    central.writeUInt16LE(0, 32);
-    central.writeUInt16LE(0, 34);
-    central.writeUInt16LE(0, 36);
-    central.writeUInt32LE(0, 38);
-    central.writeUInt32LE(offset, 42);
-    centralParts.push(central, name);
-    offset += local.length + name.length + entry.data.length;
-  }
-  const centralOffset = offset;
-  const central = Buffer.concat(centralParts);
-  const end = Buffer.alloc(22);
-  end.writeUInt32LE(0x06054b50, 0);
-  end.writeUInt16LE(0, 4);
-  end.writeUInt16LE(0, 6);
-  end.writeUInt16LE(entries.length, 8);
-  end.writeUInt16LE(entries.length, 10);
-  end.writeUInt32LE(central.length, 12);
-  end.writeUInt32LE(centralOffset, 16);
-  end.writeUInt16LE(0, 20);
-  return Buffer.concat([...localParts, central, end]);
+function writeZipArchive(path: string, entries: readonly { readonly name: string; readonly data: Buffer }[]): Promise<void> {
+  mkdirSync(resolvePath(path, ".."), { recursive: true });
+  return new Promise((resolve, reject) => {
+    const output = createWriteStream(path);
+    const archive = new ZipArchive({ store: true });
+    output.on("close", resolve);
+    output.on("error", reject);
+    archive.on("warning", reject);
+    archive.on("error", reject);
+    archive.pipe(output);
+    for (const entry of entries) archive.append(entry.data, { name: entry.name });
+    void archive.finalize();
+  });
 }
 
-const crcTable = new Uint32Array(256).map((_, index) => {
-  let value = index;
-  for (let bit = 0; bit < 8; bit += 1) value = (value & 1) === 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
-  return value >>> 0;
-});
+function dockerfileForArtifact(kind: string | null, files: readonly ArtifactFile[]): string {
+  if (kind === "source_code") return sourceCodeDockerfile(primaryExtension(files));
+  if (kind === "generic_file") return genericDockerfile();
+  if (kind === "document") return documentDockerfile(files);
+  return staticDockerfile(files);
+}
 
-function crc32(data: Buffer): number {
-  let crc = 0xffffffff;
-  for (const byte of data) crc = (crcTable[(crc ^ byte) & 0xff] ?? 0) ^ (crc >>> 8);
-  return (crc ^ 0xffffffff) >>> 0;
+function primaryExtension(files: readonly ArtifactFile[]): string {
+  return extname(files[0]?.path ?? "").toLowerCase();
+}
+
+function sourceCodeDockerfile(extension: string): string {
+  if (extension === ".py") {
+    return [
+      "FROM python:3.11-slim",
+      "WORKDIR /app",
+      "COPY . /app",
+      "CMD [\"python\", \"main.py\"]",
+      ""
+    ].join("\n");
+  }
+  if (extension === ".js" || extension === ".mjs" || extension === ".cjs" || extension === ".ts") {
+    return [
+      "FROM node:20-alpine",
+      "WORKDIR /app",
+      "COPY . /app",
+      "CMD [\"node\", \"index.js\"]",
+      ""
+    ].join("\n");
+  }
+  return genericDockerfile();
+}
+
+function genericDockerfile(): string {
+  return [
+    "FROM ubuntu:22.04",
+    "WORKDIR /app",
+    "COPY . /app",
+    "CMD [\"bash\", \"-lc\", \"ls -la /app && sleep infinity\"]",
+    ""
+  ].join("\n");
+}
+
+function documentDockerfile(files: readonly ArtifactFile[]): string {
+  return [
+    "FROM nginx:alpine",
+    ...files.map((file) => `COPY ${dockerPath(file.path)} /usr/share/nginx/html/${dockerPath(file.path)}`),
+    "RUN printf '<!doctype html><meta charset=\"utf-8\"><pre id=\"content\"></pre><script>fetch(\"README.md\").then(r=>r.text()).then(t=>content.textContent=t)</script>' > /usr/share/nginx/html/index.html",
+    "EXPOSE 80",
+    ""
+  ].join("\n");
+}
+
+function staticDockerfile(files: readonly ArtifactFile[]): string {
+  return [
+    "FROM nginx:alpine",
+    ...files.map((file) => `COPY ${dockerPath(file.path)} /usr/share/nginx/html/${dockerPath(file.path)}`),
+    "EXPOSE 80",
+    ""
+  ].join("\n");
+}
+
+function dockerPath(path: string): string {
+  return safeArchiveName(path).replace(/(["\\$`])/gu, "\\$1");
 }
 
 function createTarGz(entries: readonly { readonly name: string; readonly data: Buffer }[]): Buffer {

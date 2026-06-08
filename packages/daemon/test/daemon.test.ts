@@ -209,12 +209,16 @@ describe("daemon M1.4 composition", () => {
       body: JSON.stringify({ artifactId: "artifact_deploy_route", kind: "preview-url" })
     });
     expect(previewCreated.status).toBe(201);
-    const previewBody = await previewCreated.json() as { readonly deployment?: { readonly url?: string } };
+    const previewBody = await previewCreated.json() as { readonly deployment?: { readonly id?: string; readonly url?: string } };
     const previewUrl = previewBody.deployment?.url ?? "";
+    expect(previewUrl).toContain("/preview/");
+    expect(previewUrl).not.toContain(previewBody.deployment?.id ?? "");
     const preview = await fetch(previewUrl.replace("http://127.0.0.1:6677", baseUrl));
     expect(preview.status).toBe(200);
     expect(preview.headers.get("content-type")).toContain("text/html");
     expect(await preview.text()).toContain("Deploy Route");
+    const legacyPreview = await fetch(`${baseUrl}/deployments/${previewBody.deployment?.id ?? ""}/preview`);
+    expect(legacyPreview.status).toBe(404);
 
     const siteCreated = await fetch(`${baseUrl}/deployments`, {
       method: "POST",
@@ -228,6 +232,21 @@ describe("daemon M1.4 composition", () => {
     expect(site.status).toBe(200);
     expect(site.headers.get("content-type")).toContain("text/html");
     expect(await site.text()).toContain("Deploy Route");
+
+    const zipCreated = await fetch(`${baseUrl}/deployments`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ artifactId: "artifact_deploy_route", kind: "source-zip" })
+    });
+    expect(zipCreated.status).toBe(201);
+    const zipBody = await zipCreated.json() as { readonly deployment?: { readonly id?: string; readonly downloadUrl?: string } };
+    expect(zipBody.deployment?.downloadUrl).toBe(`/deployments/${zipBody.deployment?.id ?? ""}/download`);
+    expect(zipBody.deployment?.downloadUrl).not.toContain("agenthub");
+    const zipDownload = await fetch(`${baseUrl}${zipBody.deployment?.downloadUrl ?? ""}`);
+    expect(zipDownload.status).toBe(200);
+    expect(zipDownload.headers.get("content-type")).toBe("application/zip");
+    expect(zipDownload.headers.get("content-disposition")).toBe("attachment; filename=\"artifact_deploy_route-v1.zip\"");
+    expect(Buffer.from(await zipDownload.arrayBuffer()).subarray(0, 4)).toEqual(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
   });
 
   it("runs preview deployment expiry sweeper from daemon startup and stops it on close", async () => {
@@ -791,6 +810,55 @@ describe("daemon M1.4 composition", () => {
     await eventually(() => expect(seededDaemon.database.sqlite.prepare("SELECT status FROM wake_outbox WHERE id = 'wake_startup_1'").get()).toMatchObject({ status: "dispatched" }));
     expect(seededDaemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM runs WHERE room_id = 'room_wake' AND wake_reason = 'task_review'").get()).toMatchObject({ count: 1 });
     expect(seededDaemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'wake_outbox.dispatched' AND json_extract(payload, '$.outboxId') = 'wake_startup_1'").get()).toMatchObject({ count: 1 });
+
+    await seededDaemon.close();
+  });
+
+  it("queues restart_recovery wake_outbox for in-flight runs from a previous daemon", async () => {
+    await daemon.close();
+    currentDaemon = undefined;
+    const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-restart-recovery-"));
+    const databasePath = join(dir, "agenthub.sqlite");
+    const seeded = createDatabase({ path: databasePath, applyMigrations: true });
+    try {
+      seeded.sqlite.transaction(() => {
+        seeded.sqlite.prepare("INSERT INTO workspaces (id, name, root_path, created_at, updated_at) VALUES ('ws_restart', 'Workspace', '.', 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO roles (id, workspace_id, name, prompt, capabilities, is_builtin, created_at, updated_at) VALUES ('role_restart', 'ws_restart', 'Builder', '', '[]', 0, 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES ('agent_restart', 'ws_restart', 'Builder', 'mock', NULL, '', '[]', NULL, 0, NULL, 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES ('binding_restart', 'ws_restart', 'role_restart', 'runtime_1', NULL, NULL, 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES ('room_restart', 'ws_restart', 'Restart Room', 'solo', 'conversation', 'agent_restart', NULL, 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES ('room_restart', 'agent_restart', 'agent', 'primary', 'mock', 'session_restart', 'binding_restart', 'active', 1)").run();
+        seeded.sqlite.prepare(
+          `INSERT INTO runs (
+            id, workspace_id, task_id, room_id, agent_id, adapter_id, adapter_session_id, provider_conversation_id,
+            parent_run_id, status, wake_reason, waiting_reason, workspace_path, work_dir, workspace_mode, context_version,
+            target_files, mailbox_claim_count, pid_at_start, claimed_at, started_at, ended_at, input_tokens, output_tokens,
+            cached_tokens, cost_usd, model_id, failure_class, error, created_at, updated_at
+          ) VALUES ('run_restart', 'ws_restart', NULL, 'room_restart', 'agent_restart', 'mock', 'session_restart', NULL,
+            NULL, 'running', 'primary_turn', NULL, NULL, NULL, 'shadow_buffer', NULL,
+            '[]', 0, 1, 1, 2, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL, NULL, 1, 2)`
+        ).run();
+      })();
+    } finally {
+      seeded.sqlite.close();
+    }
+
+    const seededDaemon = createDaemon({ databasePath, port: 0, modelTestFetch: modelTestFetchMock, now: () => 500 });
+    await seededDaemon.start();
+
+    expect(seededDaemon.database.sqlite.prepare("SELECT status, failure_class, error FROM runs WHERE id = 'run_restart'").get()).toMatchObject({
+      status: "failed",
+      failure_class: "transient",
+      error: "daemon_restarted"
+    });
+    expect(seededDaemon.database.sqlite.prepare("SELECT room_id, agent_id, reason, status, payload FROM wake_outbox WHERE reason = 'restart_recovery'").get()).toMatchObject({
+      room_id: "room_restart",
+      agent_id: "agent_restart",
+      reason: "restart_recovery",
+      status: "pending",
+      payload: JSON.stringify({ runId: "run_restart" })
+    });
 
     await seededDaemon.close();
   });

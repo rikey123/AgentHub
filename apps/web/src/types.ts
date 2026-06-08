@@ -33,6 +33,7 @@ export type DeploymentViewModel = {
   readonly url?: string | undefined;
   readonly downloadUrl?: string | undefined;
   readonly imageTag?: string | undefined;
+  readonly expiresAt?: number | undefined;
   readonly artifactVersion?: number | undefined;
   readonly lastError?: string | undefined;
   readonly createdAt?: number | undefined;
@@ -44,11 +45,19 @@ export type AgentContactViewModel = {
   readonly displayName: string;
   readonly avatarUrl?: string | undefined;
   readonly roleId: string;
+  readonly runtimeId?: string | undefined;
+  readonly modelConfigId?: string | undefined;
+  readonly roleName?: string | undefined;
   readonly runtimeKind: string;
+  readonly runtimeName?: string | undefined;
+  readonly modelName?: string | undefined;
   readonly capabilities: readonly string[];
+  readonly skills?: readonly string[] | undefined;
   readonly status: "available" | "busy" | "offline";
   readonly description?: string | undefined;
+  readonly systemPrompt?: string | undefined;
   readonly lastUsedAt?: number | undefined;
+  readonly runtimeHealth?: { readonly status: "success" | "error" | "experimental"; readonly version?: string | undefined; readonly error?: string | undefined } | undefined;
 };
 
 export type ParticipantViewModel = {

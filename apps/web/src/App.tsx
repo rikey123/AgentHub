@@ -10,7 +10,7 @@ import { ChatStream } from "./components/chat/ChatStream.tsx";
 import { InputBox } from "./components/chat/InputBox.tsx";
 import { PendingTurnList } from "./components/chat/PendingTurnList.tsx";
 import { SidePanel } from "./components/panels/SidePanel.tsx";
-import { ArtifactsRailContainer, ContactsRailContainer } from "./components/rail/RailViews.tsx";
+import { ArtifactsRailContainer, ContactsRailContainer, RunsRailView, TasksRailView } from "./components/rail/RailViews.tsx";
 import { RunDetailDrawer } from "./components/run/RunDetailDrawer.tsx";
 import { CommandPalette, type PaletteCommand } from "./components/CommandPalette.tsx";
 import { KeymapModal } from "./components/KeymapModal.tsx";
@@ -18,10 +18,12 @@ import { NewRoomDialog, type CreateRoomInput } from "./components/NewRoomDialog.
 import { SettingsModal } from "./components/settings/index.ts";
 import { getSettingsSearch, getSettingsStateFromSearch } from "./components/settings/settingsUrl.ts";
 import type { SettingsTabId } from "./components/settings/SettingsModal.tsx";
+import type { ArtifactChatReference } from "./components/artifacts/ArtifactPreviewModal.tsx";
 import type { AgentContactViewModel, MessageViewModel } from "./types.ts";
 import { normalizedRoomSearchQuery, useProjector } from "./hooks/useProjector.ts";
 import { useSdk, useCsrfFetch } from "./hooks/useSdk.ts";
 import { useTheme } from "./hooks/useTheme.ts";
+import type { MessageContextRef } from "@agenthub/protocol/domains";
 
 type ChatRoomLayoutProps = {
   readonly chat: React.ReactNode;
@@ -55,9 +57,26 @@ export function roomPinRequestFor(roomId: string, isPinned: boolean): { readonly
 
 type MessageDraftState = { text?: string; quotedMessageId?: string; quotePreview?: string; quoteInsertText?: string };
 type MessageCard = Extract<MessageViewModel["parts"][number], { type: "card" }>["card"];
+type SendMessageInput = { text: string; quotedMessageId?: string; attachmentIds: string[]; mentions: string[]; refs: MessageContextRef[] };
+
+export function messagePayloadForSendInput(input: SendMessageInput): {
+  readonly text: string;
+  readonly quotedMessageId?: string;
+  readonly attachmentIds?: readonly string[];
+  readonly mentions?: readonly string[];
+  readonly refs?: readonly MessageContextRef[];
+} {
+  return {
+    text: input.text,
+    ...(input.quotedMessageId ? { quotedMessageId: input.quotedMessageId } : {}),
+    ...(input.attachmentIds.length > 0 ? { attachmentIds: input.attachmentIds } : {}),
+    ...(input.mentions.length > 0 ? { mentions: input.mentions } : {}),
+    ...(input.refs.length > 0 ? { refs: input.refs } : {})
+  };
+}
 
 export function draftWithQuotedMessage(draft: MessageDraftState, messageId: string, preview: string): MessageDraftState {
-  const { quoteInsertText: _quoteInsertText, ...baseDraft } = draft;
+  const baseDraft = draft.text === undefined ? {} : { text: draft.text };
   return {
     ...baseDraft,
     quotedMessageId: messageId,
@@ -66,7 +85,7 @@ export function draftWithQuotedMessage(draft: MessageDraftState, messageId: stri
 }
 
 export function draftWithQuotedText(draft: MessageDraftState, text: string): MessageDraftState {
-  const { quotedMessageId: _quotedMessageId, quotePreview: _quotePreview, quoteInsertText: _quoteInsertText, ...baseDraft } = draft;
+  const baseDraft = draft.text === undefined ? {} : { text: draft.text };
   if (text.trim().length === 0) return baseDraft;
   const quoteText = text
     .split(/\r?\n/u)
@@ -77,6 +96,16 @@ export function draftWithQuotedText(draft: MessageDraftState, text: string): Mes
   return {
     ...baseDraft,
     quoteInsertText: quoteText
+  };
+}
+
+export function draftWithArtifactReference(draft: MessageDraftState, reference: ArtifactChatReference): MessageDraftState & { readonly composerRef: ArtifactChatReference["ref"] } {
+  const base = (draft.text ?? "").trimEnd();
+  return {
+    ...(base.length > 0 ? { text: `${base} ${reference.token}` } : { text: reference.token }),
+    ...(draft.quotedMessageId !== undefined ? { quotedMessageId: draft.quotedMessageId } : {}),
+    ...(draft.quotePreview !== undefined ? { quotePreview: draft.quotePreview } : {}),
+    composerRef: reference.ref
   };
 }
 
@@ -108,8 +137,10 @@ function cardPreview(card: MessageCard): string {
   return `Card - ${card.type}`;
 }
 
-export function workbenchCenterModeForRail(rail: RailItem, hasActiveRoom: boolean): "home" | "room" | "contacts" | "artifacts" {
+export function workbenchCenterModeForRail(rail: RailItem, hasActiveRoom: boolean): "home" | "room" | "contacts" | "runs" | "tasks" | "artifacts" {
   if (rail === "contacts") return "contacts";
+  if (rail === "runs") return "runs";
+  if (rail === "tasks") return "tasks";
   if (rail === "artifacts") return "artifacts";
   return hasActiveRoom ? "room" : "home";
 }
@@ -192,8 +223,10 @@ export default function App() {
         title: input.title,
         mode: input.mode,
         primaryAgentId: input.primaryAgentId,
+        ...(input.agentBindingId !== undefined ? { agentBindingId: input.agentBindingId } : {}),
         ...(input.leaderRoleId !== undefined ? { leaderRoleId: input.leaderRoleId } : {}),
         ...(input.skillIds !== undefined ? { skillIds: input.skillIds } : {}),
+        ...(input.participantSkillAssignments !== undefined ? { participantSkillAssignments: input.participantSkillAssignments } : {}),
         participants: input.participants
       }) as { data?: { roomId?: string }; id?: string; roomId?: string };
       const roomId = res?.data?.roomId ?? res?.roomId ?? res?.id;
@@ -238,20 +271,15 @@ export default function App() {
     setSettingsTab(tab);
   }, []);
 
-  const handleSendMessage = useCallback(async (input: { text: string; quotedMessageId?: string; attachmentIds: string[]; mentions: string[] }) => {
+  const handleSendMessage = useCallback(async (input: SendMessageInput) => {
     if (!activeRoomId) return;
-    await sdk.sendMessage(activeRoomId, {
-      text: input.text,
-      ...(input.quotedMessageId ? { quotedMessageId: input.quotedMessageId } : {}),
-      ...(input.attachmentIds.length > 0 ? { attachmentIds: input.attachmentIds } : {}),
-      ...(input.mentions.length > 0 ? { mentions: input.mentions } : {})
-    });
+    await sdk.sendMessage(activeRoomId, messagePayloadForSendInput(input));
   }, [activeRoomId, sdk]);
 
-  const handleEditSend = useCallback(async (messageId: string, input: { text: string; attachmentIds: string[]; mentions: string[] }) => {
+  const handleEditSend = useCallback(async (messageId: string, input: SendMessageInput) => {
     await csrfFetch(`/messages/${encodeURIComponent(messageId)}`, {
       method: "PATCH",
-      body: JSON.stringify({ text: input.text, attachmentIds: input.attachmentIds, mentions: input.mentions })
+      body: JSON.stringify(messagePayloadForSendInput(input))
     });
     setEditingTurnId(undefined);
   }, [csrfFetch]);
@@ -294,6 +322,10 @@ export default function App() {
     const message = activeRoom?.messages.find((item) => item.id === id);
     writeMessageDraft((draft) => draftWithQuotedText(draft, message?.text ?? ""));
   }, [activeRoom, writeMessageDraft]);
+
+  const handleReferenceArtifactInChat = useCallback((reference: ArtifactChatReference) => {
+    writeMessageDraft((draft) => draftWithArtifactReference(draft, reference));
+  }, [writeMessageDraft]);
 
   const handlePin = useCallback(async (id: string) => {
     if (!activeRoomId) return;
@@ -470,6 +502,7 @@ export default function App() {
               onStopDiscussion={() => void handleStopDiscussion()}
               onEditPending={handleEditPending}
               csrfFetch={csrfFetch}
+              onReferenceArtifact={handleReferenceArtifactInChat}
               connectionStatus={projector.connectionStatus}
               connectionError={projector.connectionError}
             />
@@ -503,9 +536,13 @@ export default function App() {
     <HomeView rooms={rooms} onOpenRoom={openRoom} onCreate={openNewRoom} />
   );
   const center = centerMode === "contacts"
-    ? <ContactsRailContainer fetchImpl={csrfFetch} onStartChat={handleStartContactChat} onEditContact={() => setSettingsOpen(true)} />
+    ? <ContactsRailContainer fetchImpl={csrfFetch} onStartChat={handleStartContactChat} />
+    : centerMode === "runs"
+      ? <RunsRailView />
+      : centerMode === "tasks"
+        ? <TasksRailView />
     : centerMode === "artifacts"
-      ? <ArtifactsRailContainer fetchImpl={csrfFetch} />
+      ? <ArtifactsRailContainer fetchImpl={csrfFetch} onReferenceArtifact={handleReferenceArtifactInChat} />
       : roomCenter;
 
   return (

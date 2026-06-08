@@ -120,6 +120,23 @@ describe("buildRunPrompt", () => {
     expect(prompt.indexOf("## Pinned Room Context")).toBeLessThan(prompt.indexOf("## Assisted Group Chat"));
   });
 
+  test("places explicit context refs ahead of pinned room context", () => {
+    expect(tempDir).toBeDefined();
+    currentDatabase().sqlite.prepare("UPDATE workspaces SET root_path = ? WHERE id = 'ws_1'").run(tempDir as string);
+    mkdirSync(join(tempDir as string, "src"), { recursive: true });
+    writeFileSync(join(tempDir as string, "src", "app.ts"), "workspace context");
+    seedTextArtifact("artifact_priority", "artifact context", "priority.md");
+    seedPinnedUserMessage("msg_pinned_priority", "Pinned note", 1);
+    seedUserMessage("msg_refs_and_pins", "Use @artifact:artifact_priority and @workspace:src/app.ts#L1-L1", 2);
+    createRun("run_refs_and_pins", "primary_turn", { messageId: "msg_refs_and_pins" });
+
+    const prompt = buildRunPrompt(run("run_refs_and_pins"), currentDatabase(), { now: () => now });
+
+    expect(prompt).toContain("## Context References");
+    expect(prompt).toContain("## Pinned Room Context");
+    expect(prompt.indexOf("## Context References")).toBeLessThan(prompt.indexOf("## Pinned Room Context"));
+  });
+
   test("team leader follow-up prompt includes prior room context", () => {
     seedTeamLeaderRoom();
     seedUserMessage("msg_original", "大家好，我想让你们讨论一下一个多agent合作的平台应该怎么设计", 1);

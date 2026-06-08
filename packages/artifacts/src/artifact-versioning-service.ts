@@ -131,7 +131,13 @@ export function createArtifactVersioningService(options: ArtifactVersioningServi
       contentEncoding: "binary",
       createdAt,
       createdBy: input.createdBy,
-      message: input.message
+      message: input.message,
+      metadata: {
+        filename,
+        mimeType: input.mimeType ?? mimeTypeForPath(filename),
+        sizeBytes: stats.size,
+        newSha256: digest
+      }
     });
   };
   const restoreBinaryVersionInTransaction = (artifactId: string, sourceVersion: number): ArtifactVersionRecord => {
@@ -167,7 +173,13 @@ export function createArtifactVersioningService(options: ArtifactVersioningServi
       storagePath,
       contentEncoding: "binary",
       createdAt,
-      message: `Restore v${sourceVersion}`
+      message: `Restore v${sourceVersion}`,
+      metadata: {
+        filename,
+        mimeType: mimeTypeForPath(filename),
+        sizeBytes: stats.size,
+        newSha256: digest
+      }
     });
   };
   const service: ArtifactVersioningService = {
@@ -229,12 +241,14 @@ function insertVersion(
     readonly createdAt: number;
     readonly createdBy?: string | undefined;
     readonly message?: string | undefined;
+    readonly metadata?: Record<string, unknown> | undefined;
   }
 ): ArtifactVersionRecord {
   const id = randomUUID();
+  const metadata = JSON.stringify(input.metadata ?? JSON.parse(artifact.metadata) as Record<string, unknown>);
   options.database.sqlite
     .prepare("INSERT INTO artifact_versions (id, artifact_id, version, content, storage_path, content_encoding, metadata, created_at, created_by, message) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-    .run(id, artifact.id, input.version, input.content, input.storagePath, input.contentEncoding, artifact.metadata, input.createdAt, input.createdBy ?? null, input.message ?? null);
+    .run(id, artifact.id, input.version, input.content, input.storagePath, input.contentEncoding, metadata, input.createdAt, input.createdBy ?? null, input.message ?? null);
   options.eventBus.publish({
     id: randomUUID(),
     type: "artifact.version.created",

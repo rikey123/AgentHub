@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createPptPreviewBridge, type PptPreviewBridgeOptions } from "../src/services/ppt-preview-bridge.ts";
 
 const execFileMock = vi.hoisted(() => vi.fn());
+const existsSyncMock = vi.hoisted(() => vi.fn());
 
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
@@ -14,9 +15,25 @@ vi.mock("node:child_process", async (importOriginal) => {
   };
 });
 
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    existsSync: existsSyncMock
+  };
+});
+
 describe("PptPreviewBridge", () => {
+  const originalLocalAppData = process.env.LOCALAPPDATA;
+  const originalPath = process.env.Path;
+  const originalUpperPath = process.env.PATH;
+
   afterEach(() => {
     execFileMock.mockReset();
+    existsSyncMock.mockReset();
+    process.env.LOCALAPPDATA = originalLocalAppData;
+    process.env.Path = originalPath;
+    process.env.PATH = originalUpperPath;
   });
 
   it("starts officecli watch on a per-file port and tracks active sessions", async () => {
@@ -99,6 +116,67 @@ describe("PptPreviewBridge", () => {
     await expect(bridge.start("deck.pptx")).resolves.toMatchObject({ port: 61238, status: "ready" });
 
     expect(execFileMock).toHaveBeenCalledWith("sh", ["-c", "command -v officecli"], expect.any(Function));
+  });
+
+  it("detects the Windows installer directory when the current process PATH has not refreshed", async () => {
+    execFileMock.mockImplementation((command: string, args: readonly string[], callback: (error: Error | null) => void) => {
+      expect(command).toBe("where.exe");
+      expect(args).toEqual(["officecli"]);
+      callback(new Error("not found"));
+    });
+    existsSyncMock.mockReturnValue(true);
+    process.env.LOCALAPPDATA = "C:\\Users\\tester\\AppData\\Local";
+    process.env.Path = "C:\\Windows\\System32";
+    process.env.PATH = process.env.Path;
+    const child = fakeChild(1238);
+    const bridge = createPptPreviewBridge({
+      findFreePort: async () => 61239,
+      spawnWatch: vi.fn(() => child),
+      waitForReady: async () => undefined,
+      platform: () => "win32"
+    });
+
+    await expect(bridge.start("deck.pptx")).resolves.toMatchObject({ port: 61239, status: "ready" });
+
+    expect(existsSyncMock).toHaveBeenCalledWith("C:\\Users\\tester\\AppData\\Local\\OfficeCLI\\officecli.exe");
+    expect(process.env.Path?.split(";")[0]).toBe("C:\\Users\\tester\\AppData\\Local\\OfficeCLI");
+  });
+
+  it("uses the current OfficeCLI installer source when auto-installing", async () => {
+    let attempts = 0;
+    execFileMock.mockImplementation((command: string, args: readonly string[], callback: (error: Error | null) => void) => {
+      attempts += 1;
+      if (attempts === 1) {
+        expect(command).toBe("where.exe");
+        callback(new Error("not found"));
+        return;
+      }
+      if (attempts === 2) {
+        expect(command).toBe("powershell.exe");
+        expect(args).toEqual([
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "irm https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.ps1 | iex"
+        ]);
+        callback(null);
+        return;
+      }
+      callback(null);
+    });
+    existsSyncMock.mockReturnValue(false);
+    const child = fakeChild(1239);
+    const bridge = createPptPreviewBridge({
+      findFreePort: async () => 61240,
+      spawnWatch: vi.fn(() => child),
+      waitForReady: async () => undefined,
+      platform: () => "win32"
+    });
+
+    await expect(bridge.start("deck.pptx")).resolves.toMatchObject({ port: 61240, status: "ready" });
+
+    expect(attempts).toBe(3);
   });
 });
 

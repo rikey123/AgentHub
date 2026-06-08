@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { loadArtifactPreviewState } from "./ArtifactCards.tsx";
+import { deploymentActionButtonState, deploymentLogLines, loadArtifactPreviewState, loadDeploymentLogFallback } from "./ArtifactCards.tsx";
 import { CardRenderer } from "./CardRenderer.tsx";
 
 describe("V1.2 artifact cards", () => {
@@ -22,6 +22,22 @@ describe("V1.2 artifact cards", () => {
     expect(html).toContain("v3");
     expect(html).toContain("/artifacts/artifact-doc-1/download");
     expect(html).toContain("Expand Preview");
+  });
+
+  it("prefers artifact filenames over display titles in artifact card headers", () => {
+    const html = renderToStaticMarkup(createElement(CardRenderer, {
+      card: {
+        type: "artifact",
+        artifactId: "artifact-doc-filename-1",
+        kind: "document",
+        title: "OpenCode Runtime Document",
+        filename: "runtime-acceptance.md",
+        version: 1
+      },
+      csrfFetch: vi.fn<typeof fetch>()
+    }));
+
+    expect(html).toContain("runtime-acceptance.md");
   });
 
   it("routes source code and generic file artifacts to generic ArtifactCard branches", () => {
@@ -65,7 +81,7 @@ describe("V1.2 artifact cards", () => {
     expect(genericFile).not.toContain('data-slot="card-content"><pre');
   });
 
-  it("routes web artifacts to PreviewCard with only wired actions", () => {
+  it("routes web artifacts to PreviewCard with the V1.2 header body footer actions", () => {
     const html = renderToStaticMarkup(createElement(CardRenderer, {
       card: {
         type: "artifact",
@@ -79,9 +95,9 @@ describe("V1.2 artifact cards", () => {
 
     expect(html).toContain("Preview");
     expect(html).toContain("landing.html");
+    expect(html).toContain("Edit");
+    expect(html).toContain("Deploy");
     expect(html).toContain("Download");
-    expect(html).not.toContain("Edit");
-    expect(html).not.toContain("Deploy");
     expect(html).toContain("Expand Preview");
     expect(html).toContain("sandbox=\"allow-scripts\"");
   });
@@ -109,13 +125,59 @@ describe("V1.2 artifact cards", () => {
     }));
 
     expect(slides).toContain("HTML slides");
-    expect(slides).not.toContain("Reference slide");
-    expect(slides).not.toContain("Edit");
+    expect(slides).toContain("Prev");
+    expect(slides).toContain("Next");
+    expect(slides).toContain("Reference Slide");
     expect(slides).toContain("Expand Preview");
     expect(pptx).toContain("PPTX preview");
-    expect(pptx).toContain("Install failed");
+    expect(pptx).toContain("Loading PPT preview");
     expect(pptx).toContain("/artifacts/artifact-pptx-1/download");
     expect(pptx).toContain("Expand Preview");
+  });
+
+  it("renders document cards with edit reference download and expand footer actions", () => {
+    const html = renderToStaticMarkup(createElement(CardRenderer, {
+      card: {
+        type: "artifact",
+        artifactId: "artifact-doc-2",
+        kind: "document",
+        title: "Research memo.md",
+        version: 5
+      },
+      csrfFetch: vi.fn<typeof fetch>()
+    }));
+
+    expect(html).toContain("Document");
+    expect(html).toContain("Markdown summary");
+    expect(html).toContain("Edit");
+    expect(html).toContain("Reference");
+    expect(html).toContain("Download");
+    expect(html).toContain("Expand Preview");
+  });
+
+  it("covers presentation_pptx loading installing ready failed and download fallback states", () => {
+    const renderPptx = (pptStatus: string) => renderToStaticMarkup(createElement(CardRenderer, {
+      card: {
+        type: "artifact",
+        artifactId: `artifact-pptx-${pptStatus}`,
+        kind: "presentation_pptx",
+        title: `${pptStatus}.pptx`,
+        version: 1,
+        pptStatus,
+        pptPreviewUrl: "/api/ppt-proxy/4567/"
+      } as never,
+      csrfFetch: vi.fn<typeof fetch>()
+    }));
+
+    expect(renderPptx("loading")).toContain("Loading PPT preview");
+    expect(renderPptx("installing")).toContain("Installing officecli");
+    expect(renderPptx("ready")).toContain("PPT Preview");
+    expect(renderPptx("ready")).toContain("/api/ppt-proxy/4567/");
+    expect(renderPptx("startFailed")).toContain("Preview start failed");
+    expect(renderPptx("installFailed")).toContain("Install failed");
+    for (const status of ["loading", "installing", "ready", "startFailed", "installFailed"]) {
+      expect(renderPptx(status)).toContain(`/artifacts/artifact-pptx-${status}/download`);
+    }
   });
 
   it("routes failed deployment payloads to retry/log/download actions", () => {
@@ -167,6 +229,7 @@ describe("V1.2 artifact cards", () => {
         provider: "agenthub-local",
         status: "ready",
         url: "http://127.0.0.1:6677/sites/deployment-ready-1/",
+        expiresAt: Date.now() + 30 * 60 * 1000
       } as never,
       csrfFetch: vi.fn<typeof fetch>()
     }));
@@ -203,6 +266,7 @@ describe("V1.2 artifact cards", () => {
     expect(running).not.toContain("Unpublish");
 
     expect(readySite).toContain("Deployment is ready.");
+    expect(readySite).toContain("Expires in");
     expect(readySite).toContain("Open Preview");
     expect(readySite).toContain("Copy URL");
     expect(readySite).toContain("Redeploy");
@@ -275,6 +339,79 @@ describe("V1.2 artifact cards", () => {
     expect(runningExportWithStaleDownload).not.toContain("/deployments/deployment-running-stale-1/download");
     expect(runningExportWithStaleDownload).not.toContain("C:\\workspace");
     expect(runningExportWithStaleDownload).toContain("Cancel");
+  });
+
+  it("renders every V1.2 deployment status with a visible lifecycle action", () => {
+    const statuses = [
+      ["queued", "Queued for deployment.", "Cancel"],
+      ["in_progress", "in progress", "Cancel"],
+      ["ready", "Deployment is ready.", "Redeploy"],
+      ["failed", "Deployment failed", "Retry"],
+      ["cancelled", "Deployment was cancelled", "Redeploy"],
+      ["expired", "Preview expired", "Redeploy"],
+      ["unpublished", "Deployment is unpublished", "Redeploy"]
+    ] as const;
+
+    for (const [status, bodyText, actionText] of statuses) {
+      const html = renderToStaticMarkup(createElement(CardRenderer, {
+        card: {
+          type: "deployment",
+          deploymentId: `deployment-${status}`,
+          artifactId: "artifact-1",
+          kind: "static-site",
+          provider: "agenthub-local",
+          status,
+          url: status === "ready" ? "http://127.0.0.1:6678/sites/site/" : undefined
+        } as never,
+        csrfFetch: vi.fn<typeof fetch>()
+      }));
+
+      expect(html).toContain(status);
+      expect(html).toContain(bodyText);
+      expect(html).toContain(actionText);
+      expect(html).toContain(`/deployments/deployment-${status}/logs`);
+    }
+  });
+
+  it("deduplicates appended deployment logs before rendering REST fallback output", () => {
+    expect(deploymentLogLines([
+      "Detecting providers...",
+      "Installing Node.js 20...",
+      "Installing Node.js 20...",
+      "",
+      "Build complete"
+    ])).toEqual([
+      "Detecting providers...",
+      "Installing Node.js 20...",
+      "Build complete"
+    ]);
+  });
+
+  it("loads deployment REST logs and merges them with live log lines", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => new Response("Installing Node.js 20...\nBuild complete\n", { status: 200 }));
+
+    await expect(loadDeploymentLogFallback(fetchImpl, "deployment 1", ["Detecting providers...", "Installing Node.js 20..."])).resolves.toEqual([
+      "Detecting providers...",
+      "Installing Node.js 20...",
+      "Build complete"
+    ]);
+
+    expect(fetchImpl).toHaveBeenCalledWith("/deployments/deployment%201/logs", { headers: { accept: "text/plain" } });
+  });
+
+  it("exposes deployment action button state that prevents repeated clicks", () => {
+    expect(deploymentActionButtonState("retry", undefined)).toEqual({
+      isPending: false,
+      isDisabled: false
+    });
+    expect(deploymentActionButtonState("retry", "retry")).toEqual({
+      isPending: true,
+      isDisabled: true
+    });
+    expect(deploymentActionButtonState("redeploy", "retry")).toEqual({
+      isPending: false,
+      isDisabled: true
+    });
   });
 
   it("ignores artifact expand loads after the modal is closed", async () => {

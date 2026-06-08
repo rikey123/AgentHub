@@ -453,8 +453,10 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
         onTerminal: (runId: string) => {
           activeWakes.releaseRun(runId);
           runQueueRef.current?.releaseLocks(runId);
+          const commandBus = commandBusRef.current;
+          if (commandBus === undefined) return;
           pendingTurns.handleTerminal(runId);
-          void handleTeamDispatchReviewTerminal({ database, eventBus, commandBus: commandBusRef.current ?? commandBus, taskService, taskModeGroupChatPresenter, ...(options.now !== undefined ? { now: options.now } : {}) }, runId);
+          void handleTeamDispatchReviewTerminal({ database, eventBus, commandBus, taskService, taskModeGroupChatPresenter, ...(options.now !== undefined ? { now: options.now } : {}) }, runId);
           void continueAssistedSelectorAfterRun({ database, getCommandBus: () => commandBusRef.current, assistedSelector }, runId).catch(() => undefined);
         },
         finalizeNextTurns: (tx: AgentHubDatabase["sqlite"], runId: string, failureClass: Parameters<MailboxService["finalizeForRun"]>[2], now: number) => mailbox.finalizeForRun(tx, runId, failureClass, now),
@@ -1197,7 +1199,7 @@ async function route(ctx: RouteContext): Promise<void> {
   if (ctx.req.method === "POST" && parts[0] === "deployments" && parts.length === 1) return createDeployment(ctx, await body(ctx));
   if (ctx.req.method === "GET" && parts[0] === "deployments" && parts[2] === "logs") return deploymentLogs(ctx, parts[1] as string);
   if (ctx.req.method === "GET" && parts[0] === "deployments" && parts[2] === "download") return deploymentDownload(ctx, parts[1] as string);
-  if (ctx.req.method === "GET" && parts[0] === "deployments" && parts[2] === "preview") return deploymentPreview(ctx, parts[1] as string);
+  if (ctx.req.method === "GET" && parts[0] === "preview" && parts[1]) return deploymentPreview(ctx, parts[1] as string);
   if (ctx.req.method === "GET" && parts[0] === "sites" && parts[1]) return deploymentSite(ctx, parts[1], decodeURIComponent(parts.slice(2).join("/")));
   if (ctx.req.method === "POST" && parts[0] === "deployments" && parts[2] === "redeploy") return deploymentAction(ctx, parts[1] as string, "redeploy");
   if (ctx.req.method === "POST" && parts[0] === "deployments" && parts[2] === "retry") return deploymentAction(ctx, parts[1] as string, "retry");
@@ -1216,6 +1218,8 @@ async function route(ctx: RouteContext): Promise<void> {
   if (ctx.req.method === "GET" && parts[0] === "artifacts" && parts[2] === "versions" && parts[4] === "diff" && parts[5]) return artifactVersionDiff(ctx, parts[1] as string, Number(parts[3]), Number(parts[5]));
   if (ctx.req.method === "POST" && parts[0] === "artifacts" && parts[2] === "versions" && parts[4] === "restore") return restoreArtifactVersion(ctx, parts[1] as string, Number(parts[3]));
   if (ctx.req.method === "GET" && parts[0] === "artifacts" && parts[2] === "versions" && parts[3]) return artifactVersion(ctx, parts[1] as string, Number(parts[3]));
+  if (ctx.req.method === "POST" && parts[0] === "artifacts" && parts[2] === "ppt-preview" && parts.length === 3) return startArtifactPptPreview(ctx, parts[1] as string);
+  if (ctx.req.method === "DELETE" && parts[0] === "artifacts" && parts[2] === "ppt-preview" && parts[3]) return stopArtifactPptPreview(ctx, Number(parts[3]));
   if (ctx.req.method === "GET" && parts[0] === "artifacts" && parts[2] === "download") return downloadArtifact(ctx, parts[1] as string);
   if (ctx.req.method === "GET" && parts[0] === "artifacts" && parts.length === 2) return json(ctx.res, 200, { artifact: ctx.artifactService.get(parts[1] as string) ?? null });
   if (ctx.req.method === "GET" && parts[0] === "artifacts" && parts[2] === "reviews" && parts.length === 3) return json(ctx.res, 200, { reviews: ctx.artifactService.reviews(parts[1] as string) });
@@ -1443,11 +1447,25 @@ async function deploymentLogs(ctx: RouteContext, deploymentId: string): Promise<
 async function deploymentDownload(ctx: RouteContext, deploymentId: string): Promise<void> {
   const path = await ctx.deploymentService.downloadPath(deploymentId);
   if (path === undefined || !existsSync(path)) return json(ctx.res, 404, { error: "deployment_download_not_found" });
-  return serveStaticFile(ctx.req, ctx.res, path) ? undefined : json(ctx.res, 404, { error: "deployment_download_not_found" });
+  try {
+    const stat = statSync(path);
+    if (!stat.isFile()) return json(ctx.res, 404, { error: "deployment_download_not_found" });
+    ctx.res.writeHead(200, {
+      "content-type": contentTypeFor(path),
+      "content-length": String(stat.size),
+      "content-disposition": `attachment; filename="${safeDownloadName(path)}"`,
+      "cache-control": "no-cache",
+      "x-content-type-options": "nosniff"
+    });
+    if (ctx.req.method === "HEAD") ctx.res.end();
+    else ctx.res.end(readFileSync(path));
+  } catch {
+    return json(ctx.res, 404, { error: "deployment_download_not_found" });
+  }
 }
 
-function deploymentPreview(ctx: RouteContext, deploymentId: string): void {
-  const row = get(ctx.database, "SELECT kind, status, source_path FROM deployments WHERE id = ?", deploymentId) as { readonly kind: string; readonly status: string; readonly source_path: string | null } | null;
+function deploymentPreview(ctx: RouteContext, token: string): void {
+  const row = get(ctx.database, "SELECT kind, status, source_path FROM deployments WHERE provider_resource_id = ?", token) as { readonly kind: string; readonly status: string; readonly source_path: string | null } | null;
   if (row === null || row.kind !== "preview-url" || row.status !== "ready" || row.source_path === null) return json(ctx.res, 404, { error: "deployment_preview_not_found" });
   const filePath = containedPath(row.source_path, "index.html");
   if (filePath === undefined) return json(ctx.res, 404, { error: "deployment_preview_not_found" });
@@ -1973,6 +1991,40 @@ function artifactVersion(ctx: RouteContext, artifactId: string, version: number)
   const row = get(ctx.database, "SELECT * FROM artifact_versions WHERE artifact_id = ? AND version = ?", artifactId, version) as Record<string, unknown> | null;
   if (row === null) return json(ctx.res, 404, { error: "artifact_version_not_found" });
   json(ctx.res, 200, { version: row });
+}
+
+async function startArtifactPptPreview(ctx: RouteContext, artifactId: string): Promise<void> {
+  const row = get(
+    ctx.database,
+    `SELECT a.kind, f.path, f.content_path, f.binary
+     FROM artifacts a
+     INNER JOIN artifact_files f ON f.artifact_id = a.id
+     WHERE a.id = ? AND a.deleted_at IS NULL
+     ORDER BY f.path ASC
+     LIMIT 1`,
+    artifactId
+  ) as Record<string, unknown> | null;
+  if (row === null) return json(ctx.res, 404, { error: "artifact_not_found" });
+  if (row.kind !== "presentation_pptx" || row.binary !== 1 || typeof row.content_path !== "string") {
+    return json(ctx.res, 400, { error: "artifact_not_pptx" });
+  }
+  try {
+    const session = await ctx.pptPreviewBridge.start(row.content_path);
+    return json(ctx.res, 200, {
+      port: session.port,
+      pid: session.pid,
+      status: session.status,
+      previewUrl: `/api/ppt-proxy/${session.port}/`
+    });
+  } catch (error) {
+    return json(ctx.res, 503, { error: "ppt_preview_start_failed", message: errorMessage(error) });
+  }
+}
+
+async function stopArtifactPptPreview(ctx: RouteContext, port: number): Promise<void> {
+  if (!Number.isInteger(port)) return json(ctx.res, 400, { error: "invalid_port" });
+  await ctx.pptPreviewBridge.stop(port);
+  return json(ctx.res, 200, { ok: true });
 }
 
 async function artifactVersionDiff(ctx: RouteContext, artifactId: string, fromVersion: number, toVersion: number): Promise<void> {
@@ -3264,7 +3316,7 @@ function deleteAgentBinding(ctx: RouteContext, bindingId: string): void {
 function agentContacts(ctx: RouteContext): void {
   const rows = all(
     ctx.database,
-    `SELECT ab.id, ab.role_id, ab.runtime_id, ab.contact_name, ab.avatar_url, ab.contact_description, ab.disabled_at, ab.updated_at,
+    `SELECT ab.id, ab.role_id, ab.runtime_id, ab.model_config_id, ab.contact_name, ab.avatar_url, ab.contact_description, ab.disabled_at, ab.updated_at,
             r.name AS role_name, r.capabilities, rt.kind AS runtime_kind, rt.status AS runtime_status,
             (SELECT MAX(started_at) FROM runs WHERE runs.agent_id = ab.id OR runs.agent_id = r.id) AS last_used_at,
             (SELECT COUNT(*) FROM runs WHERE (runs.agent_id = ab.id OR runs.agent_id = r.id) AND runs.status IN ('running', 'queued', 'starting')) AS busy_count
@@ -3349,6 +3401,8 @@ function contactRow(row: Record<string, unknown>): Record<string, unknown> {
     displayName: stringField(row.contact_name) ?? stringField(row.role_name) ?? String(row.id),
     ...(stringField(row.avatar_url) !== undefined ? { avatarUrl: stringField(row.avatar_url) } : {}),
     roleId: row.role_id,
+    runtimeId: row.runtime_id,
+    ...(stringField(row.model_config_id) !== undefined ? { modelConfigId: stringField(row.model_config_id) } : {}),
     runtimeKind: row.runtime_kind,
     capabilities: parseJsonField(row.capabilities, []),
     status: Number(row.busy_count ?? 0) > 0 ? "busy" : runtimeStatusAvailable(row.runtime_status) ? "available" : "offline",
@@ -3932,6 +3986,7 @@ const WEB_API_PREFIXES = [
   "/artifacts",
   "/deployments",
   "/deployment-providers",
+  "/preview",
   "/sites",
   "/api",
   "/debug",
@@ -4037,6 +4092,7 @@ function contentTypeFor(filePath: string): string {
   if (ext === ".webmanifest") return "application/manifest+json; charset=utf-8";
   if (ext === ".woff2") return "font/woff2";
   if (ext === ".woff") return "font/woff";
+  if (ext === ".zip") return "application/zip";
   return "application/octet-stream";
 }
 

@@ -191,7 +191,24 @@ function artifactIdsForTasks(database: AgentHubDatabase, taskIds: readonly strin
   if (taskIds.length === 0) return [];
   const placeholders = taskIds.map(() => "?").join(",");
   const rows = database.sqlite.prepare(`SELECT DISTINCT id FROM artifacts WHERE task_id IN (${placeholders}) AND deleted_at IS NULL ORDER BY id ASC`).all(...taskIds) as Array<{ readonly id: string }>;
-  return rows.map((row) => row.id);
+  const ids = new Set(rows.map((row) => row.id));
+  const activityRows = database.sqlite
+    .prepare(`SELECT payload FROM task_activities WHERE task_id IN (${placeholders}) AND kind = 'comment' ORDER BY created_at ASC, id ASC`)
+    .all(...taskIds) as Array<{ readonly payload: string }>;
+  for (const row of activityRows) {
+    for (const artifactId of artifactIdsFromActivityPayload(row.payload)) ids.add(artifactId);
+  }
+  return [...ids].sort();
+}
+
+function artifactIdsFromActivityPayload(payloadJson: string): readonly string[] {
+  try {
+    const payload = JSON.parse(payloadJson) as { readonly artifactIds?: unknown };
+    if (!Array.isArray(payload.artifactIds)) return [];
+    return payload.artifactIds.filter((item): item is string => typeof item === "string" && item.length > 0);
+  } catch {
+    return [];
+  }
 }
 
 function blockedTask(database: AgentHubDatabase, roomId: string, scope: TeamDispatchScope): TaskRow | undefined {

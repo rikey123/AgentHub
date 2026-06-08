@@ -628,7 +628,8 @@ describe("useProjector replay handling", () => {
     projector.apply(makeEvent("deployment.ready", roomId, {
       deploymentId: "deployment-2",
       url: "http://127.0.0.1:4173/sites/deployment-2/",
-      downloadUrl: "/deployments/deployment-2/download"
+      downloadUrl: "/deployments/deployment-2/download",
+      expiresAt: 1_710_000_000_000
     }, 200));
 
     projector.apply(makeAgentEvent("message.created", roomId, "agent-builder", {
@@ -659,7 +660,8 @@ describe("useProjector replay handling", () => {
     expect(room?.deploymentsById?.["deployment-2"]).toMatchObject({
       status: "ready",
       url: "http://127.0.0.1:4173/sites/deployment-2/",
-      downloadUrl: "/deployments/deployment-2/download"
+      downloadUrl: "/deployments/deployment-2/download",
+      expiresAt: 1_710_000_000_000
     });
     expect(card).toMatchObject({
       type: "card",
@@ -668,6 +670,7 @@ describe("useProjector replay handling", () => {
         deploymentId: "deployment-2",
         status: "ready",
         url: "http://127.0.0.1:4173/sites/deployment-2/",
+        expiresAt: 1_710_000_000_000,
         downloadUrl: "/deployments/deployment-2/download"
       }
     });

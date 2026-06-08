@@ -1117,6 +1117,7 @@ class Projector {
             url: typeof payload.url === "string" ? payload.url : existing?.url,
             downloadUrl: typeof payload.downloadUrl === "string" ? payload.downloadUrl : existing?.downloadUrl,
             imageTag: typeof payload.imageTag === "string" ? payload.imageTag : existing?.imageTag,
+            expiresAt: typeof payload.expiresAt === "number" ? payload.expiresAt : existing?.expiresAt,
             lastError: typeof payload.error === "string" ? payload.error : existing?.lastError,
             updatedAt: event.createdAt
           };
@@ -1601,6 +1602,7 @@ function hydrateMessagePart(room: RoomViewModel, part: MessageViewModel["parts"]
         url: deployment.url ?? card.url,
         downloadUrl: deployment.downloadUrl ?? card.downloadUrl,
         imageTag: deployment.imageTag ?? card.imageTag,
+        expiresAt: deployment.expiresAt ?? card.expiresAt,
         lastError: deployment.lastError ?? card.lastError,
         logs: room.deploymentLogsById[card.deploymentId] ?? card.logs
       }

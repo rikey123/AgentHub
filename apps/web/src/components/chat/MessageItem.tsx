@@ -4,7 +4,7 @@ import type { MessageViewModel } from "../../types.ts";
 import { formatBytes, formatTime, initials } from "../../lib/format.ts";
 import { pendingTurnColor } from "../../lib/status.ts";
 import { CardRenderer } from "../cards/CardRenderer.tsx";
-import { ArtifactPreviewModal, normalizePreviewKind } from "../artifacts/ArtifactPreviewModal.tsx";
+import { ArtifactPreviewModal, normalizePreviewKind, type ArtifactChatReference } from "../artifacts/ArtifactPreviewModal.tsx";
 
 export type QuotedMessagePreview = {
   readonly id: string;
@@ -26,11 +26,12 @@ interface MessageItemProps {
   onDelete?: (() => void) | undefined;
   onCancelPending?: (() => void) | undefined;
   onEditPending?: (() => void) | undefined;
+  onReferenceArtifact?: ((reference: ArtifactChatReference) => void) | undefined;
   csrfFetch: typeof fetch;
 }
 
 export function MessageItem(props: MessageItemProps) {
-  const { message, quotedMessage, isSelected, onSelect, onOpenQuotedMessage, onOpenRun, onReply, onQuote, onPin, onRegenerate, onDelete, onCancelPending, onEditPending, csrfFetch } = props;
+  const { message, quotedMessage, isSelected, onSelect, onOpenQuotedMessage, onOpenRun, onReply, onQuote, onPin, onRegenerate, onDelete, onCancelPending, onEditPending, onReferenceArtifact, csrfFetch } = props;
   const [expanded, setExpanded] = useState(false);
 
   const isUser = message.senderType === "user";
@@ -125,7 +126,7 @@ export function MessageItem(props: MessageItemProps) {
             {message.parts.length > 0 ? (
               <div className="mt-3 flex flex-col gap-2">
                 {message.parts.map((part, i) => (
-                  <PartView key={i} part={part} csrfFetch={csrfFetch} />
+                  <PartView key={i} part={part} csrfFetch={csrfFetch} onReferenceArtifact={onReferenceArtifact} />
                 ))}
               </div>
             ) : null}
@@ -303,7 +304,7 @@ function hasMarkdownFencedCode(text: string): boolean {
   return /^```[^\r\n`]*\r?\n[\s\S]*?\r?\n```[ \t]*$/m.test(text);
 }
 
-function PartView({ part, csrfFetch }: { part: MessageViewModel["parts"][number]; csrfFetch: typeof fetch }) {
+function PartView({ part, csrfFetch, onReferenceArtifact }: { part: MessageViewModel["parts"][number]; csrfFetch: typeof fetch; onReferenceArtifact?: ((reference: ArtifactChatReference) => void) | undefined }) {
   switch (part.type) {
     case "text":
       return <p className="text-sm whitespace-pre-wrap">{part.text}</p>;
@@ -334,9 +335,9 @@ function PartView({ part, csrfFetch }: { part: MessageViewModel["parts"][number]
         </Card>
       );
     case "attachment":
-      return <ArtifactAttachmentCard part={part} csrfFetch={csrfFetch} />;
+      return <ArtifactAttachmentCard part={part} csrfFetch={csrfFetch} onReferenceArtifact={onReferenceArtifact} />;
     case "card":
-      return <CardRenderer card={part.card} csrfFetch={csrfFetch} />;
+      return <CardRenderer card={part.card} csrfFetch={csrfFetch} onReferenceArtifact={onReferenceArtifact} />;
     default: {
       return null;
     }
@@ -401,7 +402,7 @@ function CodePartView({ part }: { part: Extract<MessageViewModel["parts"][number
   );
 }
 
-function ArtifactAttachmentCard({ part, csrfFetch }: { part: Extract<MessageViewModel["parts"][number], { type: "attachment" }>; csrfFetch: typeof fetch }) {
+function ArtifactAttachmentCard({ part, csrfFetch, onReferenceArtifact }: { part: Extract<MessageViewModel["parts"][number], { type: "attachment" }>; csrfFetch: typeof fetch; onReferenceArtifact?: ((reference: ArtifactChatReference) => void) | undefined }) {
   const [preview, setPreview] = useState<{ readonly title: string; readonly content: string; readonly error?: string | undefined } | undefined>();
   const [loading, setLoading] = useState(false);
   const canPreview = part.artifactId !== undefined && part.path !== undefined;
@@ -457,6 +458,10 @@ function ArtifactAttachmentCard({ part, csrfFetch }: { part: Extract<MessageView
         error={preview?.error}
         loading={loading}
         downloadUrl={downloadUrl}
+        artifactId={part.artifactId}
+        type="file"
+        kind={part.previewKind}
+        onReferenceInChat={onReferenceArtifact}
         onRetry={openPreview}
         onOpenChange={(open) => { if (!open) setPreview(undefined); }}
       />

@@ -719,6 +719,7 @@ export class RoomMcpServer {
     if (content !== undefined && filePath !== undefined) return failure("validation_failed", "content and filePath are mutually exclusive");
     const existingArtifactId = typeof input.artifactId === "string" && input.artifactId.length > 0 ? input.artifactId : undefined;
     const runId = this.requireRunId(session, context);
+    const taskId = taskIdForRun(this.options.database, runId);
     const now = this.options.now?.() ?? Date.now();
     const artifactId = existingArtifactId ?? randomUUID();
     let messageId = "";
@@ -729,18 +730,18 @@ export class RoomMcpServer {
         if (existingArtifactId !== undefined) {
           const existing = this.options.database.sqlite.prepare("SELECT id, workspace_id, room_id FROM artifacts WHERE id = ? AND deleted_at IS NULL").get(existingArtifactId) as { readonly id: string; readonly workspace_id: string; readonly room_id: string | null } | undefined;
           if (existing === undefined || existing.workspace_id !== room.workspace_id || existing.room_id !== session.roomId) throw new Error("artifact_not_found");
-          this.options.database.sqlite.prepare("UPDATE artifacts SET run_id = ?, message_id = ?, kind = ?, title = ?, metadata = ?, updated_at = ? WHERE id = ?").run(runId, messageId, kind, title, JSON.stringify({ filename }), now, artifactId);
+          this.options.database.sqlite.prepare("UPDATE artifacts SET task_id = COALESCE(task_id, ?), run_id = ?, message_id = ?, kind = ?, title = ?, metadata = ?, updated_at = ? WHERE id = ?").run(taskId ?? null, runId, messageId, kind, title, JSON.stringify({ filename }), now, artifactId);
         } else {
-          this.options.database.sqlite.prepare("INSERT INTO artifacts (id, workspace_id, room_id, run_id, message_id, type, kind, title, status, created_by, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'file', ?, ?, 'draft', ?, ?, ?, ?)").run(artifactId, room.workspace_id, session.roomId, runId, messageId, kind, title, session.agentId, JSON.stringify({ filename }), now, now);
+          this.options.database.sqlite.prepare("INSERT INTO artifacts (id, workspace_id, room_id, task_id, run_id, message_id, type, kind, title, status, created_by, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'file', ?, ?, 'draft', ?, ?, ?, ?)").run(artifactId, room.workspace_id, session.roomId, taskId ?? null, runId, messageId, kind, title, session.agentId, JSON.stringify({ filename }), now, now);
         }
         const record = filePath !== undefined
           ? versioning.createBinaryVersionInTransaction({ artifactId, filePath, filename, mimeType: typeof input.mimeType === "string" ? input.mimeType : undefined, createdBy: session.agentId, message: typeof input.message === "string" ? input.message : undefined })
           : versioning.createVersionInTransaction({ artifactId, content: content ?? "", filename, createdBy: session.agentId, message: typeof input.message === "string" ? input.message : undefined });
         version = record.version;
         const seq = nextMessagePartSeq(this.options.database, messageId);
-        const partPayload = { type: "artifact", artifactId, kind, title, filename, version };
-        this.options.database.sqlite.prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, ?, 'artifact', ?, ?)").run(messageId, seq, JSON.stringify(partPayload), now);
-        this.options.eventBus.publish({ id: randomUUID(), type: "message.part.added", schemaVersion: 1, workspaceId: room.workspace_id, roomId: session.roomId, runId, agentId: session.agentId, payload: { messageId, seq, part: partPayload }, createdAt: now });
+        const partPayload = { type: "card", seq, card: { type: "artifact", artifactId, kind, title, filename, version } };
+        this.options.database.sqlite.prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, ?, 'card', ?, ?)").run(messageId, seq, JSON.stringify(partPayload), now);
+        this.options.eventBus.publish({ id: randomUUID(), type: "message.part.added", schemaVersion: 1, workspaceId: room.workspace_id, roomId: session.roomId, runId, agentId: session.agentId, payload: { messageId, part: partPayload }, createdAt: now });
       })();
     } catch (error) {
       if (error instanceof Error && error.message.includes("within workspace")) return failure("permission_denied", "path_traversal_denied");
@@ -1656,6 +1657,11 @@ function failure(code: string, message: string, details?: unknown): RoomMcpToolR
 
 function commandFailure<T>(code: CommandErrorCode, message: string, details?: unknown): CommandResult<T> {
   return { ok: false, error: { code, message, ...(details !== undefined ? { details } : {}) } };
+}
+
+function taskIdForRun(database: AgentHubDatabase, runId: string): string | undefined {
+  const row = database.sqlite.prepare("SELECT task_id FROM runs WHERE id = ?").get(runId) as { readonly task_id: string | null } | undefined;
+  return row?.task_id ?? undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

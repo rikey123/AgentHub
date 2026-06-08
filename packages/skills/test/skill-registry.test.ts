@@ -93,6 +93,26 @@ describe("SkillRegistry", () => {
     });
   });
 
+  test("builtin artifact skills are available as SKILL.md packages", () => {
+    const packageRoot = join(process.cwd(), "packages", "skills", "builtin");
+    const expected = {
+      "document-builder": "document",
+      "html-slides-builder": "presentation",
+      "officecli-pptx": "presentation_pptx",
+      "one-pager-builder": "web_page",
+      "web-app-builder": "web_app",
+      "web-page-builder": "web_page"
+    } as const;
+
+    for (const [name, artifactKind] of Object.entries(expected)) {
+      const skillPath = join(packageRoot, name, "SKILL.md");
+      const content = fs.readFileSync(skillPath, "utf8");
+
+      expect(content).toContain(`name: ${name}`);
+      expect(content).toContain(`artifact_kind: ${artifactKind}`);
+    }
+  });
+
   test("resolveSkills returns room pool, adds extras, and excludes restricted room skills", () => {
     const roomSkill = createSkill("room-skill");
     const terminalAccess = createSkill("terminal-access");

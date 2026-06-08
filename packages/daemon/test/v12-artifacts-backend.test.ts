@@ -1,34 +1,31 @@
-import { mkdirSync, mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createDaemon, type DaemonApp } from "../src/index.ts";
+import { createDaemon, type DaemonApp, type DaemonOptions } from "../src/index.ts";
 
 let daemon: DaemonApp | undefined;
 let baseUrl = "";
-let workspaceRoot = "";
 
 beforeEach(async () => {
-  const dir = mkdtempSync(join(tmpdir(), "agenthub-v12-backend-"));
-  workspaceRoot = join(dir, "workspace");
-  mkdirSync(workspaceRoot, { recursive: true });
-  daemon = createDaemon({ databasePath: join(dir, "agenthub.sqlite"), workspaceRoot, port: 0, adapterCommands: { claude: { command: "" }, opencode: { command: "" } }, modelTestFetch: vi.fn(async () => new Response("{}", { status: 200 })) as typeof fetch });
-  const server = await currentDaemon().start();
-  const address = server.address();
-  if (typeof address !== "object" || address === null) throw new Error("expected TCP address");
-  baseUrl = `http://127.0.0.1:${address.port}`;
+  await startTestDaemon("agenthub-v12-backend-");
 });
 
 afterEach(async () => {
   await daemon?.close();
   daemon = undefined;
   baseUrl = "";
-  workspaceRoot = "";
 });
 
 describe("V1.2 artifact backend routes", () => {
+  it("recognizes fetch-forbidden ports before creating test base URLs", () => {
+    expect(isFetchForbiddenPort(21)).toBe(true);
+    expect(isFetchForbiddenPort(6000)).toBe(true);
+    expect(isFetchForbiddenPort(49152)).toBe(false);
+  });
+
   it("lists, diffs, restores, patches, and downloads artifact versions", async () => {
     const artifactId = seedTextArtifact("artifact_versions_route", "v1");
 
@@ -101,6 +98,47 @@ describe("V1.2 artifact backend routes", () => {
       messageId: payload.data?.messageId,
       mentions: [{ agentBindingId: created.agentBindingId }]
     });
+  });
+
+  it("preserves structured context refs in message parts and durable message events", async () => {
+    currentDaemon().database.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES ('room_refs', 'default-workspace', 'Refs Room', 'assisted', 'conversation', 'agent', NULL, 1, 1)").run();
+
+    const refs = [
+      { type: "artifact", artifactId: "artifact_1", lineStart: 2, lineEnd: 3 },
+      { type: "workspace", path: "src/app.ts", lineStart: 10, lineEnd: 12 }
+    ] as const;
+    const response = await fetch(`${baseUrl}/rooms/room_refs/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "Fix @artifact:artifact_1#L2-L3 and @workspace:src/app.ts#L10-L12", refs })
+    });
+    expect(response.status).toBe(200);
+    const payload = await response.json() as { readonly data?: { readonly messageId?: string } };
+    const messageId = payload.data?.messageId ?? "";
+    const part = currentDaemon().database.sqlite.prepare("SELECT payload FROM message_parts WHERE message_id = ? AND part_type = 'text'").get(messageId) as { readonly payload: string } | undefined;
+    const createdEvent = currentDaemon().database.sqlite.prepare("SELECT payload FROM events WHERE type = 'message.created' AND json_extract(payload, '$.messageId') = ?").get(messageId) as { readonly payload: string } | undefined;
+    const completedEvent = currentDaemon().database.sqlite.prepare("SELECT payload FROM events WHERE type = 'message.completed' AND json_extract(payload, '$.messageId') = ?").get(messageId) as { readonly payload: string } | undefined;
+
+    expect(JSON.parse(part?.payload ?? "{}")).toMatchObject({ refs });
+    expect(JSON.parse(createdEvent?.payload ?? "{}")).toMatchObject({ refs });
+    expect(JSON.parse(completedEvent?.payload ?? "{}")).toMatchObject({ refs });
+  });
+
+  it("preserves quotedMessageId for reply actions in storage and message.created replay payload", async () => {
+    const quotedMessageId = seedMessage("room_reply_action", "message_reply_source");
+
+    const response = await fetch(`${baseUrl}/rooms/room_reply_action/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "Replying with context", quotedMessageId })
+    });
+
+    expect(response.status).toBe(200);
+    const payload = await response.json() as { readonly data?: { readonly messageId?: string } };
+    const messageId = payload.data?.messageId ?? "";
+    expect(currentDaemon().database.sqlite.prepare("SELECT quoted_message_id FROM messages WHERE id = ?").get(messageId)).toMatchObject({ quoted_message_id: quotedMessageId });
+    const event = currentDaemon().database.sqlite.prepare("SELECT payload FROM events WHERE type = 'message.created' AND json_extract(payload, '$.messageId') = ?").get(messageId) as { readonly payload: string } | undefined;
+    expect(JSON.parse(event?.payload ?? "{}")).toMatchObject({ messageId, quotedMessageId });
   });
 
   it("rejects room-scoped pin requests when the message belongs to a different room", async () => {
@@ -201,13 +239,7 @@ describe("V1.2 artifact backend routes", () => {
     await currentDaemon().close();
     daemon = undefined;
     const upstream = await startPptPreviewUpstream();
-    const dir = mkdtempSync(join(tmpdir(), "agenthub-v12-ppt-proxy-"));
-    daemon = createDaemon({
-      databasePath: join(dir, "agenthub.sqlite"),
-      workspaceRoot: join(dir, "workspace"),
-      port: 0,
-      adapterCommands: { claude: { command: "" }, opencode: { command: "" } },
-      modelTestFetch: vi.fn(async () => new Response("{}", { status: 200 })) as typeof fetch,
+    await startTestDaemon("agenthub-v12-ppt-proxy-", {
       pptPreviewBridge: {
         start: async () => ({ port: upstream.port, filePath: "deck.pptx", pid: 1, status: "ready" }),
         stop: async () => undefined,
@@ -215,10 +247,6 @@ describe("V1.2 artifact backend routes", () => {
         isActivePreviewPort: (port) => port === upstream.port
       }
     });
-    const server = await currentDaemon().start();
-    const address = server.address();
-    if (typeof address !== "object" || address === null) throw new Error("expected TCP address");
-    baseUrl = `http://127.0.0.1:${address.port}`;
 
     const html = await fetch(`${baseUrl}/api/ppt-proxy/${upstream.port}/viewer`);
     expect(html.status).toBe(200);
@@ -228,6 +256,47 @@ describe("V1.2 artifact backend routes", () => {
     expect(redirect.status).toBe(302);
     expect(redirect.headers.get("location")).toBe(`/api/ppt-proxy/${upstream.port}/next`);
     await upstream.close();
+  });
+
+  it("starts an active ppt preview session for binary PPTX artifacts", async () => {
+    await currentDaemon().close();
+    daemon = undefined;
+    const startedFiles: string[] = [];
+    const stoppedPorts: number[] = [];
+    await startTestDaemon("agenthub-v12-ppt-preview-start-", {
+      pptPreviewBridge: {
+        start: async (filePath) => {
+          startedFiles.push(filePath);
+          return { port: 61241, filePath, pid: 1, status: "ready" };
+        },
+        stop: async (port) => {
+          stoppedPorts.push(port);
+        },
+        stopAll: async () => undefined,
+        isActivePreviewPort: (port) => port === 61241
+      }
+    });
+    const artifactId = seedBinaryArtifact("artifact_ppt_preview_start", "deck.pptx", "pptx-bytes");
+
+    const response = await fetch(`${baseUrl}/artifacts/${artifactId}/ppt-preview`, { method: "POST" });
+    const payload = await response.json() as { readonly port?: number; readonly previewUrl?: string };
+
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({ port: 61241, previewUrl: "/api/ppt-proxy/61241/" });
+    expect(startedFiles).toEqual([expect.stringContaining("deck.pptx")]);
+
+    const stopped = await fetch(`${baseUrl}/artifacts/${artifactId}/ppt-preview/61241`, { method: "DELETE" });
+    expect(stopped.status).toBe(200);
+    expect(stoppedPorts).toEqual([61241]);
+  });
+
+  it("rejects ppt preview startup for text artifacts", async () => {
+    const artifactId = seedTextArtifact("artifact_text_preview_rejected", "not binary", { kind: "document" });
+
+    const response = await fetch(`${baseUrl}/artifacts/${artifactId}/ppt-preview`, { method: "POST" });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: "artifact_not_pptx" });
   });
 
   it("lists contacts and creates custom agents on roles plus agent_bindings", async () => {
@@ -241,8 +310,8 @@ describe("V1.2 artifact backend routes", () => {
     expect(created.status).toBe(201);
     const payload = await created.json() as { readonly agentBindingId: string };
 
-    const contacts = await (await fetch(`${baseUrl}/agents/contacts`)).json() as { readonly contacts: readonly { readonly agentBindingId: string; readonly displayName: string; readonly runtimeKind: string; readonly status: string }[] };
-    expect(contacts.contacts).toContainEqual(expect.objectContaining({ agentBindingId: payload.agentBindingId, displayName: "Frontend Expert", runtimeKind: "opencode", status: "available" }));
+    const contacts = await (await fetch(`${baseUrl}/agents/contacts`)).json() as { readonly contacts: readonly { readonly agentBindingId: string; readonly displayName: string; readonly runtimeId: string; readonly modelConfigId?: string; readonly runtimeKind: string; readonly status: string }[] };
+    expect(contacts.contacts).toContainEqual(expect.objectContaining({ agentBindingId: payload.agentBindingId, displayName: "Frontend Expert", runtimeId, runtimeKind: "opencode", status: "available" }));
 
     const duplicate = await fetch(`${baseUrl}/agents/custom`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Frontend Expert", runtimeId, systemPrompt: "Again" }) });
     expect(duplicate.status).toBe(400);
@@ -380,6 +449,93 @@ describe("V1.2 artifact backend routes", () => {
     });
   });
 
+  it("keeps the explicit contact primary when creating a team room with contact teammates", async () => {
+    const runtimeId = seedRuntime("runtime_contact_team", "opencode");
+    const leader = await createCustomAgent("Contact Team Lead", runtimeId);
+    const teammate = await createCustomAgent("Contact Teammate", runtimeId);
+
+    const response = await fetch(`${baseUrl}/rooms`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        title: "Contact Team Room",
+        mode: "team",
+        primaryAgentId: leader.agentBindingId,
+        agentBindingId: leader.agentBindingId,
+        leaderRoleId: leader.roleId,
+        participants: [{
+          type: "agent",
+          agentId: teammate.agentBindingId,
+          agentBindingId: teammate.agentBindingId,
+          role: "teammate",
+          defaultPresence: "active"
+        }]
+      })
+    });
+    const payload = await response.json() as { readonly data?: { readonly roomId?: string; readonly agentBindingId?: string } };
+
+    expect(response.status).toBe(201);
+    expect(payload.data).toMatchObject({ agentBindingId: leader.agentBindingId });
+    expect(currentDaemon().database.sqlite.prepare("SELECT primary_agent_id, leader_role_id FROM rooms WHERE id = ?").get(payload.data?.roomId)).toMatchObject({
+      primary_agent_id: leader.agentBindingId,
+      leader_role_id: leader.roleId
+    });
+    expect(currentDaemon().database.sqlite.prepare("SELECT agent_binding_id, role FROM room_participants WHERE room_id = ? ORDER BY role").all(payload.data?.roomId)).toEqual([
+      { agent_binding_id: leader.agentBindingId, role: "primary" },
+      { agent_binding_id: teammate.agentBindingId, role: "teammate" }
+    ]);
+  });
+
+  it("honors contact-first presence and participant skill assignments during room creation", async () => {
+    const runtimeId = seedRuntime("runtime_contact_config", "opencode");
+    const leader = await createCustomAgent("Configurable Lead", runtimeId);
+    const teammate = await createCustomAgent("Configurable Teammate", runtimeId);
+    const db = currentDaemon().database.sqlite;
+    db.prepare("INSERT OR IGNORE INTO skills (id, workspace_id, name, description, content, origin, source_url, created_at, updated_at) VALUES ('skill_contact_review', 'default-workspace', 'contact-review', 'Review contact output', '---', 'workspace', NULL, 1, 1)").run();
+
+    const response = await fetch(`${baseUrl}/rooms`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        title: "Configured Contact Room",
+        mode: "team",
+        primaryAgentId: leader.agentBindingId,
+        agentBindingId: leader.agentBindingId,
+        leaderRoleId: leader.roleId,
+        participants: [
+          {
+            type: "agent",
+            agentId: leader.agentBindingId,
+            agentBindingId: leader.agentBindingId,
+            role: "primary",
+            defaultPresence: "observing"
+          },
+          {
+            type: "agent",
+            agentId: teammate.agentBindingId,
+            agentBindingId: teammate.agentBindingId,
+            role: "teammate",
+            defaultPresence: "observing"
+          }
+        ],
+        participantSkillAssignments: [
+          {
+            participantId: teammate.agentBindingId,
+            skillIds: ["skill_contact_review"],
+            mode: "add"
+          }
+        ]
+      })
+    });
+    const payload = await response.json() as { readonly data?: { readonly roomId?: string } };
+
+    expect(response.status).toBe(201);
+    expect(db.prepare("SELECT default_presence FROM room_participants WHERE room_id = ? AND participant_id = ?").get(payload.data?.roomId, leader.agentBindingId)).toMatchObject({ default_presence: "observing" });
+    expect(db.prepare("SELECT default_presence FROM room_participants WHERE room_id = ? AND participant_id = ?").get(payload.data?.roomId, teammate.agentBindingId)).toMatchObject({ default_presence: "observing" });
+    expect(db.prepare("SELECT mode FROM agent_skills WHERE room_participant_id = ? AND skill_id = 'skill_contact_review'").get(`${payload.data?.roomId}:${teammate.agentBindingId}`)).toMatchObject({ mode: "add" });
+    expect(db.prepare("SELECT COUNT(*) AS count FROM events WHERE room_id = ? AND type = 'skill.activated' AND json_extract(payload, '$.participantId') = ?").get(payload.data?.roomId, teammate.agentBindingId)).toMatchObject({ count: 1 });
+  });
+
   it("rejects disabled role/runtime bindings as initial room participants", async () => {
     const runtimeId = seedRuntime("runtime_disabled_room_participant", "opencode");
     const disabled = await createCustomAgent("Disabled Participant", runtimeId);
@@ -480,6 +636,49 @@ function currentDaemon(): DaemonApp {
   return daemon;
 }
 
+async function startTestDaemon(prefix: string, overrides: Partial<DaemonOptions> = {}): Promise<void> {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const dir = mkdtempSync(join(tmpdir(), prefix));
+    const nextWorkspaceRoot = join(dir, "workspace");
+    mkdirSync(nextWorkspaceRoot, { recursive: true });
+    const nextDaemon = createDaemon({
+      databasePath: join(dir, "agenthub.sqlite"),
+      workspaceRoot: nextWorkspaceRoot,
+      port: 0,
+      adapterCommands: { claude: { command: "" }, opencode: { command: "" } },
+      modelTestFetch: vi.fn(async () => new Response("{}", { status: 200 })) as typeof fetch,
+      ...overrides
+    });
+    const server = await nextDaemon.start();
+    const address = server.address();
+    if (typeof address !== "object" || address === null) {
+      await nextDaemon.close();
+      throw new Error("expected TCP address");
+    }
+    if (isFetchForbiddenPort(address.port)) {
+      await nextDaemon.close();
+      continue;
+    }
+    daemon = nextDaemon;
+    baseUrl = `http://127.0.0.1:${address.port}`;
+    return;
+  }
+  throw new Error("failed to start daemon on a fetch-safe port");
+}
+
+function isFetchForbiddenPort(port: number): boolean {
+  if (port >= 6665 && port <= 6669) return true;
+  return FETCH_FORBIDDEN_PORTS.has(port);
+}
+
+const FETCH_FORBIDDEN_PORTS = new Set([
+  1, 7, 9, 11, 13, 15, 17, 19, 20, 21, 22, 23, 25, 37, 42, 43, 53, 69, 77, 79,
+  87, 95, 101, 102, 103, 104, 109, 110, 111, 113, 115, 117, 119, 123, 135, 137,
+  139, 143, 161, 179, 389, 427, 465, 512, 513, 514, 515, 526, 530, 531, 532,
+  540, 548, 554, 556, 563, 587, 601, 636, 989, 990, 993, 995, 1719, 1720, 1723,
+  2049, 3659, 4045, 4190, 5060, 5061, 6000, 6566, 6697, 10080
+]);
+
 function seedTextArtifact(artifactId: string, content: string, options: { readonly roomId?: string; readonly kind?: string; readonly title?: string; readonly createdAt?: number; readonly updatedAt?: number; readonly metadata?: Record<string, unknown> } = {}): string {
   const db = currentDaemon().database.sqlite;
   const metadata = options.metadata ?? { filename: "doc.md" };
@@ -491,6 +690,20 @@ function seedTextArtifact(artifactId: string, content: string, options: { readon
   db.prepare("INSERT INTO artifacts (id, workspace_id, room_id, type, kind, title, status, created_by, metadata, created_at, updated_at) VALUES (?, 'default-workspace', ?, 'file', ?, ?, 'draft', 'agent', ?, ?, ?)").run(artifactId, options.roomId ?? null, options.kind ?? "document", options.title ?? "Doc", JSON.stringify(metadata), createdAt, updatedAt);
   db.prepare("INSERT INTO artifact_files (artifact_id, path, old_content, new_content, patch, additions, deletions, file_status, old_sha256, new_sha256, applied_state, content_path, created_at, binary, mime_type, size_bytes) VALUES (?, ?, NULL, ?, NULL, 0, 0, 'modified', NULL, NULL, NULL, NULL, ?, 0, 'text/markdown', ?)").run(artifactId, typeof metadata.filename === "string" ? metadata.filename : "doc.md", content, createdAt, Buffer.byteLength(content));
   db.prepare("INSERT INTO artifact_versions (id, artifact_id, version, content, storage_path, content_encoding, metadata, created_at, created_by, message) VALUES (?, ?, 1, ?, NULL, 'text', ?, ?, 'agent', 'initial')").run(`${artifactId}_v1`, artifactId, content, JSON.stringify(metadata), createdAt);
+  return artifactId;
+}
+
+function seedBinaryArtifact(artifactId: string, filename: string, content: string): string {
+  const db = currentDaemon().database.sqlite;
+  const createdAt = 100;
+  const bytes = Buffer.from(content);
+  mkdirSync(join(tmpdir(), "agenthub-v12-binary-artifacts"), { recursive: true });
+  const controlledPath = join(tmpdir(), "agenthub-v12-binary-artifacts", `${artifactId}-${filename}`);
+  writeFileSync(controlledPath, bytes);
+  db.prepare("INSERT OR IGNORE INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES ('room_binary_artifact', 'default-workspace', 'Binary Artifact Room', 'solo', 'conversation', 'agent', NULL, 1, 1)").run();
+  db.prepare("INSERT INTO artifacts (id, workspace_id, room_id, task_id, run_id, message_id, type, kind, title, status, created_by, metadata, created_at, updated_at) VALUES (?, 'default-workspace', 'room_binary_artifact', NULL, NULL, NULL, 'file', 'presentation_pptx', ?, 'ready', 'agent', ?, ?, ?)").run(artifactId, filename, JSON.stringify({ filename }), createdAt, createdAt);
+  db.prepare("INSERT INTO artifact_files (artifact_id, path, old_content, new_content, patch, additions, deletions, file_status, old_sha256, new_sha256, applied_state, content_path, created_at, binary, mime_type, size_bytes) VALUES (?, ?, NULL, NULL, NULL, 0, 0, 'modified', NULL, NULL, NULL, ?, ?, 1, 'application/vnd.openxmlformats-officedocument.presentationml.presentation', ?)").run(artifactId, filename, controlledPath, createdAt, bytes.byteLength);
+  db.prepare("INSERT INTO artifact_versions (id, artifact_id, version, content, storage_path, content_encoding, metadata, created_at, created_by, message) VALUES (?, ?, 1, NULL, ?, 'binary', ?, ?, 'agent', 'initial binary')").run(`${artifactId}_v1`, artifactId, controlledPath, JSON.stringify({ filename, sizeBytes: bytes.byteLength }), createdAt);
   return artifactId;
 }
 

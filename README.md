@@ -1,6 +1,8 @@
-# AgentHub V1.0
+# AgentHub V1.2
 
-AgentHub is a local-first multi-agent workbench for running a daemon, a web UI, and a set of task-oriented agents on your own machine. V1.0 is no longer a mock chat demo or an MVP sketch: it ships a real daemon, a HeroUI-based frontend, SQLite persistence, OS keychain-backed secrets, and a first-class task orchestration model for multi-agent work.
+AgentHub is a local-first multi-agent workbench for running a daemon, a web UI, and task-oriented agents on your own machine. V1.2 completes the chat-to-artifact loop: agents can produce web pages, web apps, documents, presentations, code artifacts, diffs, and deployment cards that stay visible in the conversation, can be previewed or edited, and can be published through local deployment flows.
+
+V1.2 keeps the V1 foundation of SQLite persistence, OS keychain-backed secrets, HeroUI-based frontend surfaces, and task-backed multi-agent orchestration. It extends that foundation with Artifact Studio, deployment publishing, contact-first agent workflows, pinned context, room search and pinning, and stricter projector/EventBus state guarantees.
 
 ## Quick start
 
@@ -14,60 +16,70 @@ The `web` launcher starts the local daemon and opens the browser UI. On a machin
 
 By default, the daemon listens on `http://127.0.0.1:6677` and the web app runs on `http://127.0.0.1:5173`.
 
-## What V1.0 includes
+## What V1.2 includes
 
-### 1. Separate role, runtime, and model configuration
+### 1. Artifact Studio
 
-- Roles are now independent from runtimes and model providers.
-- Runtime settings support external executors such as `claude-code`, `opencode`, `native`, and other custom ACP-compatible runtimes.
-- Model provider settings support provider-specific configuration such as OpenAI, Anthropic, Google, OpenAI-compatible providers, Ollama, and local-only providers that do not need an API key.
-- Agent bindings connect a role to a runtime and a model configuration without hard-coding them together.
+- Agents can publish typed artifacts for `web_page`, `web_app`, `document`, `presentation`, `presentation_pptx`, `source_code`, and generic files.
+- Chat timeline cards render through stable payloads: `PreviewCard`, `DocumentCard`, `PresentationCard`, `DiffCard`, and `DeploymentCard`.
+- Artifact Studio adds preview, editor, history, and raw views, including version restore flows for editable artifacts.
+- Text artifacts store version snapshots, while binary artifacts such as PPTX use controlled storage paths with size, MIME type, and checksum metadata.
 
-### 2. A real Settings experience
+### 2. Built-in artifact skills
 
-- V1.0 adds a dedicated Settings UI with six top-level sections: `Agents`, `Runtimes`, `Models`, `Permissions`, `Workspace`, and `MCP`.
-- The Settings experience is REST-driven rather than SSE-driven, so it stays stable and predictable while you edit configuration.
-- API keys are stored in the OS keychain; SQLite stores only references and metadata, not raw secret material.
-- Model and runtime entries can be detected, edited, and tested from the UI.
+- V1.2 ships built-in SKILL.md packages for `web-page-builder`, `web-app-builder`, `one-pager-builder`, `html-slides-builder`, `document-builder`, and `officecli-pptx`.
+- Each built-in package declares an `artifact_kind` contract so artifact generation and card rendering can stay typed.
+- Web and slide builders prefer self-contained outputs that can be previewed without external network dependencies.
+- The `officecli-pptx` skill covers real PPTX generation and read-only preview through the daemon PPT bridge when `officecli` is available.
 
-### 3. Native agent runtime
+### 3. Deployment publishing
 
-- AgentHub ships a native runtime implemented on top of the Vercel AI SDK.
-- The runtime uses an explicit provider registry instead of relying on implicit global provider resolution.
-- Per-run permission checks and caching are built into the runtime path so model calls stay visible to the permission system.
-- The built-in runtime is meant to cover the same class of internal agent workflows as the reference built-in runtime, not to clone every Claude Code-specific behavior.
+- Artifacts can be deployed as preview URLs, static sites, source zips, container export bundles, local container builds, or CapRover self-hosted deployments.
+- Deployment records live in SQLite and are reflected into chat through `DeploymentCard` message parts.
+- Build logs stream through `deployment.log.appended` live events and can be recovered through REST log endpoints.
+- CapRover provider credentials are stored by reference through the keychain path; raw tokens are not echoed back to the UI.
 
-### 4. AI role generation with approval
+### 4. Contacts and custom agents
 
-- Users can generate a new role from a natural-language description.
-- Generation produces a draft first, then requires human review before the role is saved.
-- Drafts are visible as drafts, not silently auto-created as production roles.
+- Agent contacts are the IM-facing view of agent bindings, with display names, avatars, descriptions, runtime metadata, capabilities, and availability.
+- The Contacts rail supports contact discovery and contact-first chat creation.
+- New chat creation starts with contacts and mode selection, while advanced role/runtime/model/skills configuration remains available.
+- Custom agent creation and contact editing update agent binding display fields without changing the role/runtime/model identity model underneath.
 
-### 5. Team mode and Squad mode
+### 5. Room list, pinned context, and message actions
 
-- `Team` mode supports review-based delegation, where a leader can break a request into tasks and review the results before completion.
-- `Squad` mode supports lighter-weight delegation for ongoing collaboration.
-- Both modes use task-backed coordination instead of free-form multi-agent chat, which avoids the infinite-loop behavior that the earlier mailbox-only approach could trigger.
+- Rooms support search, pinning, archive filtering, and last-activity ordering.
+- Pinned rooms and pinned messages publish durable events so the UI updates without requiring a refresh.
+- Pinned messages are injected into prompt context ahead of ordinary clipped conversation history.
+- Message actions include reply, quote, regenerate, copy code, apply diff, expand preview, and pin/unpin.
 
-### 6. Task workflow core
+### 6. Visible group orchestration
 
-- Tasks are now a first-class product object, not just an internal placeholder.
-- The workflow includes task activities, delegation chains, status transitions, review steps, and a task board / timeline view.
-- The UI shows task progress and task-related activity alongside the chat experience so work can be tracked without losing the conversation context.
+- Assisted and Team flows expose the coordination process in chat instead of hiding it entirely in run detail.
+- Team dispatch can post visible assignment announcements, failure downgrade messages, member summaries, and final aggregate messages.
+- Long-form outputs are expected to enter the timeline as artifacts or files, keeping ordinary chat messages short and readable.
+- WakeAgent outbox recovery and dependency auto-dispatch remain internal reliability mechanisms, backed by SQLite state.
 
-### 7. A more complete workbench UI
+### 7. Settings and runtime directory
 
-- The web app uses HeroUI v3, React 19, Vite, and Tailwind CSS 4.
-- The main workbench includes chat, run detail, artifact inspection, permission flows, task notifications, and a command palette.
-- Light and dark themes, density modes, responsive panels, and polished loading / empty / error states are part of the shipped UI.
-- The launcher and web UI are designed around a local workbench workflow rather than a marketing site or a blank landing page.
+- Settings includes real tabs for roles, runtimes, models, skills, permissions, workspace, deploy providers, and MCP/tool visibility.
+- Runtime cards support detection, custom ACP command configuration, connection testing, and version display.
+- Claude Code and OpenCode are the main V1.2 runtime targets.
+- Codex appears in the runtime directory with an `experimental` badge and is not treated as a primary V1.2 acceptance runtime.
 
-### 8. Security and storage
+### 8. EventBus and projector state guarantees
+
+- AgentHub's UI reconstructs state from durable event replay plus live SSE streams, not from direct SQLite reads.
+- State mutations and `EventBus.publish()` calls must happen in the same SQLite transaction.
+- `message.part.added` is the timeline insertion signal for artifact and deployment cards.
+- The projector tracks normalized room state for pinned rooms, participant contact names, deployments, deployment logs, artifact versions, pinned messages, and relevant V1.2 lifecycle events.
+
+### 9. Security and storage
 
 - Durable state lives in SQLite.
-- Third-party API keys are stored in the OS keychain and are not written to SQLite in plaintext.
+- Third-party API keys and deployment provider tokens are stored in the OS keychain and are not written to SQLite in plaintext.
 - Raw adapter output is redacted before it reaches the UI, logs, or persisted events.
-- The local daemon and browser UI are built around localhost-only defaults.
+- The local daemon and browser UI keep localhost-only defaults unless remote access is explicitly configured with authentication.
 
 ## Core command surface
 
@@ -84,13 +96,12 @@ agenthub debug stats
 
 If you are working directly from the repository on Windows, `.\agenthub.cmd web` is the most convenient one-command launcher.
 
-## What is intentionally out of scope for V1.0
+## What is intentionally out of scope for V1.2
 
-- SaaS hosting and cloud sync
-- Mobile apps
-- Marketplace or plugin ecosystem
-- Multi-tenant remote infrastructure
-- Postgres / Redis-backed deployment
-- Browser automation, web search, and image generation inside the native runtime by default
+- Workflow artifacts, DAG execution, WorkflowCard, workflow visual editing, and recurring schedulers
+- SaaS deployment providers such as Vercel, Cloudflare, Fly.io, Dokploy, and Coolify
+- Full Codex adapter certification beyond the experimental runtime marker
+- Multi-user authentication, cloud sync, marketplace distribution, and hosted multi-tenant infrastructure
+- BM25/vector hybrid memory upgrades and plugin or LAN discovery flows
 
-V1.0 is focused on a strong local workbench: clear role/runtime/model separation, real orchestration, a usable settings surface, task-backed collaboration, and a UI that reflects the actual product rather than placeholders.
+V1.2 is focused on the local workbench loop: chat, contacts, orchestration, artifact creation, preview/edit/history, and practical local/self-hosted publishing.

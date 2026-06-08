@@ -52,6 +52,7 @@ export class AdapterBridge {
   private turnCount = 0;
   private turnLimitTriggered = false;
   private readonly seenMessageIds = new Set<string>();
+  private terminal = false;
   private static readonly WATCHDOG_MS = 90_000; // 90s of silence → notify leader
   private static readonly LEVEL2_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -107,6 +108,7 @@ export class AdapterBridge {
       return;
     }
     if (event.type === "session.ended") {
+      this.terminal = true;
       this.clearWatchdog();
       // For isolated_worktree runs, generate worktree diff artifact.
       // buildWorktreeDiffArtifact returns undefined (without consuming the run) when mode
@@ -126,6 +128,7 @@ export class AdapterBridge {
       return;
     }
     if (event.type === "session.crashed") {
+      this.terminal = true;
       this.clearWatchdog();
       this.input.artifactFs?.buildRunArtifact({ runId: this.input.runId, title: `Run ${this.input.runId} changes` });
       const briefText = this.computeBriefText({ failureClass: "adapter_error", failureReason: event.error });
@@ -213,9 +216,11 @@ export class AdapterBridge {
   // ---------------------------------------------------------------------------
 
   private resetWatchdog(): void {
+    if (this.terminal) return;
     this.clearWatchdog();
     this.watchdogTimer = setTimeout(() => {
       this.watchdogTimer = undefined;
+      if (this.terminal) return;
       void this.notifyLeaderOfStall();
     }, AdapterBridge.WATCHDOG_MS);
   }
@@ -236,6 +241,9 @@ export class AdapterBridge {
     if (db === undefined) return;
     void Promise.resolve().then(async () => {
       try {
+        if (this.terminal) return;
+        const run = db.sqlite.prepare("SELECT status FROM runs WHERE id = ?").get(this.input.runId) as { readonly status: string } | undefined;
+        if (run === undefined || run.status !== "running") return;
         const room = db.sqlite
           .prepare("SELECT workspace_id, primary_agent_id, mode FROM rooms WHERE id = ?")
           .get(this.input.roomId) as { workspace_id: string; primary_agent_id: string | null; mode: string } | undefined;
@@ -272,6 +280,7 @@ export class AdapterBridge {
         const level2StartTime = this.input.now?.() ?? Date.now();
         this.level2Timer = setTimeout(() => {
           this.level2Timer = undefined;
+          if (this.terminal) return;
           this.checkLevel2Stall(leaderRunId ?? null, level2StartTime);
         }, AdapterBridge.LEVEL2_MS);
       } catch (err) {

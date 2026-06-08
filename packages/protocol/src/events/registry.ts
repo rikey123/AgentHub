@@ -87,7 +87,8 @@ export const DeploymentStatusChangedPayloadSchema = Schema.Struct({
   kind: Schema.optional(Schema.Literal("preview-url", "static-site", "source-zip", "container-export", "container-build", "self-hosted")),
   url: Schema.optional(Schema.String),
   downloadUrl: Schema.optional(Schema.String),
-  imageTag: Schema.optional(Schema.String)
+  imageTag: Schema.optional(Schema.String),
+  expiresAt: Schema.optional(EpochMillisSchema)
 });
 export type DeploymentStatusChangedPayload = typeof DeploymentStatusChangedPayloadSchema.Type;
 
@@ -102,7 +103,8 @@ export const DeploymentReadyPayloadSchema = Schema.Struct({
   kind: Schema.optional(Schema.Literal("preview-url", "static-site", "source-zip", "container-export", "container-build", "self-hosted")),
   url: Schema.optional(Schema.String),
   downloadUrl: Schema.optional(Schema.String),
-  imageTag: Schema.optional(Schema.String)
+  imageTag: Schema.optional(Schema.String),
+  expiresAt: Schema.optional(EpochMillisSchema)
 });
 export type DeploymentReadyPayload = typeof DeploymentReadyPayloadSchema.Type;
 

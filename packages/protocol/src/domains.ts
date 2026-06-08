@@ -101,6 +101,7 @@ export const ArtifactCardPayloadSchema = Schema.Struct({
   artifactId: IdSchema,
   kind: ArtifactKindSchema,
   title: Schema.String,
+  filename: Schema.optional(Schema.String),
   version: Schema.optional(Schema.Number)
 });
 export type ArtifactCardPayload = typeof ArtifactCardPayloadSchema.Type;
@@ -114,7 +115,8 @@ export const DeploymentCardPayloadSchema = Schema.Struct({
   status: DeploymentStatusSchema,
   url: Schema.optional(Schema.String),
   downloadUrl: Schema.optional(Schema.String),
-  imageTag: Schema.optional(Schema.String)
+  imageTag: Schema.optional(Schema.String),
+  expiresAt: Schema.optional(EpochMillisSchema)
 });
 export type DeploymentCardPayload = typeof DeploymentCardPayloadSchema.Type;
 

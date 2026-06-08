@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   settingsModal: vi.fn(() => null),
   commandPalette: vi.fn(() => null),
   contactsRailContainer: vi.fn(() => null),
+  runsRailView: vi.fn(() => null),
+  tasksRailView: vi.fn(() => null),
   homeView: vi.fn(() => null),
   roomList: vi.fn(() => null),
   useProjector: vi.fn(),
@@ -74,7 +76,9 @@ vi.mock("./components/rooms/RoomList.tsx", () => ({ RoomList: mocks.roomList }))
 vi.mock("./components/home/HomeView.tsx", () => ({ HomeView: mocks.homeView }));
 vi.mock("./components/rail/RailViews.tsx", () => ({
   ContactsRailContainer: mocks.contactsRailContainer,
-  ArtifactsRailContainer: () => createElement("section", { "data-testid": "artifacts-rail-view" }, "Artifacts rail view")
+  ArtifactsRailContainer: () => createElement("section", { "data-testid": "artifacts-rail-view" }, "Artifacts rail view"),
+  RunsRailView: mocks.runsRailView,
+  TasksRailView: mocks.tasksRailView
 }));
 vi.mock("./components/chat/ChatStream.tsx", () => ({ ChatStream: () => null }));
 vi.mock("./components/chat/InputBox.tsx", () => ({ InputBox: () => null }));
@@ -85,7 +89,7 @@ vi.mock("./components/CommandPalette.tsx", () => ({ CommandPalette: mocks.comman
 vi.mock("./components/KeymapModal.tsx", () => ({ KeymapModal: () => null }));
 vi.mock("./components/NewRoomDialog.tsx", () => ({ NewRoomDialog: mocks.newRoomDialog }));
 
-import App, { ChatRoomLayout, createRoomInputForContactStartChat, draftWithQuotedMessage, draftWithQuotedText, messagePinRequestFor, replyPreviewForMessage, roomPinRequestFor, workbenchCenterModeForRail, workbenchNavigationForRoomOpen } from "./App.tsx";
+import App, { ChatRoomLayout, createRoomInputForContactStartChat, draftWithArtifactReference, draftWithQuotedMessage, draftWithQuotedText, messagePayloadForSendInput, messagePinRequestFor, replyPreviewForMessage, roomPinRequestFor, workbenchCenterModeForRail, workbenchNavigationForRoomOpen } from "./App.tsx";
 
 function renderApp() {
   mocks.stateIndex = 0;
@@ -105,6 +109,8 @@ describe("App integration wiring", () => {
     mocks.settingsModal.mockClear();
     mocks.commandPalette.mockClear();
     mocks.contactsRailContainer.mockClear();
+    mocks.runsRailView.mockClear();
+    mocks.tasksRailView.mockClear();
     mocks.homeView.mockClear();
     mocks.roomList.mockClear();
     mocks.useProjector.mockReset();
@@ -283,11 +289,62 @@ describe("App integration wiring", () => {
     })).toBe("Builder: Attachment - requirements.md");
   });
 
+  it("preserves structured context refs in the SDK send payload", () => {
+    expect(messagePayloadForSendInput({
+      text: "Fix @artifact:artifact_1#L2-L3",
+      attachmentIds: [],
+      mentions: [],
+      refs: [{ type: "artifact", artifactId: "artifact_1", lineStart: 2, lineEnd: 3 }]
+    })).toEqual({
+      text: "Fix @artifact:artifact_1#L2-L3",
+      refs: [{ type: "artifact", artifactId: "artifact_1", lineStart: 2, lineEnd: 3 }]
+    });
+  });
+
+  it("builds room drafts with structured artifact references for Artifact Studio", () => {
+    expect(draftWithArtifactReference({ text: "Please inspect" }, {
+      token: "@artifact:artifact_1#L2-L3",
+      ref: { type: "artifact", artifactId: "artifact_1", lineStart: 2, lineEnd: 3 }
+    })).toEqual({
+      text: "Please inspect @artifact:artifact_1#L2-L3",
+      composerRef: { type: "artifact", artifactId: "artifact_1", lineStart: 2, lineEnd: 3 }
+    });
+  });
+
   it("maps contacts and artifacts rail selection to dedicated center views", () => {
     expect(workbenchCenterModeForRail("contacts", false)).toBe("contacts");
     expect(workbenchCenterModeForRail("artifacts", false)).toBe("artifacts");
+    expect(workbenchCenterModeForRail("runs", false)).toBe("runs");
+    expect(workbenchCenterModeForRail("tasks", false)).toBe("tasks");
     expect(workbenchCenterModeForRail("chat", true)).toBe("room");
     expect(workbenchCenterModeForRail("chat", false)).toBe("home");
+  });
+
+  it("renders real center views for runs and tasks rail entries", () => {
+    mocks.stateOverridesByInitialValue.set("chat", "runs");
+    renderApp();
+    expect(mocks.runsRailView).toHaveBeenCalled();
+
+    mocks.runsRailView.mockClear();
+    mocks.tasksRailView.mockClear();
+    mocks.stateIndex = 0;
+    mocks.stateOverridesByInitialValue.set("chat", "tasks");
+    renderApp();
+    expect(mocks.tasksRailView).toHaveBeenCalled();
+  });
+
+  it("leaves contact edit and configure modals inside the contacts rail", () => {
+    mocks.stateOverridesByInitialValue.set("chat", "contacts");
+    renderApp();
+
+    const [contactsProps] = mocks.contactsRailContainer.mock.calls[0] as unknown as [{
+      readonly fetchImpl?: typeof fetch;
+      readonly onEditContact?: () => void;
+      readonly onConfigureContact?: () => void;
+    }];
+    expect(contactsProps.fetchImpl).toBe(mocks.csrfFetch);
+    expect(contactsProps.onEditContact).toBeUndefined();
+    expect(contactsProps.onConfigureContact).toBeUndefined();
   });
 
   it("returns to chat center when a room is opened from a non-chat rail view", () => {
@@ -446,6 +503,90 @@ describe("App integration wiring", () => {
       agentBindingId: "binding_builder",
       participants: []
     });
+  });
+
+  it("forwards agentBindingId from the NewRoomDialog contact-first payload", async () => {
+    mocks.sdk.createRoom.mockResolvedValue({ data: { roomId: "room_dialog_contact" } });
+    renderApp();
+
+    const [dialogProps] = mocks.newRoomDialog.mock.calls[0] as unknown as [{
+      readonly onCreate: (input: {
+        readonly title: string;
+        readonly mode: "solo" | "assisted" | "squad" | "team";
+        readonly primaryAgentId: string;
+        readonly agentBindingId?: string;
+        readonly participants: readonly unknown[];
+      }) => Promise<void>;
+    }];
+
+    await dialogProps.onCreate({
+      title: "Contact room",
+      mode: "solo",
+      primaryAgentId: "binding_builder",
+      agentBindingId: "binding_builder",
+      participants: []
+    });
+
+    expect(mocks.sdk.createRoom).toHaveBeenCalledWith(expect.objectContaining({
+      title: "Contact room",
+      mode: "solo",
+      primaryAgentId: "binding_builder",
+      agentBindingId: "binding_builder",
+      participants: []
+    }));
+  });
+
+  it("forwards per-participant skill assignments from contact-first room creation", async () => {
+    mocks.sdk.createRoom.mockResolvedValue({ data: { roomId: "room_dialog_contact_skills" } });
+    renderApp();
+
+    const [dialogProps] = mocks.newRoomDialog.mock.calls[0] as unknown as [{
+      readonly onCreate: (input: {
+        readonly title: string;
+        readonly mode: "solo" | "assisted" | "squad" | "team";
+        readonly primaryAgentId: string;
+        readonly agentBindingId?: string;
+        readonly participants: readonly unknown[];
+        readonly participantSkillAssignments?: readonly {
+          readonly participantId: string;
+          readonly skillIds: readonly string[];
+          readonly mode?: "add" | "restrict";
+        }[];
+      }) => Promise<void>;
+    }];
+
+    await dialogProps.onCreate({
+      title: "Contact room skills",
+      mode: "assisted",
+      primaryAgentId: "binding_builder",
+      agentBindingId: "binding_builder",
+      participants: [
+        {
+          type: "agent",
+          agentId: "binding_reviewer",
+          agentBindingId: "binding_reviewer",
+          role: "teammate",
+          defaultPresence: "active"
+        }
+      ],
+      participantSkillAssignments: [
+        {
+          participantId: "binding_reviewer",
+          skillIds: ["skill_review"],
+          mode: "add"
+        }
+      ]
+    });
+
+    expect(mocks.sdk.createRoom).toHaveBeenCalledWith(expect.objectContaining({
+      participantSkillAssignments: [
+        {
+          participantId: "binding_reviewer",
+          skillIds: ["skill_review"],
+          mode: "add"
+        }
+      ]
+    }));
   });
 
   it("creates and opens a room from the contacts rail Start Chat action", async () => {
