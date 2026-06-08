@@ -83,7 +83,7 @@ Workflow 产物（`WorkflowDefinition` / DAG 执行 / WorkflowCard）推迟到 V
 - `im-chat-core-completion`：会话搜索、联系人优先的新建对话、置顶/最近活跃排序、多会话并行、消息操作六项、Pin 关键消息为长期上下文。
 - `agent-contact-custom`：Agent Contact Directory（available/busy/offline 状态）、AgentBinding 联系人身份模型、对话式向导创建自建 Agent（InlineAgentEditor + Test Connection）。
 - `group-chat-orchestration`：@ 触发可见分派公告、成员短消息 + Artifact Card 分离、Orchestrator 最终汇总、失败降级可见。
-- `artifact-message-cards`：PreviewCard / DocumentCard / PresentationCard / DiffCard / DeploymentCard 的协议 payload、`message.part.added` 合约、UnknownCard fallback、live projector 更新。 
+- `artifact-message-cards`：PreviewCard / DocumentCard / PresentationCard / DiffCard / DeploymentCard 的协议 payload、`message.part.added` 合约、UnknownCard fallback、live projector 更新。
 - `artifact-preview-editing`：网页 sandbox iframe 预览、Markdown 渲染、HTML slides 浏览、真实 PPTX/ODP 只读预览（officecli watch + ppt-proxy）、Monaco 代码编辑器、Raw 视图、下载；统一预览矩阵（image/PDF/audio/video/unsupported/too-large fallback）。
 - `artifact-version-history`：`artifact_versions` 表、Save 创建版本、Restore 创建新版本、History tab 版本列表。
 - `artifact-reference-context`：`@artifact:<id>#Lx-Ly` / `@workspace:<path>#Lx-Ly` pill 语法、daemon context-ref 注入。
