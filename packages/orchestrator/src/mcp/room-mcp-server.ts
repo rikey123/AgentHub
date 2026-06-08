@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import type { CommandBus, CommandResult, EventBus } from "@agenthub/bus";
 import type { CommandErrorCode } from "@agenthub/bus";
 import type { AgentHubDatabase } from "@agenthub/db";
+import type { ArtifactVersioningService } from "@agenthub/artifacts";
 import type { PermissionEngine, PermissionResource } from "../../../permissions/src/index.ts";
 
 import { nameToSlug } from "../mention-parser.ts";
@@ -98,7 +99,7 @@ export class RoomMcpServer {
   private readonly authToken = randomUUID();
   private readonly sessionRegistrations = new Map<string, RoomMcpSessionRegistration>();
 
-  constructor(private readonly options: { readonly commandBus: CommandBus; readonly taskService: TaskService; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly taskModeGroupChatPresenter?: TaskModeGroupChatPresenter; readonly permissionEngine?: PermissionEngine; readonly artifactFs?: { readonly readTextFile?: (input: { readonly runId: string; readonly path: string }) => string | undefined; readonly writeTextFile: (input: { readonly runId: string; readonly path: string; readonly content: string }) => void }; readonly artifactService?: RoomMcpArtifactService; readonly now?: () => number }) {}
+  constructor(private readonly options: { readonly commandBus: CommandBus; readonly taskService: TaskService; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly taskModeGroupChatPresenter?: TaskModeGroupChatPresenter; readonly permissionEngine?: PermissionEngine; readonly artifactFs?: { readonly readTextFile?: (input: { readonly runId: string; readonly path: string }) => string | undefined; readonly writeTextFile: (input: { readonly runId: string; readonly path: string; readonly content: string }) => void }; readonly artifactService?: RoomMcpArtifactService; readonly artifactVersioningService?: ArtifactVersioningService; readonly now?: () => number }) {}
 
   /**
    * Start the TCP server. Must be called once before getStdioConfig().
@@ -274,6 +275,7 @@ export class RoomMcpServer {
     if (name === "room.read_mailbox") return this.handleReadMailbox(input, session, context);
     if (name === "room.send_message") return this.handleSendMessage(input, session, context);
     if (name === "room.send_file_message") return await this.handleSendFileMessage(input, session, context);
+    if (name === "room.publish_artifact") return await this.handlePublishArtifact(input, session, context);
     if (name === "room.list_members") return this.handleListMembers(session);
     if (name === "room.list_runtimes") return this.handleListRuntimes(session);
     if (name === "room.list_models") return this.handleListModels(session);
@@ -700,6 +702,55 @@ export class RoomMcpServer {
   // room.send_file_message
   // ---------------------------------------------------------------------------
 
+  private async handlePublishArtifact(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): Promise<RoomMcpToolResult> {
+    void context;
+    if (!isRecord(input)) return failure("validation_failed", "input must be an object");
+    const versioning = this.options.artifactVersioningService;
+    if (versioning === undefined) return failure("not_implemented", "artifact versioning service is not available");
+    const room = this.options.database.sqlite.prepare("SELECT workspace_id FROM rooms WHERE id = ? AND archived_at IS NULL").get(session.roomId) as { readonly workspace_id: string } | undefined;
+    if (room === undefined) return failure("not_found", `Room '${session.roomId}' not found`);
+    const kind = typeof input.kind === "string" ? input.kind : "generic_file";
+    const title = typeof input.title === "string" && input.title.length > 0 ? input.title : typeof input.filename === "string" ? input.filename : "Artifact";
+    const filename = typeof input.filename === "string" && input.filename.length > 0 ? normalizeMessageFilePath(input.filename) : defaultArtifactFilename(kind);
+    if (hasPathTraversal(filename)) return failure("permission_denied", "path_traversal_denied");
+    const content = typeof input.content === "string" ? input.content : undefined;
+    const filePath = typeof input.filePath === "string" ? input.filePath : undefined;
+    if (content === undefined && filePath === undefined) return failure("validation_failed", "content or filePath is required");
+    if (content !== undefined && filePath !== undefined) return failure("validation_failed", "content and filePath are mutually exclusive");
+    const existingArtifactId = typeof input.artifactId === "string" && input.artifactId.length > 0 ? input.artifactId : undefined;
+    const runId = this.requireRunId(session, context);
+    const taskId = taskIdForRun(this.options.database, runId);
+    const now = this.options.now?.() ?? Date.now();
+    const artifactId = existingArtifactId ?? randomUUID();
+    let messageId = "";
+    let version = 0;
+    try {
+      this.options.database.sqlite.transaction(() => {
+        messageId = this.ensureRunMessage(room.workspace_id, session, runId, now);
+        if (existingArtifactId !== undefined) {
+          const existing = this.options.database.sqlite.prepare("SELECT id, workspace_id, room_id FROM artifacts WHERE id = ? AND deleted_at IS NULL").get(existingArtifactId) as { readonly id: string; readonly workspace_id: string; readonly room_id: string | null } | undefined;
+          if (existing === undefined || existing.workspace_id !== room.workspace_id || existing.room_id !== session.roomId) throw new Error("artifact_not_found");
+          this.options.database.sqlite.prepare("UPDATE artifacts SET task_id = COALESCE(task_id, ?), run_id = ?, message_id = ?, kind = ?, title = ?, metadata = ?, updated_at = ? WHERE id = ?").run(taskId ?? null, runId, messageId, kind, title, JSON.stringify({ filename }), now, artifactId);
+        } else {
+          this.options.database.sqlite.prepare("INSERT INTO artifacts (id, workspace_id, room_id, task_id, run_id, message_id, type, kind, title, status, created_by, metadata, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'file', ?, ?, 'draft', ?, ?, ?, ?)").run(artifactId, room.workspace_id, session.roomId, taskId ?? null, runId, messageId, kind, title, session.agentId, JSON.stringify({ filename }), now, now);
+        }
+        const record = filePath !== undefined
+          ? versioning.createBinaryVersionInTransaction({ artifactId, filePath, filename, mimeType: typeof input.mimeType === "string" ? input.mimeType : undefined, createdBy: session.agentId, message: typeof input.message === "string" ? input.message : undefined })
+          : versioning.createVersionInTransaction({ artifactId, content: content ?? "", filename, createdBy: session.agentId, message: typeof input.message === "string" ? input.message : undefined });
+        version = record.version;
+        const seq = nextMessagePartSeq(this.options.database, messageId);
+        const partPayload = { type: "card", seq, card: { type: "artifact", artifactId, kind, title, filename, version } };
+        this.options.database.sqlite.prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, ?, 'card', ?, ?)").run(messageId, seq, JSON.stringify(partPayload), now);
+        this.options.eventBus.publish({ id: randomUUID(), type: "message.part.added", schemaVersion: 1, workspaceId: room.workspace_id, roomId: session.roomId, runId, agentId: session.agentId, payload: { messageId, part: partPayload }, createdAt: now });
+      })();
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("within workspace")) return failure("permission_denied", "path_traversal_denied");
+      if (error instanceof Error && error.message === "artifact_not_found") return failure("not_found", "artifact not found in this room");
+      throw error;
+    }
+    return { ok: true, data: { artifactId, messageId, kind, version, filename } };
+  }
+
   private async handleSendFileMessage(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): Promise<RoomMcpToolResult> {
     if (!isRecord(input)) return failure("validation_failed", "input must be an object");
     const artifactService = this.options.artifactService;
@@ -777,6 +828,7 @@ export class RoomMcpServer {
       const maxSeq = this.options.database.sqlite.prepare("SELECT COALESCE(MAX(seq), -1) AS maxSeq FROM message_parts WHERE message_id = ?").get(messageId) as { readonly maxSeq: number };
       seq = maxSeq.maxSeq + 1;
       const partPayload = { ...payload, fileId: artifactId, artifactId };
+      this.options.database.sqlite.prepare("UPDATE rooms SET last_activity_at = ?, updated_at = ? WHERE id = ?").run(now, now, session.roomId);
       this.options.database.sqlite
         .prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, ?, 'attachment', ?, ?)")
         .run(messageId, seq, JSON.stringify(partPayload), now);
@@ -802,10 +854,13 @@ export class RoomMcpServer {
     const messageId = `msg_${runId}`;
     const byId = this.options.database.sqlite.prepare("SELECT id FROM messages WHERE id = ?").get(messageId) as { readonly id: string } | undefined;
     if (byId !== undefined) return byId.id;
-    this.options.database.sqlite
-      .prepare("INSERT INTO messages (id, workspace_id, room_id, sender_type, sender_id, run_id, role, status, quoted_message_id, turn_dispatch_mode, pending_turn_id, created_at, updated_at, deleted_at) VALUES (?, ?, ?, 'agent', ?, ?, 'assistant', 'streaming', NULL, 'immediate', NULL, ?, ?, NULL)")
-      .run(messageId, workspaceId, session.roomId, session.agentId, runId, now, now);
-    this.options.eventBus.publish({ id: randomUUID(), type: "message.created", schemaVersion: 1, workspaceId, roomId: session.roomId, runId, agentId: session.agentId, payload: { messageId, senderType: "agent", senderId: session.agentId, role: "assistant", status: "streaming" }, createdAt: now });
+    this.options.database.sqlite.transaction(() => {
+      this.options.database.sqlite.prepare("UPDATE rooms SET last_activity_at = ?, updated_at = ? WHERE id = ?").run(now, now, session.roomId);
+      this.options.database.sqlite
+        .prepare("INSERT INTO messages (id, workspace_id, room_id, sender_type, sender_id, run_id, role, status, quoted_message_id, turn_dispatch_mode, pending_turn_id, created_at, updated_at, deleted_at) VALUES (?, ?, ?, 'agent', ?, ?, 'assistant', 'streaming', NULL, 'immediate', NULL, ?, ?, NULL)")
+        .run(messageId, workspaceId, session.roomId, session.agentId, runId, now, now);
+      this.options.eventBus.publish({ id: randomUUID(), type: "message.created", schemaVersion: 1, workspaceId, roomId: session.roomId, runId, agentId: session.agentId, payload: { messageId, senderType: "agent", senderId: session.agentId, role: "assistant", status: "streaming" }, createdAt: now });
+    })();
     return messageId;
   }
 
@@ -1140,6 +1195,8 @@ export class RoomMcpServer {
       }
     }
 
+    const room = this.options.database.sqlite.prepare("SELECT primary_agent_id FROM rooms WHERE id = ? AND archived_at IS NULL").get(session.roomId) as { readonly primary_agent_id: string | null } | undefined;
+
     const result = this.options.taskService.completeTask({
       taskId: input.taskId,
       roomId: session.roomId,
@@ -1149,28 +1206,12 @@ export class RoomMcpServer {
       summary: input.summary,
       ...(typeof input.blockerReason === "string" ? { blockerReason: input.blockerReason } : {}),
       ...(Array.isArray(input.artifactIds) ? { artifactIds: input.artifactIds } : {}),
-      ...(Array.isArray(input.filesChanged) ? { filesChanged: input.filesChanged } : {})
+      ...(Array.isArray(input.filesChanged) ? { filesChanged: input.filesChanged } : {}),
+      ...(room?.primary_agent_id !== undefined && room.primary_agent_id !== null && room.primary_agent_id !== session.agentId
+        ? { leaderWake: { agentId: room.primary_agent_id, payload: { taskId: input.taskId, status: normalizedStatus === "completed" ? "review" : normalizedStatus, summary: input.summary } } }
+        : {})
     });
     if (!result.ok) return commandResult(result);
-
-    if (result.data.task.status === "review" || result.data.task.status === "blocked") {
-      const room = this.options.database.sqlite.prepare("SELECT workspace_id, primary_agent_id FROM rooms WHERE id = ? AND archived_at IS NULL").get(session.roomId) as { readonly workspace_id: string; readonly primary_agent_id: string | null } | undefined;
-      if (room?.primary_agent_id !== undefined && room.primary_agent_id !== null && room.primary_agent_id !== session.agentId) {
-        void this.options.commandBus.dispatch(
-          {
-            type: "WakeAgent",
-            roomId: session.roomId,
-            agentId: room.primary_agent_id,
-            workspaceId: room.workspace_id,
-            reason: result.data.task.status === "blocked" ? "task_blocked" : "task_review",
-            taskId: input.taskId,
-            promptDelta: { kind: "delta_only", instructions: `Task ${input.taskId} reported ${result.data.task.status}: ${input.summary}` },
-            idempotencyKey: `complete-task:${input.taskId}:${result.data.task.status}:${randomUUID()}`
-          },
-          { actor: { type: "system" }, traceId: `complete-task:${input.taskId}`, origin: "internal" }
-        );
-      }
-    }
 
     return commandResult(result);
   }
@@ -1618,6 +1659,11 @@ function commandFailure<T>(code: CommandErrorCode, message: string, details?: un
   return { ok: false, error: { code, message, ...(details !== undefined ? { details } : {}) } };
 }
 
+function taskIdForRun(database: AgentHubDatabase, runId: string): string | undefined {
+  const row = database.sqlite.prepare("SELECT task_id FROM runs WHERE id = ?").get(runId) as { readonly task_id: string | null } | undefined;
+  return row?.task_id ?? undefined;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -1804,6 +1850,19 @@ function normalizeMessageFilePath(path: string): string {
   const normalized = toPosixPath(path).replace(/^\.\//u, "");
   const segments = normalized.split("/").filter((segment) => segment.length > 0);
   return segments.length > 0 ? segments.join("/") : DEFAULT_FILE_MESSAGE_NAME;
+}
+
+function defaultArtifactFilename(kind: string): string {
+  if (kind === "document") return "content.md";
+  if (kind === "presentation") return "slides.html";
+  if (kind === "web_page" || kind === "web_app") return "index.html";
+  if (kind === "presentation_pptx") return "deck.pptx";
+  return DEFAULT_FILE_MESSAGE_NAME;
+}
+
+function nextMessagePartSeq(database: AgentHubDatabase, messageId: string): number {
+  const row = database.sqlite.prepare("SELECT COALESCE(MAX(seq), 0) + 1 AS seq FROM message_parts WHERE message_id = ?").get(messageId) as { readonly seq: number };
+  return row.seq;
 }
 
 function isSensitiveWorkspacePath(path: string): boolean {

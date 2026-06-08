@@ -134,6 +134,24 @@ describe("RuntimesTab REST integration contract", () => {
     expect(html).toContain("Ready to test");
     expect(html).not.toContain(">Missing<");
   });
+
+  it("marks Codex runtimes as experimental in the runtime directory", () => {
+    const html = renderToStaticMarkup(createElement(RuntimesTab, {
+      data: [
+        customRuntime({
+          id: "runtime-codex",
+          name: "Codex",
+          kind: "codex",
+          status: "missing"
+        })
+      ],
+      fetchImpl: vi.fn<typeof fetch>()
+    }));
+
+    expect(html).toContain("Codex");
+    expect(html).toContain("codex");
+    expect(html).toContain('aria-label="Runtime maturity: experimental"');
+  });
 });
 
 function customRuntime(patch: Partial<RuntimeConfig>): RuntimeConfig {

@@ -13,4 +13,5 @@ export * from "./run-queue.ts";
 export * from "./task-service.ts";
 export * from "./task-mode-group-chat-presenter.ts";
 export * from "./team-dispatch.ts";
+export * from "./wake-outbox-dispatcher.ts";
 export * from "./mcp/room-mcp-server.ts";

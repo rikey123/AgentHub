@@ -1,20 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ScrollShadow, Skeleton } from "@heroui/react";
+import { Button, ScrollShadow, Skeleton } from "@heroui/react";
 import type { RoomViewModel } from "../../types.ts";
-import { MessageItem } from "./MessageItem.tsx";
+import { MessageItem, type QuotedMessagePreview } from "./MessageItem.tsx";
 import { BriefItem } from "./BriefItem.tsx";
 import { TypingIndicator } from "./TypingIndicator.tsx";
 import { ConnectionBanner } from "./ConnectionBanner.tsx";
 import { RunBriefToasts } from "./RunBriefToasts.tsx";
 import { MailboxFailureCard } from "../cards/MailboxFailureCard.tsx";
 import { PermissionCard } from "../cards/PermissionCard.tsx";
+import type { ArtifactChatReference } from "../artifacts/ArtifactPreviewModal.tsx";
 
 interface ChatStreamProps {
   room: RoomViewModel;
   selectedMessageId?: string | undefined;
   onSelectMessage: (id: string | undefined) => void;
   onOpenRun: (runId: string) => void;
+  onReply: (id: string) => void;
   onQuote: (id: string) => void;
   onPin: (id: string) => void;
   onRegenerate: (id: string) => void;
@@ -24,6 +26,7 @@ interface ChatStreamProps {
   onCancelPending: (pendingTurnId: string) => void;
   onStopDiscussion?: ((runId: string) => void) | undefined;
   onEditPending: (id: string) => void;
+  onReferenceArtifact?: ((reference: ArtifactChatReference) => void) | undefined;
   csrfFetch: typeof fetch;
   connectionStatus: "connected" | "connecting" | "reconnecting" | "offline" | "disconnected";
   connectionError?: string | undefined;
@@ -67,6 +70,54 @@ export function activeRunIndicatorProps(room: RoomViewModel): { readonly runId: 
     mode: room.mode,
     ...(turnIndex !== undefined && turnIndex > 0 ? { turnIndex } : {})
   };
+}
+
+export function pinnedMessagesForDrawer(room: RoomViewModel): RoomViewModel["messages"] {
+  return room.messages
+    .filter((message) => message.pinnedAt !== undefined)
+    .slice()
+    .sort((a, b) => (b.pinnedAt ?? 0) - (a.pinnedAt ?? 0));
+}
+
+export function latestRegenerableAgentMessageId(messages: RoomViewModel["messages"]): string | undefined {
+  let latest: RoomViewModel["messages"][number] | undefined;
+  for (const message of messages) {
+    if (message.senderType !== "agent" || message.status !== "completed") continue;
+    if (latest === undefined || message.createdAt >= latest.createdAt) latest = message;
+  }
+  return latest?.id;
+}
+
+export function quotedMessagePreviewFor(message: RoomViewModel["messages"][number] | undefined): QuotedMessagePreview | undefined {
+  if (message === undefined) return undefined;
+  return {
+    id: message.id,
+    senderName: message.senderName,
+    preview: messageSummaryText(message)
+  };
+}
+
+function messageSummaryText(message: RoomViewModel["messages"][number]): string {
+  const text = message.text.trim().replace(/\s+/g, " ");
+  if (text.length > 0) return truncateQuotedPreview(text, 96);
+
+  for (const part of message.parts) {
+    if (part.type === "text" && part.text.trim().length > 0) return truncateQuotedPreview(part.text.trim().replace(/\s+/g, " "), 96);
+    if (part.type === "code") return `${part.lang || "code"} code block`;
+    if (part.type === "attachment") return part.name;
+    if (part.type === "card") {
+      const card = part.card as Record<string, unknown>;
+      if (typeof card.title === "string" && card.title.trim().length > 0) return card.title.trim();
+      if (typeof card.filename === "string" && card.filename.trim().length > 0) return card.filename.trim();
+      if (typeof card.type === "string" && card.type.trim().length > 0) return `${card.type} card`;
+    }
+  }
+
+  return "Quoted message";
+}
+
+function truncateQuotedPreview(text: string, maxLength: number): string {
+  return text.length > maxLength ? `${text.slice(0, maxLength - 3).trimEnd()}...` : text;
 }
 
 export function ChatStream(props: ChatStreamProps) {
@@ -115,6 +166,9 @@ export function ChatStream(props: ChatStreamProps) {
   }, [props.selectedMessageId, items, virtualizer]);
 
   const activeIndicator = activeRunIndicatorProps(room);
+  const pinnedMessages = useMemo(() => pinnedMessagesForDrawer(room), [room.messages]);
+  const regenerableMessageId = useMemo(() => latestRegenerableAgentMessageId(room.messages), [room.messages]);
+  const messagesById = useMemo(() => new Map(room.messages.map((message) => [message.id, message])), [room.messages]);
   const [dismissedFailures, setDismissedFailures] = useState<Set<string>>(() => new Set());
   const visibleFailures = useMemo(
     () => room.mailboxFailures.filter((f) => !dismissedFailures.has(f.id)),
@@ -133,6 +187,9 @@ export function ChatStream(props: ChatStreamProps) {
         <div className="px-3 pt-2">
           <ConnectionBanner status={props.connectionStatus} error={props.connectionError} />
         </div>
+      ) : null}
+      {pinnedMessages.length > 0 ? (
+        <PinnedContextDrawer messages={pinnedMessages} onUnpin={props.onPin} />
       ) : null}
       {visibleFailures.length > 0 ? (
         <div className="flex flex-col gap-2 px-3 pt-2">
@@ -183,15 +240,19 @@ export function ChatStream(props: ChatStreamProps) {
                     {item.kind === "message" ? (
                       <MessageItem
                         message={item.data}
+                        quotedMessage={quotedMessagePreviewFor(item.data.quotedMessageId ? messagesById.get(item.data.quotedMessageId) : undefined)}
                         isSelected={item.id === props.selectedMessageId}
                         onSelect={() => props.onSelectMessage(item.id)}
+                        onOpenQuotedMessage={(id) => props.onSelectMessage(id)}
                         onOpenRun={(runId) => props.onOpenRun(runId)}
+                        onReply={() => props.onReply(item.id)}
                         onQuote={() => props.onQuote(item.id)}
                         onPin={() => props.onPin(item.id)}
-                        onRegenerate={() => props.onRegenerate(item.id)}
+                        onRegenerate={item.id === regenerableMessageId ? () => props.onRegenerate(item.id) : undefined}
                         onDelete={() => props.onDelete(item.id)}
                         onCancelPending={item.data.pendingTurnId ? () => props.onCancelPending(item.data.pendingTurnId!) : undefined}
                         onEditPending={() => props.onEditPending(item.id)}
+                        onReferenceArtifact={props.onReferenceArtifact}
                         csrfFetch={props.csrfFetch}
                       />
                     ) : item.kind === "permission" ? (
@@ -223,4 +284,62 @@ export function ChatStream(props: ChatStreamProps) {
       ) : null}
     </div>
   );
+}
+
+function PinnedContextDrawer({ messages, onUnpin }: { readonly messages: RoomViewModel["messages"]; readonly onUnpin: (id: string) => void }) {
+  return (
+    <details className="mx-3 mt-2 shrink-0 rounded-xl border border-border bg-overlay/85 px-3 py-2 shadow-sm">
+      <summary className="cursor-pointer text-sm font-semibold">
+        Pinned Context <span className="ml-2 text-xs font-medium text-muted">{messages.length} pinned</span>
+      </summary>
+      <div className="mt-2 flex flex-col gap-2">
+        {messages.map((message) => (
+          <div key={message.id} className="rounded-lg border border-border/70 bg-surface-secondary/70 px-3 py-2">
+            <div className="grid gap-1">
+              <div className="flex items-start gap-2">
+                <p className="min-w-0 flex-1 line-clamp-2 text-xs leading-5 text-muted">
+                  {pinnedMessagePreview(message)}
+                </p>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2 text-xs"
+                  aria-label={`Unpin pinned message ${message.id}`}
+                  onPress={() => onUnpin(message.id)}
+                >
+                  Unpin
+                </Button>
+              </div>
+              {pinnedArtifactRef(message) !== undefined ? (
+                <p className="text-[11px] font-medium text-warning-soft-foreground">Content compacted to avoid expanding large artifacts.</p>
+              ) : null}
+            </div>
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+function pinnedMessagePreview(message: RoomViewModel["messages"][number]): string {
+  const text = message.text.trim();
+  const artifactRef = pinnedArtifactRef(message);
+  if (artifactRef !== undefined && text.length > 0) return `${artifactRef} ${truncatePinnedMessageText(text, 140)}`;
+  if (artifactRef !== undefined) return artifactRef;
+  if (text.length > 0) return truncatePinnedMessageText(text, 160);
+  return "Pinned message";
+}
+
+function pinnedArtifactRef(message: RoomViewModel["messages"][number]): string | undefined {
+  return message.parts
+    .map((part) => {
+      if (part.type !== "card") return undefined;
+      const card = part.card as Record<string, unknown>;
+      return card.type === "artifact" && typeof card.artifactId === "string" ? `@artifact:${card.artifactId}` : undefined;
+    })
+    .find((ref): ref is string => ref !== undefined);
+}
+
+function truncatePinnedMessageText(text: string, maxLength: number): string {
+  return text.length > maxLength ? `${text.slice(0, maxLength - 3).trimEnd()}...` : text;
 }

@@ -251,14 +251,11 @@ export class AdapterRegistry {
   }
 
   // Used by StartupRecovery to decide what to do with each in-flight run after
-  // a daemon restart. ACP adapters claim `resumable` in their manifest, but
-  // the actual ACP child process died with the previous daemon, so the
-  // attachSession path always throws. Returning `fail_run` here makes the
-  // recovery mark these runs failed cleanly (and clear `run_locks`), which
-  // lets fresh runs in the same room start without waiting on dead lock owners.
+  // a daemon restart. The child process died with the previous daemon, so we
+  // fail the stale run and enqueue a restart_recovery wake for a fresh run.
   reclaimAdapterFor(run: RunRow): ReclaimAdapter {
     void run;
-    return { crashRecovery: "fail_run" };
+    return { crashRecovery: "restartable" };
   }
 
   private claude(): WarmableManagedAdapter {

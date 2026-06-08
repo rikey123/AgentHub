@@ -47,6 +47,22 @@ describe("buildLeaderPrompt", () => {
     expect(prompt).toContain("file card");
   });
 
+  test("includes V1.2 artifact publishing, aggregate wake, restart recovery, and PPTX guidance", () => {
+    const prompt = buildLeaderPrompt({
+      agentName: "Project Manager",
+      teammates: [
+        { agentId: "agent_builder", name: "Builder", slug: "builder", role: "teammate", presence: "active" }
+      ]
+    });
+
+    expect(prompt).toContain("room.publish_artifact");
+    expect(prompt).toContain("keep the chat message to a short note plus the artifact reference");
+    expect(prompt).toContain("reason `aggregate`");
+    expect(prompt).toContain("reason `restart_recovery`");
+    expect(prompt).toContain("officecli-pptx");
+    expect(prompt).toContain("kind: \"presentation_pptx\"");
+  });
+
   test("uses attributed synthesis and visible handoff language without bypassing review", () => {
     const prompt = buildLeaderPrompt({
       agentName: "Project Manager",

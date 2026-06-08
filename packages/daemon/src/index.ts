@@ -7,12 +7,12 @@ import { fileURLToPath, URL } from "node:url";
 
 import { createCommandBus, createDurableHandlerRegistry, createEventBus, createOutboxDispatcher, type CommandBus, type CommandHandler, type CommandType, type DurableHandlerRegistry, type EventBus, type EventBusSubscriber, type OutboxDispatcher, type PublishInput, type ReplayView } from "@agenthub/bus";
 import { bootstrapBuiltInAgents, watchAgentProfiles, type AgentProfileWatcher } from "@agenthub/agents";
-import { ArtifactFSRunRegistry, ArtifactService, createArtifactCommandHandlers } from "@agenthub/artifacts";
+import { ArtifactFSRunRegistry, ArtifactService, createArtifactCommandHandlers, createArtifactVersioningService } from "@agenthub/artifacts";
 import { ContextLedger, createContextCommandHandlers, HeuristicBriefGenerator } from "@agenthub/context";
 import { createDatabase, type AgentHubDatabase } from "@agenthub/db";
 import { MockAdapterManager } from "@agenthub/adapter-mock";
 import { createInterventionCommandHandlers, InterventionEngine } from "@agenthub/interventions";
-import { ActiveWakesRegistry, AssistedSelectorGroupChatManager, checkTaskTimeouts, createCancelRunHandler, createCompleteTaskHandler, createConsumePendingTurnHandler, createCreateTaskHandler, createUpdateTaskHandler, createWakeAgentHandler, handleTeamDispatchReviewTerminal, MailboxService, maybePublishTeamDispatchCompleted, PendingTurnService, ReclaimStaleClaimedRun, reconcileTerminalDelegatedTaskRuns, RoomMcpServer, RunLifecycleService, RunQueue, StartupRecovery, TaskModeGroupChatPresenter, TaskService, WELL_KNOWN_CAPABILITY_TOKENS, type BriefResolver } from "@agenthub/orchestrator";
+import { ActiveWakesRegistry, AssistedSelectorGroupChatManager, checkTaskTimeouts, createCancelRunHandler, createCompleteTaskHandler, createConsumePendingTurnHandler, createCreateTaskHandler, createUpdateTaskHandler, createWakeAgentHandler, createWakeOutboxDispatcher, handleTeamDispatchReviewTerminal, MailboxService, maybePublishTeamDispatchCompleted, PendingTurnService, ReclaimStaleClaimedRun, reconcileTerminalDelegatedTaskRuns, RoomMcpServer, RunLifecycleService, RunQueue, StartupRecovery, TaskModeGroupChatPresenter, TaskService, WELL_KNOWN_CAPABILITY_TOKENS, type BriefResolver, type WakeOutboxDispatcher } from "@agenthub/orchestrator";
 import { createPermissionCommandHandlers, PermissionEngine, seedBuiltInPermissionProfiles } from "@agenthub/permissions";
 import type { EventEnvelope } from "@agenthub/protocol/events";
 import { artifactContentTypeFor as protocolArtifactContentTypeFor } from "@agenthub/protocol/preview";
@@ -28,9 +28,12 @@ import { migrateAgentProfilesToV10 } from "./migrations/0014_data.ts";
 import { cleanExpiredRoleDrafts, startRoleDraftGC } from "./role-draft-gc.ts";
 import { continueAssistedSelectorAfterRun } from "./assisted-selector-continuation.ts";
 import { createDaemonCommandHandlers, seedDefaultData } from "./commands.ts";
+import { createDeploymentService, type DeploymentService, type DeploymentKind } from "./services/deployment-service.ts";
 export { daemonPidPath, defaultConfigPath, ensureAgentHubHome, ensureParentDirectory, loadAgentHubConfig, redactConfig, type AgentHubConfig, type ConfigOverrides } from "./config.ts";
 import { openApiDocument } from "./openapi.ts";
+import { injectPptNavigationGuard, rewritePptProxyLocation } from "./routes/ppt-proxy.ts";
 import { RUNTIME_DEFINITIONS, runtimeDefinitionForKind, runtimeSeedRows, type RuntimeDetection, type RuntimeSeedRow } from "./runtime-catalog.ts";
+import { createPptPreviewBridge, type PptPreviewBridge } from "./services/ppt-preview-bridge.ts";
 
 type PlanDocument = {
   readonly goal: string;
@@ -118,10 +121,10 @@ export type DaemonStartupPhase =
   | "HTTP server bind + SSE accept";
 export type RoleDraftGenerator = (input: RoleDraftGenerationInput) => Promise<RoleDraft>;
 export type AssistedSpeakerSelector = (input: AssistedSpeakerSelectionInput) => Promise<string | undefined>;
-export type DaemonOptions = { readonly databasePath: string; readonly workspaceRoot?: string; readonly webAssetsRoot?: string; readonly host?: string; readonly port?: number; readonly token?: string; readonly allowRemote?: boolean; readonly allowedOrigins?: readonly string[]; readonly adapterCommands?: { readonly claude?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv }; readonly opencode?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv } }; readonly now?: () => number; readonly modelTestFetch?: typeof fetch; readonly roleDraftGenerator?: RoleDraftGenerator; readonly assistedSpeakerSelector?: AssistedSpeakerSelector; readonly onLifecyclePhase?: (event: { readonly direction: "startup" | "shutdown"; readonly phase: DaemonStartupPhase }) => void };
+export type DaemonOptions = { readonly databasePath: string; readonly workspaceRoot?: string; readonly webAssetsRoot?: string; readonly host?: string; readonly port?: number; readonly token?: string; readonly allowRemote?: boolean; readonly allowedOrigins?: readonly string[]; readonly adapterCommands?: { readonly claude?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv }; readonly opencode?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv } }; readonly now?: () => number; readonly modelTestFetch?: typeof fetch; readonly roleDraftGenerator?: RoleDraftGenerator; readonly assistedSpeakerSelector?: AssistedSpeakerSelector; readonly deploymentCommandProbe?: (command: "nixpacks" | "docker") => boolean | Promise<boolean>; readonly pptPreviewBridge?: PptPreviewBridge; readonly onLifecyclePhase?: (event: { readonly direction: "startup" | "shutdown"; readonly phase: DaemonStartupPhase }) => void };
 export type DaemonCloseOptions = { readonly forceCancelAfterMs?: number };
 export type DaemonCloseResult = { readonly forced: boolean; readonly cancelledRunIds: readonly string[] };
-export type DaemonApp = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly lifecycle: RunLifecycleService; readonly roomMcpServer: RoomMcpServer; readonly adapterRegistry: AdapterRegistry; readonly mockAdapter: MockAdapterManager; readonly handle: (req: IncomingMessage, res: ServerResponse) => void; readonly inFlightRunIds: () => readonly string[]; start(): Promise<Server>; close(options?: DaemonCloseOptions): Promise<DaemonCloseResult> };
+export type DaemonApp = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly lifecycle: RunLifecycleService; readonly roomMcpServer: RoomMcpServer; readonly adapterRegistry: AdapterRegistry; readonly mockAdapter: MockAdapterManager; readonly deploymentService: DeploymentService; readonly handle: (req: IncomingMessage, res: ServerResponse) => void; readonly inFlightRunIds: () => readonly string[]; start(): Promise<Server>; close(options?: DaemonCloseOptions): Promise<DaemonCloseResult> };
 type StatusLineEventBus = EventBus & { flushStatusLines?: () => void };
 const PHASE_SQLITE: DaemonStartupPhase = "SQLite open + pragma + migrate";
 const PHASE_EVENT_STORE: DaemonStartupPhase = "EventStore readiness check";
@@ -152,10 +155,13 @@ type DaemonRuntime = {
   adapterRegistry: AdapterRegistry;
   mockAdapter: MockAdapterManager;
   artifactService: ArtifactService;
+  deploymentService: DeploymentService;
   taskService: TaskService;
   skillRegistry: SkillRegistry;
+  pptPreviewBridge: PptPreviewBridge;
   assistedSelector: AssistedSelectorGroupChatManager;
   outbox: OutboxDispatcher;
+  wakeOutbox: WakeOutboxDispatcher;
   handlers: DurableHandlerRegistry;
   runQueue: RunQueue;
   agentProfiles: AgentProfileWatcher;
@@ -180,6 +186,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
   let closed = false;
   let stopping = false;
   let taskTimeoutTimer: ReturnType<typeof setInterval> | undefined;
+  let deploymentExpiryTimer: ReturnType<typeof setInterval> | undefined;
   const sseClients = new Set<SseClient>();
   const settingsJobs = new Map<string, SettingsJobRecord>();
   const modelConfigSecrets = createKeychain("agenthub-model-configs");
@@ -201,7 +208,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     if (!ready) return json(res, 503, { error: "service_starting", retryAfterMs: 500 });
     if (serveWebAsset({ req, res, url, ...(webAssetsRoot !== undefined ? { webAssetsRoot } : {}) })) return;
     const app = requireRuntime();
-    void route({ req, res, database: app.database, eventBus: app.eventBus, commandBus: app.commandBus, artifactService: app.artifactService, taskService: app.taskService, skillRegistry: app.skillRegistry, outbox: app.outbox, stopAssistedDiscussion: (roomId) => stopAssistedRoomDiscussion(app, roomId), modelConfigSecrets, settingsJobs, modelTestFetch: options.modelTestFetch ?? globalThis.fetch.bind(globalThis), roleDraftGenerator: options.roleDraftGenerator ?? generateRoleDraftWithModelConfig, registerSseClient: (client) => { sseClients.add(client); return () => sseClients.delete(client); }, ...(options.token !== undefined ? { token: options.token } : {}), ...(options.allowedOrigins !== undefined ? { allowedOrigins: options.allowedOrigins } : {}), host: `${options.host ?? "127.0.0.1"}:${options.port ?? 6677}`, ...(options.now !== undefined ? { now: options.now } : {}) });
+    void route({ req, res, database: app.database, eventBus: app.eventBus, commandBus: app.commandBus, artifactService: app.artifactService, deploymentService: app.deploymentService, taskService: app.taskService, skillRegistry: app.skillRegistry, pptPreviewBridge: app.pptPreviewBridge, outbox: app.outbox, stopAssistedDiscussion: (roomId) => stopAssistedRoomDiscussion(app, roomId), modelConfigSecrets, settingsJobs, modelTestFetch: options.modelTestFetch ?? globalThis.fetch.bind(globalThis), roleDraftGenerator: options.roleDraftGenerator ?? generateRoleDraftWithModelConfig, registerSseClient: (client) => { sseClients.add(client); return () => sseClients.delete(client); }, serveWebAsset: () => serveWebAsset({ req, res, url, ...(webAssetsRoot !== undefined ? { webAssetsRoot } : {}) }), ...(options.token !== undefined ? { token: options.token } : {}), ...(options.allowedOrigins !== undefined ? { allowedOrigins: options.allowedOrigins } : {}), host: `${options.host ?? "127.0.0.1"}:${options.port ?? 6677}`, ...(options.now !== undefined ? { now: options.now } : {}) });
   };
 
   const start = async (): Promise<Server> => {
@@ -247,6 +254,30 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     const permissionEngine = new PermissionEngine({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
     const interventionEngine = new InterventionEngine({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
     const artifactService = new ArtifactService({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
+    const deploymentService = createDeploymentService({
+      database,
+      eventBus,
+      ...(options.now !== undefined ? { now: options.now } : {}),
+      deploymentRoot: workspaceRoot,
+      fetchImpl: options.modelTestFetch ?? globalThis.fetch.bind(globalThis),
+      keychain: modelConfigSecrets,
+      ...(options.deploymentCommandProbe !== undefined ? { commandProbe: options.deploymentCommandProbe } : {}),
+      authorizeBuild: async (input) => {
+        const decision = permissionEngine.check({
+          workspaceId: input.workspaceId,
+          idempotencyKey: `deployment-build:${input.deploymentId}`,
+          resource: { type: "shell", command: input.command },
+          reason: `deployment container build ${input.deploymentId}`
+        });
+        if (decision.status === "allow") return "allow";
+        if (decision.status === "deny") return "deny";
+        const resolved = await decision.promise;
+        return resolved.decision === "allowed" ? "allow" : "deny";
+      }
+    });
+    deploymentService.recoverInterruptedDeployments();
+    deploymentExpiryTimer = setInterval(() => deploymentService.expirePreviewDeployments(), 60_000);
+    deploymentExpiryTimer.unref?.();
     const onSkillMaterializationFailed = (input: { readonly taskId?: string; readonly skillId: string; readonly skillName: string; readonly workspaceId: string; readonly runId: string; readonly error: string }): void => {
       const now = options.now?.() ?? Date.now();
       database.sqlite.transaction(() => {
@@ -363,23 +394,17 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
       const room = database.sqlite.prepare("SELECT workspace_id, primary_agent_id FROM rooms WHERE id = ? AND archived_at IS NULL").get(task.room_id) as { readonly workspace_id: string; readonly primary_agent_id: string | null } | undefined;
       if (room?.primary_agent_id === undefined || room.primary_agent_id === null) return;
 
-      const result = taskService.updateStatus({ taskId, status: "review", blockerReason: "missing_completion_report" });
-      if (!result.ok) return;
-
-      const now = options.now?.() ?? Date.now();
-      void commandBusRef.current?.dispatch(
-        {
-          type: "WakeAgent",
-          roomId: task.room_id,
+      const result = taskService.updateStatus({
+        taskId,
+        status: "review",
+        blockerReason: "missing_completion_report",
+        leaderWake: {
           agentId: room.primary_agent_id,
-          workspaceId: room.workspace_id,
           reason: "task_review",
-          taskId,
-          promptDelta: { kind: "delta_only", instructions: `Task ${taskId} ended without a completion report. Please review it.` },
-          idempotencyKey: `missing-completion-report:${taskId}:${now}`
-        },
-        { actor: { type: "system" }, traceId: `missing-completion-report:${taskId}`, origin: "internal" }
-      );
+          payload: { taskId, reason: "missing_completion_report" }
+        }
+      });
+      if (!result.ok) return;
     };
     const onPlanPhaseEnded = async (runId: string, planText?: string): Promise<void> => {
       const run = database.sqlite.prepare("SELECT room_id, agent_id, workspace_id, wake_reason FROM runs WHERE id = ?").get(runId) as { readonly room_id: string; readonly agent_id: string; readonly workspace_id: string; readonly wake_reason: string | null } | undefined;
@@ -428,8 +453,10 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
         onTerminal: (runId: string) => {
           activeWakes.releaseRun(runId);
           runQueueRef.current?.releaseLocks(runId);
+          const commandBus = commandBusRef.current;
+          if (commandBus === undefined) return;
           pendingTurns.handleTerminal(runId);
-          void handleTeamDispatchReviewTerminal({ database, eventBus, commandBus: commandBusRef.current ?? commandBus, taskService, taskModeGroupChatPresenter, ...(options.now !== undefined ? { now: options.now } : {}) }, runId);
+          void handleTeamDispatchReviewTerminal({ database, eventBus, commandBus, taskService, taskModeGroupChatPresenter, ...(options.now !== undefined ? { now: options.now } : {}) }, runId);
           void continueAssistedSelectorAfterRun({ database, getCommandBus: () => commandBusRef.current, assistedSelector }, runId).catch(() => undefined);
         },
         finalizeNextTurns: (tx: AgentHubDatabase["sqlite"], runId: string, failureClass: Parameters<MailboxService["finalizeForRun"]>[2], now: number) => mailbox.finalizeForRun(tx, runId, failureClass, now),
@@ -537,11 +564,8 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
           .prepare("INSERT INTO mailbox_messages (id, workspace_id, room_id, from_type, from_id, to_agent_id, kind, content, files, read, claimed_run_id, claimed_at, delivery_batch_id, delivery_failure_reason, attempt_count, created_at, consumed_at) VALUES (?, ?, ?, 'system', ?, ?, 'message', ?, '[]', 0, NULL, NULL, NULL, NULL, 0, ?, NULL)")
           .run(mailboxMessageId, workspaceId, roomId, taskId, primaryAgentId, JSON.stringify({ text: `[${reason}] Task ${taskId}: ${task.title} (${task.status})` }), now);
         eventBus.publish({ id: randomUUID(), type: "mailbox.message.created", schemaVersion: 1, workspaceId, roomId, agentId: primaryAgentId, payload: { mailboxMessageId, roomId, fromAgentId: taskId, targetAgentId: primaryAgentId, reason }, createdAt: now });
+        enqueueWakeOutbox(database, roomId, primaryAgentId, reason, { taskId, runId, mailboxMessageId, status: task.status }, now);
       })();
-      void commandBusRef.current?.dispatch(
-        { type: "WakeAgent", roomId, agentId: primaryAgentId, workspaceId, reason: "mailbox_message", promptDelta: { kind: "delta_only", instructions: `Task ${reason === "task_completed" ? "completed" : "blocked"}: ${task.title}` }, idempotencyKey: `task-mailbox:${taskId}:${runId}:${reason}` },
-        { actor: { type: "system" }, traceId: `task-mailbox:${taskId}:${runId}`, idempotencyKey: `task-mailbox:${taskId}:${runId}:${reason}`, origin: "internal" }
-      );
     }
 
     emitPhase("startup", PHASE_COMMAND_BUS);
@@ -590,7 +614,37 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
       }
     });
     commandBusRef.current = commandBus;
-    const roomMcpServer = new RoomMcpServer({ commandBus, taskService, database, eventBus, taskModeGroupChatPresenter, permissionEngine, artifactFs, artifactService, ...(options.now !== undefined ? { now: options.now } : {}) });
+    const wakeOutbox = createWakeOutboxDispatcher({
+      database,
+      eventBus,
+      ...(options.now !== undefined ? { now: options.now } : {}),
+      dispatchWake: async (item) => {
+        const room = database.sqlite.prepare("SELECT workspace_id FROM rooms WHERE id = ?").get(item.roomId) as { readonly workspace_id: string } | undefined;
+        const payload = parseWakePayload(item.payload);
+        const taskId = typeof payload.taskId === "string" ? payload.taskId : Array.isArray(payload.taskIds) && typeof payload.taskIds[0] === "string" ? payload.taskIds[0] : undefined;
+        const result = await Promise.resolve(commandBus.dispatch(
+          {
+            type: "WakeAgent",
+            roomId: item.roomId,
+            agentId: item.agentId,
+            workspaceId: room?.workspace_id ?? "default-workspace",
+            reason: wakeReasonForCommand(item.reason),
+            ...(taskId !== undefined ? { taskId } : {}),
+            promptDelta: { kind: "delta_only", instructions: promptForWakeOutbox(item.reason, payload) },
+            idempotencyKey: `wake-outbox:${item.id}`
+          },
+          { actor: { type: "system" }, traceId: `wake-outbox:${item.id}`, idempotencyKey: `wake-outbox:${item.id}`, origin: "internal" }
+        ));
+        if (!result.ok) throw new Error(result.error.message);
+        const data = result.data as { readonly runId?: string; readonly appendedToRunId?: string };
+        const runId = data.runId ?? data.appendedToRunId;
+        return runId === undefined ? {} : { runId };
+      }
+    });
+    wakeOutbox.start();
+    const artifactVersioningService = createArtifactVersioningService({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
+    const pptPreviewBridge = options.pptPreviewBridge ?? createPptPreviewBridge();
+    const roomMcpServer = new RoomMcpServer({ commandBus, taskService, database, eventBus, taskModeGroupChatPresenter, permissionEngine, artifactFs, artifactService, artifactVersioningService, ...(options.now !== undefined ? { now: options.now } : {}) });
     // Start the TCP server so agents can reach room.* MCP tools via the stdio bridge.
     await roomMcpServer.startTcp();
     roomMcpServerRef.current = roomMcpServer;
@@ -599,17 +653,11 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
       await handleTeamDispatchReviewTerminal({ database, eventBus, commandBus, taskService, taskModeGroupChatPresenter, ...(options.now !== undefined ? { now: options.now } : {}) }, runId);
     }
     const runTaskTimeoutSweep = () => {
-      const wakes = checkTaskTimeouts(database, eventBus, options.now?.() ?? Date.now());
-      for (const wake of wakes) {
-        void commandBus.dispatch(
-          { type: "WakeAgent", roomId: wake.roomId, agentId: wake.agentId, workspaceId: wake.workspaceId, reason: "task_blocked", messageId: wake.mailboxMessageId, idempotencyKey: `task-timeout:${wake.taskId}:${wake.mailboxMessageId}` },
-          { actor: { type: "system" }, traceId: `task-timeout:${wake.taskId}`, idempotencyKey: `task-timeout:${wake.taskId}:${wake.mailboxMessageId}`, origin: "internal" }
-        );
-      }
+      checkTaskTimeouts(database, eventBus, options.now?.() ?? Date.now());
     };
     taskTimeoutTimer = setInterval(runTaskTimeoutSweep, 60_000);
     taskTimeoutTimer.unref?.();
-    runtime = { database, eventBus, commandBus, roomMcpServer, adapterRegistry, mockAdapter, artifactService, taskService, skillRegistry, assistedSelector, outbox, handlers, runQueue, agentProfiles, roleDraftGcCleanup, lifecycle };
+    runtime = { database, eventBus, commandBus, roomMcpServer, adapterRegistry, mockAdapter, artifactService, deploymentService, taskService, skillRegistry, pptPreviewBridge, assistedSelector, outbox, wakeOutbox, handlers, runQueue, agentProfiles, roleDraftGcCleanup, lifecycle };
 
     emitPhase("startup", PHASE_HTTP);
     return await new Promise<Server>((resolve) => {
@@ -633,15 +681,19 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
         await new Promise<void>((resolve, reject) => server?.close((err) => err ? reject(err) : resolve()));
         server = undefined;
       } else if (phase === PHASE_OUTBOX) {
+        runtime?.wakeOutbox.stop();
         await runtime?.outbox.drainPending();
       } else if (phase === PHASE_EVENT_BUS) {
         runtime?.roleDraftGcCleanup();
         runtime?.eventBus.flushStatusLines?.();
         if (taskTimeoutTimer !== undefined) clearInterval(taskTimeoutTimer);
         taskTimeoutTimer = undefined;
+        if (deploymentExpiryTimer !== undefined) clearInterval(deploymentExpiryTimer);
+        deploymentExpiryTimer = undefined;
         await runtime?.agentProfiles.close();
         runtime?.adapterRegistry.disposeAll();
         runtime?.roomMcpServer.stopTcp();
+        await runtime?.pptPreviewBridge.stopAll();
         runtime?.eventBus.close();
       } else if (phase === PHASE_SQLITE) {
         runtime?.database.sqlite.close();
@@ -681,6 +733,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     get roomMcpServer() { return requireRuntime().roomMcpServer; },
     get adapterRegistry() { return requireRuntime().adapterRegistry; },
     get mockAdapter() { return requireRuntime().mockAdapter; },
+    get deploymentService() { return requireRuntime().deploymentService; },
     handle,
     inFlightRunIds,
     start,
@@ -738,7 +791,53 @@ function withStatusLineCoalescing(eventBus: EventBus): StatusLineEventBus {
   return wrapped;
 }
 
-type RouteContext = { readonly req: IncomingMessage; readonly res: ServerResponse; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly artifactService: ArtifactService; readonly taskService: TaskService; readonly skillRegistry: SkillRegistry; readonly outbox: { drainPending(): Promise<void> }; readonly stopAssistedDiscussion: (roomId: string) => Promise<{ readonly ok: boolean; readonly roomId: string; readonly cancelledRunIds: readonly string[] }>; readonly modelConfigSecrets: KeychainBridge; readonly settingsJobs: Map<string, SettingsJobRecord>; readonly modelTestFetch: typeof fetch; readonly roleDraftGenerator: RoleDraftGenerator; readonly registerSseClient: (client: SseClient) => () => void; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly host: string; readonly now?: () => number };
+function parseWakePayload(payload: string | undefined): Record<string, unknown> {
+  if (payload === undefined) return {};
+  try {
+    const parsed = JSON.parse(payload) as unknown;
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+function enqueueWakeOutbox(database: AgentHubDatabase, roomId: string, agentId: string, reason: "task_completed" | "task_blocked" | "task_review", payload: Record<string, unknown>, now: number): void {
+  const wakeReason = reason === "task_completed" ? "task_review" : reason;
+  const payloadJson = JSON.stringify(payload);
+  const existing = database.sqlite
+    .prepare("SELECT id FROM wake_outbox WHERE room_id = ? AND agent_id = ? AND reason = ? AND payload = ? AND status IN ('pending', 'dispatching', 'dispatched') LIMIT 1")
+    .get(roomId, agentId, wakeReason, payloadJson);
+  if (existing !== undefined) return;
+  database.sqlite
+    .prepare("INSERT INTO wake_outbox (id, room_id, agent_id, reason, payload, status, attempt_count, max_attempts, created_at, dispatch_after) VALUES (?, ?, ?, ?, ?, 'pending', 0, 3, ?, NULL)")
+    .run(randomUUID(), roomId, agentId, wakeReason, payloadJson, now);
+}
+
+function promptForWakeOutbox(reason: string, payload: Record<string, unknown>): string {
+  if (reason === "aggregate") {
+    return "All delegated tasks reached terminal states. Summarize completed artifacts, blocked work, and review items for the room.";
+  }
+  if (reason === "task_review") {
+    return "Delegated tasks are ready for leader review. Review their outputs and provide the next coordination step.";
+  }
+  if (reason === "task_blocked") {
+    return "A delegated task is blocked. Explain the issue and choose a degradation, retry, or user-intervention path.";
+  }
+  if (reason === "restart_recovery") {
+    return "The daemon restarted while work was in progress. Recover the previous run state and continue safely.";
+  }
+  if (typeof payload.taskId === "string") return `Continue delegated task ${payload.taskId}.`;
+  return `Continue work for wake reason ${reason}.`;
+}
+
+function wakeReasonForCommand(reason: string): "primary_turn" | "user_mention" | "delegated_task" | "task_review" | "task_blocked" | "rule_review" | "knock_approved" | "group_review" | "phase_completed" | "agent_crashed" | "consume_pending_turn" | "mailbox_message" | "plan" | "execute" | "agent_stalled" {
+  if (reason === "aggregate") return "task_review";
+  if (reason === "restart_recovery") return "agent_crashed";
+  if (reason === "task_review" || reason === "task_blocked" || reason === "delegated_task") return reason;
+  return "delegated_task";
+}
+
+type RouteContext = { readonly req: IncomingMessage; readonly res: ServerResponse; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly artifactService: ArtifactService; readonly deploymentService: DeploymentService; readonly taskService: TaskService; readonly skillRegistry: SkillRegistry; readonly pptPreviewBridge: PptPreviewBridge; readonly outbox: { drainPending(): Promise<void> }; readonly stopAssistedDiscussion: (roomId: string) => Promise<{ readonly ok: boolean; readonly roomId: string; readonly cancelledRunIds: readonly string[] }>; readonly modelConfigSecrets: KeychainBridge; readonly settingsJobs: Map<string, SettingsJobRecord>; readonly modelTestFetch: typeof fetch; readonly roleDraftGenerator: RoleDraftGenerator; readonly registerSseClient: (client: SseClient) => () => void; readonly serveWebAsset: () => boolean; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly host: string; readonly now?: () => number };
 
 async function route(ctx: RouteContext): Promise<void> {
   const url = new URL(ctx.req.url ?? "/", "http://127.0.0.1");
@@ -969,6 +1068,7 @@ async function route(ctx: RouteContext): Promise<void> {
   }
   if (ctx.req.method === "POST" && parts[0] === "runtimes" && parts[1] && parts[2] === "detect") return detectRuntime(ctx, parts[1]);
   if (ctx.req.method === "POST" && parts[0] === "runtimes" && parts[1] && parts[2] === "test") return testRuntime(ctx, parts[1], await body(ctx));
+  if ((ctx.req.method === "GET" || ctx.req.method === "POST") && parts[0] === "runtimes" && parts[1] && parts[2] === "health") return runtimeHealth(ctx, parts[1]);
   if (ctx.req.method === "GET" && parts[0] === "runtimes" && parts[1] && parts[2] === "local-skills" && parts.length === 3) return runtimeLocalSkills(ctx, parts[1]);
   if (ctx.req.method === "POST" && parts[0] === "runtimes" && parts[1] && parts[2] === "local-skills" && parts[3] === "import") return importRuntimeLocalSkill(ctx, parts[1], await body(ctx));
   if (ctx.req.method === "DELETE" && parts[0] === "runtimes" && parts[1]) {
@@ -996,7 +1096,8 @@ async function route(ctx: RouteContext): Promise<void> {
     return json(ctx.res, 200, { ok: true });
   }
   if (ctx.req.method === "GET" && url.pathname === "/event") return sse(ctx, url, auth.scopes);
-  if (ctx.req.method === "GET" && url.pathname === "/rooms") return json(ctx.res, 200, { rooms: all(ctx.database, "SELECT * FROM rooms ORDER BY created_at ASC") });
+  if (ctx.req.method === "GET" && url.pathname === "/rooms") return roomsList(ctx, url);
+  if (ctx.req.method === "GET" && parts[0] === "api" && parts[1] === "ppt-proxy" && parts[2]) return pptProxy(ctx, Number(parts[2]), parts.slice(3).join("/"));
   if (ctx.req.method === "POST" && url.pathname === "/rooms") {
     const requestBody = await body(ctx);
     const normalized = normalizeRoomCreateCompat(ctx.database, requestBody);
@@ -1012,7 +1113,9 @@ async function route(ctx: RouteContext): Promise<void> {
   if (ctx.req.method === "GET" && url.pathname === "/roles") return roles(ctx, url);
   if (ctx.req.method === "POST" && url.pathname === "/roles") return createRole(ctx, await body(ctx));
   if (ctx.req.method === "DELETE" && parts[0] === "auth" && parts[1] === "tokens" && parts[2]) { if (!requireScope(auth, "write", ctx.res)) return; return revokeToken(ctx, parts[2]); }
-  if (ctx.req.method === "GET" && parts[0] === "rooms" && parts.length === 1) return json(ctx.res, 200, { rooms: all(ctx.database, "SELECT * FROM rooms ORDER BY created_at ASC") });
+  if (ctx.req.method === "GET" && parts[0] === "rooms" && parts.length === 1) return roomsList(ctx, url);
+  if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "pin") return pinRoom(ctx, parts[1] as string);
+  if (ctx.req.method === "DELETE" && parts[0] === "rooms" && parts[2] === "pin") return unpinRoom(ctx, parts[1] as string);
   if (ctx.req.method === "GET" && parts[0] === "rooms" && parts[2] === "task-plans" && parts[3] === "latest") return latestTaskPlan(ctx, parts[1] as string);
   if (ctx.req.method === "GET" && parts[0] === "rooms" && parts.length === 2) return json(ctx.res, 200, { room: get(ctx.database, "SELECT * FROM rooms WHERE id = ?", parts[1]) });
   if (ctx.req.method === "GET" && parts[0] === "rooms" && parts[2] === "tasks") return tasks(ctx, parts[1] as string, url);
@@ -1031,13 +1134,23 @@ async function route(ctx: RouteContext): Promise<void> {
   if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "unarchive") return dispatch(ctx, { roomId: parts[1] }, "UnarchiveRoom");
   if (ctx.req.method === "GET" && url.pathname === "/messages") return messages(ctx, url);
   if (ctx.req.method === "GET" && parts[0] === "rooms" && parts[2] === "messages") return messages(ctx, url, parts[1] as string);
+  if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "messages" && parts[4] === "pin") return pinMessage(ctx, parts[3] as string, parts[1] as string);
+  if (ctx.req.method === "DELETE" && parts[0] === "rooms" && parts[2] === "messages" && parts[4] === "pin") return unpinMessage(ctx, parts[3] as string, parts[1] as string);
   if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "messages") return dispatch(ctx, { ...(await body(ctx)), roomId: parts[1] }, "SendMessage");
   if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "discussion" && parts[3] === "stop") return stopDiscussion(ctx, parts[1] as string);
   if (ctx.req.method === "DELETE" && parts[0] === "pending-turns" && parts[1]) return dispatch(ctx, { pendingTurnId: parts[1] }, "CancelPendingTurn");
   if (ctx.req.method === "PATCH" && parts[0] === "messages" && parts[1]) return dispatch(ctx, { ...(await body(ctx)), messageId: parts[1] }, "EditMessage");
   if (ctx.req.method === "POST" && parts[0] === "messages" && parts[1] && parts[2] === "regenerate") return dispatch(ctx, { ...(await body(ctx)), messageId: parts[1] }, "RegenerateMessage");
-  if (ctx.req.method === "POST" && parts[0] === "messages" && parts[1] && parts[2] === "pin") return dispatch(ctx, { ...(await body(ctx)), messageId: parts[1] }, "PinMessage");
+  if (ctx.req.method === "POST" && parts[0] === "messages" && parts[1] && parts[2] === "pin") return pinMessage(ctx, parts[1] as string);
+  if (ctx.req.method === "DELETE" && parts[0] === "messages" && parts[1] && parts[2] === "pin") return unpinMessage(ctx, parts[1] as string);
   if (ctx.req.method === "DELETE" && parts[0] === "messages" && parts[1]) return dispatch(ctx, { messageId: parts[1] }, "DeleteMessage");
+  if (ctx.req.method === "GET" && url.pathname === "/agents/contacts") return agentContacts(ctx);
+  if (ctx.req.method === "POST" && url.pathname === "/agents/custom") return createCustomAgent(ctx, await body(ctx));
+  if (ctx.req.method === "PATCH" && parts[0] === "agents" && parts[1] === "contacts" && parts[2]) return updateCustomAgent(ctx, parts[2], await body(ctx));
+  if (ctx.req.method === "DELETE" && parts[0] === "agents" && parts[1] === "contacts" && parts[2]) return deleteCustomAgent(ctx, parts[2], url.searchParams.get("hard") === "1" || url.searchParams.get("hard") === "true");
+  if (ctx.req.method === "PATCH" && parts[0] === "agents" && parts[1] === "custom" && parts[2]) return updateCustomAgent(ctx, parts[2], await body(ctx));
+  if (ctx.req.method === "DELETE" && parts[0] === "agents" && parts[1] === "custom" && parts[2]) return deleteCustomAgent(ctx, parts[2], url.searchParams.get("hard") === "1" || url.searchParams.get("hard") === "true");
+  if (ctx.req.method === "POST" && url.pathname === "/create-agent") return parseCreateAgent(ctx, await body(ctx));
   if (ctx.req.method === "GET" && url.pathname === "/agents") return json(ctx.res, 200, { agents: all(ctx.database, "SELECT * FROM agent_profiles ORDER BY name ASC") });
   if (ctx.req.method === "GET" && parts[0] === "agents" && parts[1]) return json(ctx.res, 200, { agent: get(ctx.database, "SELECT * FROM agent_profiles WHERE id = ?", parts[1]) });
   if (ctx.req.method === "GET" && parts[0] === "runs" && parts[1] && parts[2] === "permission-summary") {
@@ -1082,8 +1195,32 @@ async function route(ctx: RouteContext): Promise<void> {
     if (ctx.req.method === "PATCH" && parts.length === 2) return updateRole(ctx, parts[1], await body(ctx));
     if (ctx.req.method === "DELETE" && parts.length === 2) return deleteRole(ctx, parts[1]);
   }
+  if (ctx.req.method === "GET" && parts[0] === "deployments" && parts.length === 1) return deployments(ctx, url);
+  if (ctx.req.method === "POST" && parts[0] === "deployments" && parts.length === 1) return createDeployment(ctx, await body(ctx));
+  if (ctx.req.method === "GET" && parts[0] === "deployments" && parts[2] === "logs") return deploymentLogs(ctx, parts[1] as string);
+  if (ctx.req.method === "GET" && parts[0] === "deployments" && parts[2] === "download") return deploymentDownload(ctx, parts[1] as string);
+  if (ctx.req.method === "GET" && parts[0] === "preview" && parts[1]) return deploymentPreview(ctx, parts[1] as string);
+  if (ctx.req.method === "GET" && parts[0] === "sites" && parts[1]) return deploymentSite(ctx, parts[1], decodeURIComponent(parts.slice(2).join("/")));
+  if (ctx.req.method === "POST" && parts[0] === "deployments" && parts[2] === "redeploy") return deploymentAction(ctx, parts[1] as string, "redeploy");
+  if (ctx.req.method === "POST" && parts[0] === "deployments" && parts[2] === "retry") return deploymentAction(ctx, parts[1] as string, "retry");
+  if (ctx.req.method === "POST" && parts[0] === "deployments" && parts[2] === "cancel") return deploymentAction(ctx, parts[1] as string, "cancel");
+  if (ctx.req.method === "POST" && parts[0] === "deployments" && parts[2] === "unpublish") return deploymentAction(ctx, parts[1] as string, "unpublish");
+  if (ctx.req.method === "GET" && parts[0] === "deployments" && parts.length === 2) return deployment(ctx, parts[1] as string);
+  if (ctx.req.method === "GET" && parts[0] === "deployment-providers" && parts.length === 1) return deploymentProviders(ctx);
+  if (ctx.req.method === "POST" && parts[0] === "deployment-providers" && parts.length === 1) return createDeploymentProvider(ctx, await body(ctx));
+  if (ctx.req.method === "PATCH" && parts[0] === "deployment-providers" && parts[1]) return updateDeploymentProvider(ctx, parts[1], await body(ctx));
+  if (ctx.req.method === "DELETE" && parts[0] === "deployment-providers" && parts[1]) return deleteDeploymentProvider(ctx, parts[1]);
+  if (ctx.req.method === "POST" && parts[0] === "deployment-providers" && parts[2] === "test") return testDeploymentProvider(ctx, parts[1] as string);
   if (ctx.req.method === "GET" && url.pathname === "/artifacts") return artifacts(ctx, url);
   if (ctx.req.method === "POST" && url.pathname === "/artifacts") return dispatch(ctx, await body(ctx), "CreateArtifact");
+  if (ctx.req.method === "PATCH" && parts[0] === "artifacts" && parts.length === 2) return patchArtifact(ctx, parts[1] as string, await body(ctx));
+  if (ctx.req.method === "GET" && parts[0] === "artifacts" && parts[2] === "versions" && parts.length === 3) return artifactVersions(ctx, parts[1] as string);
+  if (ctx.req.method === "GET" && parts[0] === "artifacts" && parts[2] === "versions" && parts[4] === "diff" && parts[5]) return artifactVersionDiff(ctx, parts[1] as string, Number(parts[3]), Number(parts[5]));
+  if (ctx.req.method === "POST" && parts[0] === "artifacts" && parts[2] === "versions" && parts[4] === "restore") return restoreArtifactVersion(ctx, parts[1] as string, Number(parts[3]));
+  if (ctx.req.method === "GET" && parts[0] === "artifacts" && parts[2] === "versions" && parts[3]) return artifactVersion(ctx, parts[1] as string, Number(parts[3]));
+  if (ctx.req.method === "POST" && parts[0] === "artifacts" && parts[2] === "ppt-preview" && parts.length === 3) return startArtifactPptPreview(ctx, parts[1] as string);
+  if (ctx.req.method === "DELETE" && parts[0] === "artifacts" && parts[2] === "ppt-preview" && parts[3]) return stopArtifactPptPreview(ctx, Number(parts[3]));
+  if (ctx.req.method === "GET" && parts[0] === "artifacts" && parts[2] === "download") return downloadArtifact(ctx, parts[1] as string);
   if (ctx.req.method === "GET" && parts[0] === "artifacts" && parts.length === 2) return json(ctx.res, 200, { artifact: ctx.artifactService.get(parts[1] as string) ?? null });
   if (ctx.req.method === "GET" && parts[0] === "artifacts" && parts[2] === "reviews" && parts.length === 3) return json(ctx.res, 200, { reviews: ctx.artifactService.reviews(parts[1] as string) });
   if (ctx.req.method === "POST" && parts[0] === "artifacts" && parts[2] === "reviews" && parts.length === 3) return addArtifactReview(ctx, parts[1] as string, await body(ctx));
@@ -1138,6 +1275,7 @@ async function route(ctx: RouteContext): Promise<void> {
   if (ctx.req.method === "POST" && url.pathname === "/skills") return createSkill(ctx, await body(ctx));
   if (ctx.req.method === "PUT" && parts[0] === "skills" && parts[1]) return updateSkill(ctx, parts[1], await body(ctx));
   if (ctx.req.method === "DELETE" && parts[0] === "skills" && parts[1]) return deleteSkill(ctx, parts[1]);
+  if (ctx.serveWebAsset()) return;
   return json(ctx.res, 404, { error: "not_found" });
 }
 
@@ -1164,6 +1302,250 @@ async function detectRuntime(ctx: RouteContext, runtimeId: string): Promise<void
   return json(ctx.res, 200, { runtime: get(ctx.database, "SELECT * FROM runtimes WHERE id = ?", runtimeId), changed });
 }
 
+function roomsList(ctx: RouteContext, url: URL): void {
+  const query = url.searchParams.get("q")?.trim();
+  const rows = ctx.database.sqlite
+    .prepare(
+      `SELECT r.*
+       FROM rooms r
+       WHERE r.archived_at IS NULL
+         AND (
+           ? IS NULL
+           OR r.title LIKE ?
+           OR EXISTS (
+             SELECT 1
+             FROM room_participants rp
+             LEFT JOIN agent_bindings ab ON ab.id = rp.agent_binding_id
+             LEFT JOIN roles roles ON roles.id = ab.role_id
+             WHERE rp.room_id = r.id
+               AND COALESCE(ab.contact_name, roles.name, rp.participant_id) LIKE ?
+           )
+           OR EXISTS (
+             SELECT 1
+             FROM (
+               SELECT m.id
+               FROM messages m
+               WHERE m.room_id = r.id AND m.deleted_at IS NULL
+               ORDER BY m.created_at DESC, m.id DESC
+               LIMIT 5
+             ) recent
+             JOIN message_parts mp ON mp.message_id = recent.id
+             WHERE mp.payload LIKE ?
+           )
+         )
+       ORDER BY
+         CASE WHEN r.pinned_at IS NULL THEN 0 ELSE 1 END DESC,
+         r.pinned_at DESC,
+         r.last_activity_at DESC,
+         r.updated_at DESC,
+         r.created_at DESC
+       LIMIT 20`
+    )
+    .all(query ?? null, likeQuery(query), likeQuery(query), likeQuery(query)) as Array<Record<string, unknown>>;
+  json(ctx.res, 200, { rooms: rows.map((row) => roomListRow(ctx.database, row)) });
+}
+
+function roomListRow(database: AgentHubDatabase, row: Record<string, unknown>): Record<string, unknown> {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    title: row.title,
+    mode: row.mode,
+    defaultContextScope: row.default_context_scope,
+    primaryAgentId: row.primary_agent_id ?? undefined,
+    archivedAt: row.archived_at ?? undefined,
+    pinnedAt: row.pinned_at ?? undefined,
+    lastActivityAt: row.last_activity_at ?? undefined,
+    stalledAt: row.stalled_at ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    participantContactNames: participantContactNames(database, String(row.id))
+  };
+}
+
+function pinRoom(ctx: RouteContext, roomId: string): void {
+  const room = ctx.database.sqlite.prepare("SELECT workspace_id FROM rooms WHERE id = ? AND archived_at IS NULL").get(roomId) as { readonly workspace_id: string } | undefined;
+  if (room === undefined) return json(ctx.res, 404, { error: "room_not_found" });
+  const now = ctx.now?.() ?? Date.now();
+  ctx.database.sqlite.transaction(() => {
+    ctx.database.sqlite.prepare("UPDATE rooms SET pinned_at = ?, updated_at = ? WHERE id = ?").run(now, now, roomId);
+    ctx.eventBus.publish({ id: randomUUID(), type: "room.pinned", schemaVersion: 1, workspaceId: room.workspace_id, roomId, payload: { roomId, pinnedAt: now }, createdAt: now });
+  })();
+  json(ctx.res, 200, { ok: true, roomId, pinnedAt: now });
+}
+
+function unpinRoom(ctx: RouteContext, roomId: string): void {
+  const room = ctx.database.sqlite.prepare("SELECT workspace_id FROM rooms WHERE id = ? AND archived_at IS NULL").get(roomId) as { readonly workspace_id: string } | undefined;
+  if (room === undefined) return json(ctx.res, 404, { error: "room_not_found" });
+  const now = ctx.now?.() ?? Date.now();
+  ctx.database.sqlite.transaction(() => {
+    ctx.database.sqlite.prepare("UPDATE rooms SET pinned_at = NULL, updated_at = ? WHERE id = ?").run(now, roomId);
+    ctx.eventBus.publish({ id: randomUUID(), type: "room.unpinned", schemaVersion: 1, workspaceId: room.workspace_id, roomId, payload: { roomId }, createdAt: now });
+  })();
+  json(ctx.res, 200, { ok: true, roomId });
+}
+
+function participantContactNames(database: AgentHubDatabase, roomId: string): readonly string[] {
+  const rows = database.sqlite
+    .prepare(
+      `SELECT COALESCE(ab.contact_name, roles.name, rp.participant_id) AS name
+       FROM room_participants rp
+       LEFT JOIN agent_bindings ab ON ab.id = rp.agent_binding_id
+       LEFT JOIN roles roles ON roles.id = ab.role_id
+       WHERE rp.room_id = ? AND rp.participant_type = 'agent'
+       ORDER BY rp.joined_at ASC`
+    )
+    .all(roomId) as Array<{ readonly name: string | null }>;
+  return rows.map((row) => row.name).filter((name): name is string => typeof name === "string" && name.length > 0);
+}
+
+function likeQuery(value: string | undefined): string | null {
+  return value === undefined || value.length === 0 ? null : `%${value}%`;
+}
+
+async function deployments(ctx: RouteContext, url: URL): Promise<void> {
+  const artifactId = url.searchParams.get("artifactId");
+  if (artifactId === null || artifactId.length === 0) {
+    return json(ctx.res, 200, { deployments: all(ctx.database, "SELECT * FROM deployments ORDER BY created_at DESC") });
+  }
+  return json(ctx.res, 200, { deployments: await ctx.deploymentService.listDeployments(artifactId) });
+}
+
+async function createDeployment(ctx: RouteContext, input: Record<string, unknown>): Promise<void> {
+  const artifactId = stringField(input.artifactId);
+  const kind = deploymentKind(input.kind);
+  if (artifactId === undefined || kind === undefined) return json(ctx.res, 400, { error: "validation_failed", message: "artifactId and valid kind are required" });
+  try {
+    const deployment = await ctx.deploymentService.createDeployment({ artifactId, kind, ...(stringField(input.roomId) !== undefined ? { roomId: stringField(input.roomId) as string } : {}), ...(stringField(input.providerId) !== undefined ? { providerId: stringField(input.providerId) as string } : {}) });
+    return json(ctx.res, 201, { deployment });
+  } catch (error) {
+    return json(ctx.res, 400, { error: errorMessage(error) });
+  }
+}
+
+async function deployment(ctx: RouteContext, deploymentId: string): Promise<void> {
+  const result = await ctx.deploymentService.getDeployment(deploymentId);
+  if (result === undefined) return json(ctx.res, 404, { error: "deployment_not_found" });
+  return json(ctx.res, 200, { deployment: result });
+}
+
+async function deploymentAction(ctx: RouteContext, deploymentId: string, action: "redeploy" | "retry" | "cancel" | "unpublish"): Promise<void> {
+  try {
+    const deployment = await ctx.deploymentService[action](deploymentId);
+    return json(ctx.res, 200, { deployment });
+  } catch (error) {
+    return json(ctx.res, 404, { error: errorMessage(error) });
+  }
+}
+
+async function deploymentLogs(ctx: RouteContext, deploymentId: string): Promise<void> {
+  const text = await ctx.deploymentService.readLogs(deploymentId);
+  ctx.res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+  ctx.res.end(text);
+}
+
+async function deploymentDownload(ctx: RouteContext, deploymentId: string): Promise<void> {
+  const path = await ctx.deploymentService.downloadPath(deploymentId);
+  if (path === undefined || !existsSync(path)) return json(ctx.res, 404, { error: "deployment_download_not_found" });
+  try {
+    const stat = statSync(path);
+    if (!stat.isFile()) return json(ctx.res, 404, { error: "deployment_download_not_found" });
+    ctx.res.writeHead(200, {
+      "content-type": contentTypeFor(path),
+      "content-length": String(stat.size),
+      "content-disposition": `attachment; filename="${safeDownloadName(path)}"`,
+      "cache-control": "no-cache",
+      "x-content-type-options": "nosniff"
+    });
+    if (ctx.req.method === "HEAD") ctx.res.end();
+    else ctx.res.end(readFileSync(path));
+  } catch {
+    return json(ctx.res, 404, { error: "deployment_download_not_found" });
+  }
+}
+
+function deploymentPreview(ctx: RouteContext, token: string): void {
+  const row = get(ctx.database, "SELECT kind, status, source_path FROM deployments WHERE provider_resource_id = ?", token) as { readonly kind: string; readonly status: string; readonly source_path: string | null } | null;
+  if (row === null || row.kind !== "preview-url" || row.status !== "ready" || row.source_path === null) return json(ctx.res, 404, { error: "deployment_preview_not_found" });
+  const filePath = containedPath(row.source_path, "index.html");
+  if (filePath === undefined) return json(ctx.res, 404, { error: "deployment_preview_not_found" });
+  return serveStaticFile(ctx.req, ctx.res, filePath) ? undefined : json(ctx.res, 404, { error: "deployment_preview_not_found" });
+}
+
+function deploymentSite(ctx: RouteContext, deploymentId: string, requestedPath: string): void {
+  const row = get(ctx.database, "SELECT kind, status, source_path FROM deployments WHERE id = ?", deploymentId) as { readonly kind: string; readonly status: string; readonly source_path: string | null } | null;
+  if (row === null || row.kind !== "static-site" || row.status !== "ready" || row.source_path === null) return json(ctx.res, 404, { error: "deployment_site_not_found" });
+  const normalizedPath = requestedPath.length === 0 || requestedPath.endsWith("/") ? `${requestedPath}index.html` : requestedPath;
+  const filePath = containedPath(row.source_path, normalizedPath);
+  if (filePath === undefined) return json(ctx.res, 404, { error: "deployment_site_not_found" });
+  return serveStaticFile(ctx.req, ctx.res, filePath) ? undefined : json(ctx.res, 404, { error: "deployment_site_not_found" });
+}
+
+function deploymentProviders(ctx: RouteContext): void {
+  json(ctx.res, 200, { providers: (all(ctx.database, "SELECT id, workspace_id, kind, name, base_url, credential_ref, created_at, updated_at FROM deployment_providers ORDER BY created_at ASC") as Array<Record<string, unknown>>).map(providerResponse) });
+}
+
+async function createDeploymentProvider(ctx: RouteContext, input: Record<string, unknown>): Promise<void> {
+  const kind = stringField(input.kind) ?? "caprover";
+  const name = stringField(input.name);
+  const baseUrl = stringField(input.baseUrl) ?? stringField(input.base_url);
+  const credential = stringField(input.credential);
+  if (kind !== "caprover" || name === undefined || baseUrl === undefined || credential === undefined) return json(ctx.res, 400, { error: "validation_failed" });
+  const now = ctx.now?.() ?? Date.now();
+  const id = randomUUID();
+  const credentialRef = `deployment-provider:${id}`;
+  await ctx.modelConfigSecrets.set(credentialRef, credential);
+  const workspaceId = defaultWorkspaceId(ctx.database);
+  ctx.database.sqlite.transaction(() => {
+    ctx.database.sqlite.prepare("INSERT INTO deployment_providers (id, workspace_id, kind, name, base_url, credential_ref, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(id, workspaceId, kind, name, baseUrl, credentialRef, now, now);
+    ctx.eventBus.publish({ id: randomUUID(), type: "deployment.provider.created", schemaVersion: 1, workspaceId, payload: { providerId: id, kind, name, baseUrl, hasCredential: true }, createdAt: now });
+  })();
+  json(ctx.res, 201, { provider: providerResponse(get(ctx.database, "SELECT * FROM deployment_providers WHERE id = ?", id) as Record<string, unknown>) });
+}
+
+async function updateDeploymentProvider(ctx: RouteContext, providerId: string, input: Record<string, unknown>): Promise<void> {
+  const existing = get(ctx.database, "SELECT * FROM deployment_providers WHERE id = ?", providerId) as Record<string, unknown> | null;
+  if (existing === null) return json(ctx.res, 404, { error: "deployment_provider_not_found" });
+  const now = ctx.now?.() ?? Date.now();
+  const name = stringField(input.name) ?? String(existing.name);
+  const baseUrl = stringField(input.baseUrl) ?? stringField(input.base_url) ?? String(existing.base_url);
+  const credential = stringField(input.credential);
+  if (credential !== undefined) await ctx.modelConfigSecrets.set(String(existing.credential_ref), credential);
+  const workspaceId = String(existing.workspace_id);
+  ctx.database.sqlite.transaction(() => {
+    ctx.database.sqlite.prepare("UPDATE deployment_providers SET name = ?, base_url = ?, updated_at = ? WHERE id = ?").run(name, baseUrl, now, providerId);
+    ctx.eventBus.publish({ id: randomUUID(), type: "deployment.provider.updated", schemaVersion: 1, workspaceId, payload: { providerId, kind: String(existing.kind), name, baseUrl, hasCredential: true }, createdAt: now });
+  })();
+  json(ctx.res, 200, { provider: providerResponse(get(ctx.database, "SELECT * FROM deployment_providers WHERE id = ?", providerId) as Record<string, unknown>) });
+}
+
+async function deleteDeploymentProvider(ctx: RouteContext, providerId: string): Promise<void> {
+  const existing = get(ctx.database, "SELECT * FROM deployment_providers WHERE id = ?", providerId) as Record<string, unknown> | null;
+  if (existing === null) return json(ctx.res, 404, { error: "deployment_provider_not_found" });
+  const now = ctx.now?.() ?? Date.now();
+  ctx.database.sqlite.transaction(() => {
+    ctx.database.sqlite.prepare("DELETE FROM deployment_providers WHERE id = ?").run(providerId);
+    ctx.eventBus.publish({ id: randomUUID(), type: "deployment.provider.deleted", schemaVersion: 1, workspaceId: String(existing.workspace_id), payload: { providerId, kind: String(existing.kind) }, createdAt: now });
+  })();
+  await ctx.modelConfigSecrets.delete(String(existing.credential_ref)).catch(() => false);
+  json(ctx.res, 200, { ok: true });
+}
+
+function providerResponse(row: Record<string, unknown>): Record<string, unknown> {
+  const { credential_ref: _credentialRef, ...publicRow } = row;
+  void _credentialRef;
+  return { ...publicRow, hasCredential: typeof row.credential_ref === "string" && row.credential_ref.length > 0, masked: typeof row.credential_ref === "string" && row.credential_ref.length > 0 };
+}
+
+async function testDeploymentProvider(ctx: RouteContext, providerId: string): Promise<void> {
+  const result = await ctx.deploymentService.testProvider(providerId);
+  json(ctx.res, result.ok ? 200 : 400, result);
+}
+
+function deploymentKind(value: unknown): DeploymentKind | undefined {
+  return value === "preview-url" || value === "static-site" || value === "source-zip" || value === "container-export" || value === "container-build" || value === "self-hosted" ? value : undefined;
+}
+
 async function testRuntime(ctx: RouteContext, runtimeId: string, input: Record<string, unknown>): Promise<void> {
   const runtime = get(ctx.database, "SELECT * FROM runtimes WHERE id = ?", runtimeId) as Record<string, unknown> | null;
   if (runtime === null) return json(ctx.res, 404, { error: "runtime_not_found" });
@@ -1178,6 +1560,23 @@ async function testRuntime(ctx: RouteContext, runtimeId: string, input: Record<s
   }
   const result = await runRuntimeTest(runtime);
   return json(ctx.res, 200, result);
+}
+
+function runtimeHealth(ctx: RouteContext, runtimeId: string): void {
+  const runtime = get(ctx.database, "SELECT id, kind, name, status, detected_version FROM runtimes WHERE id = ?", runtimeId) as Record<string, unknown> | null;
+  if (runtime === null) return json(ctx.res, 404, { error: "runtime_not_found" });
+  const available = runtimeStatusAvailable(runtime.status);
+  return json(ctx.res, available ? 200 : 503, {
+    ok: available,
+    runtimeId,
+    status: stringField(runtime.status) ?? "unknown",
+    kind: runtime.kind,
+    ...(stringOrNull(runtime.detected_version) !== null ? { version: stringOrNull(runtime.detected_version) } : {})
+  });
+}
+
+function runtimeStatusAvailable(status: unknown): boolean {
+  return status === "available" || status === "connected" || status === "ready";
 }
 
 async function runRuntimeDetection(runtime: Record<string, unknown>): Promise<{ readonly ok: true; readonly detectedPath: string | null; readonly detectedVersion: string | null } | { readonly ok: false; readonly error: string }> {
@@ -1450,9 +1849,110 @@ function artifacts(ctx: RouteContext, url: URL): void {
   const roomId = url.searchParams.get("roomId") ?? undefined;
   const taskId = url.searchParams.get("taskId") ?? undefined;
   const includeDeleted = url.searchParams.get("includeDeleted") === "1" || url.searchParams.get("includeDeleted") === "true";
+  const kind = url.searchParams.get("kind") ?? undefined;
+  const q = url.searchParams.get("q")?.trim() || undefined;
+  const limit = Math.min(Math.max(numberQuery(url, "limit") ?? 100, 1), 500);
   const statusParam = url.searchParams.get("status");
   const status = statusParam === null ? undefined : statusParam.split(",").filter(Boolean) as NonNullable<Parameters<ArtifactService["list"]>[0]>["status"];
-  json(ctx.res, 200, { artifacts: ctx.artifactService.list({ ...(roomId !== undefined ? { roomId } : {}), ...(taskId !== undefined ? { taskId } : {}), ...(status !== undefined ? { status } : {}), includeDeleted }) });
+  const clauses: string[] = [];
+  const params: unknown[] = [];
+  if (roomId !== undefined) { clauses.push("a.room_id = ?"); params.push(roomId); }
+  if (taskId !== undefined) { clauses.push("a.task_id = ?"); params.push(taskId); }
+  if (kind !== undefined) { clauses.push("a.kind = ?"); params.push(kind); }
+  if (status !== undefined && status.length > 0) { clauses.push(`a.status IN (${status.map(() => "?").join(", ")})`); params.push(...status); }
+  if (includeDeleted !== true) clauses.push("a.deleted_at IS NULL");
+  if (q !== undefined) {
+    clauses.push("(a.title LIKE ? OR a.metadata LIKE ? OR a.id LIKE ? OR af.path LIKE ?)");
+    params.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`);
+  }
+  const where = clauses.length > 0 ? ` WHERE ${clauses.join(" AND ")}` : "";
+  const rows = all(
+    ctx.database,
+    `SELECT a.*,
+            (
+              SELECT af_primary.path
+              FROM artifact_files af_primary
+              WHERE af_primary.artifact_id = a.id
+              ORDER BY af_primary.path ASC, af_primary.created_at ASC
+              LIMIT 1
+            ) AS filename,
+            (
+              SELECT af_primary.mime_type
+              FROM artifact_files af_primary
+              WHERE af_primary.artifact_id = a.id
+              ORDER BY af_primary.path ASC, af_primary.created_at ASC
+              LIMIT 1
+            ) AS mime_type,
+            (
+              SELECT af_primary.size_bytes
+              FROM artifact_files af_primary
+              WHERE af_primary.artifact_id = a.id
+              ORDER BY af_primary.path ASC, af_primary.created_at ASC
+              LIMIT 1
+            ) AS size_bytes,
+            (SELECT MAX(version) FROM artifact_versions av WHERE av.artifact_id = a.id) AS latest_version
+     FROM artifacts a
+     LEFT JOIN artifact_files af ON af.artifact_id = a.id
+     ${where}
+     GROUP BY a.id
+     ORDER BY a.updated_at DESC, a.created_at DESC, a.id ASC
+     LIMIT ?`,
+    ...params,
+    limit
+  ) as Record<string, unknown>[];
+  json(ctx.res, 200, { artifacts: rows.map(artifactLibraryRow) });
+}
+
+function artifactLibraryRow(row: Record<string, unknown>): Record<string, unknown> {
+  const metadata = parseJsonField(row.metadata, {}) as Record<string, unknown>;
+  const filename = stringField(row.filename) ?? stringField(metadata.filename);
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    roomId: row.room_id ?? undefined,
+    taskId: row.task_id ?? undefined,
+    runId: row.run_id ?? undefined,
+    messageId: row.message_id ?? undefined,
+    type: row.type,
+    kind: row.kind ?? undefined,
+    title: row.title,
+    ...(filename !== undefined ? { filename } : {}),
+    latestVersion: typeof row.latest_version === "number" ? row.latest_version : 0,
+    status: row.status,
+    createdBy: row.created_by,
+    metadata,
+    ...(stringField(row.mime_type) !== undefined ? { mimeType: stringField(row.mime_type) } : {}),
+    ...(typeof row.size_bytes === "number" ? { sizeBytes: row.size_bytes } : {}),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    archivedAt: row.archived_at ?? undefined,
+    deletedAt: row.deleted_at ?? undefined
+  };
+}
+
+async function pptProxy(ctx: RouteContext, port: number, proxiedPath: string): Promise<void> {
+  if (!Number.isInteger(port) || !ctx.pptPreviewBridge.isActivePreviewPort(port)) return json(ctx.res, 403, { error: "inactive_ppt_preview_port" });
+  const requestUrl = new URL(ctx.req.url ?? "/", "http://127.0.0.1");
+  const upstreamPath = `/${proxiedPath}${requestUrl.search}`;
+  const upstream = await fetch(`http://127.0.0.1:${port}${upstreamPath}`, { method: ctx.req.method ?? "GET", redirect: "manual" });
+  const headers: Record<string, string> = {};
+  upstream.headers.forEach((value, key) => {
+    if (key.toLowerCase() === "location") headers[key] = rewritePptProxyLocation(value, port);
+    else if (!["content-encoding", "transfer-encoding", "content-length"].includes(key.toLowerCase())) headers[key] = value;
+  });
+  const contentType = upstream.headers.get("content-type") ?? "";
+  if (contentType.includes("text/html")) {
+    const html = injectPptNavigationGuard(await upstream.text(), port);
+    headers["content-type"] = contentType;
+    headers["content-length"] = String(Buffer.byteLength(html));
+    ctx.res.writeHead(upstream.status, headers);
+    ctx.res.end(html);
+    return;
+  }
+  const buffer = Buffer.from(await upstream.arrayBuffer());
+  headers["content-length"] = String(buffer.byteLength);
+  ctx.res.writeHead(upstream.status, headers);
+  ctx.res.end(buffer);
 }
 
 function artifactFileRaw(ctx: RouteContext, artifactId: string, path: string, download: boolean): void {
@@ -1467,6 +1967,117 @@ function artifactFileRaw(ctx: RouteContext, artifactId: string, path: string, do
     "x-content-type-options": "nosniff"
   });
   ctx.res.end(buffer);
+}
+
+async function patchArtifact(ctx: RouteContext, artifactId: string, input: Record<string, unknown>): Promise<void> {
+  const content = stringField(input.content);
+  if (content === undefined) return json(ctx.res, 400, { error: "validation_failed", message: "content is required" });
+  try {
+    const service = createArtifactVersioningService({ database: ctx.database, eventBus: ctx.eventBus, ...(ctx.now !== undefined ? { now: ctx.now } : {}) });
+    const version = await service.createVersion({ artifactId, content, filename: stringField(input.filename), createdBy: "user", message: stringField(input.message) });
+    return json(ctx.res, 200, { version });
+  } catch (error) {
+    return json(ctx.res, 404, { error: "artifact_not_found", message: errorMessage(error) });
+  }
+}
+
+async function artifactVersions(ctx: RouteContext, artifactId: string): Promise<void> {
+  const service = createArtifactVersioningService({ database: ctx.database, eventBus: ctx.eventBus, ...(ctx.now !== undefined ? { now: ctx.now } : {}) });
+  json(ctx.res, 200, { versions: await service.listVersions(artifactId) });
+}
+
+function artifactVersion(ctx: RouteContext, artifactId: string, version: number): void {
+  if (!Number.isInteger(version)) return json(ctx.res, 400, { error: "invalid_version" });
+  const row = get(ctx.database, "SELECT * FROM artifact_versions WHERE artifact_id = ? AND version = ?", artifactId, version) as Record<string, unknown> | null;
+  if (row === null) return json(ctx.res, 404, { error: "artifact_version_not_found" });
+  json(ctx.res, 200, { version: row });
+}
+
+async function startArtifactPptPreview(ctx: RouteContext, artifactId: string): Promise<void> {
+  const row = get(
+    ctx.database,
+    `SELECT a.kind, f.path, f.content_path, f.binary
+     FROM artifacts a
+     INNER JOIN artifact_files f ON f.artifact_id = a.id
+     WHERE a.id = ? AND a.deleted_at IS NULL
+     ORDER BY f.path ASC
+     LIMIT 1`,
+    artifactId
+  ) as Record<string, unknown> | null;
+  if (row === null) return json(ctx.res, 404, { error: "artifact_not_found" });
+  if (row.kind !== "presentation_pptx" || row.binary !== 1 || typeof row.content_path !== "string") {
+    return json(ctx.res, 400, { error: "artifact_not_pptx" });
+  }
+  try {
+    const session = await ctx.pptPreviewBridge.start(row.content_path);
+    return json(ctx.res, 200, {
+      port: session.port,
+      pid: session.pid,
+      status: session.status,
+      previewUrl: `/api/ppt-proxy/${session.port}/`
+    });
+  } catch (error) {
+    return json(ctx.res, 503, { error: "ppt_preview_start_failed", message: errorMessage(error) });
+  }
+}
+
+async function stopArtifactPptPreview(ctx: RouteContext, port: number): Promise<void> {
+  if (!Number.isInteger(port)) return json(ctx.res, 400, { error: "invalid_port" });
+  await ctx.pptPreviewBridge.stop(port);
+  return json(ctx.res, 200, { ok: true });
+}
+
+async function artifactVersionDiff(ctx: RouteContext, artifactId: string, fromVersion: number, toVersion: number): Promise<void> {
+  if (!Number.isInteger(fromVersion) || !Number.isInteger(toVersion)) return json(ctx.res, 400, { error: "invalid_version" });
+  const service = createArtifactVersioningService({ database: ctx.database, eventBus: ctx.eventBus, ...(ctx.now !== undefined ? { now: ctx.now } : {}) });
+  try {
+    const diff = await service.diffVersions(artifactId, fromVersion, toVersion);
+    ctx.res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-cache" });
+    ctx.res.end(diff);
+  } catch (error) {
+    json(ctx.res, 404, { error: "artifact_version_not_found", message: errorMessage(error) });
+  }
+}
+
+async function restoreArtifactVersion(ctx: RouteContext, artifactId: string, version: number): Promise<void> {
+  if (!Number.isInteger(version)) return json(ctx.res, 400, { error: "invalid_version" });
+  const service = createArtifactVersioningService({ database: ctx.database, eventBus: ctx.eventBus, ...(ctx.now !== undefined ? { now: ctx.now } : {}) });
+  try {
+    json(ctx.res, 200, { version: await service.restoreVersion(artifactId, version) });
+  } catch (error) {
+    json(ctx.res, 404, { error: "artifact_version_not_found", message: errorMessage(error) });
+  }
+}
+
+function downloadArtifact(ctx: RouteContext, artifactId: string): void {
+  const row = get(
+    ctx.database,
+    `SELECT a.title, a.metadata, f.path, f.new_content, f.content_path, f.binary, f.mime_type
+     FROM artifacts a
+     LEFT JOIN artifact_files f ON f.artifact_id = a.id
+     WHERE a.id = ?
+     ORDER BY f.path ASC
+     LIMIT 1`,
+    artifactId
+  ) as Record<string, unknown> | null;
+  if (row === null || row.path === null || row.path === undefined) return json(ctx.res, 404, { error: "artifact_not_found" });
+  const path = String(row.path);
+  const filename = artifactFilename(row, path);
+  const mimeType = stringField(row.mime_type) ?? artifactContentTypeFor(path);
+  const buffer = row.binary === 1 && typeof row.content_path === "string" ? readFileSync(row.content_path) : Buffer.from(String(row.new_content ?? ""), "utf8");
+  ctx.res.writeHead(200, {
+    "content-type": mimeType,
+    "content-length": String(buffer.byteLength),
+    "content-disposition": `attachment; filename="${safeDownloadName(filename)}"`,
+    "cache-control": "no-cache",
+    "x-content-type-options": "nosniff"
+  });
+  ctx.res.end(buffer);
+}
+
+function artifactFilename(row: Record<string, unknown>, fallback: string): string {
+  const metadata = parseJsonField(row.metadata, {}) as Record<string, unknown>;
+  return typeof metadata.filename === "string" ? metadata.filename : fallback;
 }
 
 const taskDeliveryReportTemplateVersion = 2;
@@ -1513,17 +2124,6 @@ type TaskReportEvidenceCounts = {
   readonly reviewDecisions: number;
   readonly unresolvedComments: number;
 };
-
-function taskDeliveryReportMarkdown(task: ReturnType<TaskService["list"]>[number]): string {
-  return taskDeliveryReportMarkdownFromEvidence({
-    id: task.id,
-    title: task.title,
-    description: task.description,
-    status: task.status,
-    assignee: task.assigneeRoleId ?? task.assigneeAgentId ?? "Unassigned",
-    sourceRunId: task.sourceRunId
-  });
-}
 
 function taskDeliveryReportMarkdownFromEvidence(input: {
   readonly id: string;
@@ -2278,6 +2878,31 @@ function messages(ctx: RouteContext, url: URL, roomIdOverride?: string): void {
   });
 }
 
+function pinMessage(ctx: RouteContext, messageId: string, roomId?: string): void {
+  const row = get(ctx.database, "SELECT workspace_id, room_id FROM messages WHERE id = ? AND deleted_at IS NULL", messageId) as { readonly workspace_id: string; readonly room_id: string } | null;
+  if (row === null) return json(ctx.res, 404, { error: "message_not_found" });
+  if (roomId !== undefined && row.room_id !== roomId) return json(ctx.res, 404, { error: "message_not_found" });
+  const now = ctx.now?.() ?? Date.now();
+  ctx.database.sqlite.transaction(() => {
+    ctx.database.sqlite.prepare("UPDATE messages SET pinned_at = ?, updated_at = ? WHERE id = ?").run(now, now, messageId);
+    ctx.eventBus.publish({ id: randomUUID(), type: "message.updated", schemaVersion: 1, workspaceId: row.workspace_id, roomId: row.room_id, payload: { messageId, pinnedAt: now }, createdAt: now });
+    ctx.eventBus.publish({ id: randomUUID(), type: "message.pinned", schemaVersion: 1, workspaceId: row.workspace_id, roomId: row.room_id, payload: { roomId: row.room_id, messageId, pinnedAt: now }, createdAt: now });
+  })();
+  json(ctx.res, 200, { ok: true, messageId, pinnedAt: now });
+}
+
+function unpinMessage(ctx: RouteContext, messageId: string, roomId?: string): void {
+  const row = get(ctx.database, "SELECT workspace_id, room_id FROM messages WHERE id = ? AND deleted_at IS NULL", messageId) as { readonly workspace_id: string; readonly room_id: string } | null;
+  if (row === null) return json(ctx.res, 404, { error: "message_not_found" });
+  if (roomId !== undefined && row.room_id !== roomId) return json(ctx.res, 404, { error: "message_not_found" });
+  const now = ctx.now?.() ?? Date.now();
+  ctx.database.sqlite.transaction(() => {
+    ctx.database.sqlite.prepare("UPDATE messages SET pinned_at = NULL, updated_at = ? WHERE id = ?").run(now, messageId);
+    ctx.eventBus.publish({ id: randomUUID(), type: "message.unpinned", schemaVersion: 1, workspaceId: row.workspace_id, roomId: row.room_id, payload: { roomId: row.room_id, messageId }, createdAt: now });
+  })();
+  json(ctx.res, 200, { ok: true, messageId });
+}
+
 /**
  * Hydrate a raw `messages` row with its `message_parts` so callers see the actual text content
  * without a follow-up round trip. Concatenates all `text` and `code` parts in seq order; keeps
@@ -2544,6 +3169,14 @@ function deleteRole(ctx: RouteContext, roleId: string): void {
 
 function agentBindings(ctx: RouteContext, url: URL): void {
   const workspaceId = url.searchParams.get("workspaceId");
+  const includeDisabled = url.searchParams.get("includeDisabled") === "true" || url.searchParams.get("includeDisabled") === "1";
+  const where: string[] = [];
+  const params: unknown[] = [];
+  if (workspaceId !== null) {
+    where.push("agent_bindings.workspace_id = ?");
+    params.push(workspaceId);
+  }
+  if (!includeDisabled) where.push("agent_bindings.disabled_at IS NULL");
   const rows = all(
     ctx.database,
     `SELECT
@@ -2564,9 +3197,9 @@ function agentBindings(ctx: RouteContext, url: URL): void {
     LEFT JOIN roles ON roles.id = agent_bindings.role_id
     LEFT JOIN runtimes ON runtimes.id = agent_bindings.runtime_id
     LEFT JOIN model_configs ON model_configs.id = agent_bindings.model_config_id
-    ${workspaceId === null ? "" : "WHERE agent_bindings.workspace_id = ?"}
+    ${where.length === 0 ? "" : `WHERE ${where.join(" AND ")}`}
     ORDER BY agent_bindings.created_at ASC`,
-    ...(workspaceId === null ? [] : [workspaceId])
+    ...params
   ).map((row) => normalizeAgentBindingRow(row as Record<string, unknown>));
   json(ctx.res, 200, { agentBindings: rows });
 }
@@ -2680,6 +3313,105 @@ function deleteAgentBinding(ctx: RouteContext, bindingId: string): void {
   json(ctx.res, 200, { ok: true });
 }
 
+function agentContacts(ctx: RouteContext): void {
+  const rows = all(
+    ctx.database,
+    `SELECT ab.id, ab.role_id, ab.runtime_id, ab.model_config_id, ab.contact_name, ab.avatar_url, ab.contact_description, ab.disabled_at, ab.updated_at,
+            r.name AS role_name, r.capabilities, rt.kind AS runtime_kind, rt.status AS runtime_status,
+            (SELECT MAX(started_at) FROM runs WHERE runs.agent_id = ab.id OR runs.agent_id = r.id) AS last_used_at,
+            (SELECT COUNT(*) FROM runs WHERE (runs.agent_id = ab.id OR runs.agent_id = r.id) AND runs.status IN ('running', 'queued', 'starting')) AS busy_count
+     FROM agent_bindings ab
+     JOIN roles r ON r.id = ab.role_id
+     JOIN runtimes rt ON rt.id = ab.runtime_id
+     WHERE ab.disabled_at IS NULL
+     ORDER BY ab.created_at DESC`
+  ) as Array<Record<string, unknown>>;
+  json(ctx.res, 200, { contacts: rows.map(contactRow) });
+}
+
+function createCustomAgent(ctx: RouteContext, input: Record<string, unknown>): void {
+  const name = stringField(input.name);
+  const runtimeId = stringField(input.runtimeId);
+  const systemPrompt = stringField(input.systemPrompt);
+  if (name === undefined || runtimeId === undefined || systemPrompt === undefined) return json(ctx.res, 400, { error: "validation_failed", message: "name, runtimeId, and systemPrompt are required" });
+  if (get(ctx.database, "SELECT id FROM agent_bindings WHERE contact_name = ? AND disabled_at IS NULL", name) !== null) return json(ctx.res, 400, { error: "agent_name_conflict" });
+  const runtime = get(ctx.database, "SELECT * FROM runtimes WHERE id = ?", runtimeId) as Record<string, unknown> | null;
+  if (runtime === null) return json(ctx.res, 404, { error: "runtime_not_found" });
+  const now = ctx.now?.() ?? Date.now();
+  const workspaceId = stringField(input.workspaceId) ?? stringField(runtime.workspace_id) ?? "default-workspace";
+  const roleId = randomUUID();
+  const bindingId = randomUUID();
+  const capabilities = JSON.stringify(Array.isArray(input.capabilities) ? input.capabilities.filter((value): value is string => typeof value === "string") : []);
+  const skillIds = JSON.stringify(Array.isArray(input.skillIds) ? input.skillIds.filter((value): value is string => typeof value === "string") : []);
+  ctx.database.sqlite.transaction(() => {
+    ctx.database.sqlite.prepare("INSERT INTO roles (id, workspace_id, name, avatar, description, prompt, capabilities, default_permission_profile_id, tags, is_builtin, source_path, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, 0, NULL, NULL, ?, ?)").run(roleId, workspaceId, name, stringOrNull(input.avatarUrl), stringOrNull(input.description), systemPrompt, capabilities, skillIds, now, now);
+    ctx.database.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at, avatar_url, contact_name, contact_description) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)").run(bindingId, workspaceId, roleId, runtimeId, stringOrNull(input.modelConfigId), now, now, stringOrNull(input.avatarUrl), name, stringOrNull(input.description));
+    ctx.eventBus.publish({ id: randomUUID(), type: "agent_binding.created", schemaVersion: 1, workspaceId, payload: { bindingId, roleId, runtimeId, workspaceId }, createdAt: now });
+    ctx.eventBus.publish({ id: randomUUID(), type: "agent.contact.updated", schemaVersion: 1, workspaceId, payload: { agentBindingId: bindingId, displayName: name, avatarUrl: stringOrNull(input.avatarUrl), description: stringOrNull(input.description) }, createdAt: now });
+  })();
+  json(ctx.res, 201, { agentBindingId: bindingId, roleId });
+}
+
+function updateCustomAgent(ctx: RouteContext, bindingId: string, input: Record<string, unknown>): void {
+  const existing = get(ctx.database, "SELECT ab.*, r.id AS role_id FROM agent_bindings ab JOIN roles r ON r.id = ab.role_id WHERE ab.id = ?", bindingId) as Record<string, unknown> | null;
+  if (existing === null) return json(ctx.res, 404, { error: "agent_binding_not_found" });
+  const now = ctx.now?.() ?? Date.now();
+  const name = stringField(input.name) ?? stringField(existing.contact_name) ?? "Agent";
+  const description = Object.prototype.hasOwnProperty.call(input, "description") ? stringOrNull(input.description) : stringOrNull(existing.contact_description);
+  const avatarUrl = Object.prototype.hasOwnProperty.call(input, "avatarUrl") ? stringOrNull(input.avatarUrl) : stringOrNull(existing.avatar_url);
+  const workspaceId = stringField(existing.workspace_id) ?? "default-workspace";
+  ctx.database.sqlite.transaction(() => {
+    ctx.database.sqlite.prepare("UPDATE agent_bindings SET contact_name = ?, avatar_url = ?, contact_description = ?, updated_at = ? WHERE id = ?").run(name, avatarUrl, description, now, bindingId);
+    ctx.database.sqlite.prepare("UPDATE roles SET name = COALESCE(?, name), description = COALESCE(?, description), avatar = COALESCE(?, avatar), prompt = COALESCE(?, prompt), updated_at = ? WHERE id = ?").run(name, description, avatarUrl, stringField(input.systemPrompt), now, String(existing.role_id));
+    ctx.eventBus.publish({ id: randomUUID(), type: "agent.contact.updated", schemaVersion: 1, workspaceId, payload: { agentBindingId: bindingId, displayName: name, avatarUrl, description }, createdAt: now });
+  })();
+  json(ctx.res, 200, { agentBindingId: bindingId });
+}
+
+function deleteCustomAgent(ctx: RouteContext, bindingId: string, hard: boolean): void {
+  const existing = get(ctx.database, "SELECT * FROM agent_bindings WHERE id = ?", bindingId) as Record<string, unknown> | null;
+  if (existing === null) return json(ctx.res, 404, { error: "agent_binding_not_found" });
+  const participantCount = scalar(ctx.database, "SELECT COUNT(*) AS count FROM room_participants WHERE participant_id = ? OR agent_binding_id = ?", bindingId, bindingId);
+  if (hard && participantCount > 0) return json(ctx.res, 409, { error: "agent_binding_has_room_participants", participantCount });
+  const now = ctx.now?.() ?? Date.now();
+  const workspaceId = stringField(existing.workspace_id) ?? "default-workspace";
+  ctx.database.sqlite.transaction(() => {
+    if (hard) ctx.database.sqlite.prepare("DELETE FROM agent_bindings WHERE id = ?").run(bindingId);
+    else ctx.database.sqlite.prepare("UPDATE agent_bindings SET disabled_at = ?, updated_at = ? WHERE id = ?").run(now, now, bindingId);
+    ctx.eventBus.publish({ id: randomUUID(), type: "agent.contact.updated", schemaVersion: 1, workspaceId, payload: { agentBindingId: bindingId, displayName: stringField(existing.contact_name) ?? bindingId, disabledAt: now }, createdAt: now });
+  })();
+  json(ctx.res, 200, { ok: true, agentBindingId: bindingId, hard });
+}
+
+function parseCreateAgent(ctx: RouteContext, input: Record<string, unknown>): void {
+  const text = stringField(input.text) ?? "";
+  const lower = text.toLowerCase();
+  const runtime = (all(ctx.database, "SELECT id, kind, name FROM runtimes ORDER BY created_at ASC") as Array<Record<string, unknown>>)
+    .find((row) => lower.includes(String(row.kind).toLowerCase()) || lower.includes(String(row.name).toLowerCase()));
+  const skillIds = (all(ctx.database, "SELECT id, name FROM skills ORDER BY name ASC") as Array<Record<string, unknown>>)
+    .filter((row) => lower.includes(String(row.name).toLowerCase()))
+    .map((row) => String(row.id));
+  const name = lower.includes("frontend") || lower.includes("front-end") ? "Frontend Expert Agent" : "Custom Agent";
+  json(ctx.res, 200, { draft: { name, ...(runtime !== undefined ? { runtimeId: runtime.id } : {}), skillIds, systemPrompt: "" } });
+}
+
+function contactRow(row: Record<string, unknown>): Record<string, unknown> {
+  return {
+    agentBindingId: row.id,
+    displayName: stringField(row.contact_name) ?? stringField(row.role_name) ?? String(row.id),
+    ...(stringField(row.avatar_url) !== undefined ? { avatarUrl: stringField(row.avatar_url) } : {}),
+    roleId: row.role_id,
+    runtimeId: row.runtime_id,
+    ...(stringField(row.model_config_id) !== undefined ? { modelConfigId: stringField(row.model_config_id) } : {}),
+    runtimeKind: row.runtime_kind,
+    capabilities: parseJsonField(row.capabilities, []),
+    status: Number(row.busy_count ?? 0) > 0 ? "busy" : runtimeStatusAvailable(row.runtime_status) ? "available" : "offline",
+    ...(typeof row.disabled_at === "number" ? { disabledAt: row.disabled_at, isDisabled: true } : {}),
+    ...(stringField(row.contact_description) !== undefined ? { description: stringField(row.contact_description) } : {}),
+    ...(typeof row.last_used_at === "number" ? { lastUsedAt: row.last_used_at } : {})
+  };
+}
+
 function agentBindingRow(options: { readonly id: string; readonly workspaceId: string | null; readonly role: Record<string, unknown>; readonly runtime: Record<string, unknown>; readonly modelConfig: Record<string, unknown> | null; readonly overridePermissionProfileId: string | undefined; readonly now: number }): { readonly id: string; readonly workspace_id: string | null; readonly role_id: string; readonly runtime_id: string; readonly model_config_id: string | null; readonly override_permission_profile_id: string | null; readonly created_at: number; readonly updated_at: number } {
   return {
     id: options.id,
@@ -2710,6 +3442,7 @@ function normalizeAgentBindingRow(row: Record<string, unknown>): Record<string, 
     runtimeId: row.runtime_id,
     modelConfigId: row.model_config_id,
     overridePermissionProfileId: row.override_permission_profile_id,
+    ...(typeof row.disabled_at === "number" ? { disabledAt: row.disabled_at, isDisabled: true } : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -3251,6 +3984,11 @@ const WEB_API_PREFIXES = [
   "/permissions",
   "/interventions",
   "/artifacts",
+  "/deployments",
+  "/deployment-providers",
+  "/preview",
+  "/sites",
+  "/api",
   "/debug",
   "/healthz",
   "/openapi.json",
@@ -3319,6 +4057,14 @@ function serveStaticFile(req: IncomingMessage, res: ServerResponse, filePath: st
   }
 }
 
+function containedPath(root: string, childPath: string): string | undefined {
+  const resolvedRoot = resolvePath(root);
+  const candidate = resolvePath(resolvedRoot, childPath);
+  const rel = relative(resolvedRoot, candidate);
+  if (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))) return candidate;
+  return undefined;
+}
+
 function hasFileExtension(pathname: string): boolean {
   return extname(pathname).length > 0;
 }
@@ -3346,6 +4092,7 @@ function contentTypeFor(filePath: string): string {
   if (ext === ".webmanifest") return "application/manifest+json; charset=utf-8";
   if (ext === ".woff2") return "font/woff2";
   if (ext === ".woff") return "font/woff";
+  if (ext === ".zip") return "application/zip";
   return "application/octet-stream";
 }
 

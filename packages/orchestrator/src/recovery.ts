@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import type { AgentHubDatabase } from "@agenthub/db";
 import type { EventBus } from "@agenthub/bus";
 
@@ -28,6 +30,8 @@ type TerminalDelegatedTaskRunRow = {
   readonly task_status: TaskStatus;
   readonly expects_review: number;
   readonly room_mode: string;
+  readonly workspace_id: string;
+  readonly room_id: string;
 };
 
 export class StartupRecovery {
@@ -69,6 +73,8 @@ export function reconcileTerminalDelegatedTaskRuns(input: { readonly database: A
               r.task_id AS task_id,
               t.status AS task_status,
               t.expects_review AS expects_review,
+              t.workspace_id AS workspace_id,
+              t.room_id AS room_id,
               rooms.mode AS room_mode
        FROM runs r
        INNER JOIN tasks t ON t.id = r.task_id
@@ -91,7 +97,16 @@ export function reconcileTerminalDelegatedTaskRuns(input: { readonly database: A
     checkedRunIds.push(row.run_id);
     const requiresReview = row.room_mode === "team" || row.expects_review !== 0;
     if (row.room_mode === "team" && row.expects_review === 0) {
-      input.database.sqlite.prepare("UPDATE tasks SET expects_review = 1, updated_at = ? WHERE id = ? AND expects_review = 0").run(now, row.task_id);
+      input.database.sqlite.transaction(() => {
+        input.database.sqlite.prepare("UPDATE tasks SET expects_review = 1, updated_at = ? WHERE id = ? AND expects_review = 0").run(now, row.task_id);
+        input.eventBus.publish(taskEvent("task.status.changed", row.workspace_id, row.room_id, row.task_id, {
+          taskId: row.task_id,
+          prevStatus: row.task_status,
+          nextStatus: row.task_status,
+          reason: "startup_reconciliation",
+          expectsReview: true
+        }, now));
+      })();
     }
 
     if (row.task_status === "pending") {
@@ -134,6 +149,10 @@ function pushUnique(target: string[], value: string): void {
   if (!target.includes(value)) target.push(value);
 }
 
+function taskEvent(type: "task.status.changed", workspaceId: string, roomId: string, taskId: string, payload: Record<string, unknown>, createdAt: number) {
+  return { id: randomUUID(), type, schemaVersion: 1, workspaceId, roomId, taskId, payload, createdAt };
+}
+
 export class ReclaimStaleClaimedRun {
   constructor(
     private readonly database: AgentHubDatabase,
@@ -174,7 +193,10 @@ export class ReclaimStaleClaimedRun {
       return;
     }
     if (adapter.crashRecovery === "restartable") {
-      this.lifecycle.fail(null, run.id, "daemon_restarted", "transient");
+      this.database.sqlite.transaction(() => {
+        this.lifecycle.fail(null, run.id, "daemon_restarted", "transient");
+        this.enqueueRestartRecoveryWake(run);
+      })();
       return;
     }
 
@@ -193,5 +215,17 @@ export class ReclaimStaleClaimedRun {
     } catch (error) {
       this.lifecycle.fail(null, run.id, "reclaim_attach_failed", "fresh_session_required", error instanceof Error ? error.message : String(error));
     }
+  }
+
+  private enqueueRestartRecoveryWake(run: RunRow): void {
+    if (run.room_id === null || run.agent_id === null) return;
+    const payload = JSON.stringify({ runId: run.id });
+    const existing = this.database.sqlite
+      .prepare("SELECT id FROM wake_outbox WHERE room_id = ? AND agent_id = ? AND reason = 'restart_recovery' AND payload = ? AND status IN ('pending', 'dispatching', 'dispatched') LIMIT 1")
+      .get(run.room_id, run.agent_id, payload);
+    if (existing !== undefined) return;
+    this.database.sqlite
+      .prepare("INSERT INTO wake_outbox (id, room_id, agent_id, reason, payload, status, attempt_count, max_attempts, created_at, dispatch_after) VALUES (?, ?, ?, 'restart_recovery', ?, 'pending', 0, 3, ?, NULL)")
+      .run(randomUUID(), run.room_id, run.agent_id, payload, this.now());
   }
 }

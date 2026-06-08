@@ -14,6 +14,8 @@ import {
   TextField
 } from "@heroui/react";
 import { useRoomCreationOptions, type AgentBindingSummary } from "../hooks/useRoomCreationOptions.ts";
+import type { AgentContactViewModel } from "../types.ts";
+import { normalizeAgentContacts } from "./rail/RailViews.tsx";
 
 export type RoomMode = "solo" | "assisted" | "squad" | "team";
 export type RoomParticipantRole = "observer" | "reviewer" | "specialist";
@@ -22,7 +24,8 @@ export type RoomPresence = "observing" | "active";
 export type LegacyAgentParticipant = {
   type: "agent";
   agentId: string;
-  role: RoomParticipantRole;
+  agentBindingId?: string;
+  role: V1RoomParticipantRole;
   defaultPresence: RoomPresence;
 };
 export type V1RoomParticipant = {
@@ -37,9 +40,27 @@ export type CreateRoomInput = {
   title: string;
   mode: RoomMode;
   primaryAgentId: string;
+  agentBindingId?: string;
   leaderRoleId?: string;
   skillIds?: string[];
   participants: Array<LegacyAgentParticipant | V1RoomParticipant>;
+  participantSkillAssignments?: ParticipantSkillAssignment[];
+};
+
+export type ParticipantSkillAssignment = {
+  participantId: string;
+  skillIds: string[];
+  mode?: "add" | "restrict";
+};
+
+export type ContactFirstParticipantConfig = {
+  agentBindingId: string;
+  roleId?: string;
+  runtimeId?: string;
+  runtimeKind?: string;
+  modelConfigId?: string;
+  defaultPresence?: RoomPresence;
+  skillIds?: readonly string[];
 };
 
 export const ROOM_MODE_OPTIONS: ReadonlyArray<{ value: RoomMode; title: string; description: string }> = [
@@ -157,6 +178,75 @@ export function buildCreateRoomInput(input: {
     participants,
     ...selectedSkills
   };
+}
+
+export function defaultRoomModeForSelectedContacts(selectedCount: number, currentMode: RoomMode): RoomMode {
+  if (selectedCount === 1) return "solo";
+  if (selectedCount > 1 && (currentMode === "team" || currentMode === "squad")) return currentMode;
+  if (selectedCount > 1) return "assisted";
+  return currentMode;
+}
+
+export function buildContactFirstCreateRoomInput(input: {
+  readonly title: string;
+  readonly mode: RoomMode;
+  readonly contacts: readonly AgentContactViewModel[];
+  readonly skillIds?: readonly string[];
+  readonly participantConfigs?: readonly ContactFirstParticipantConfig[];
+  readonly resolvedBindingIds?: Readonly<Record<string, string>>;
+}): CreateRoomInput {
+  const contactsById = new Map<string, AgentContactViewModel>();
+  for (const contact of input.contacts) contactsById.set(contact.agentBindingId, contact);
+  const contacts = Array.from(contactsById.values());
+  const primary = contacts[0];
+  if (primary === undefined) throw new Error("Pick at least one contact.");
+  const configById = new Map<string, ContactFirstParticipantConfig>();
+  for (const config of input.participantConfigs ?? []) configById.set(config.agentBindingId, config);
+  const mode = defaultRoomModeForSelectedContacts(contacts.length, input.mode);
+  const skillIds = Array.from(new Set(input.skillIds ?? [])).filter((id) => id.length > 0);
+  const primaryConfig = configById.get(primary.agentBindingId);
+  const primaryBindingId = input.resolvedBindingIds?.[primary.agentBindingId] ?? primary.agentBindingId;
+  const leaderRoleId = mode === "team" || mode === "squad" ? primaryConfig?.roleId ?? primary.roleId : undefined;
+  const participantRecords = contacts.flatMap((contact, index): LegacyAgentParticipant[] => {
+    const config = configById.get(contact.agentBindingId);
+    const participantId = input.resolvedBindingIds?.[contact.agentBindingId] ?? contact.agentBindingId;
+    const defaultPresence = config?.defaultPresence ?? "active";
+    const configSkillIds = uniqueStrings(config?.skillIds ?? []);
+    const needsExplicitPrimary = index === 0 && (defaultPresence !== "active" || configSkillIds.length > 0 || participantId !== contact.agentBindingId);
+    if (mode === "solo" && !needsExplicitPrimary) return [];
+    if (index === 0 && !needsExplicitPrimary) return [];
+    return [{
+      type: "agent",
+      agentId: participantId,
+      agentBindingId: participantId,
+      role: index === 0 ? "primary" : "teammate",
+      defaultPresence
+    }];
+  });
+  const participantSkillAssignments = contacts.flatMap((contact): ParticipantSkillAssignment[] => {
+    const config = configById.get(contact.agentBindingId);
+    const configSkillIds = uniqueStrings(config?.skillIds ?? []);
+    if (configSkillIds.length === 0) return [];
+    return [{
+      participantId: input.resolvedBindingIds?.[contact.agentBindingId] ?? contact.agentBindingId,
+      skillIds: configSkillIds,
+      mode: "add"
+    }];
+  });
+  return {
+    title: input.title.trim() || `Chat with ${primary.displayName}`,
+    mode,
+    primaryAgentId: primaryBindingId,
+    agentBindingId: primaryBindingId,
+    ...(leaderRoleId !== undefined ? { leaderRoleId } : {}),
+    ...(skillIds.length > 0 ? { skillIds } : {}),
+    participants: participantRecords,
+    ...(participantSkillAssignments.length > 0 ? { participantSkillAssignments } : {})
+  };
+}
+
+function uniqueStrings(values: readonly string[]): string[] {
+  return Array.from(new Set(values)).filter((id) => id.length > 0);
 }
 
 interface NewRoomDialogProps {
@@ -345,6 +435,90 @@ export function RoleSelect({
   );
 }
 
+export function ContactFirstPicker({
+  contacts,
+  selectedIds,
+  loading,
+  error,
+  onToggle
+}: {
+  readonly contacts: readonly AgentContactViewModel[];
+  readonly selectedIds: ReadonlySet<string>;
+  readonly loading: boolean;
+  readonly error?: string | undefined;
+  readonly onToggle: (agentBindingId: string) => void;
+}) {
+  const sorted = [...contacts].sort((a, b) => contactStatusRank(a.status) - contactStatusRank(b.status) || a.displayName.localeCompare(b.displayName));
+  return (
+    <section className="rounded-2xl border border-border bg-overlay p-4 shadow-sm">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold">Contacts</h3>
+          <p className="text-xs text-muted">Pick one or more agent contacts first, then adjust mode or advanced configuration.</p>
+        </div>
+        <Chip size="sm" variant="soft" color={selectedIds.size > 0 ? "accent" : "default"}>
+          {selectedIds.size} selected
+        </Chip>
+      </div>
+      {error ? <p className="mb-2 text-xs text-danger">{error}</p> : null}
+      {loading ? <p className="mb-2 text-xs text-muted">Loading contacts...</p> : null}
+      {sorted.length === 0 && !loading ? (
+        <div className="rounded-xl border border-dashed border-border bg-surface p-3 text-sm text-muted">
+          No contacts are available yet. Use Advanced Configuration below to create a room from roles and runtimes.
+        </div>
+      ) : (
+        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+          {sorted.map((contact) => {
+            const selected = selectedIds.has(contact.agentBindingId);
+            return (
+              <button
+                key={contact.agentBindingId}
+                type="button"
+                className={[
+                  "min-w-0 rounded-2xl border bg-surface p-3 text-left transition-colors",
+                  selected ? "border-accent bg-accent-soft" : "border-border hover:bg-surface-secondary"
+                ].join(" ")}
+                aria-pressed={selected}
+                onClick={() => onToggle(contact.agentBindingId)}
+              >
+                <span className="flex min-w-0 items-start justify-between gap-3">
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-semibold">{contact.displayName}</span>
+                    <span className="mt-1 block truncate text-xs text-muted">{contact.roleId} / {contact.runtimeKind}</span>
+                  </span>
+                  <span className="flex shrink-0 flex-col items-end gap-1">
+                    <Chip size="sm" variant="soft" color={contactStatusColor(contact.status)}>{contact.status}</Chip>
+                    {selected ? <Chip size="sm" variant="soft" color="accent">selected</Chip> : null}
+                  </span>
+                </span>
+                {contact.capabilities.length > 0 ? (
+                  <span className="mt-3 flex flex-wrap gap-1.5">
+                    {contact.capabilities.slice(0, 4).map((capability) => (
+                      <Chip key={capability} size="sm" variant="soft" color="default">{capability}</Chip>
+                    ))}
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function contactStatusColor(status: AgentContactViewModel["status"]): "success" | "warning" | "default" {
+  if (status === "available") return "success";
+  if (status === "busy") return "warning";
+  return "default";
+}
+
+function contactStatusRank(status: AgentContactViewModel["status"]): number {
+  if (status === "available") return 0;
+  if (status === "busy") return 1;
+  return 2;
+}
+
 export function RoleBindingRow({
   title,
   roleId,
@@ -430,6 +604,11 @@ type V1ParticipantDraft = {
   defaultPresence: RoomPresence;
 };
 
+type ContactParticipantDraft = V1ParticipantDraft & {
+  agentBindingId: string;
+  skillIds: string[];
+};
+
 function newParticipantDraft(roleId: string, runtimeId: string, modelConfigId = ""): V1ParticipantDraft {
   return {
     id: typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `participant-${Date.now()}-${Math.random()}`,
@@ -452,6 +631,29 @@ function patchParticipantRuntime(
   return { ...participant, ...patch, runtimeId, modelConfigId };
 }
 
+function newContactParticipantDraft(
+  contact: AgentContactViewModel,
+  runtimes: readonly { id: string; kind: string }[],
+  modelConfigs: readonly { id: string }[]
+): ContactParticipantDraft {
+  const runtime = runtimes.find((candidate) => candidate.id === contact.runtimeId)
+    ?? runtimes.find((candidate) => candidate.kind === contact.runtimeKind)
+    ?? runtimes[0];
+  const runtimeId = runtime?.id ?? contact.runtimeId ?? "";
+  const modelConfigId = contact.modelConfigId ?? (runtime?.kind === "native" ? modelConfigs[0]?.id ?? "" : "");
+  return {
+    ...newParticipantDraft(contact.roleId, runtimeId, modelConfigId),
+    agentBindingId: contact.agentBindingId,
+    skillIds: []
+  };
+}
+
+function contactDraftMatchesBinding(contact: AgentContactViewModel, draft: ContactParticipantDraft): boolean {
+  return draft.roleId === contact.roleId
+    && (contact.runtimeId === undefined || draft.runtimeId === contact.runtimeId)
+    && normalizedModelConfigId(draft.modelConfigId) === normalizedModelConfigId(contact.modelConfigId);
+}
+
 export async function ensureAgentBindingsForParticipants(options: {
   readonly fetchImpl: typeof fetch;
   readonly existingBindings: readonly AgentBindingSummary[];
@@ -459,6 +661,7 @@ export async function ensureAgentBindingsForParticipants(options: {
 }): Promise<{ readonly bindingIds: string[]; readonly ensuredBindings: AgentBindingSummary[]; readonly createdBindings: AgentBindingSummary[] }> {
   const known = new Map<string, AgentBindingSummary>();
   for (const binding of options.existingBindings) {
+    if (binding.disabledAt !== undefined) continue;
     known.set(agentBindingKey(binding.roleId, binding.runtimeId, binding.modelConfigId), binding);
   }
 
@@ -615,6 +818,11 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
   const [leaderRoleId, setLeaderRoleId] = useState<string>("");
   const [leaderBinding, setLeaderBinding] = useState<V1ParticipantDraft | undefined>(undefined);
   const [v1Participants, setV1Participants] = useState<V1ParticipantDraft[]>([]);
+  const [contacts, setContacts] = useState<AgentContactViewModel[]>([]);
+  const [selectedContactIds, setSelectedContactIds] = useState<Set<string>>(new Set());
+  const [contactParticipantDrafts, setContactParticipantDrafts] = useState<Record<string, ContactParticipantDraft>>({});
+  const [contactsLoading, setContactsLoading] = useState(false);
+  const [contactsError, setContactsError] = useState<string | undefined>(undefined);
   const [skills, setSkills] = useState<WorkspaceSkillSummary[]>([]);
   const [selectedSkillIds, setSelectedSkillIds] = useState<Set<string>>(new Set());
   const [skillsLoading, setSkillsLoading] = useState(false);
@@ -631,10 +839,45 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
       setLeaderBinding(undefined);
       setV1Participants([]);
       setCreatedAgentBindings([]);
+      setSelectedContactIds(new Set());
+      setContactParticipantDrafts({});
+      setContactsError(undefined);
       setSelectedSkillIds(new Set());
       setSkillsError(undefined);
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    const controller = new AbortController();
+    setContactsLoading(true);
+    setContactsError(undefined);
+    void csrfFetch("/agents/contacts", {
+      credentials: "same-origin",
+      headers: { accept: "application/json" },
+      signal: controller.signal
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`contacts ${response.status}`);
+        return response.json() as Promise<unknown>;
+      })
+      .then((payload) => {
+        if (!cancelled) setContacts(normalizeAgentContacts(payload));
+      })
+      .catch((err: unknown) => {
+        if (!cancelled && !(err instanceof DOMException && err.name === "AbortError")) {
+          setContactsError(err instanceof Error ? err.message : String(err));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setContactsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [csrfFetch, isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -684,8 +927,25 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
     setLeaderRoleId(next.roleId);
   }, [leaderBinding, leaderRoleId, modelConfigs, roles, runtimes]);
 
-  const selectedLeader = roles.find((role) => role.id === (leaderBinding?.roleId ?? leaderRoleId));
   const teamMode = mode === "squad" || mode === "team";
+  const selectedContacts = Array.from(selectedContactIds).flatMap((agentBindingId) => {
+    const contact = contacts.find((candidate) => candidate.agentBindingId === agentBindingId);
+    return contact ? [contact] : [];
+  });
+  const selectedContactDrafts = selectedContacts.map((contact) =>
+    contactParticipantDrafts[contact.agentBindingId] ?? newContactParticipantDraft(contact, runtimes, modelConfigs)
+  );
+  const selectedLeader = roles.find((role) => role.id === (selectedContactDrafts[0]?.roleId ?? leaderBinding?.roleId ?? leaderRoleId));
+
+  useEffect(() => {
+    setContactParticipantDrafts((current) => {
+      const next: Record<string, ContactParticipantDraft> = {};
+      for (const contact of selectedContacts) {
+        next[contact.agentBindingId] = current[contact.agentBindingId] ?? newContactParticipantDraft(contact, runtimes, modelConfigs);
+      }
+      return next;
+    });
+  }, [contacts, modelConfigs, runtimes, selectedContactIds]);
 
   const updateV1Participant = (id: string, patch: Partial<V1ParticipantDraft>) => {
     setV1Participants((current) => current.map((participant) => {
@@ -699,6 +959,50 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
       const next = new Set(current);
       if (selected) next.add(id); else next.delete(id);
       return next;
+    });
+  };
+
+  const toggleContact = (agentBindingId: string) => {
+    setSelectedContactIds((current) => {
+      const next = new Set(current);
+      if (next.has(agentBindingId)) next.delete(agentBindingId); else next.add(agentBindingId);
+      setMode(defaultRoomModeForSelectedContacts(next.size, mode));
+      return next;
+    });
+  };
+
+  const updateContactParticipant = (agentBindingId: string, patch: Partial<V1ParticipantDraft>) => {
+    setContactParticipantDrafts((current) => {
+      const contact = contacts.find((candidate) => candidate.agentBindingId === agentBindingId);
+      if (contact === undefined) return current;
+      const base = current[agentBindingId] ?? newContactParticipantDraft(contact, runtimes, modelConfigs);
+      const patched = patchParticipantRuntime(base, patch, runtimes, modelConfigs);
+      return {
+        ...current,
+        [agentBindingId]: {
+          ...base,
+          ...patched,
+          agentBindingId,
+          skillIds: base.skillIds
+        }
+      };
+    });
+  };
+
+  const setContactSkillSelected = (agentBindingId: string, skillId: string, selected: boolean) => {
+    setContactParticipantDrafts((current) => {
+      const contact = contacts.find((candidate) => candidate.agentBindingId === agentBindingId);
+      if (contact === undefined) return current;
+      const base = current[agentBindingId] ?? newContactParticipantDraft(contact, runtimes, modelConfigs);
+      const nextSkillIds = new Set(base.skillIds);
+      if (selected) nextSkillIds.add(skillId); else nextSkillIds.delete(skillId);
+      return {
+        ...current,
+        [agentBindingId]: {
+          ...base,
+          skillIds: Array.from(nextSkillIds)
+        }
+      };
     });
   };
 
@@ -733,6 +1037,65 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
   };
 
   const handleSubmit = async () => {
+    if (selectedContacts.length > 0) {
+      setSubmitting(true);
+      setError(undefined);
+      try {
+        const contactDrafts = selectedContacts.map((contact) =>
+          contactParticipantDrafts[contact.agentBindingId] ?? newContactParticipantDraft(contact, runtimes, modelConfigs)
+        );
+        const overrideParticipants = selectedContacts.flatMap((contact, index): BuildV1ParticipantInput[] => {
+          const draft = contactDrafts[index]!;
+          if (contactDraftMatchesBinding(contact, draft)) return [];
+          const runtime = runtimes.find((candidate) => candidate.id === draft.runtimeId);
+          const runtimeKind = runtime?.kind ?? contact.runtimeKind;
+          if (runtimeKind === "native" && !draft.modelConfigId) throw new Error("Native runtime participants require a model config.");
+          const participant: BuildV1ParticipantInput = {
+            roleId: draft.roleId,
+            runtimeId: draft.runtimeId,
+            runtimeKind,
+            defaultPresence: draft.defaultPresence
+          };
+          if (draft.modelConfigId) participant.modelConfigId = draft.modelConfigId;
+          return [participant];
+        });
+        const resolvedBindingIds: Record<string, string> = {};
+        if (overrideParticipants.length > 0) {
+          const ensured = await ensureAgentBindingsForParticipants({
+            fetchImpl: csrfFetch,
+            existingBindings: [...agentBindings, ...createdAgentBindings],
+            participants: overrideParticipants
+          });
+          if (ensured.createdBindings.length > 0) {
+            setCreatedAgentBindings((current) => mergeAgentBindings(current, ensured.createdBindings));
+          }
+          let index = 0;
+          for (let contactIndex = 0; contactIndex < selectedContacts.length; contactIndex += 1) {
+            const contact = selectedContacts[contactIndex]!;
+            const draft = contactDrafts[contactIndex]!;
+            if (contactDraftMatchesBinding(contact, draft)) continue;
+            const bindingId = ensured.bindingIds[index];
+            if (bindingId !== undefined) resolvedBindingIds[contact.agentBindingId] = bindingId;
+            index += 1;
+          }
+        }
+        await onCreate(buildContactFirstCreateRoomInput({
+          title,
+          mode,
+          contacts: selectedContacts,
+          skillIds: Array.from(selectedSkillIds),
+          participantConfigs: contactDrafts,
+          resolvedBindingIds
+        }));
+        onOpenChange(false);
+      } catch (err) {
+        setError(displayErrorMessage(err));
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+
     if (!leaderBinding) {
       setError("请选择主 role 绑定。");
       return;
@@ -812,6 +1175,14 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
           <Modal.Body className="min-h-0 flex-1 gap-0 overflow-hidden p-0">
             <ScrollShadow className="h-full min-h-0 overflow-auto pb-8" orientation="vertical">
               <div className="grid gap-4 p-5 pb-8">
+                <ContactFirstPicker
+                  contacts={contacts}
+                  selectedIds={selectedContactIds}
+                  loading={contactsLoading}
+                  error={contactsError}
+                  onToggle={toggleContact}
+                />
+
                 <section className="rounded-2xl border border-border bg-overlay p-4 shadow-sm">
                   <div className="grid gap-4">
                     <TextField value={title} onChange={setTitle}>
@@ -842,82 +1213,166 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
                   </div>
                 </section>
 
-                <section className="rounded-2xl border border-border bg-overlay p-4 shadow-sm">
-                  <div className="mb-3 flex items-start justify-between gap-3">
-                    <div>
-                      <h3 className="text-sm font-semibold">{teamMode ? "角色团队" : "主角色"}</h3>
-                      <p className="text-xs text-muted">
-                        {teamMode
-                          ? "为 leader 绑定角色、Runtime 和模型，并按需添加队友。"
-                          : "为此 Room 的主 agent 选择角色、Runtime 和模型。"}
-                      </p>
-                    </div>
-                    <Chip size="sm" variant="soft" color={selectedLeader ? "accent" : "default"}>
-                      {selectedLeader ? roleDisplayText(selectedLeader).title : "未选择主角色"}
-                    </Chip>
-                  </div>
-
-                  {optionsError ? <p className="mb-2 text-xs text-danger">{optionsError}</p> : null}
-                  {optionsLoading ? <p className="mb-2 text-xs text-muted">正在加载角色、Runtime 和模型...</p> : null}
-
-                  {leaderBinding ? (
-                    <RoleBindingRow
-                      title={teamMode ? "Leader 绑定" : "主绑定"}
-                      roleId={leaderBinding.roleId}
-                      runtimeId={leaderBinding.runtimeId}
-                      modelConfigId={leaderBinding.modelConfigId}
-                      presence={leaderBinding.defaultPresence}
-                      roles={roles}
-                      runtimes={runtimes}
-                      modelConfigs={modelConfigs}
-                      onChange={updateLeaderBinding}
-                      testIdPrefix="new-room-leader"
-                    />
-                  ) : (
-                    <div className="rounded-xl border border-dashed border-border bg-surface p-3 text-sm text-muted">
-                      正在加载 role 绑定选项...
-                    </div>
-                  )}
-
-                  {mode !== "solo" ? (
-                    <div className="mt-4 grid gap-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <h4 className="text-sm font-semibold">{teamMode ? "队友" : "协作者"}</h4>
-                        <Button size="sm" variant="secondary" onPress={addV1Participant} isDisabled={roles.length === 0 || runtimes.length === 0}>
-                          {teamMode ? "添加队友" : "添加协作者"}
-                        </Button>
+                {selectedContacts.length > 0 ? (
+                  <section className="rounded-2xl border border-border bg-overlay p-4 shadow-sm">
+                    <div className="mb-3 flex items-start justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-semibold">联系人高级配置</h3>
+                        <p className="text-xs text-muted">
+                          可逐个覆盖 role/runtime/model/presence，并为特定联系人追加 skills。
+                        </p>
                       </div>
+                      <Chip size="sm" variant="soft" color={selectedLeader ? "accent" : "default"}>
+                        {selectedLeader ? roleDisplayText(selectedLeader).title : "未选择主角色"}
+                      </Chip>
+                    </div>
 
-                      {v1Participants.length === 0 ? (
-                        <div className="rounded-xl border border-dashed border-border bg-surface p-3 text-sm text-muted">
-                          {teamMode
-                            ? "在此添加队友角色。上方的 leader 绑定始终会包含在内。"
-                            : "在此添加协作者角色。上方的主绑定始终会包含在内。"}
-                        </div>
-                      ) : v1Participants.map((participant, index) => {
+                    {optionsError ? <p className="mb-2 text-xs text-danger">{optionsError}</p> : null}
+                    {optionsLoading ? <p className="mb-2 text-xs text-muted">正在加载角色、Runtime 和模型...</p> : null}
+
+                    <div className="grid gap-3">
+                      {selectedContacts.map((contact, index) => {
+                        const draft = selectedContactDrafts[index] ?? newContactParticipantDraft(contact, runtimes, modelConfigs);
                         return (
-                          <RoleBindingRow
-                            key={participant.id}
-                            roleId={participant.roleId}
-                            runtimeId={participant.runtimeId}
-                            modelConfigId={participant.modelConfigId}
-                            presence={participant.defaultPresence}
-                            roles={roles}
-                            runtimes={runtimes}
-                            modelConfigs={modelConfigs}
-                            onChange={(patch) => updateV1Participant(participant.id, patch)}
-                            testIdPrefix={`new-room-participant-${index}`}
-                            action={
-                              <Button size="sm" variant="tertiary" onPress={() => removeV1Participant(participant.id)} isDisabled={v1Participants.length === 1}>
-                                移除
-                              </Button>
-                            }
-                          />
+                          <div key={contact.agentBindingId} className="grid gap-3 rounded-xl border border-border bg-surface p-3">
+                            <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+                              <div className="min-w-0">
+                                <h4 className="truncate text-sm font-semibold">{contact.displayName}</h4>
+                                <p className="truncate text-xs text-muted">{contact.agentBindingId}</p>
+                              </div>
+                              <div className="flex flex-wrap justify-end gap-1.5">
+                                <Chip size="sm" variant="soft" color={index === 0 ? "accent" : "default"}>{index === 0 ? "primary" : "teammate"}</Chip>
+                                <Chip size="sm" variant="soft" color={contactStatusColor(contact.status)}>{contact.status}</Chip>
+                              </div>
+                            </div>
+
+                            <RoleBindingRow
+                              roleId={draft.roleId}
+                              runtimeId={draft.runtimeId}
+                              modelConfigId={draft.modelConfigId}
+                              presence={draft.defaultPresence}
+                              roles={roles}
+                              runtimes={runtimes}
+                              modelConfigs={modelConfigs}
+                              onChange={(patch) => updateContactParticipant(contact.agentBindingId, patch)}
+                              testIdPrefix={`new-room-contact-${index}`}
+                            />
+
+                            <div className="grid gap-2">
+                              <div className="flex items-center justify-between gap-3">
+                                <h5 className="text-xs font-semibold uppercase text-muted">Contact skills</h5>
+                                <Chip size="sm" variant="soft" color={draft.skillIds.length > 0 ? "accent" : "default"}>
+                                  {draft.skillIds.length} selected
+                                </Chip>
+                              </div>
+                              {skills.length === 0 && !skillsLoading ? (
+                                <div className="rounded-xl border border-dashed border-border bg-overlay p-3 text-sm text-muted">
+                                  未找到可追加到此联系人的 skills。
+                                </div>
+                              ) : (
+                                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                                  {skills.map((skill) => {
+                                    const selected = draft.skillIds.includes(skill.id);
+                                    return (
+                                      <Checkbox
+                                        key={skill.id}
+                                        isSelected={selected}
+                                        onChange={(selected) => setContactSkillSelected(contact.agentBindingId, skill.id, selected)}
+                                        className={[
+                                          "rounded-2xl border bg-overlay px-3 py-2 transition-colors",
+                                          selected ? "border-accent bg-accent-soft" : "border-border hover:bg-surface-secondary"
+                                        ].join(" ")}
+                                      >
+                                        <span className="block truncate text-sm font-medium">{skill.name}</span>
+                                      </Checkbox>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          </div>
                         );
                       })}
                     </div>
-                  ) : null}
-                </section>
+                  </section>
+                ) : (
+                  <section className="rounded-2xl border border-border bg-overlay p-4 shadow-sm">
+                    <div className="mb-3 flex items-start justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-semibold">{teamMode ? "角色团队" : "主角色"}</h3>
+                        <p className="text-xs text-muted">
+                          {teamMode
+                            ? "为 leader 绑定角色、Runtime 和模型，并按需添加队友。"
+                            : "为此 Room 的主 agent 选择角色、Runtime 和模型。"}
+                        </p>
+                      </div>
+                      <Chip size="sm" variant="soft" color={selectedLeader ? "accent" : "default"}>
+                        {selectedLeader ? roleDisplayText(selectedLeader).title : "未选择主角色"}
+                      </Chip>
+                    </div>
+
+                    {optionsError ? <p className="mb-2 text-xs text-danger">{optionsError}</p> : null}
+                    {optionsLoading ? <p className="mb-2 text-xs text-muted">正在加载角色、Runtime 和模型...</p> : null}
+
+                    {leaderBinding ? (
+                      <RoleBindingRow
+                        title={teamMode ? "Leader 绑定" : "主绑定"}
+                        roleId={leaderBinding.roleId}
+                        runtimeId={leaderBinding.runtimeId}
+                        modelConfigId={leaderBinding.modelConfigId}
+                        presence={leaderBinding.defaultPresence}
+                        roles={roles}
+                        runtimes={runtimes}
+                        modelConfigs={modelConfigs}
+                        onChange={updateLeaderBinding}
+                        testIdPrefix="new-room-leader"
+                      />
+                    ) : (
+                      <div className="rounded-xl border border-dashed border-border bg-surface p-3 text-sm text-muted">
+                        正在加载 role 绑定选项...
+                      </div>
+                    )}
+
+                    {mode !== "solo" ? (
+                      <div className="mt-4 grid gap-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <h4 className="text-sm font-semibold">{teamMode ? "队友" : "协作者"}</h4>
+                          <Button size="sm" variant="secondary" onPress={addV1Participant} isDisabled={roles.length === 0 || runtimes.length === 0}>
+                            {teamMode ? "添加队友" : "添加协作者"}
+                          </Button>
+                        </div>
+
+                        {v1Participants.length === 0 ? (
+                          <div className="rounded-xl border border-dashed border-border bg-surface p-3 text-sm text-muted">
+                            {teamMode
+                              ? "在此添加队友角色。上方的 leader 绑定始终会包含在内。"
+                              : "在此添加协作者角色。上方的主绑定始终会包含在内。"}
+                          </div>
+                        ) : v1Participants.map((participant, index) => {
+                          return (
+                            <RoleBindingRow
+                              key={participant.id}
+                              roleId={participant.roleId}
+                              runtimeId={participant.runtimeId}
+                              modelConfigId={participant.modelConfigId}
+                              presence={participant.defaultPresence}
+                              roles={roles}
+                              runtimes={runtimes}
+                              modelConfigs={modelConfigs}
+                              onChange={(patch) => updateV1Participant(participant.id, patch)}
+                              testIdPrefix={`new-room-participant-${index}`}
+                              action={
+                                <Button size="sm" variant="tertiary" onPress={() => removeV1Participant(participant.id)} isDisabled={v1Participants.length === 1}>
+                                  移除
+                                </Button>
+                              }
+                            />
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                  </section>
+                )}
 
                 <section className="rounded-2xl border border-border bg-overlay p-4 shadow-sm">
                   <div className="mb-3 flex items-start justify-between gap-3">
@@ -982,7 +1437,7 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
             <Button
               variant="primary"
               isPending={submitting}
-              isDisabled={submitting || !leaderBinding}
+              isDisabled={submitting || (selectedContacts.length === 0 && !leaderBinding)}
               onPress={() => void handleSubmit()}
             >
               创建 Room

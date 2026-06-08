@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@heroui/react";
 import { useHotkeys } from "react-hotkeys-hook";
 import { AppShell } from "./components/shell/AppShell.tsx";
@@ -10,6 +10,7 @@ import { ChatStream } from "./components/chat/ChatStream.tsx";
 import { InputBox } from "./components/chat/InputBox.tsx";
 import { PendingTurnList } from "./components/chat/PendingTurnList.tsx";
 import { SidePanel } from "./components/panels/SidePanel.tsx";
+import { ArtifactsRailContainer, ContactsRailContainer, RunsRailView, TasksRailView } from "./components/rail/RailViews.tsx";
 import { RunDetailDrawer } from "./components/run/RunDetailDrawer.tsx";
 import { CommandPalette, type PaletteCommand } from "./components/CommandPalette.tsx";
 import { KeymapModal } from "./components/KeymapModal.tsx";
@@ -17,9 +18,12 @@ import { NewRoomDialog, type CreateRoomInput } from "./components/NewRoomDialog.
 import { SettingsModal } from "./components/settings/index.ts";
 import { getSettingsSearch, getSettingsStateFromSearch } from "./components/settings/settingsUrl.ts";
 import type { SettingsTabId } from "./components/settings/SettingsModal.tsx";
-import { useProjector } from "./hooks/useProjector.ts";
+import type { ArtifactChatReference } from "./components/artifacts/ArtifactPreviewModal.tsx";
+import type { AgentContactViewModel, MessageViewModel } from "./types.ts";
+import { normalizedRoomSearchQuery, useProjector } from "./hooks/useProjector.ts";
 import { useSdk, useCsrfFetch } from "./hooks/useSdk.ts";
 import { useTheme } from "./hooks/useTheme.ts";
+import type { MessageContextRef } from "@agenthub/protocol/domains";
 
 type ChatRoomLayoutProps = {
   readonly chat: React.ReactNode;
@@ -35,6 +39,125 @@ export function ChatRoomLayout({ chat, pendingTurns, input }: ChatRoomLayoutProp
       <div className="shrink-0" data-testid="chat-input-region">{input}</div>
     </div>
   );
+}
+
+export function messagePinRequestFor(roomId: string, messageId: string, isPinned: boolean): { readonly url: string; readonly method: "POST" | "DELETE" } {
+  return {
+    url: `/rooms/${encodeURIComponent(roomId)}/messages/${encodeURIComponent(messageId)}/pin`,
+    method: isPinned ? "DELETE" : "POST"
+  };
+}
+
+export function roomPinRequestFor(roomId: string, isPinned: boolean): { readonly url: string; readonly method: "POST" | "DELETE" } {
+  return {
+    url: `/rooms/${encodeURIComponent(roomId)}/pin`,
+    method: isPinned ? "DELETE" : "POST"
+  };
+}
+
+type MessageDraftState = { text?: string; quotedMessageId?: string; quotePreview?: string; quoteInsertText?: string };
+type MessageCard = Extract<MessageViewModel["parts"][number], { type: "card" }>["card"];
+type SendMessageInput = { text: string; quotedMessageId?: string; attachmentIds: string[]; mentions: string[]; refs: MessageContextRef[] };
+
+export function messagePayloadForSendInput(input: SendMessageInput): {
+  readonly text: string;
+  readonly quotedMessageId?: string;
+  readonly attachmentIds?: readonly string[];
+  readonly mentions?: readonly string[];
+  readonly refs?: readonly MessageContextRef[];
+} {
+  return {
+    text: input.text,
+    ...(input.quotedMessageId ? { quotedMessageId: input.quotedMessageId } : {}),
+    ...(input.attachmentIds.length > 0 ? { attachmentIds: input.attachmentIds } : {}),
+    ...(input.mentions.length > 0 ? { mentions: input.mentions } : {}),
+    ...(input.refs.length > 0 ? { refs: input.refs } : {})
+  };
+}
+
+export function draftWithQuotedMessage(draft: MessageDraftState, messageId: string, preview: string): MessageDraftState {
+  const baseDraft = draft.text === undefined ? {} : { text: draft.text };
+  return {
+    ...baseDraft,
+    quotedMessageId: messageId,
+    quotePreview: preview.slice(0, 80)
+  };
+}
+
+export function draftWithQuotedText(draft: MessageDraftState, text: string): MessageDraftState {
+  const baseDraft = draft.text === undefined ? {} : { text: draft.text };
+  if (text.trim().length === 0) return baseDraft;
+  const quoteText = text
+    .split(/\r?\n/u)
+    .map((line) => `> ${line}`)
+    .join("\n")
+    .trimEnd();
+  if (quoteText.length === 0) return baseDraft;
+  return {
+    ...baseDraft,
+    quoteInsertText: quoteText
+  };
+}
+
+export function draftWithArtifactReference(draft: MessageDraftState, reference: ArtifactChatReference): MessageDraftState & { readonly composerRef: ArtifactChatReference["ref"] } {
+  const base = (draft.text ?? "").trimEnd();
+  return {
+    ...(base.length > 0 ? { text: `${base} ${reference.token}` } : { text: reference.token }),
+    ...(draft.quotedMessageId !== undefined ? { quotedMessageId: draft.quotedMessageId } : {}),
+    ...(draft.quotePreview !== undefined ? { quotePreview: draft.quotePreview } : {}),
+    composerRef: reference.ref
+  };
+}
+
+export function replyPreviewForMessage(message: MessageViewModel): string {
+  const summary = message.text.trim() || message.parts.map((part) => messagePartPreview(part)).find((preview) => preview !== undefined) || message.id;
+  return `${message.senderName}: ${summary}`.slice(0, 80);
+}
+
+function messagePartPreview(part: MessageViewModel["parts"][number] | undefined): string | undefined {
+  if (part === undefined) return undefined;
+  if (part.type === "text") return part.text.trim() || undefined;
+  if (part.type === "code") return part.lang ? `Code - ${part.lang}` : "Code";
+  if (part.type === "attachment") return `Attachment - ${part.name}`;
+  if (part.type === "tool_call") return `Tool call - ${part.name}`;
+  if (part.type === "tool_result") return `Tool result - ${part.ok ? "ok" : "error"}`;
+  if (part.type === "card") return cardPreview(part.card);
+  return undefined;
+}
+
+function cardPreview(card: MessageCard): string {
+  if (card.type === "artifact") return `Artifact - ${card.title}`;
+  if (card.type === "deployment") return `Deployment - ${card.status}`;
+  if (card.type === "diff") return `Diff - ${card.files.length} file${card.files.length === 1 ? "" : "s"}`;
+  if (card.type === "context") return `Context - ${card.title}`;
+  if (card.type === "task") return `Task - ${card.title}`;
+  if (card.type === "preview") return `Preview - ${card.kind}`;
+  if (card.type === "permission") return `Permission - ${card.status}`;
+  if (card.type === "intervention") return `Intervention - ${card.reason}`;
+  return `Card - ${card.type}`;
+}
+
+export function workbenchCenterModeForRail(rail: RailItem, hasActiveRoom: boolean): "home" | "room" | "contacts" | "runs" | "tasks" | "artifacts" {
+  if (rail === "contacts") return "contacts";
+  if (rail === "runs") return "runs";
+  if (rail === "tasks") return "tasks";
+  if (rail === "artifacts") return "artifacts";
+  return hasActiveRoom ? "room" : "home";
+}
+
+export function workbenchNavigationForRoomOpen(roomId: string, currentRail: RailItem): { readonly activeRoomId: string; readonly rail: RailItem } {
+  void currentRail;
+  return { activeRoomId: roomId, rail: "chat" };
+}
+
+export function createRoomInputForContactStartChat(contact: AgentContactViewModel): CreateRoomInput & { readonly agentBindingId: string } {
+  return {
+    title: `Chat with ${contact.displayName}`,
+    mode: "assisted",
+    primaryAgentId: contact.agentBindingId,
+    agentBindingId: contact.agentBindingId,
+    participants: []
+  };
 }
 
 export default function App() {
@@ -58,11 +181,15 @@ export default function App() {
   const [rail, setRail] = useState<RailItem>("chat");
   const [bannerError, setBannerError] = useState<string | undefined>();
   const [unstallPending, setUnstallPending] = useState(false);
+  const [roomSearchQuery, setRoomSearchQuery] = useState("");
 
-  const projector = useProjector("main", activeRoomId);
+  const projector = useProjector("main", activeRoomId, undefined, roomSearchQuery);
   const sdk = useSdk();
   const csrfFetch = useCsrfFetch();
   const { theme, setTheme, toggleTheme, setDensity } = useTheme();
+  const contactStartPendingRef = useRef<Set<string>>(new Set());
+  const latestContactStartRequestRef = useRef(0);
+  const latestContactStartSuccessRef = useRef(0);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -73,8 +200,21 @@ export default function App() {
     window.history.replaceState(window.history.state, "", nextUrl);
   }, [settingsOpen, settingsTab]);
 
-  const rooms = useMemo(() => Array.from(projector.rooms.values()), [projector.rooms]);
+  const activeSearchQuery = normalizedRoomSearchQuery(roomSearchQuery);
+  const hasMatchingServerSearchResults = activeSearchQuery.length > 0 && projector.roomSearchResultQuery === activeSearchQuery && projector.roomSearchResultIds !== undefined;
+  const rooms = useMemo(() => {
+    const allRooms = Array.from(projector.rooms.values());
+    if (!hasMatchingServerSearchResults || projector.roomSearchResultIds === undefined) return allRooms;
+    const resultIds = new Set(projector.roomSearchResultIds);
+    return allRooms.filter((room) => resultIds.has(room.id));
+  }, [hasMatchingServerSearchResults, projector.roomSearchResultIds, projector.rooms]);
   const activeRoom = activeRoomId ? projector.rooms.get(activeRoomId) : undefined;
+
+  const openRoom = useCallback((roomId: string) => {
+    const next = workbenchNavigationForRoomOpen(roomId, rail);
+    setActiveRoomId(next.activeRoomId);
+    setRail(next.rail);
+  }, [rail]);
 
   const handleCreateRoom = useCallback(async (input: CreateRoomInput) => {
     setBannerError(undefined);
@@ -83,8 +223,10 @@ export default function App() {
         title: input.title,
         mode: input.mode,
         primaryAgentId: input.primaryAgentId,
+        ...(input.agentBindingId !== undefined ? { agentBindingId: input.agentBindingId } : {}),
         ...(input.leaderRoleId !== undefined ? { leaderRoleId: input.leaderRoleId } : {}),
         ...(input.skillIds !== undefined ? { skillIds: input.skillIds } : {}),
+        ...(input.participantSkillAssignments !== undefined ? { participantSkillAssignments: input.participantSkillAssignments } : {}),
         participants: input.participants
       }) as { data?: { roomId?: string }; id?: string; roomId?: string };
       const roomId = res?.data?.roomId ?? res?.roomId ?? res?.id;
@@ -92,13 +234,33 @@ export default function App() {
         // The daemon emits real `agent.joined` + `agent.state.changed` events for every
         // participant inside the same transaction as room.created, so SSE replay gives us the
         // member roster on first render and any future refresh — no local synthesis needed.
-        setActiveRoomId(roomId);
+        openRoom(roomId);
       }
     } catch (err) {
       setBannerError(err instanceof Error ? err.message : String(err));
       throw err;
     }
-  }, [sdk]);
+  }, [openRoom, sdk]);
+
+  const handleStartContactChat = useCallback(async (contact: AgentContactViewModel) => {
+    if (contactStartPendingRef.current.has(contact.agentBindingId)) return;
+    contactStartPendingRef.current.add(contact.agentBindingId);
+    const requestId = latestContactStartRequestRef.current + 1;
+    latestContactStartRequestRef.current = requestId;
+    setBannerError(undefined);
+    try {
+      const res = await sdk.createRoom(createRoomInputForContactStartChat(contact)) as { data?: { roomId?: string }; id?: string; roomId?: string };
+      const roomId = res?.data?.roomId ?? res?.roomId ?? res?.id;
+      if (typeof roomId === "string" && requestId > latestContactStartSuccessRef.current) {
+        latestContactStartSuccessRef.current = requestId;
+        openRoom(roomId);
+      }
+    } catch (err) {
+      setBannerError(err instanceof Error ? err.message : String(err));
+    } finally {
+      contactStartPendingRef.current.delete(contact.agentBindingId);
+    }
+  }, [openRoom, sdk]);
 
   const openNewRoom = useCallback(() => setNewRoomOpen(true), []);
   const openSettings = useCallback(() => setSettingsOpen(true), []);
@@ -109,20 +271,15 @@ export default function App() {
     setSettingsTab(tab);
   }, []);
 
-  const handleSendMessage = useCallback(async (input: { text: string; quotedMessageId?: string; attachmentIds: string[]; mentions: string[] }) => {
+  const handleSendMessage = useCallback(async (input: SendMessageInput) => {
     if (!activeRoomId) return;
-    await sdk.sendMessage(activeRoomId, {
-      text: input.text,
-      ...(input.quotedMessageId ? { quotedMessageId: input.quotedMessageId } : {}),
-      ...(input.attachmentIds.length > 0 ? { attachmentIds: input.attachmentIds } : {}),
-      ...(input.mentions.length > 0 ? { mentions: input.mentions } : {})
-    });
+    await sdk.sendMessage(activeRoomId, messagePayloadForSendInput(input));
   }, [activeRoomId, sdk]);
 
-  const handleEditSend = useCallback(async (messageId: string, input: { text: string; attachmentIds: string[]; mentions: string[] }) => {
+  const handleEditSend = useCallback(async (messageId: string, input: SendMessageInput) => {
     await csrfFetch(`/messages/${encodeURIComponent(messageId)}`, {
       method: "PATCH",
-      body: JSON.stringify({ text: input.text, attachmentIds: input.attachmentIds, mentions: input.mentions })
+      body: JSON.stringify(messagePayloadForSendInput(input))
     });
     setEditingTurnId(undefined);
   }, [csrfFetch]);
@@ -142,24 +299,44 @@ export default function App() {
     }
   }, [activeRoomId, csrfFetch]);
 
-  const handleQuoteMessage = useCallback((id: string) => {
+  const writeMessageDraft = useCallback((updater: (draft: MessageDraftState) => MessageDraftState) => {
     if (!activeRoomId) return;
-    const m = activeRoom?.messages.find((mm) => mm.id === id);
     const draftKey = `agenthub.draft.${activeRoomId}`;
     try {
       const raw = sessionStorage.getItem(draftKey);
-      const next = raw ? JSON.parse(raw) : {};
-      next.quotedMessageId = id;
-      next.quotePreview = m?.text?.slice(0, 80) ?? "";
+      const parsed = raw ? JSON.parse(raw) as MessageDraftState : {};
+      const next = updater(parsed);
       sessionStorage.setItem(draftKey, JSON.stringify(next));
       window.dispatchEvent(new StorageEvent("storage", { key: draftKey, newValue: JSON.stringify(next) }));
     } catch {
       // ignore
     }
-  }, [activeRoom, activeRoomId]);
+  }, [activeRoomId]);
+
+  const handleReplyMessage = useCallback((id: string) => {
+    const message = activeRoom?.messages.find((item) => item.id === id);
+    writeMessageDraft((draft) => draftWithQuotedMessage(draft, id, message ? replyPreviewForMessage(message) : ""));
+  }, [activeRoom, writeMessageDraft]);
+
+  const handleQuoteMessage = useCallback((id: string) => {
+    const message = activeRoom?.messages.find((item) => item.id === id);
+    writeMessageDraft((draft) => draftWithQuotedText(draft, message?.text ?? ""));
+  }, [activeRoom, writeMessageDraft]);
+
+  const handleReferenceArtifactInChat = useCallback((reference: ArtifactChatReference) => {
+    writeMessageDraft((draft) => draftWithArtifactReference(draft, reference));
+  }, [writeMessageDraft]);
 
   const handlePin = useCallback(async (id: string) => {
-    await csrfFetch(`/messages/${encodeURIComponent(id)}/pin`, { method: "POST" });
+    if (!activeRoomId) return;
+    const message = activeRoom?.messages.find((item) => item.id === id);
+    const request = messagePinRequestFor(activeRoomId, id, message?.pinnedAt !== undefined);
+    await csrfFetch(request.url, { method: request.method });
+  }, [activeRoom, activeRoomId, csrfFetch]);
+
+  const handleToggleRoomPin = useCallback(async (roomId: string, isPinned: boolean) => {
+    const request = roomPinRequestFor(roomId, isPinned);
+    await csrfFetch(request.url, { method: request.method });
   }, [csrfFetch]);
 
   const handleRegenerate = useCallback(async (id: string) => {
@@ -275,13 +452,14 @@ export default function App() {
         label: `打开 room · ${room.title}`,
         group: "Rooms",
         keywords: [room.id, room.mode],
-        perform: () => setActiveRoomId(room.id)
+        perform: () => openRoom(room.id)
       });
     }
     return list;
-  }, [rooms, openNewRoom, openSettings, leftCollapsed, rightCollapsed, setTheme, setDensity]);
+  }, [rooms, openRoom, openNewRoom, openSettings, leftCollapsed, rightCollapsed, setTheme, setDensity]);
 
-  const center = activeRoom ? (
+  const centerMode = workbenchCenterModeForRail(rail, activeRoom !== undefined);
+  const roomCenter = activeRoom ? (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
       {(activeRoom.skillErrors?.length ?? 0) > 0 ? (
         <div className="shrink-0 border-b border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-900 dark:border-danger-800 dark:bg-danger-950/40 dark:text-danger-100">
@@ -313,6 +491,7 @@ export default function App() {
               selectedMessageId={selectedMessageId}
               onSelectMessage={setSelectedMessageId}
               onOpenRun={(runId) => setActiveRunId(runId)}
+              onReply={handleReplyMessage}
               onQuote={handleQuoteMessage}
               onPin={(id) => void handlePin(id)}
               onRegenerate={(id) => void handleRegenerate(id)}
@@ -323,6 +502,7 @@ export default function App() {
               onStopDiscussion={() => void handleStopDiscussion()}
               onEditPending={handleEditPending}
               csrfFetch={csrfFetch}
+              onReferenceArtifact={handleReferenceArtifactInChat}
               connectionStatus={projector.connectionStatus}
               connectionError={projector.connectionError}
             />
@@ -353,8 +533,17 @@ export default function App() {
       </div>
     </div>
   ) : (
-    <HomeView rooms={rooms} onOpenRoom={setActiveRoomId} onCreate={openNewRoom} />
+    <HomeView rooms={rooms} onOpenRoom={openRoom} onCreate={openNewRoom} />
   );
+  const center = centerMode === "contacts"
+    ? <ContactsRailContainer fetchImpl={csrfFetch} onStartChat={handleStartContactChat} />
+    : centerMode === "runs"
+      ? <RunsRailView />
+      : centerMode === "tasks"
+        ? <TasksRailView />
+    : centerMode === "artifacts"
+      ? <ArtifactsRailContainer fetchImpl={csrfFetch} onReferenceArtifact={handleReferenceArtifactInChat} />
+      : roomCenter;
 
   return (
     <>
@@ -379,8 +568,11 @@ export default function App() {
           <RoomList
             rooms={rooms}
             activeRoomId={activeRoomId}
-            onSelect={setActiveRoomId}
+            onSelect={openRoom}
             onCreate={openNewRoom}
+            onTogglePin={(roomId, isPinned) => void handleToggleRoomPin(roomId, isPinned)}
+            onSearchQueryChange={setRoomSearchQuery}
+            useServerSearchResults={hasMatchingServerSearchResults}
           />
         }
         center={center}

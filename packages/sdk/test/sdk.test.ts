@@ -75,6 +75,63 @@ describe("AgentHubClient", () => {
     }]);
   });
 
+  it("sends per-participant skill assignments when creating a room", async () => {
+    const calls: Array<{ readonly url: string; readonly body: unknown }> = [];
+    const client = new AgentHubClient({
+      baseUrl: "http://daemon",
+      fetchImpl: (async (url, init) => {
+        calls.push({
+          url: String(url),
+          body: init?.body === undefined ? undefined : JSON.parse(String(init.body)) as unknown
+        });
+        return new Response(JSON.stringify({ data: { roomId: "room_skilled_contact" } }), { status: 201 });
+      }) as typeof fetch
+    });
+
+    await client.createRoom({
+      title: "Skilled contact room",
+      mode: "assisted",
+      primaryAgentId: "binding_builder",
+      participantSkillAssignments: [
+        {
+          participantId: "binding_reviewer",
+          skillIds: ["skill_review"],
+          mode: "add"
+        }
+      ],
+      participants: [{
+        type: "agent",
+        agentId: "binding_reviewer",
+        agentBindingId: "binding_reviewer",
+        role: "teammate",
+        defaultPresence: "active"
+      }]
+    });
+
+    expect(calls).toEqual([{
+      url: "http://daemon/rooms",
+      body: {
+        title: "Skilled contact room",
+        mode: "assisted",
+        primaryAgentId: "binding_builder",
+        participantSkillAssignments: [
+          {
+            participantId: "binding_reviewer",
+            skillIds: ["skill_review"],
+            mode: "add"
+          }
+        ],
+        participants: [{
+          type: "agent",
+          agentId: "binding_reviewer",
+          agentBindingId: "binding_reviewer",
+          role: "teammate",
+          defaultPresence: "active"
+        }]
+      }
+    }]);
+  });
+
   it("builds intervention and debug API requests", async () => {
     const calls: string[] = [];
     const client = new AgentHubClient({
@@ -106,5 +163,32 @@ describe("AgentHubClient", () => {
     await client.stopDiscussion("room_1");
 
     expect(calls).toEqual([{ url: "http://daemon/rooms/room_1/discussion/stop", method: "POST" }]);
+  });
+
+  it("sends structured context refs with chat messages", async () => {
+    const calls: Array<{ readonly url: string; readonly body: unknown }> = [];
+    const client = new AgentHubClient({
+      baseUrl: "http://daemon",
+      fetchImpl: (async (url, init) => {
+        calls.push({
+          url: String(url),
+          body: init?.body === undefined ? undefined : JSON.parse(String(init.body)) as unknown
+        });
+        return new Response(JSON.stringify({ data: { messageId: "message_1" } }), { status: 200 });
+      }) as typeof fetch
+    });
+
+    await client.sendMessage("room_1", {
+      text: "Fix @artifact:artifact_1#L2-L3",
+      refs: [{ type: "artifact", artifactId: "artifact_1", lineStart: 2, lineEnd: 3 }]
+    });
+
+    expect(calls).toEqual([{
+      url: "http://daemon/rooms/room_1/messages",
+      body: {
+        text: "Fix @artifact:artifact_1#L2-L3",
+        refs: [{ type: "artifact", artifactId: "artifact_1", lineStart: 2, lineEnd: 3 }]
+      }
+    }]);
   });
 });

@@ -4,24 +4,34 @@ import type { MessageViewModel } from "../../types.ts";
 import { formatBytes, formatTime, initials } from "../../lib/format.ts";
 import { pendingTurnColor } from "../../lib/status.ts";
 import { CardRenderer } from "../cards/CardRenderer.tsx";
-import { ArtifactPreviewModal, normalizePreviewKind } from "../artifacts/ArtifactPreviewModal.tsx";
+import { ArtifactPreviewModal, normalizePreviewKind, type ArtifactChatReference } from "../artifacts/ArtifactPreviewModal.tsx";
+
+export type QuotedMessagePreview = {
+  readonly id: string;
+  readonly senderName: string;
+  readonly preview: string;
+};
 
 interface MessageItemProps {
   message: MessageViewModel;
+  quotedMessage?: QuotedMessagePreview | undefined;
   isSelected?: boolean | undefined;
   onSelect?: (() => void) | undefined;
+  onOpenQuotedMessage?: ((id: string) => void) | undefined;
   onOpenRun?: ((runId: string) => void) | undefined;
+  onReply?: (() => void) | undefined;
   onQuote?: (() => void) | undefined;
   onPin?: (() => void) | undefined;
   onRegenerate?: (() => void) | undefined;
   onDelete?: (() => void) | undefined;
   onCancelPending?: (() => void) | undefined;
   onEditPending?: (() => void) | undefined;
+  onReferenceArtifact?: ((reference: ArtifactChatReference) => void) | undefined;
   csrfFetch: typeof fetch;
 }
 
 export function MessageItem(props: MessageItemProps) {
-  const { message, isSelected, onSelect, onOpenRun, onQuote, onPin, onRegenerate, onDelete, onCancelPending, onEditPending, csrfFetch } = props;
+  const { message, quotedMessage, isSelected, onSelect, onOpenQuotedMessage, onOpenRun, onReply, onQuote, onPin, onRegenerate, onDelete, onCancelPending, onEditPending, onReferenceArtifact, csrfFetch } = props;
   const [expanded, setExpanded] = useState(false);
 
   const isUser = message.senderType === "user";
@@ -32,22 +42,12 @@ export function MessageItem(props: MessageItemProps) {
   const testId = `message-bubble-${isUser ? "user" : isSystem ? "system" : "agent"}`;
   const textPreview = publicAgentTextPreview(message.text, message.senderType, isStreaming);
   const visibleText = textPreview.collapsed && !expanded ? textPreview.preview : message.text;
+  const selectMessage = () => {
+    onSelect?.();
+  };
 
   return (
     <div
-      role="button"
-      tabIndex={0}
-      onClick={(e) => {
-        e.stopPropagation();
-        onSelect?.();
-      }}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          e.stopPropagation();
-          onSelect?.();
-        }
-      }}
       className={[
         "group mx-auto my-1.5 w-full max-w-[1280px] px-6 py-1 transition-colors",
         isSelected ? "rounded-2xl bg-accent-soft" : ""
@@ -82,6 +82,11 @@ export function MessageItem(props: MessageItemProps) {
           ) : null}
 
           <div
+            onClick={(e) => {
+              e.stopPropagation();
+              if (!shouldSelectMessageFromTarget(e.target)) return;
+              selectMessage();
+            }}
             className={[
               "relative w-fit rounded-[20px] px-4 py-3 text-sm leading-6 shadow-sm",
               isUser
@@ -92,17 +97,16 @@ export function MessageItem(props: MessageItemProps) {
             ].join(" ")}
           >
             {message.quotedMessageId ? (
-              <Card variant="transparent" className={["mb-2 border-l-2 pl-2", isUser ? "border-accent-foreground/70 bg-white/10" : "border-accent bg-accent-soft"].join(" ")}>
-                <Card.Description className={["text-xs", isUser ? "text-accent-foreground/85" : ""].join(" ")}>
-                  引用 {message.quotedMessageId.slice(0, 8)}
-                </Card.Description>
-              </Card>
+              <QuotedMessageBubble
+                quotedMessageId={message.quotedMessageId}
+                quotedMessage={quotedMessage}
+                isUser={isUser}
+                onOpenQuotedMessage={onOpenQuotedMessage}
+              />
             ) : null}
 
             {message.text ? (
-              <p className={["whitespace-pre-wrap break-words", isStreaming ? "ah-streaming-caret" : ""].join(" ")}>
-                {visibleText}
-              </p>
+              <MessageTextView text={visibleText} isStreaming={isStreaming} />
             ) : null}
 
             {textPreview.collapsed ? (
@@ -122,7 +126,7 @@ export function MessageItem(props: MessageItemProps) {
             {message.parts.length > 0 ? (
               <div className="mt-3 flex flex-col gap-2">
                 {message.parts.map((part, i) => (
-                  <PartView key={i} part={part} csrfFetch={csrfFetch} />
+                  <PartView key={i} part={part} csrfFetch={csrfFetch} onReferenceArtifact={onReferenceArtifact} />
                 ))}
               </div>
             ) : null}
@@ -139,7 +143,10 @@ export function MessageItem(props: MessageItemProps) {
             ) : null}
           </div>
 
-          <footer className={["mt-1 flex items-center gap-1.5 text-xs", isUser ? "justify-end" : "justify-start"].join(" ")}>
+          <footer
+            className={["mt-1 flex items-center gap-1.5 text-xs", isUser ? "justify-end" : "justify-start"].join(" ")}
+            onClick={(e) => e.stopPropagation()}
+          >
             <span className="shrink-0 text-muted">{formatTime(message.createdAt)}</span>
             <Dropdown>
               <Dropdown.Trigger
@@ -151,11 +158,12 @@ export function MessageItem(props: MessageItemProps) {
               </Dropdown.Trigger>
               <Dropdown.Popover>
                 <Dropdown.Menu aria-label="消息操作">
-                  {onQuote ? <Dropdown.Item onAction={onQuote}>引用</Dropdown.Item> : null}
+                  {onReply ? <Dropdown.Item onAction={onReply}>Reply</Dropdown.Item> : null}
+                  {onQuote ? <Dropdown.Item onAction={onQuote}>Quote</Dropdown.Item> : null}
                   {onRegenerate && message.senderType === "agent" && message.status === "completed" ? (
-                    <Dropdown.Item onAction={onRegenerate}>重新生成</Dropdown.Item>
+                    <Dropdown.Item onAction={onRegenerate}>{regenerateActionLabel()}</Dropdown.Item>
                   ) : null}
-                  {onPin && message.status === "completed" ? <Dropdown.Item onAction={onPin}>置顶</Dropdown.Item> : null}
+                  {onPin && message.status === "completed" ? <Dropdown.Item onAction={onPin}>{pinActionLabel(message.pinnedAt !== undefined)}</Dropdown.Item> : null}
                   {message.runId && onOpenRun ? (
                     <Dropdown.Item onAction={() => onOpenRun(message.runId!)}>打开运行详情</Dropdown.Item>
                   ) : null}
@@ -178,8 +186,91 @@ export function MessageItem(props: MessageItemProps) {
   );
 }
 
+function QuotedMessageBubble(props: {
+  readonly quotedMessageId: string;
+  readonly quotedMessage?: QuotedMessagePreview | undefined;
+  readonly isUser: boolean;
+  readonly onOpenQuotedMessage?: ((id: string) => void) | undefined;
+}) {
+  const targetId = props.quotedMessage?.id ?? props.quotedMessageId;
+  const senderName = props.quotedMessage?.senderName ?? "Quoted message";
+  const preview = props.quotedMessage?.preview || props.quotedMessageId.slice(0, 8);
+
+  return (
+    <button
+      type="button"
+      className={[
+        "mb-2 block max-w-full rounded-lg border-l-2 px-2 py-1.5 text-left text-xs leading-5 transition-colors",
+        props.isUser
+          ? "border-accent-foreground/70 bg-white/10 text-accent-foreground/90 hover:bg-white/15"
+          : "border-accent bg-accent-soft text-muted hover:bg-accent-soft/80"
+      ].join(" ")}
+      data-message-action
+      data-quoted-message-id={targetId}
+      aria-label={`Open quoted message from ${senderName}`}
+      onClick={(event) => {
+        event.stopPropagation();
+        props.onOpenQuotedMessage?.(targetId);
+      }}
+    >
+      <span className="block truncate font-semibold">{senderName}</span>
+      <span className="block truncate">{preview}</span>
+    </button>
+  );
+}
+
+type MessageTextSegment =
+  | { readonly type: "text"; readonly text: string }
+  | { readonly type: "code"; readonly lang: string; readonly text: string };
+
+export function parseMarkdownFencedCode(text: string): MessageTextSegment[] {
+  const segments: MessageTextSegment[] = [];
+  const fencePattern = /^```([^\r\n`]*)\r?\n([\s\S]*?)\r?\n```[ \t]*$/gm;
+  let lastIndex = 0;
+
+  for (const match of text.matchAll(fencePattern)) {
+    const index = match.index ?? 0;
+    if (index > lastIndex) {
+      segments.push({ type: "text", text: text.slice(lastIndex, index) });
+    }
+    segments.push({
+      type: "code",
+      lang: match[1]?.trim() || "code",
+      text: match[2] ?? ""
+    });
+    lastIndex = index + match[0].length;
+  }
+
+  if (lastIndex < text.length) {
+    segments.push({ type: "text", text: text.slice(lastIndex) });
+  }
+
+  return segments.length > 0 ? segments : [{ type: "text", text }];
+}
+
+function MessageTextView({ text, isStreaming }: { readonly text: string; readonly isStreaming: boolean }) {
+  const segments = parseMarkdownFencedCode(text);
+
+  return (
+    <div className={["flex flex-col gap-2", isStreaming ? "ah-streaming-caret" : ""].join(" ")}>
+      {segments.map((segment, index) => {
+        if (segment.type === "code") {
+          return <CodePartView key={index} part={{ type: "code", seq: index + 1, lang: segment.lang, text: segment.text }} />;
+        }
+
+        return segment.text.trim().length > 0 ? (
+          <p key={index} className="whitespace-pre-wrap break-words">
+            {segment.text.trim()}
+          </p>
+        ) : null;
+      })}
+    </div>
+  );
+}
+
 function publicAgentTextPreview(text: string, senderType: MessageViewModel["senderType"], isStreaming: boolean): { collapsed: boolean; preview: string } {
   if (senderType !== "agent") return { collapsed: false, preview: text };
+  if (hasMarkdownFencedCode(text)) return { collapsed: false, preview: text };
   const contentLines = text.split(/\r?\n/).filter((line) => line.trim().length > 0);
   const shouldCollapse = text.length > 640 || contentLines.length > 4;
   if (!shouldCollapse) return { collapsed: false, preview: text };
@@ -209,16 +300,16 @@ function publicAgentTextPreview(text: string, senderType: MessageViewModel["send
   return { collapsed: true, preview: `${previewLines.join("\n").trimEnd()}...` };
 }
 
-function PartView({ part, csrfFetch }: { part: MessageViewModel["parts"][number]; csrfFetch: typeof fetch }) {
+function hasMarkdownFencedCode(text: string): boolean {
+  return /^```[^\r\n`]*\r?\n[\s\S]*?\r?\n```[ \t]*$/m.test(text);
+}
+
+function PartView({ part, csrfFetch, onReferenceArtifact }: { part: MessageViewModel["parts"][number]; csrfFetch: typeof fetch; onReferenceArtifact?: ((reference: ArtifactChatReference) => void) | undefined }) {
   switch (part.type) {
     case "text":
       return <p className="text-sm whitespace-pre-wrap">{part.text}</p>;
     case "code":
-      return (
-        <pre className="ah-mono overflow-auto rounded bg-surface-secondary p-2 text-xs">
-          {part.text}
-        </pre>
-      );
+      return <CodePartView part={part} />;
     case "tool_call":
       return (
         <Card variant="transparent" className="border border-border">
@@ -244,16 +335,74 @@ function PartView({ part, csrfFetch }: { part: MessageViewModel["parts"][number]
         </Card>
       );
     case "attachment":
-      return <ArtifactAttachmentCard part={part} csrfFetch={csrfFetch} />;
+      return <ArtifactAttachmentCard part={part} csrfFetch={csrfFetch} onReferenceArtifact={onReferenceArtifact} />;
     case "card":
-      return <CardRenderer card={part.card} csrfFetch={csrfFetch} />;
+      return <CardRenderer card={part.card} csrfFetch={csrfFetch} onReferenceArtifact={onReferenceArtifact} />;
     default: {
       return null;
     }
   }
 }
 
-function ArtifactAttachmentCard({ part, csrfFetch }: { part: Extract<MessageViewModel["parts"][number], { type: "attachment" }>; csrfFetch: typeof fetch }) {
+const MESSAGE_ACTION_SELECTOR = "button,a,input,textarea,select,[role='button'],[data-message-action]";
+
+export function shouldSelectMessageFromTarget(target: EventTarget | null): boolean {
+  if (!target || typeof target !== "object" || !("closest" in target)) return true;
+  const closest = (target as { readonly closest?: unknown }).closest;
+  return typeof closest !== "function" || closest.call(target, MESSAGE_ACTION_SELECTOR) === null;
+}
+
+export function copyCodeButtonLabel(copied: boolean): string {
+  return copied ? "Copied ✓" : "Copy Code";
+}
+
+export function pinActionLabel(isPinned: boolean): string {
+  return isPinned ? "Unpin" : "Pin";
+}
+
+export function regenerateActionLabel(): string {
+  return "Regenerate";
+}
+
+function CodePartView({ part }: { part: Extract<MessageViewModel["parts"][number], { type: "code" }> }) {
+  const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState<string | undefined>(undefined);
+
+  const copyCode = () => {
+    setCopyError(undefined);
+    const writer = globalThis.navigator?.clipboard?.writeText;
+    if (!writer) {
+      setCopyError("Clipboard is unavailable.");
+      return;
+    }
+
+    void writer.call(globalThis.navigator.clipboard, part.text)
+      .then(() => {
+        setCopied(true);
+        globalThis.setTimeout(() => setCopied(false), 1500);
+      })
+      .catch((err: unknown) => {
+        setCopyError(err instanceof Error ? err.message : String(err));
+      });
+  };
+
+  return (
+    <div className="overflow-hidden rounded bg-surface-secondary">
+      <div className="flex items-center justify-between gap-2 border-b border-border/70 px-2 py-1">
+        <span className="text-[11px] font-semibold text-muted">{part.lang}</span>
+        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onPress={copyCode} aria-label="Copy code block">
+          {copyCodeButtonLabel(copied)}
+        </Button>
+      </div>
+      <pre className="ah-mono overflow-auto p-2 text-xs">
+        {part.text}
+      </pre>
+      {copyError ? <p className="px-2 pb-2 text-xs text-danger">{copyError}</p> : null}
+    </div>
+  );
+}
+
+function ArtifactAttachmentCard({ part, csrfFetch, onReferenceArtifact }: { part: Extract<MessageViewModel["parts"][number], { type: "attachment" }>; csrfFetch: typeof fetch; onReferenceArtifact?: ((reference: ArtifactChatReference) => void) | undefined }) {
   const [preview, setPreview] = useState<{ readonly title: string; readonly content: string; readonly error?: string | undefined } | undefined>();
   const [loading, setLoading] = useState(false);
   const canPreview = part.artifactId !== undefined && part.path !== undefined;
@@ -309,6 +458,10 @@ function ArtifactAttachmentCard({ part, csrfFetch }: { part: Extract<MessageView
         error={preview?.error}
         loading={loading}
         downloadUrl={downloadUrl}
+        artifactId={part.artifactId}
+        type="file"
+        kind={part.previewKind}
+        onReferenceInChat={onReferenceArtifact}
         onRetry={openPreview}
         onOpenChange={(open) => { if (!open) setPreview(undefined); }}
       />

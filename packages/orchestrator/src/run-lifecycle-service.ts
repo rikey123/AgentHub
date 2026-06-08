@@ -236,6 +236,7 @@ export class RunLifecycleService {
       this.requireStatus(run, ["claimed"], "markStarting");
       const now = this.now();
       this.updateStatus(db, runId, "starting", { pid_at_start: pidAtStart, started_at: now });
+      this.touchRoomActivity(db, run.room_id, now);
       this.publishRunEvent(db, "agent.run.started", runId, run.workspace_id, run.room_id, run.agent_id, { runId, pidAtStart, ...(run.task_id !== null ? { taskId: run.task_id } : {}), ...(run.parent_run_id !== null ? { parentRunId: run.parent_run_id } : {}) });
     });
   }
@@ -310,8 +311,9 @@ export class RunLifecycleService {
     this.withTransaction(tx, (db) => {
       const run = this.getRun(db, runId);
       this.requireStatus(run, ["starting", "running", "waiting_permission"], "complete");
+      const now = this.now();
       this.updateStatus(db, runId, "completed", {
-        ended_at: this.now(),
+        ended_at: now,
         input_tokens: cost.inputTokens,
         output_tokens: cost.outputTokens,
         cached_tokens: cost.cachedTokens,
@@ -319,6 +321,7 @@ export class RunLifecycleService {
         model_id: cost.modelId,
         waiting_reason: null
       });
+      this.touchRoomActivity(db, run.room_id, now);
       this.publishRunEvent(db, "agent.run.completed", runId, run.workspace_id, run.room_id, run.agent_id, { runId, cost });
       this.publishBriefEvent(db, runId, run.workspace_id, run.room_id, run.agent_id, "run_completed", briefText);
     });
@@ -457,6 +460,10 @@ export class RunLifecycleService {
   private updateStatus(db: SqliteTx, runId: string, status: RunStatus, patch: Record<string, unknown>): void {
     const assignments = ["status = ?", "updated_at = ?", ...Object.keys(patch).map((key) => `${key} = ?`)];
     db.prepare(`UPDATE runs SET ${assignments.join(", ")} WHERE id = ?`).run(status, this.now(), ...Object.values(patch), runId);
+  }
+
+  private touchRoomActivity(db: SqliteTx, roomId: string, now: number): void {
+    db.prepare("UPDATE rooms SET last_activity_at = ?, updated_at = ? WHERE id = ?").run(now, now, roomId);
   }
 
   private publishRunEvent(

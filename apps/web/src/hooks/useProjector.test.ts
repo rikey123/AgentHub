@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
-import { getProjector } from "./useProjector.ts";
+import { getProjector, roomListFetchDelayMs, roomsListRequestPath } from "./useProjector.ts";
 import type { ProjectorState } from "../types.ts";
 import type { EventType } from "@agenthub/protocol/events";
 
@@ -40,6 +40,138 @@ describe("useProjector replay handling", () => {
   afterEach(() => {
     unsubscribe?.();
     unsubscribe = undefined;
+  });
+
+  it("builds room list request paths with encoded search queries", () => {
+    expect(roomsListRequestPath("")).toBe("/rooms");
+    expect(roomsListRequestPath(" Builder Captain ")).toBe("/rooms?q=Builder+Captain");
+    expect(roomsListRequestPath("a/b?c")).toBe("/rooms?q=a%2Fb%3Fc");
+  });
+
+  it("debounces room list searches by 200ms while loading the default list immediately", () => {
+    expect(roomListFetchDelayMs("")).toBe(0);
+    expect(roomListFetchDelayMs("   ")).toBe(0);
+    expect(roomListFetchDelayMs("Builder")).toBe(200);
+  });
+
+  it("hydrates V1.2 room list fields from room.created payloads", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+
+    projector.apply(makeEvent("room.created", roomId, {
+      roomId,
+      title: "Pinned archived room",
+      mode: "assisted",
+      pinnedAt: 100,
+      lastActivityAt: 200,
+      archivedAt: 300,
+      participantContactNames: {
+        "binding-builder": "Builder Contact"
+      }
+    }));
+
+    expect(emittedState.rooms.get(roomId)).toMatchObject({
+      title: "Pinned archived room",
+      mode: "assisted",
+      pinnedAt: 100,
+      lastActivityAt: 200,
+      archivedAt: 300,
+      participantContactNames: {
+        "binding-builder": "Builder Contact"
+      }
+    });
+  });
+
+  it("normalizes room list contact-name arrays returned by the daemon", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+
+    projector.apply(makeEvent("room.created", roomId, {
+      roomId,
+      title: "Searchable contacts",
+      mode: "assisted",
+      participantContactNames: ["Builder Contact", "Reviewer Contact"]
+    }));
+
+    expect(Object.values(emittedState.rooms.get(roomId)?.participantContactNames ?? {})).toEqual([
+      "Builder Contact",
+      "Reviewer Contact"
+    ]);
+  });
+
+  it("tracks backend room search result ids for server-only matches", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+
+    projector.applyRoomSearchResults("deploy provider", [
+      {
+        id: roomId,
+        title: "Server-only match",
+        mode: "assisted",
+        participantContactNames: []
+      }
+    ]);
+
+    expect(emittedState.roomSearchResultIds).toEqual([roomId]);
+    expect(emittedState.roomSearchResultQuery).toBe("deploy provider");
+    expect(emittedState.rooms.get(roomId)).toMatchObject({
+      title: "Server-only match",
+      mode: "assisted"
+    });
+  });
+
+  it("projects room archive and unarchive events for live RoomList updates", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "solo" }, 100));
+    projector.apply(makeEvent("room.closed", roomId, { roomId }, 200));
+
+    expect(emittedState.rooms.get(roomId)?.archivedAt).toBe(200);
+
+    projector.apply(makeEvent("room.opened", roomId, { roomId }, 300));
+
+    expect(emittedState.rooms.get(roomId)?.archivedAt).toBeUndefined();
+  });
+
+  it("advances hydrated room activity from live activity events without moving backward", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+
+    projector.apply(makeEvent("room.created", roomId, {
+      roomId,
+      title: "Activity room",
+      mode: "team",
+      lastActivityAt: 100
+    }, 100));
+
+    projector.apply(makeEvent("message.created", roomId, { messageId: "message-activity", text: "New activity" }, 200));
+    expect(emittedState.rooms.get(roomId)?.lastActivityAt).toBe(200);
+
+    projector.apply(makeAgentEvent("agent.run.started", roomId, "agent-1", { runId: "run-activity" }, 300));
+    expect(emittedState.rooms.get(roomId)?.lastActivityAt).toBe(300);
+
+    projector.apply(makeEvent("task.status.changed", roomId, { taskId: "task-activity", nextStatus: "in_progress" }, 250));
+    expect(emittedState.rooms.get(roomId)?.lastActivityAt).toBe(300);
+
+    projector.apply(makeEvent("task.status.changed", roomId, { taskId: "task-activity", nextStatus: "review" }, 350));
+    expect(emittedState.rooms.get(roomId)?.lastActivityAt).toBe(350);
+
+    projector.apply(makeAgentEvent("agent.joined", roomId, "agent-2", {
+      agentId: "agent-2",
+      agentName: "Reviewer",
+      role: "teammate",
+      adapterId: "native"
+    }, 400));
+    expect(emittedState.rooms.get(roomId)?.lastActivityAt).toBe(400);
+
+    projector.apply(makeEvent("room.created", roomId, {
+      roomId,
+      title: "Activity room",
+      mode: "team",
+      lastActivityAt: 150
+    }, 500));
+    expect(emittedState.rooms.get(roomId)?.lastActivityAt).toBe(400);
   });
 
   it("maps task.created v1.0 payload fields without legacy todo fallback", () => {
@@ -242,6 +374,76 @@ describe("useProjector replay handling", () => {
     ]);
   });
 
+  it("hydrates message.created and message.completed payload parts during durable replay", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "assisted" }));
+    projector.apply(makeEvent("deployment.ready", roomId, {
+      deploymentId: "deployment-replay-1",
+      url: "http://127.0.0.1:4173/sites/deployment-replay-1/",
+      downloadUrl: "/deployments/deployment-replay-1/download"
+    }, 100));
+    projector.apply(makeAgentEvent("message.created", roomId, "agent-builder", {
+      messageId: "msg-replay-parts-1",
+      senderId: "agent-builder",
+      senderType: "agent",
+      role: "assistant",
+      text: "Deployment ready.",
+      parts: [
+        {
+          type: "card",
+          seq: 1,
+          card: {
+            type: "deployment",
+            deploymentId: "deployment-replay-1",
+            artifactId: "artifact-replay-1",
+            kind: "preview-url",
+            provider: "agenthub-local",
+            status: "queued"
+          }
+        }
+      ]
+    }, 110));
+    projector.apply(makeEvent("message.completed", roomId, {
+      messageId: "msg-replay-parts-1",
+      text: "Deployment ready.",
+      parts: [
+        {
+          type: "attachment",
+          seq: 2,
+          fileId: "file-replay-1",
+          name: "README.md",
+          mimeType: "text/markdown",
+          sizeBytes: 100,
+          artifactId: "artifact-replay-1",
+          path: "README.md",
+          previewKind: "markdown"
+        }
+      ]
+    }, 120));
+
+    const message = emittedState.rooms.get(roomId)?.messages.find((item) => item.id === "msg-replay-parts-1");
+    expect(message?.parts).toEqual([
+      expect.objectContaining({
+        type: "card",
+        seq: 1,
+        card: expect.objectContaining({
+          type: "deployment",
+          deploymentId: "deployment-replay-1",
+          status: "ready",
+          url: "http://127.0.0.1:4173/sites/deployment-replay-1/",
+          downloadUrl: "/deployments/deployment-replay-1/download"
+        })
+      }),
+      expect.objectContaining({
+        type: "attachment",
+        seq: 2,
+        fileId: "file-replay-1",
+        artifactId: "artifact-replay-1"
+      })
+    ]);
+  });
+
   it("removes deleted messages and pending turn entries from live state", () => {
     const roomId = `room-${randomUUID()}`;
     const projector = getProjector();
@@ -386,6 +588,311 @@ describe("useProjector replay handling", () => {
     expect(room?.skillErrors).toEqual([
       expect.objectContaining({ skillId: "skill-1", skillName: "task-planner", runId: "run-skill-1", error: "disk full" })
     ]);
+  });
+
+  it("keeps deployment.created normalized without inserting a chat card by itself", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "assisted" }));
+
+    projector.apply(makeEvent("deployment.created", roomId, {
+      deploymentId: "deployment-1",
+      artifactId: "artifact-1",
+      kind: "preview-url",
+      provider: "agenthub-local",
+      status: "queued"
+    }));
+
+    const room = emittedState.rooms.get(roomId);
+    expect(room?.messages).toEqual([]);
+    expect(room?.deploymentsById?.["deployment-1"]).toMatchObject({
+      id: "deployment-1",
+      artifactId: "artifact-1",
+      kind: "preview-url",
+      provider: "agenthub-local",
+      status: "queued"
+    });
+  });
+
+  it("merges deployment.ready into a later DeploymentCard message part", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "assisted" }));
+    projector.apply(makeEvent("deployment.created", roomId, {
+      deploymentId: "deployment-2",
+      artifactId: "artifact-2",
+      kind: "static-site",
+      provider: "agenthub-local",
+      status: "queued"
+    }, 100));
+    projector.apply(makeEvent("deployment.ready", roomId, {
+      deploymentId: "deployment-2",
+      url: "http://127.0.0.1:4173/sites/deployment-2/",
+      downloadUrl: "/deployments/deployment-2/download",
+      expiresAt: 1_710_000_000_000
+    }, 200));
+
+    projector.apply(makeAgentEvent("message.created", roomId, "agent-builder", {
+      messageId: "msg-deployment-2",
+      senderId: "agent-builder",
+      senderType: "agent",
+      role: "assistant",
+      text: "Deployment queued."
+    }, 300));
+    projector.apply(makeEvent("message.part.added", roomId, {
+      messageId: "msg-deployment-2",
+      part: {
+        type: "card",
+        seq: 1,
+        card: {
+          type: "deployment",
+          deploymentId: "deployment-2",
+          artifactId: "artifact-2",
+          kind: "static-site",
+          provider: "agenthub-local",
+          status: "queued"
+        }
+      }
+    }, 400));
+
+    const room = emittedState.rooms.get(roomId);
+    const card = room?.messages.find((item) => item.id === "msg-deployment-2")?.parts[0];
+    expect(room?.deploymentsById?.["deployment-2"]).toMatchObject({
+      status: "ready",
+      url: "http://127.0.0.1:4173/sites/deployment-2/",
+      downloadUrl: "/deployments/deployment-2/download",
+      expiresAt: 1_710_000_000_000
+    });
+    expect(card).toMatchObject({
+      type: "card",
+      card: {
+        type: "deployment",
+        deploymentId: "deployment-2",
+        status: "ready",
+        url: "http://127.0.0.1:4173/sites/deployment-2/",
+        expiresAt: 1_710_000_000_000,
+        downloadUrl: "/deployments/deployment-2/download"
+      }
+    });
+  });
+
+  it("hydrates deployment card error details and live logs without timeline insertion", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "assisted" }));
+    projector.apply(makeEvent("deployment.created", roomId, {
+      deploymentId: "deployment-failed-1",
+      artifactId: "artifact-failed-1",
+      kind: "container-build",
+      provider: "agenthub-local",
+      status: "in_progress"
+    }, 100));
+    projector.apply(makeEvent("deployment.log.appended", roomId, {
+      deploymentId: "deployment-failed-1",
+      line: "Detecting providers..."
+    }, 120));
+    projector.apply(makeEvent("deployment.failed", roomId, {
+      deploymentId: "deployment-failed-1",
+      error: "Docker is not available"
+    }, 130));
+
+    let room = emittedState.rooms.get(roomId);
+    expect(room?.messages).toEqual([]);
+    expect(room?.deploymentLogsById["deployment-failed-1"]).toEqual(["Detecting providers..."]);
+    expect(room?.deploymentsById["deployment-failed-1"]).toMatchObject({
+      status: "failed",
+      lastError: "Docker is not available"
+    });
+
+    projector.apply(makeAgentEvent("message.created", roomId, "agent-builder", {
+      messageId: "msg-deployment-failed-1",
+      senderId: "agent-builder",
+      senderType: "agent",
+      role: "assistant",
+      text: "Deployment failed."
+    }, 140));
+    projector.apply(makeEvent("message.part.added", roomId, {
+      messageId: "msg-deployment-failed-1",
+      part: {
+        type: "card",
+        seq: 1,
+        card: {
+          type: "deployment",
+          deploymentId: "deployment-failed-1",
+          artifactId: "artifact-failed-1",
+          kind: "container-build",
+          provider: "agenthub-local",
+          status: "in_progress"
+        }
+      }
+    }, 150));
+
+    room = emittedState.rooms.get(roomId);
+    const card = room?.messages.find((item) => item.id === "msg-deployment-failed-1")?.parts[0];
+    expect(card).toMatchObject({
+      type: "card",
+      card: {
+        type: "deployment",
+        deploymentId: "deployment-failed-1",
+        status: "failed",
+        lastError: "Docker is not available",
+        logs: ["Detecting providers..."]
+      }
+    });
+  });
+
+  it("hydrates an existing deployment card when live logs arrive after insertion", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "assisted" }));
+    projector.apply(makeEvent("deployment.created", roomId, {
+      deploymentId: "deployment-live-log-1",
+      artifactId: "artifact-live-log-1",
+      kind: "container-build",
+      provider: "agenthub-local",
+      status: "in_progress"
+    }, 100));
+    projector.apply(makeAgentEvent("message.created", roomId, "agent-builder", {
+      messageId: "msg-deployment-live-log-1",
+      senderId: "agent-builder",
+      senderType: "agent",
+      role: "assistant",
+      text: "Deployment started."
+    }, 110));
+    projector.apply(makeEvent("message.part.added", roomId, {
+      messageId: "msg-deployment-live-log-1",
+      part: {
+        type: "card",
+        seq: 1,
+        card: {
+          type: "deployment",
+          deploymentId: "deployment-live-log-1",
+          artifactId: "artifact-live-log-1",
+          kind: "container-build",
+          provider: "agenthub-local",
+          status: "in_progress"
+        }
+      }
+    }, 120));
+
+    projector.apply(makeEvent("deployment.log.appended", roomId, {
+      deploymentId: "deployment-live-log-1",
+      line: "Building image..."
+    }, 130));
+
+    const room = emittedState.rooms.get(roomId);
+    const card = room?.messages.find((item) => item.id === "msg-deployment-live-log-1")?.parts[0];
+    expect(card).toMatchObject({
+      type: "card",
+      card: {
+        type: "deployment",
+        deploymentId: "deployment-live-log-1",
+        logs: ["Building image..."]
+      }
+    });
+  });
+
+  it("tracks artifact versions without inserting timeline content", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "assisted" }));
+
+    projector.apply(makeEvent("artifact.version.created", roomId, {
+      artifactId: "artifact-3",
+      version: 2,
+      createdBy: "agent-builder",
+      message: "Updated hero"
+    }, 500));
+
+    const room = emittedState.rooms.get(roomId);
+    expect(room?.messages).toEqual([]);
+    expect(room?.artifactVersionsById?.["artifact-3"]).toEqual([
+      expect.objectContaining({
+        artifactId: "artifact-3",
+        version: 2,
+        createdBy: "agent-builder",
+        message: "Updated hero",
+        createdAt: 500
+      })
+    ]);
+  });
+
+  it("projects message pinning, task unblocking, and contact name updates", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "team" }));
+    projector.apply(makeAgentEvent("agent.joined", roomId, "binding-builder", {
+      agentId: "binding-builder",
+      agentBindingId: "binding-builder",
+      agentName: "Old Builder",
+      role: "teammate",
+      adapterId: "native"
+    }));
+    projector.apply(makeEvent("message.created", roomId, {
+      messageId: "message-pin-1",
+      role: "user",
+      text: "Keep this in context"
+    }, 100));
+    projector.apply(makeEvent("task.created", roomId, {
+      taskId: "task-unblock-1",
+      title: "Blocked task",
+      status: "blocked",
+      blockerReason: "waiting_on_dependencies"
+    }, 100));
+
+    projector.apply(makeEvent("message.pinned", roomId, {
+      roomId,
+      messageId: "message-pin-1",
+      pinnedAt: 200
+    }, 200));
+    projector.apply(makeEvent("agent.contact.updated", roomId, {
+      agentBindingId: "binding-builder",
+      displayName: "Builder",
+      avatarUrl: "agenthub://avatar/builder",
+      description: "Frontend builder"
+    }, 300));
+    projector.apply(makeEvent("task.unblocked", roomId, {
+      taskId: "task-unblock-1",
+      roomId,
+      unlockedBy: "task-parent"
+    }, 400));
+
+    let room = emittedState.rooms.get(roomId);
+    expect(room?.messages.find((item) => item.id === "message-pin-1")).toMatchObject({ pinnedAt: 200 });
+    expect(room?.participantContactNames?.["binding-builder"]).toBe("Builder");
+    expect(room?.participants.find((item) => item.id === "binding-builder")).toMatchObject({ name: "Builder" });
+    expect(room?.tasks.find((item) => item.id === "task-unblock-1")).toMatchObject({
+      status: "pending",
+      blockerReason: undefined,
+      lastUnblockedAt: 400
+    });
+
+    projector.apply(makeEvent("message.unpinned", roomId, {
+      roomId,
+      messageId: "message-pin-1"
+    }, 500));
+
+    room = emittedState.rooms.get(roomId);
+    expect(room?.messages.find((item) => item.id === "message-pin-1")?.pinnedAt).toBeUndefined();
+  });
+
+  it("projects legacy message.updated pin payloads for compatibility", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "team" }));
+    projector.apply(makeEvent("message.created", roomId, {
+      messageId: "message-pin-legacy",
+      role: "user",
+      text: "Keep this in context"
+    }, 100));
+
+    projector.apply(makeEvent("message.updated", roomId, {
+      messageId: "message-pin-legacy",
+      pinnedAt: 250
+    }, 250));
+
+    const room = emittedState.rooms.get(roomId);
+    expect(room?.messages.find((item) => item.id === "message-pin-legacy")).toMatchObject({ pinnedAt: 250 });
   });
 
   it("recognizes agent-authored message payloads even when replay lacks envelope agentId", () => {

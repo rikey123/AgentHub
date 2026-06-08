@@ -16,6 +16,8 @@ export type EventCategory =
   | "permission"
   | "intervention"
   | "artifact"
+  | "deployment"
+  | "orchestrator"
   | "adapter"
   | "mailbox"
   | "local-daemon"
@@ -62,11 +64,165 @@ export const ArtifactDiffDetectedPayloadSchema = Schema.Struct({
 });
 export type ArtifactDiffDetectedPayload = typeof ArtifactDiffDetectedPayloadSchema.Type;
 
+export const ArtifactVersionCreatedPayloadSchema = Schema.Struct({
+  artifactId: IdSchema,
+  version: Schema.Number,
+  createdBy: IdSchema,
+  message: Schema.optional(Schema.String)
+});
+export type ArtifactVersionCreatedPayload = typeof ArtifactVersionCreatedPayloadSchema.Type;
+
+export const DeploymentCreatedPayloadSchema = Schema.Struct({
+  deploymentId: IdSchema,
+  artifactId: IdSchema,
+  kind: Schema.Literal("preview-url", "static-site", "source-zip", "container-export", "container-build", "self-hosted"),
+  provider: Schema.Literal("agenthub-local", "caprover"),
+  status: Schema.Literal("queued", "in_progress", "ready", "failed", "cancelled", "expired", "unpublished")
+});
+export type DeploymentCreatedPayload = typeof DeploymentCreatedPayloadSchema.Type;
+
+export const DeploymentStatusChangedPayloadSchema = Schema.Struct({
+  deploymentId: IdSchema,
+  status: Schema.Literal("queued", "in_progress", "ready", "failed", "cancelled", "expired", "unpublished"),
+  kind: Schema.optional(Schema.Literal("preview-url", "static-site", "source-zip", "container-export", "container-build", "self-hosted")),
+  url: Schema.optional(Schema.String),
+  downloadUrl: Schema.optional(Schema.String),
+  imageTag: Schema.optional(Schema.String),
+  expiresAt: Schema.optional(EpochMillisSchema)
+});
+export type DeploymentStatusChangedPayload = typeof DeploymentStatusChangedPayloadSchema.Type;
+
+export const DeploymentLogAppendedPayloadSchema = Schema.Struct({
+  deploymentId: IdSchema,
+  line: Schema.String
+});
+export type DeploymentLogAppendedPayload = typeof DeploymentLogAppendedPayloadSchema.Type;
+
+export const DeploymentReadyPayloadSchema = Schema.Struct({
+  deploymentId: IdSchema,
+  kind: Schema.optional(Schema.Literal("preview-url", "static-site", "source-zip", "container-export", "container-build", "self-hosted")),
+  url: Schema.optional(Schema.String),
+  downloadUrl: Schema.optional(Schema.String),
+  imageTag: Schema.optional(Schema.String),
+  expiresAt: Schema.optional(EpochMillisSchema)
+});
+export type DeploymentReadyPayload = typeof DeploymentReadyPayloadSchema.Type;
+
+export const DeploymentFailedPayloadSchema = Schema.Struct({
+  deploymentId: IdSchema,
+  error: Schema.String
+});
+export type DeploymentFailedPayload = typeof DeploymentFailedPayloadSchema.Type;
+
+export const DeploymentCancelledPayloadSchema = Schema.Struct({
+  deploymentId: IdSchema
+});
+export type DeploymentCancelledPayload = typeof DeploymentCancelledPayloadSchema.Type;
+
+export const DeploymentExpiredPayloadSchema = Schema.Struct({
+  deploymentId: IdSchema
+});
+export type DeploymentExpiredPayload = typeof DeploymentExpiredPayloadSchema.Type;
+
+export const DeploymentUnpublishedPayloadSchema = Schema.Struct({
+  deploymentId: IdSchema
+});
+export type DeploymentUnpublishedPayload = typeof DeploymentUnpublishedPayloadSchema.Type;
+
+export const DeploymentProviderCreatedPayloadSchema = Schema.Struct({
+  providerId: IdSchema,
+  kind: Schema.Literal("caprover"),
+  name: Schema.String,
+  baseUrl: Schema.String,
+  hasCredential: Schema.Boolean
+});
+export type DeploymentProviderCreatedPayload = typeof DeploymentProviderCreatedPayloadSchema.Type;
+
+export const DeploymentProviderUpdatedPayloadSchema = Schema.Struct({
+  providerId: IdSchema,
+  kind: Schema.Literal("caprover"),
+  name: Schema.String,
+  baseUrl: Schema.String,
+  hasCredential: Schema.Boolean
+});
+export type DeploymentProviderUpdatedPayload = typeof DeploymentProviderUpdatedPayloadSchema.Type;
+
+export const DeploymentProviderDeletedPayloadSchema = Schema.Struct({
+  providerId: IdSchema,
+  kind: Schema.Literal("caprover")
+});
+export type DeploymentProviderDeletedPayload = typeof DeploymentProviderDeletedPayloadSchema.Type;
+
+export const RoomPinnedPayloadSchema = Schema.Struct({
+  roomId: IdSchema,
+  pinnedAt: EpochMillisSchema
+});
+export type RoomPinnedPayload = typeof RoomPinnedPayloadSchema.Type;
+
+export const RoomUnpinnedPayloadSchema = Schema.Struct({
+  roomId: IdSchema
+});
+export type RoomUnpinnedPayload = typeof RoomUnpinnedPayloadSchema.Type;
+
+export const MessagePinnedPayloadSchema = Schema.Struct({
+  roomId: IdSchema,
+  messageId: IdSchema,
+  pinnedAt: EpochMillisSchema
+});
+export type MessagePinnedPayload = typeof MessagePinnedPayloadSchema.Type;
+
+export const MessageUnpinnedPayloadSchema = Schema.Struct({
+  roomId: IdSchema,
+  messageId: IdSchema
+});
+export type MessageUnpinnedPayload = typeof MessageUnpinnedPayloadSchema.Type;
+
+export const AgentContactUpdatedPayloadSchema = Schema.Struct({
+  agentBindingId: IdSchema,
+  displayName: Schema.String,
+  avatarUrl: Schema.optional(Schema.Union(Schema.String, Schema.Literal(null))),
+  description: Schema.optional(Schema.Union(Schema.String, Schema.Literal(null))),
+  disabledAt: Schema.optional(EpochMillisSchema)
+});
+export type AgentContactUpdatedPayload = typeof AgentContactUpdatedPayloadSchema.Type;
+
+export const TaskUnblockedPayloadSchema = Schema.Struct({
+  taskId: IdSchema,
+  roomId: IdSchema,
+  unlockedBy: IdSchema
+});
+export type TaskUnblockedPayload = typeof TaskUnblockedPayloadSchema.Type;
+
+export const WakeOutboxDispatchedPayloadSchema = Schema.Struct({
+  outboxId: IdSchema,
+  runId: IdSchema
+});
+export type WakeOutboxDispatchedPayload = typeof WakeOutboxDispatchedPayloadSchema.Type;
+
 export const EVENT_PAYLOAD_SCHEMAS = {
   "agent.profile.removed": AgentProfileRemovedPayloadSchema,
   "agent.profile.error": AgentProfileErrorPayloadSchema,
   "mailbox.delivery.failed": MailboxDeliveryFailedPayloadSchema,
-  "artifact.diff.detected": ArtifactDiffDetectedPayloadSchema
+  "artifact.diff.detected": ArtifactDiffDetectedPayloadSchema,
+  "artifact.version.created": ArtifactVersionCreatedPayloadSchema,
+  "deployment.created": DeploymentCreatedPayloadSchema,
+  "deployment.status.changed": DeploymentStatusChangedPayloadSchema,
+  "deployment.log.appended": DeploymentLogAppendedPayloadSchema,
+  "deployment.ready": DeploymentReadyPayloadSchema,
+  "deployment.failed": DeploymentFailedPayloadSchema,
+  "deployment.cancelled": DeploymentCancelledPayloadSchema,
+  "deployment.expired": DeploymentExpiredPayloadSchema,
+  "deployment.unpublished": DeploymentUnpublishedPayloadSchema,
+  "deployment.provider.created": DeploymentProviderCreatedPayloadSchema,
+  "deployment.provider.updated": DeploymentProviderUpdatedPayloadSchema,
+  "deployment.provider.deleted": DeploymentProviderDeletedPayloadSchema,
+  "room.pinned": RoomPinnedPayloadSchema,
+  "room.unpinned": RoomUnpinnedPayloadSchema,
+  "message.pinned": MessagePinnedPayloadSchema,
+  "message.unpinned": MessageUnpinnedPayloadSchema,
+  "agent.contact.updated": AgentContactUpdatedPayloadSchema,
+  "task.unblocked": TaskUnblockedPayloadSchema,
+  "wake_outbox.dispatched": WakeOutboxDispatchedPayloadSchema
 } as const;
 
 export const EVENT_REGISTRY = [
@@ -77,6 +233,8 @@ export const EVENT_REGISTRY = [
   { type: "message.cancelled", category: "message", durability: "durable", visibility: "both", schemaVersion: 1 },
   { type: "message.deleted", category: "message", durability: "durable", visibility: "both", schemaVersion: 1 },
   { type: "message.updated", category: "message", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "message.pinned", category: "message", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "message.unpinned", category: "message", durability: "durable", visibility: "both", schemaVersion: 1 },
   { type: "message.brief.published", category: "message", durability: "durable", visibility: "main", schemaVersion: 1 },
   { type: "pending_turn.created", category: "message", durability: "durable", visibility: "main", schemaVersion: 1 },
   { type: "pending_turn.cancelled", category: "message", durability: "durable", visibility: "main", schemaVersion: 1 },
@@ -94,6 +252,7 @@ export const EVENT_REGISTRY = [
   { type: "agent.state.changed", category: "agent", durability: "durable", visibility: "both", schemaVersion: 1 },
   { type: "agent.blocked", category: "agent", durability: "durable", visibility: "both", schemaVersion: 1 },
   { type: "agent.capabilities.updated", category: "agent", durability: "durable", visibility: "detail", schemaVersion: 1 },
+  { type: "agent.contact.updated", category: "agent", durability: "durable", visibility: "both", schemaVersion: 1 },
   { type: "agent.token.delta", category: "agent", durability: "ephemeral", visibility: "detail", schemaVersion: 1 },
   { type: "agent.typing", category: "agent", durability: "ephemeral", visibility: "detail", schemaVersion: 1 },
   { type: "agent.status_line.updated", category: "agent", durability: "ephemeral", visibility: "main", schemaVersion: 1 },
@@ -172,6 +331,22 @@ export const EVENT_REGISTRY = [
   { type: "artifact.deleted", category: "artifact", durability: "durable", visibility: "detail", schemaVersion: 1 },
   { type: "artifact.preview.started", category: "artifact", durability: "durable", visibility: "both", schemaVersion: 1 },
   { type: "artifact.preview.stopped", category: "artifact", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "artifact.version.created", category: "artifact", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "deployment.created", category: "deployment", durability: "durable", visibility: "main", schemaVersion: 1 },
+  { type: "deployment.status.changed", category: "deployment", durability: "durable", visibility: "main", schemaVersion: 1 },
+  { type: "deployment.log.appended", category: "deployment", durability: "ephemeral", visibility: "main", schemaVersion: 1 },
+  { type: "deployment.ready", category: "deployment", durability: "durable", visibility: "main", schemaVersion: 1 },
+  { type: "deployment.failed", category: "deployment", durability: "durable", visibility: "main", schemaVersion: 1 },
+  { type: "deployment.cancelled", category: "deployment", durability: "durable", visibility: "main", schemaVersion: 1 },
+  { type: "deployment.expired", category: "deployment", durability: "durable", visibility: "main", schemaVersion: 1 },
+  { type: "deployment.unpublished", category: "deployment", durability: "durable", visibility: "main", schemaVersion: 1 },
+  { type: "deployment.provider.created", category: "deployment", durability: "durable", visibility: "detail", schemaVersion: 1 },
+  { type: "deployment.provider.updated", category: "deployment", durability: "durable", visibility: "detail", schemaVersion: 1 },
+  { type: "deployment.provider.deleted", category: "deployment", durability: "durable", visibility: "detail", schemaVersion: 1 },
+  { type: "room.pinned", category: "room", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "room.unpinned", category: "room", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "task.unblocked", category: "task", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "wake_outbox.dispatched", category: "orchestrator", durability: "durable", visibility: "detail", schemaVersion: 1 },
   { type: "adapter.registered", category: "adapter", durability: "durable", visibility: "detail", schemaVersion: 1 },
   { type: "adapter.session.created", category: "adapter", durability: "durable", visibility: "detail", schemaVersion: 1 },
   { type: "adapter.session.ended", category: "adapter", durability: "durable", visibility: "detail", schemaVersion: 1 },

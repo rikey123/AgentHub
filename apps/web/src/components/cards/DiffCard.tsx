@@ -19,6 +19,9 @@ export function DiffCard({ card, csrfFetch }: DiffCardProps) {
   const totalAdditions = card.files.reduce((acc, f) => acc + (f.additions ?? 0), 0);
   const totalDeletions = card.files.reduce((acc, f) => acc + (f.deletions ?? 0), 0);
   const isResolved = ["applied", "rejected", "failed"].includes(String(card.applyStatus));
+  const firstFilePath = card.files.find((file) => file.path.length > 0)?.path;
+  const detailsHref = firstFilePath ? `#artifact:${encodeURIComponent(card.artifactId)}:${encodeURIComponent(firstFilePath)}` : undefined;
+  const hasFooterActions = !isResolved || detailsHref !== undefined;
   const fallbackFiles: ReviewFile[] = card.files.map((file) => ({
     path: file.path,
     fileStatus: file.status,
@@ -80,10 +83,15 @@ export function DiffCard({ card, csrfFetch }: DiffCardProps) {
         {filesError ? <p className="mt-2 text-xs text-warning-700 dark:text-warning-200">Diff preview unavailable: {filesError}</p> : null}
         {error ? <p className="mt-2 text-xs text-danger">{error}</p> : null}
       </Card.Content>
-      {!isResolved ? (
+      {hasFooterActions ? (
         <Card.Footer className="gap-2">
-          <Button variant="primary" isPending={pending === "apply"} onPress={() => act("apply")}>Apply</Button>
-          <Button variant="danger" isPending={pending === "reject"} onPress={() => act("reject")}>Reject</Button>
+          {!isResolved ? (
+            <>
+              <Button variant="primary" isPending={pending === "apply"} onPress={() => act("apply")}>Apply Diff</Button>
+              <Button variant="danger" isPending={pending === "reject"} onPress={() => act("reject")}>Reject</Button>
+            </>
+          ) : null}
+          {detailsHref ? <a className="inline-flex h-10 items-center rounded-md border border-border px-3 text-sm font-semibold text-foreground hover:bg-surface-secondary" href={detailsHref}>View Details</a> : null}
         </Card.Footer>
       ) : null}
     </Card>

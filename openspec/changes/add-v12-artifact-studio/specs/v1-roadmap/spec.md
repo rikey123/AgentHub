@@ -20,17 +20,18 @@ The system SHALL consider the V1.0 `deployment-static-zip` placeholder fulfilled
 - `DeploymentCard`：聊天流部署状态卡片，含两阶段进度、实时日志、操作区
 - `deployment_providers` 表：自托管 provider 配置（credential via Keychain）
 
-`POST /artifacts { type: "deployment" }` 不再返回 501。Agent 通过 `room.deploy_artifact` MCP tool 触发部署，写入独立 `deployments` 表。
+`POST /artifacts { type: "deployment" }` MUST NOT create an artifact row. The route SHALL either be removed or return `400/410 { error: "deployment moved to /deployments" }`. Agent 通过 `room.deploy_artifact` MCP tool 或 `POST /deployments` 触发部署，写入独立 `deployments` 表。
 
 #### Scenario: V1.2 deployment 完整可用
 
 - **WHEN** Agent 调用 `room.deploy_artifact({ artifactId, kind: "static-site" })`
-- **THEN** 系统创建 `deployments` 行，DeploymentCard 出现在聊天流，`status` 从 queued → in_progress → ready；不返回 501
+- **THEN** 系统创建 `deployments` 行，DeploymentCard 出现在聊天流，`status` 从 queued → in_progress → ready；不触发旧 501 占位逻辑
 
-#### Scenario: deployment 501 不再出现
+#### Scenario: 旧 artifacts deployment 路径不再创建 artifact
 
 - **WHEN** `POST /artifacts { type: "deployment", ... }`
-- **THEN** 不返回 501；如需创建部署请使用 `room.deploy_artifact` 或 `POST /deployments`
+- **THEN** 系统返回 `400` 或 `410`，提示改用 `room.deploy_artifact` 或 `POST /deployments`
+- **AND** 不创建 `artifacts` 行
 
 ---
 

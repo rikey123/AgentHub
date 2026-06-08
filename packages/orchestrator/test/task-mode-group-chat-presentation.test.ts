@@ -35,13 +35,15 @@ afterEach(() => {
 });
 
 describe("TaskModeGroupChatPresenter", () => {
-  test("publishes a short leader handoff when a team task is delegated", () => {
+  test("publishes a system coordination notice when a team task is delegated", () => {
+    now = 2_000;
     currentPresenter().publishDelegationCreated({ roomId: "room_team", leaderAgentId: "agent_pm", taskId: "task_builder", teammateAgentId: "agent_builder" });
 
     const message = latestMessage();
-    expect(message).toMatchObject({ room_id: "room_team", sender_type: "agent", sender_id: "agent_pm", role: "assistant", status: "completed" });
-    expect(messageText(message.id)).toBe("Builder，我把「架构边界梳理」交给你，先从你的角度推进。");
+    expect(message).toMatchObject({ room_id: "room_team", sender_type: "system", sender_id: "orchestrator", role: "system", status: "completed" });
+    expect(messageText(message.id)).toBe("已将任务「架构边界梳理」分配给 Builder");
     expect(messageEventTypes(message.id)).toEqual(["message.created", "message.completed"]);
+    expect(roomActivity("room_team")).toBe(2_000);
   });
 
   test("publishes teammate start and completion turns without replacing task events", () => {
@@ -123,4 +125,9 @@ function messageText(messageId: string): string {
 function messageEventTypes(messageId: string): string[] {
   const rows = currentDatabase().sqlite.prepare("SELECT type FROM events WHERE json_extract(payload, '$.messageId') = ? ORDER BY seq ASC").all(messageId) as Array<{ readonly type: string }>;
   return rows.map((row) => row.type);
+}
+
+function roomActivity(roomId: string): number | null {
+  const row = currentDatabase().sqlite.prepare("SELECT last_activity_at FROM rooms WHERE id = ?").get(roomId) as { readonly last_activity_at: number | null };
+  return row.last_activity_at;
 }

@@ -9,12 +9,21 @@ import {
   SETTINGS_TABS,
   SettingsPanel,
   WorkspaceTab,
-  fetchSettingsBootstrap
+  DeployProvidersSettingsTab,
+  clearDeploymentProviderTestResultsForChangedProviders,
+  createDeploymentProvider,
+  deleteDeploymentProvider,
+  fetchSettingsBootstrap,
+  shouldApplyDeploymentProviderTestResult,
+  normalizeDeploymentProviders,
+  testDeploymentProvider,
+  updateDeploymentProviderTestResults,
+  updateDeploymentProvider
 } from "./SettingsModal.tsx";
 import { SkillsTab, createSkill, fetchRuntimeLocalSkills, fetchSkillDetail, importRuntimeLocalSkill, normalizeRuntimeLocalSkillList, normalizeSkills, updateSkill } from "./SkillsTab.tsx";
 
 describe("SettingsModal integration contract", () => {
-  it("defines the V1.1 top-level tabs with Roles first and Skills included", () => {
+  it("defines the V1.2 top-level tabs with deploy providers included", () => {
     expect(SETTINGS_TABS.map((tab) => tab.label)).toEqual([
       "Roles",
       "Runtimes",
@@ -22,9 +31,11 @@ describe("SettingsModal integration contract", () => {
       "Skills",
       "Permissions",
       "Workspace",
+      "Deploy Providers",
       "MCP"
     ]);
     expect(SETTINGS_TABS[0]?.id).toBe("roles");
+    expect(SETTINGS_TABS.find((tab) => tab.id === "deploy-providers")?.endpoint).toBe("deploymentProviders");
   });
 
   it("opens settings from the FeatureRail Settings entry point", () => {
@@ -42,18 +53,32 @@ describe("SettingsModal integration contract", () => {
     expect(onSelect).not.toHaveBeenCalledWith("settings");
   });
 
-  it("labels the product rail as V1.0", () => {
+  it("labels the product rail as V1.2", () => {
     const html = renderToStaticMarkup(createElement(FeatureRail, {
       active: "chat",
       onSelect: vi.fn(),
       onOpenSettings: vi.fn()
     }));
 
-    expect(html).toContain("v1.0");
+    expect(html).toContain("v1.2");
+    expect(html).not.toContain("v1.0");
     expect(html).not.toContain("v0.5");
   });
 
-  it("bootstraps settings with seven parallel REST requests including skills and permission rules, then workspace metadata, and no EventSource", async () => {
+  it("exposes contacts rail entry once the contacts view exists", () => {
+    const onSelect = vi.fn();
+    const tree = FeatureRail({ active: "chat", onSelect, onOpenSettings: vi.fn() });
+    const contactsButton = findElementByProp(tree, "aria-label", "Contacts");
+
+    expect(contactsButton).toBeDefined();
+    const onClick = contactsButton?.props.onClick;
+    expect(typeof onClick).toBe("function");
+    if (typeof onClick === "function") onClick();
+
+    expect(onSelect).toHaveBeenCalledWith("contacts");
+  });
+
+  it("bootstraps settings with eight parallel REST requests including deploy providers, then workspace metadata, and no EventSource", async () => {
     const previousEventSource = globalThis.EventSource;
     const eventSourceSpy = vi.fn();
     Object.defineProperty(globalThis, "EventSource", {
@@ -78,6 +103,8 @@ describe("SettingsModal integration contract", () => {
                 ? { rules: [{ id: "rule_1", workspace_id: "ws_1", resource_type: "file", resource_match: "src/**", action: "allow" }] }
               : path === "/skills"
                 ? { skills: [{ id: "skill_1", name: "task-planner", description: "Plans tasks", origin: "builtin" }] }
+              : path === "/deployment-providers"
+                ? { providers: [{ id: "provider_1", kind: "caprover", name: "Captain", baseUrl: "https://captain.example", masked: true, hasCredential: true }] }
               : path === "/workspaces/ws_1"
                 ? { workspace: { id: "ws_1", name: "Workspace", root_path: "." } }
                 : { path };
@@ -89,9 +116,10 @@ describe("SettingsModal integration contract", () => {
       const controller = new AbortController();
       const resultPromise = fetchSettingsBootstrap(fetchImpl, controller.signal);
 
-      // First 7 requests fire in parallel immediately.
+      // First 8 requests fire in parallel immediately.
       expect(calls.map((call) => call.path).sort()).toEqual([
         "/agent-bindings",
+        "/deployment-providers",
         "/model-configs",
         "/permissions/profiles",
         "/permissions/rules",
@@ -113,6 +141,7 @@ describe("SettingsModal integration contract", () => {
       // After resolving, the workspace fetch should have been added.
       expect(calls.map((call) => call.path).sort()).toEqual([
         "/agent-bindings",
+        "/deployment-providers",
         "/model-configs",
         "/permissions/profiles",
         "/permissions/rules",
@@ -128,6 +157,7 @@ describe("SettingsModal integration contract", () => {
         agentBindings: { agentBindings: [{ id: "binding_1", workspaceId: "ws_1", role: { name: "Reviewer" }, runtime: { kind: "native", name: "Native", detectedVersion: "native" }, modelConfig: { id: "model_1", name: "OpenAI", provider: "openai", model: "gpt-4o" } }] },
         permissionProfiles: { profiles: [{ id: "profile_1", name: "Default Policy", description: "Shared defaults", rules: [] }] },
         permissionRules: { rules: [{ id: "rule_1", workspace_id: "ws_1", resource_type: "file", resource_match: "src/**", action: "allow" }] },
+        deploymentProviders: { providers: [{ id: "provider_1", kind: "caprover", name: "Captain", baseUrl: "https://captain.example", masked: true, hasCredential: true }] },
         skills: { skills: [{ id: "skill_1", name: "task-planner", description: "Plans tasks", origin: "builtin" }] },
         workspace: { workspace: { id: "ws_1", name: "Workspace", root_path: "." } },
         errors: {}
@@ -154,7 +184,7 @@ describe("SettingsModal integration contract", () => {
     const resultPromise = fetchSettingsBootstrap(fetchImpl, controller.signal);
     controller.abort();
 
-    expect(signals).toHaveLength(7);
+    expect(signals).toHaveLength(8);
     expect(signals.every((signal) => signal.aborted)).toBe(true);
     await expect(resultPromise).rejects.toMatchObject({ name: "AbortError" });
   });
@@ -179,6 +209,7 @@ describe("SettingsModal integration contract", () => {
     expect(data.roles).toEqual({ path: "/roles" });
     expect(data.runtimes).toEqual({ path: "/runtimes" });
     expect(data.skills).toEqual({ path: "/skills" });
+    expect(data.deploymentProviders).toEqual({ path: "/deployment-providers" });
     expect(data.permissionRules).toBeUndefined();
     expect(data.workspace).toEqual({ workspace: { id: "ws_1", name: "Workspace" } });
     expect(data.errors).toMatchObject({ permissionRules: "Failed to fetch" });
@@ -198,6 +229,7 @@ describe("SettingsModal integration contract", () => {
         agentBindings: undefined,
         permissionProfiles: undefined,
         permissionRules: undefined,
+        deploymentProviders: undefined,
         workspace: undefined,
         errors: { permissionRules: "Failed to fetch" }
       },
@@ -207,7 +239,8 @@ describe("SettingsModal integration contract", () => {
       onModelConfigsChange: vi.fn(),
       onSkillsChange: vi.fn(),
       onPermissionProfilesChange: vi.fn(),
-      onPermissionRulesChange: vi.fn()
+      onPermissionRulesChange: vi.fn(),
+      onDeploymentProvidersChange: vi.fn()
     }));
 
     expect(html).toContain("Builder");
@@ -259,6 +292,150 @@ describe("SettingsModal integration contract", () => {
     ]);
     for (const tool of ROOM_MCP_TOOLS) expect(html).toContain(tool);
     expect(html).toContain("Read-only");
+  });
+
+  it("renders CapRover deployment providers with masked credentials and lifecycle actions", () => {
+    const normalized = normalizeDeploymentProviders({
+      providers: [{
+        id: "provider_1",
+        kind: "caprover",
+        name: "Captain",
+        base_url: "https://captain.example",
+        hasCredential: true,
+        masked: true
+      }]
+    });
+    expect(normalized).toEqual([
+      expect.objectContaining({
+        id: "provider_1",
+        kind: "caprover",
+        name: "Captain",
+        baseUrl: "https://captain.example",
+        hasCredential: true,
+        masked: true
+      })
+    ]);
+
+    const html = renderToStaticMarkup(createElement(DeployProvidersSettingsTab, {
+      providers: { providers: normalized },
+      fetchImpl: vi.fn<typeof fetch>(),
+      onProvidersChange: vi.fn()
+    }));
+
+    expect(html).toContain("CapRover");
+    expect(html).toContain("Captain");
+    expect(html).toContain("https://captain.example");
+    expect(html).toContain("Credential stored");
+    expect(html).toContain("Test Connection");
+    expect(html).toContain("Edit");
+    expect(html).toContain("Delete");
+    expect(html).not.toContain("Vercel");
+    expect(html).not.toContain("Cloudflare");
+    expect(html).not.toContain("Dokploy");
+    expect(html).not.toContain("Coolify");
+  });
+
+  it("renders an empty CapRover-only deployment provider state", () => {
+    const html = renderToStaticMarkup(createElement(DeployProvidersSettingsTab, {
+      providers: { providers: [] },
+      fetchImpl: vi.fn<typeof fetch>(),
+      onProvidersChange: vi.fn()
+    }));
+
+    expect(html).toContain("Add a CapRover provider");
+    expect(html).toContain("V1.2 only supports CapRover");
+    expect(html).not.toContain("Vercel");
+    expect(html).not.toContain("Cloudflare");
+  });
+
+  it("uses deployment provider REST endpoints without sending or returning raw tokens after save", async () => {
+    const calls: Array<{ readonly path: string; readonly method: string; readonly body?: unknown }> = [];
+    const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+      calls.push({
+        path: String(input),
+        method: String(init?.method ?? "GET"),
+        ...(init?.body ? { body: JSON.parse(String(init.body)) as unknown } : {})
+      });
+      if (String(input).endsWith("/test")) return jsonResponse(200, { ok: true, version: "1.12.0" });
+      if (init?.method === "DELETE") return jsonResponse(200, { ok: true });
+      return jsonResponse(String(input) === "/deployment-providers" ? 201 : 200, {
+        provider: {
+          id: "provider_1",
+          kind: "caprover",
+          name: "Captain",
+          baseUrl: "https://captain.example",
+          hasCredential: true,
+          masked: true
+        }
+      });
+    });
+
+    await expect(createDeploymentProvider(fetchImpl, {
+      kind: "caprover",
+      name: "Captain",
+      baseUrl: "https://captain.example",
+      credential: "raw-token"
+    })).resolves.toMatchObject({ id: "provider_1", hasCredential: true, masked: true });
+    await expect(updateDeploymentProvider(fetchImpl, "provider_1", {
+      name: "Captain Updated",
+      baseUrl: "https://captain.example",
+      credential: "new-token"
+    })).resolves.toMatchObject({ id: "provider_1", hasCredential: true, masked: true });
+    await expect(testDeploymentProvider(fetchImpl, "provider_1")).resolves.toEqual({ ok: true, version: "1.12.0" });
+    await expect(deleteDeploymentProvider(fetchImpl, "provider_1")).resolves.toBeUndefined();
+
+    expect(calls).toEqual([
+      { path: "/deployment-providers", method: "POST", body: { kind: "caprover", name: "Captain", baseUrl: "https://captain.example", credential: "raw-token" } },
+      { path: "/deployment-providers/provider_1", method: "PATCH", body: { name: "Captain Updated", baseUrl: "https://captain.example", credential: "new-token" } },
+      { path: "/deployment-providers/provider_1/test", method: "POST" },
+      { path: "/deployment-providers/provider_1", method: "DELETE" }
+    ]);
+  });
+
+  it("tracks deployment provider test results per provider", () => {
+    const existing = {
+      provider_2: { ok: false, error: "offline" }
+    };
+
+    const withProviderOne = updateDeploymentProviderTestResults(existing, "provider_1", { ok: true, version: "1.12.0" });
+    expect(withProviderOne).toEqual({
+      provider_1: { ok: true, version: "1.12.0" },
+      provider_2: { ok: false, error: "offline" }
+    });
+    expect(existing).toEqual({
+      provider_2: { ok: false, error: "offline" }
+    });
+
+    expect(updateDeploymentProviderTestResults(withProviderOne, "provider_2", undefined)).toEqual({
+      provider_1: { ok: true, version: "1.12.0" }
+    });
+  });
+
+  it("clears stale deployment provider test results when provider configuration changes", () => {
+    const current = {
+      provider_1: { ok: true, version: "1.12.0" },
+      provider_2: { ok: false, error: "offline" }
+    };
+    const nextProviders = [
+      { id: "provider_1", kind: "caprover" as const, name: "Captain", baseUrl: "https://captain-updated.example", hasCredential: true, masked: true },
+      { id: "provider_2", kind: "caprover" as const, name: "Backup", baseUrl: "https://backup.example", hasCredential: true, masked: true }
+    ];
+
+    expect(clearDeploymentProviderTestResultsForChangedProviders(current, nextProviders, ["provider_1"])).toEqual({
+      provider_2: { ok: false, error: "offline" }
+    });
+    expect(clearDeploymentProviderTestResultsForChangedProviders(current, nextProviders, ["provider_3"])).toEqual(current);
+  });
+
+  it("ignores deployment provider test results from stale provider generations", () => {
+    const generations = {
+      provider_1: 2,
+      provider_2: 1
+    };
+
+    expect(shouldApplyDeploymentProviderTestResult(generations, "provider_1", 1)).toBe(false);
+    expect(shouldApplyDeploymentProviderTestResult(generations, "provider_1", 2)).toBe(true);
+    expect(shouldApplyDeploymentProviderTestResult(generations, "provider_3", 0)).toBe(false);
   });
 });
 

@@ -1,3 +1,7 @@
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { isAbsolute, relative, resolve, sep } from "node:path";
+
 import type { AgentHubDatabase } from "@agenthub/db";
 
 import { MailboxService, messageText, type MailboxDeliveryBatch, type MailboxMessageDelivery, type NextTurnDelivery } from "../mailbox-service.ts";
@@ -50,9 +54,11 @@ export function buildRunPrompt(run: RunRow, database: AgentHubDatabase, options:
   const priorProgress = run.task_id !== null ? buildPriorProgressBlock(database, run.task_id) : undefined;
   const batch = readCurrentRunMailbox(run, database, options);
   const input = renderBatch(batch) ?? renderQueuedRunInput(run, database) ?? `Run ${run.id} for agent ${run.agent_id}`;
+  const contextRefs = renderContextRefsBlock(run, database, input);
+  const pinnedRoomContext = renderPinnedRoomContext(run, database);
   const leaderContext = renderLeaderRunContext(run, database);
   const assistedContext = renderAssistedGroupContext(run, database);
-  return [options.skillsBlock, missionBriefBlock, priorProgress, rolePrompt, leaderContext, assistedContext, input].filter((part): part is string => part !== undefined && part.trim().length > 0).join("\n\n---\n\n");
+  return [options.skillsBlock, missionBriefBlock, contextRefs, pinnedRoomContext, priorProgress, rolePrompt, leaderContext, assistedContext, input].filter((part): part is string => part !== undefined && part.trim().length > 0).join("\n\n---\n\n");
 }
 
 function buildLeaderPromptParams(run: RunRow, database: AgentHubDatabase): Parameters<typeof buildPlanPhasePrompt>[0] {
@@ -306,6 +312,139 @@ function artifactFileContent(database: AgentHubDatabase, artifactId: string, pat
   return fallback?.content ?? undefined;
 }
 
+function renderContextRefsBlock(run: RunRow, database: AgentHubDatabase, text: string): string | undefined {
+  const workspaceRoot = workspaceRootForRun(run, database);
+  if (workspaceRoot === undefined) return undefined;
+  const blocks = parseContextRefs(text)
+    .map((ref) => {
+      try {
+        return ref.type === "artifact"
+          ? renderArtifactContextRef(database, ref)
+          : renderWorkspaceContextRef(workspaceRoot, ref);
+      } catch {
+        return undefined;
+      }
+    })
+    .filter((block): block is string => block !== undefined && block.trim().length > 0);
+  if (blocks.length === 0) return undefined;
+  return ["## Context References", "<context-refs>", ...blocks, "</context-refs>"].join("\n");
+}
+
+type ParsedContextRef =
+  | { readonly type: "artifact"; readonly id: string; readonly lineStart?: number; readonly lineEnd?: number; readonly slide?: number }
+  | { readonly type: "workspace"; readonly path: string; readonly lineStart?: number; readonly lineEnd?: number };
+
+function parseContextRefs(text: string): ParsedContextRef[] {
+  const refs: ParsedContextRef[] = [];
+  const pattern = /@(artifact|workspace):([^\s#]+)(?:#(L(\d+)(?:-L(\d+))?|slide=(\d+)))?/gu;
+  for (const match of text.matchAll(pattern)) {
+    const type = match[1];
+    const target = match[2];
+    if (target === undefined) continue;
+    const lineStart = match[4] !== undefined ? Number(match[4]) : undefined;
+    const lineEnd = match[5] !== undefined ? Number(match[5]) : lineStart;
+    const slide = match[6] !== undefined ? Number(match[6]) : undefined;
+    const lineRange = lineStart !== undefined ? { lineStart, lineEnd: lineEnd ?? lineStart } : {};
+    if (type === "artifact") refs.push({ type: "artifact", id: target, ...lineRange, ...(slide !== undefined ? { slide } : {}) });
+    if (type === "workspace") refs.push({ type: "workspace", path: target, ...lineRange });
+  }
+  return refs;
+}
+
+function renderArtifactContextRef(database: AgentHubDatabase, ref: Extract<ParsedContextRef, { readonly type: "artifact" }>): string | undefined {
+  const row = database.sqlite.prepare("SELECT path, new_content, content_path, binary FROM artifact_files WHERE artifact_id = ? ORDER BY path ASC LIMIT 1").get(ref.id) as { readonly path: string; readonly new_content: string | null; readonly content_path: string | null; readonly binary: number } | undefined;
+  if (row === undefined) return undefined;
+  if (ref.slide !== undefined && row.binary === 1 && row.content_path !== null) {
+    const text = execFileSync("officecli", ["view", row.content_path, "text", "--start", String(ref.slide), "--end", String(ref.slide)], { encoding: "utf8" });
+    return `<context-ref type="artifact" id="${xmlEscape(ref.id)}" slide="${ref.slide}" path="${xmlEscape(row.path)}">${xmlEscape(text)}</context-ref>`;
+  }
+  const selected = selectLines(row.new_content ?? "", ref.lineStart, ref.lineEnd);
+  const lines = ref.lineStart !== undefined ? ` lines="${ref.lineStart}-${ref.lineEnd ?? ref.lineStart}"` : "";
+  return `<context-ref type="artifact" id="${xmlEscape(ref.id)}"${lines} path="${xmlEscape(row.path)}">${xmlEscape(selected)}</context-ref>`;
+}
+
+function renderWorkspaceContextRef(workspaceRoot: string, ref: Extract<ParsedContextRef, { readonly type: "workspace" }>): string {
+  const path = resolveWorkspacePath(workspaceRoot, ref.path);
+  const selected = selectLines(readFileSync(path, "utf8"), ref.lineStart, ref.lineEnd);
+  const lines = ref.lineStart !== undefined ? ` lines="${ref.lineStart}-${ref.lineEnd ?? ref.lineStart}"` : "";
+  return `<context-ref type="workspace" path="${xmlEscape(ref.path)}"${lines}>${xmlEscape(selected)}</context-ref>`;
+}
+
+function workspaceRootForRun(run: RunRow, database: AgentHubDatabase): string | undefined {
+  const row = database.sqlite.prepare("SELECT root_path FROM workspaces WHERE id = ?").get(run.workspace_id) as { readonly root_path: string | null } | undefined;
+  return row?.root_path ?? undefined;
+}
+
+function resolveWorkspacePath(root: string, path: string): string {
+  const resolvedRoot = resolve(root);
+  const target = isAbsolute(path) ? resolve(path) : resolve(resolvedRoot, path);
+  const rel = relative(resolvedRoot, target);
+  if (target !== resolvedRoot && (rel.startsWith("..") || rel.split(sep).includes("..") || isAbsolute(rel))) throw new Error("workspace ref escapes workspace");
+  return target;
+}
+
+function selectLines(content: string, start?: number, end?: number): string {
+  if (start === undefined) {
+    if (Buffer.byteLength(content, "utf8") <= 2_048) return content;
+    return `${content.split(/\r?\n/u).slice(0, 50).join("\n")}\n(content truncated; use #Lx-Ly to reference a smaller range)`;
+  }
+  return content.split(/\r?\n/u).slice(Math.max(0, start - 1), end ?? start).join("\n");
+}
+
+function renderPinnedRoomContext(run: RunRow, database: AgentHubDatabase): string | undefined {
+  const rows = database.sqlite.prepare(
+    `SELECT id, sender_type AS senderType, sender_id AS senderId, role, pinned_at AS pinnedAt
+     FROM messages
+     WHERE room_id = ?
+       AND deleted_at IS NULL
+       AND pinned_at IS NOT NULL
+     ORDER BY pinned_at DESC, created_at DESC, id DESC
+     LIMIT 12`
+  ).all(run.room_id) as Array<{ readonly id: string; readonly senderType: string; readonly senderId: string | null; readonly role: string; readonly pinnedAt: number }>;
+  const lines = rows.map((row) => renderPinnedMessage(row, database)).filter((line): line is string => line !== undefined);
+  if (lines.length === 0) return undefined;
+  return [
+    "## Pinned Room Context",
+    "Pinned messages are high-priority room context. Artifact-only pins are represented as compact refs.",
+    ...lines
+  ].join("\n");
+}
+
+function renderPinnedMessage(row: { readonly id: string; readonly senderType: string; readonly senderId: string | null; readonly role: string; readonly pinnedAt: number }, database: AgentHubDatabase): string | undefined {
+  const text = messageText(database.sqlite, row.id);
+  const artifactRefs = artifactRefsForMessage(database, row.id);
+  const pieces = [
+    text !== undefined ? truncateText(cleanSnippet(text), MAX_MESSAGE_SNIPPET_CHARS) : undefined,
+    artifactRefs.length > 0 ? artifactRefs.join(" ") : undefined
+  ].filter((part): part is string => part !== undefined && part.trim().length > 0);
+  if (pieces.length === 0) return undefined;
+  return `- ${speakerName({ ...row, senderName: row.senderId })}: ${pieces.join(" ")}`;
+}
+
+function artifactRefsForMessage(database: AgentHubDatabase, messageId: string): string[] {
+  const rows = database.sqlite.prepare("SELECT payload FROM message_parts WHERE message_id = ? ORDER BY seq ASC").all(messageId) as Array<{ readonly payload: string }>;
+  const ids = new Set<string>();
+  for (const row of rows) {
+    const artifactId = artifactIdFromPayload(row.payload);
+    if (artifactId !== undefined) ids.add(artifactId);
+  }
+  return [...ids].map((id) => `@artifact:${id}`);
+}
+
+function artifactIdFromPayload(value: string): string | undefined {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!isRecord(parsed)) return undefined;
+    const direct = parsed.artifactId;
+    if (typeof direct === "string" && direct.length > 0) return direct;
+    const card = parsed.card;
+    if (isRecord(card) && typeof card.artifactId === "string" && card.artifactId.length > 0) return card.artifactId;
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function renderRecentRoomContext(run: RunRow, database: AgentHubDatabase, excludeMessageIds: ReadonlySet<string>): string | undefined {
   const rows = database.sqlite.prepare(
     `SELECT m.id, m.sender_type AS senderType, m.sender_id AS senderId, m.role, m.run_id AS runId, m.created_at AS createdAt,
@@ -461,4 +600,12 @@ function truncateText(text: string, maxChars: number): string {
 
 function shortId(id: string): string {
   return id.length > 8 ? id.slice(0, 8) : id;
+}
+
+function xmlEscape(value: string): string {
+  return value.replace(/&/gu, "&amp;").replace(/</gu, "&lt;").replace(/>/gu, "&gt;").replace(/"/gu, "&quot;").replace(/'/gu, "&apos;");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

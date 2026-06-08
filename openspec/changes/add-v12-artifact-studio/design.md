@@ -133,6 +133,7 @@ ALTER TABLE tasks ADD COLUMN last_unblocked_at INTEGER;
 ALTER TABLE agent_bindings ADD COLUMN avatar_url          TEXT;
 ALTER TABLE agent_bindings ADD COLUMN contact_name        TEXT;
 ALTER TABLE agent_bindings ADD COLUMN contact_description TEXT;
+ALTER TABLE agent_bindings ADD COLUMN disabled_at         INTEGER;
 ```
 
 ### D2 — Artifact type / kind 分离
@@ -325,7 +326,7 @@ DELETE /rooms/:id/pin   → rooms.pinned_at = NULL，发 room.unpinned（durable
 
 ### D9 — Pin 关键消息为长期上下文
 
-复用 `messages.pinned_at`（已存在于 `0013_messages_pinned.sql`）。Pin 操作：`POST /rooms/:id/messages/:msgId/pin` → `messages.pinned_at = now()`，`DELETE` 取消。
+复用 `messages.pinned_at`（已存在于 `0013_messages_pinned.sql`）。Pin 操作：`POST /rooms/:id/messages/:msgId/pin` → `messages.pinned_at = now()` 并发 `message.pinned`（durable, both）；`DELETE` 取消并发 `message.unpinned`（durable, both）。
 
 Context Assembly 优先级更新：
 
@@ -412,7 +413,7 @@ type AgentContact = {
 
 **`container-build`**（容器构建）
 
-1. 检测本机环境：优先 `nixpacks`（`which nixpacks`），次之 `docker`（`which docker`），均无则降级为 `container-export`，在 `DeploymentCard` 提示"本机未检测到 Docker/Nixpacks，已生成 build context 供手动构建"。
+1. 检测本机环境：优先执行 `nixpacks --version`，次之执行 `docker --version`；Windows 可用 `where.exe nixpacks` / `where.exe docker`，macOS/Linux 可用 `command -v nixpacks` / `command -v docker`；均无则降级为 `container-export`，在 `DeploymentCard` 提示"本机未检测到 Docker/Nixpacks，已生成 build context 供手动构建"。
 2. 有 nixpacks：`nixpacks build {sourcePath} --name {imageTag}` — 自动检测语言/框架，生成 OCI 镜像。
 3. 有 docker 无 nixpacks：`docker build -t {imageTag} {contextDir}`。
 4. 构建命令通过 Permission Engine `shell.build = ask`（首次确认，之后 remember）。
@@ -441,6 +442,229 @@ type AgentContact = {
 
 **DeploymentCard 操作区：** Open Preview / Download ZIP / View Logs / Redeploy / Stop / Unpublish / Copy URL / Copy Docker Command（根据 kind 显示不同子集）。
 
+### D-FE-NAV — Frontend Navigation Shell
+
+V1.2 Web UI MUST reuse the existing HeroUI component system (`@heroui/react`) and the existing AgentHub shell styling. It MUST NOT introduce a separate UI library.
+
+FeatureRail 在 V1.2 中不再允许占位点击无 UI 变化。每个入口都必须映射到真实 panel 或主区域 view：
+
+| Rail item | 行为 |
+|-----------|------|
+| `chat` | 左侧显示 RoomList，主区域显示 HomeView 或 ChatStream |
+| `contacts` | 左侧显示 Agent Contact Directory，主区域可显示联系人详情 / InlineAgentEditor |
+| `runs` | 显示运行列表或 Run activity view，支持打开 RunDetailDrawer |
+| `tasks` | 聚焦任务工作台，可打开 TasksPanel 或主区域任务视图 |
+| `artifacts` | 显示 Artifact Library / Recent Artifacts，支持打开 ArtifactPreviewModal |
+| `settings` | 打开 SettingsModal |
+
+FeatureRail 底部版本标签不得固定为 `v1.0`，应读取 package version 并显示 `v1.2.x`。
+
+**HeroUI 使用要求：**
+- `Modal`：新建对话、联系人详情、自建 Agent、ArtifactPreviewModal、Deployment 配置
+- `Tabs`：Artifact Preview / Editor / History / Raw，Settings tabs
+- `Card`：联系人卡、ArtifactCard、DocumentCard、PresentationCard、DeploymentCard
+- `ListBox` / `Select` / `Checkbox` / `RadioGroup`：联系人选择、模式选择、role/runtime/model/skills 配置
+- `Chip` / `Badge`：runtime、capability、status、version、deployment status
+- `Button`：所有操作区按钮，使用 primary / secondary / tertiary / danger / ghost 语义 variant
+
+**前端交互参考边界：** bolt.diy（artifact/workbench 卡片与 deploy 状态）、AionUi（preview panel、Office/PPT viewer、InlineAgentEditor）、OpenCode（diff review、文件引用）、Golutra（RoomList 排序与联系人式会话）。这些是形态参考，不复制视觉皮肤。
+
+### D-FE-ID — Agent Identity / Contact / Role Binding Model
+
+联系人不是新的执行实体，而是 `agent_binding` 的 IM 展示身份层。
+
+```text
+Role        = 职责 / 能力 / persona / system prompt
+Runtime     = 执行环境
+ModelConfig = 模型配置
+AgentBinding = 可运行 agent 实例 = role + runtime + model + permission/skills
+Contact     = AgentBinding 的 IM 展示身份（name/avatar/description/status/lastUsedAt）
+```
+
+**关键约束：**
+- Contact 字段存放在 `agent_bindings` 上：`contact_name` / `avatar_url` / `contact_description`
+- Contact 不是与 Role 平级的新实体，也不引入第二套身份源
+- 默认联系人自动从所有 `agent_bindings` 生成
+- 默认 `displayName = contact_name || `${role.name} · ${runtime.name}``
+- 联系人改名只影响 UI 和 `@` autocomplete，不改变 `role.name` / capabilities / prompt 职责
+- 删除联系人本质上是 disable 对应 `agent_binding`；若已被历史 `room_participants` 引用，MUST NOT hard delete
+- `agent_bindings.disabled_at` 为联系人禁用字段；disabled contact 不出现在默认联系人选择器中，但历史 room / message / task assignee 仍可显示其 display snapshot
+
+**Mention 解析：**
+- `@联系人名` 的稳定目标 MUST 是 `agent_binding_id`
+- 历史消息保留当时显示名，联系人改名 MUST NOT 重写历史消息
+- `@roleName` 作为快捷方式仅在房间内唯一 role 时可直接解析；多个同 role 时必须弹出 disambiguation（如 `Builder · Claude Code` / `Builder · OpenCode`）
+
+**Task/Prompt 影响：**
+- Team/Assisted 分派仍按 `role.capabilities` / skills / availability / presence 决策
+- 最终 assignee 始终是 `agent_binding_id`
+- Prompt context 同时注入：
+  ```xml
+  <agent_identity>
+    <display_name>前端构建者</display_name>
+    <role_name>Builder</role_name>
+    <runtime>Claude Code</runtime>
+    <capabilities>code.edit,file.write</capabilities>
+  </agent_identity>
+  ```
+- 聊天气泡姓名显示 `displayName`，副 chip 显示 `roleName` / `runtimeName`
+
+### D-FE-NEW-CHAT — Contact-first New Room Flow
+
+V1.2 的 New Chat 流程默认走联系人优先，但不得删除现有 role/runtime/model/skills 精细配置能力。
+
+默认流程：
+1. 选择联系人（支持搜索，展示 avatar、displayName、runtime chip、capability tags、status）
+2. 选择模式
+   - 单人默认 `Solo` 或 `Assisted`
+   - 多人默认 `Assisted` 或 `Team`
+3. Advanced Configuration
+   - 对每个选中联系人可展开配置：role/runtime/model/skills/presence
+   - 可替换 runtime
+   - 可覆盖 model config
+   - 可为 room 选择 skills
+   - 可创建/编辑 agent binding
+
+`role/runtime` picker 不删除，只移动到 Advanced。用户不应一开始面对复杂矩阵，但高级用户仍可逐联系人精配。
+
+### D-FE-MODES — Solo / Assisted / Team 主入口，Squad 兼容保留
+
+V1.2 UI SHALL expose `Solo` / `Assisted` / `Team` as primary mode choices.
+
+- `Solo`：1v1，单 agent 执行
+- `Assisted`：群聊讨论 / selector 模式，多 agent 可轮流发言，适合 brainstorming / 协作生成
+- `Team`：严格工作流，leader 拆任务，成员执行，review/汇总，底层仍是 task/state machine
+- `Squad`：MAY remain supported internally and MAY be shown only under Advanced as a lightweight Team preset. Existing `squad` mode MUST NOT be removed from protocol or migration compatibility.
+
+Team 的前端呈现仍需有群聊感：leader 分派公告、成员短消息汇报、产物以 ArtifactCard 插入、leader 最终汇总；但底层逻辑不得退化成 assisted selector。
+
+### D-FE-CARD-CONTRACT — Message Card Protocol Contract
+
+协议层必须有稳定的 card payload shape，前端 renderer 不得靠 ad-hoc `metadata` 猜字段。
+
+**Artifact/Preview card payload：**
+```typescript
+type ArtifactCardPayload = {
+  type: "artifact"
+  artifactId: string
+  kind: "web_page" | "web_app" | "document" | "presentation" | "presentation_pptx" | "source_code" | "generic_file"
+  title: string
+  filename: string
+  version: number
+  mimeType?: string
+  sizeBytes?: number
+  previewUrl?: string
+  downloadUrl?: string
+  status?: string
+}
+```
+
+**Deployment card payload：**
+```typescript
+type DeploymentCardPayload = {
+  type: "deployment"
+  deploymentId: string
+  artifactId: string
+  kind: "preview-url" | "static-site" | "source-zip" | "container-export" | "container-build" | "self-hosted"
+  provider?: string
+  status: "queued" | "in_progress" | "ready" | "failed" | "cancelled" | "expired" | "unpublished"
+  url?: string
+  downloadUrl?: string
+  imageTag?: string
+  expiresAt?: number
+  lastError?: string
+  logPreview?: string[]
+}
+```
+
+**Diff card** 继续复用现有协议，但其按钮与 ArtifactPreviewModal / Apply Diff / View Details 必须对齐。
+
+Unknown card payload MUST render through an `UnknownCard` fallback instead of crashing the timeline.
+
+### D-FE-PROJECTOR — Projector State Contract
+
+Projector 需要明确状态模型，不得仅靠“来了事件就 rerender”这种松散约定。
+
+`RoomViewModel` 在 V1.2 必须新增：
+```typescript
+{
+  pinnedAt?: number
+  lastActivityAt?: number
+  participantContactNames: string[]
+  deploymentsById: Record<string, DeploymentViewModel>
+  deploymentLogsById: Record<string, string[]>
+  artifactVersionsById: Record<string, ArtifactVersionSummary[]>
+}
+```
+
+**规则：**
+- `message.part.added` 是聊天流插入卡片的唯一信号
+- `deployment.created` 只初始化/patch `deploymentsById`，不单独插入卡片
+- `message.part.added` 插入 `card.type="deployment"` 后，DeploymentCard 从 `card payload + deploymentsById[deploymentId]` 派生最新状态
+- `deployment.ready` / `deployment.status.changed` / `deployment.failed` / `deployment.cancelled` / `deployment.expired` / `deployment.unpublished` 必须 patch `deploymentsById`
+- `deployment.log.appended` 追加到 `deploymentLogsById[deploymentId]`
+- `artifact.version.created` patch `artifactVersionsById[artifactId]`，并更新 version badge；若 History tab 已打开则追加版本
+- `room.pinned` / `room.unpinned` patch `RoomViewModel.pinnedAt` 并重排 RoomList
+- `task.unblocked` 清除 blocker indicator / blockerReason，刷新 Kanban / TasksPanel
+- Projector MUST tolerate out-of-order events：若 `deployment.ready` 先于 `message.part.added` 到达，先缓存状态；卡片插入后立即合并
+- Replay 后无需刷新页面即可重建卡片和状态
+
+### D-FE-CARD-UI — Card UI Anatomy
+
+所有 card 使用 HeroUI `Card`，结构固定：
+
+1. **Header**
+   - 图标
+   - title / filename
+   - kind chip
+   - status/version badge
+2. **Body**
+   - `PreviewCard`：固定比例 sandbox iframe 缩略预览
+   - `DocumentCard`：Markdown 前几段 / 摘要，sanitized
+   - `PresentationCard`：第 1 页 / 当前页缩略图，slide count；`presentation_pptx` 有 installing/loading/startFailed/ready 状态
+   - `DeploymentCard`：状态摘要、两阶段进度、URL、日志折叠区
+3. **Footer actions**
+   - `PreviewCard`：Edit / Deploy / Download / Expand
+   - `DocumentCard`：Edit / Reference / Download / Expand
+   - `PresentationCard`：Prev / Next / Reference Slide / Download / Expand
+   - `DeploymentCard`：Open / View Logs / Redeploy / Stop or Cancel / Unpublish / Download / Copy URL / Copy Docker Command
+
+### D-FE-COMPOSER — Input Composer Token Model
+
+InputBox 在 V1.2 中支持统一 token / pill 模型：
+- agent mention：`@AgentName`
+- artifact ref：`@artifact:<id>#Lx-Ly`
+- artifact slide ref：`@artifact:<id>#slide=N`
+- workspace ref：`@workspace:<path>#Lx-Ly`
+- quote preview
+- attachment
+
+**要求：**
+- 输入 `@` 时，搜索 room participants + agent contacts，区分 mention 与 artifact/workspace ref
+- 从 ArtifactPreviewModal 点击 `Reference in Chat` 时注入 structured pill，而不只是字符串替换
+- 发送时允许同时携带 token string 和 structured refs；若只走字符串，也必须有 deterministic parser
+- pill 可删除，显示友好名称如 `@report.md#L10-L25`、`@deck.pptx#slide=3`
+- `@AgentName` autocomplete MUST 支持 Assisted/Team 群聊唤醒场景
+
+**推荐消息 payload：**
+```ts
+POST /rooms/:id/messages {
+  content: string,
+  mentions?: Array<{
+    agentBindingId: string,
+    label: string,
+    roleName?: string,
+    runtimeName?: string,
+  }>,
+  refs?: Array<
+    | { type: 'artifact'; artifactId: string; lines?: [number, number]; slide?: number }
+    | { type: 'workspace'; path: string; lines: [number, number] }
+  >,
+  quotedMessageId?: string,
+}
+```
+`label` 作为历史显示快照，稳定路由目标始终是 `agentBindingId`。
+
 ### D13 — WakeAgent Outbox（内部机制）
 
 不作为产品 capability，作为所有 WakeAgent dispatch 的内部交付保证。
@@ -454,10 +678,14 @@ type AgentContact = {
 契约周单 PR 合并到 `main`：
 1. `packages/db/migrations/0019_v12.sql`
 2. `packages/protocol/src/events/registry.ts` 新增全部 V1.2 事件（含 `"deployment"` EventCategory）
-3. Stub 服务文件：`wake-outbox-dispatcher.ts` / `deployment-service.ts` / `ppt-preview-bridge.ts`
-4. 新路由类型 stub（含 `ppt-proxy.ts`）
+3. `packages/protocol` 中补齐共享 Card / MessagePart payload 类型：`ArtifactCardPayload` / `DeploymentCardPayload`
+4. 共享前端状态类型：`RoomViewModel`（`pinnedAt` / `lastActivityAt` / `participantContactNames` / `deploymentsById` / `deploymentLogsById` / `artifactVersionsById`）
+5. `AgentContact` response type 与 mention payload shape 定稿
+6. Stub 服务文件：`wake-outbox-dispatcher.ts` / `deployment-service.ts` / `ppt-preview-bridge.ts`
+7. 新路由类型 stub（含 `ppt-proxy.ts`）
+8. 契约测试：UnknownCard fallback、typed `message.part.added` payload、`deployment.ready` 先于 `message.part.added` 到达时的 projector 合并
 
-**Dev A 负责：** `wake-outbox-dispatcher.ts`，`run-lifecycle-service.ts`（restart recovery），`task-service.ts`（dependency unblock），`team-dispatch.ts`（分派公告 + 汇总 wake + 失败降级消息），`deployment-service.ts`（container-build + CapRover adapter + WebSocket log）。
+**Dev A 负责：** `wake-outbox-dispatcher.ts`，`run-lifecycle-service.ts`（restart recovery），`task-service.ts`（dependency unblock），`team-dispatch.ts`（分派公告 + 汇总 wake + 失败降级消息），`deployment-service.ts`（container-build + CapRover adapter + `deployment.log.appended` event + REST log fallback）。
 
 **Dev B 负责：** `packages/skills`（六个 builtin skill，含 `officecli-pptx`），`mcp/room-mcp-server.ts`（`room.deploy_artifact` 更新），artifact versioning service，`@artifact`/`@workspace` context-ref resolver，InlineAgentEditor 后端路由，context assembly pinned messages 优先级，`ppt-preview-bridge.ts`，`ppt-proxy` route。
 
@@ -502,11 +730,11 @@ type AgentContact = {
 
 ---
 
-## Open Questions
+## Resolved Decisions
 
-- **[DECISION-NEEDED-V1.2-A]** container-build 检测降级策略：是否在 DeploymentCard 上显示 "Install Nixpacks" / "Install Docker" 引导链接？**推荐是**，降低用户摩擦。
-- **[DECISION-NEEDED-V1.2-B]** CapRover app name 如何生成？用 `artifactId` 的前 8 位 + slug，还是让用户命名？**推荐**：先自动生成 slug（`{kind}-{artifactId[:8]}`），在 DeploymentCard 上可编辑后再部署。
-- **[DECISION-NEEDED-V1.2-C]** `@artifact:<id>` 整体引用（无行号）时：是否注入全文（小文件）+ 截断提示（大文件），还是始终只注入摘要？**推荐**：< 2KB 注入全文；≥ 2KB 注入前 50 行 + 提示"文件较大，建议指定行范围 `#Lx-Ly`"。
+- **Container build detection fallback**：DeploymentCard SHALL 显示 `Install Nixpacks` / `Install Docker` 引导链接，降低本地构建摩擦。
+- **CapRover app name generation**：默认使用 `{kind}-{artifactId[:8]}` 生成 slug，并允许用户在 DeploymentCard 上编辑后再部署。
+- **Whole-artifact reference truncation**：`@artifact:<id>` 无行号时，< 2KB 注入全文；≥ 2KB 注入前 50 行并提示用户使用 `#Lx-Ly` 缩小范围。
 
 ---
 
@@ -517,9 +745,9 @@ type AgentContact = {
 | Event | Category | Durability | Visibility | Payload | Projector Consumer |
 |-------|----------|-----------|-----------|---------|-------------------|
 | `artifact.version.created` | `artifact` | durable | `both` | `{ artifactId, version, createdBy, message? }` | 更新 artifact card 版本 badge；History tab 追加行 |
-| `deployment.created` | `deployment` | durable | `main` | `{ deploymentId, artifactId, kind, provider, status }` | 聊天流插入 DeploymentCard（配合 message.part.added）|
-| `deployment.status.changed` | `deployment` | durable | `main` | `{ deploymentId, status, url?, downloadUrl?, imageTag? }` | 更新 DeploymentCard 状态 |
-| `deployment.log.appended` | `deployment` | ephemeral | `main` | `{ deploymentId, line }` | DeploymentCard 日志面板追加行（断线后 REST 补全）|
+| `deployment.created` | `deployment` | durable | `main` | `{ deploymentId, artifactId, kind, provider, status }` | patch `deploymentsById`；不直接插入聊天卡片 |
+| `deployment.status.changed` | `deployment` | durable | `main` | `{ deploymentId, status, url?, downloadUrl?, imageTag? }` | patch `deploymentsById` 并刷新所有引用该 deploymentId 的卡片 |
+| `deployment.log.appended` | `deployment` | ephemeral | `main` | `{ deploymentId, line }` | append 到 `deploymentLogsById[deploymentId]`（断线后 REST 补全）|
 | `deployment.ready` | `deployment` | durable | `main` | `{ deploymentId, url?, downloadUrl?, imageTag? }` | DeploymentCard 显示 ready 状态 + URL/操作区 |
 | `deployment.failed` | `deployment` | durable | `main` | `{ deploymentId, error }` | DeploymentCard 显示失败 + error + Retry |
 | `deployment.cancelled` | `deployment` | durable | `main` | `{ deploymentId }` | DeploymentCard 更新为 cancelled |
@@ -527,12 +755,16 @@ type AgentContact = {
 | `deployment.unpublished` | `deployment` | durable | `main` | `{ deploymentId }` | DeploymentCard 更新为 unpublished |
 | `room.pinned` | `room` | durable | `both` | `{ roomId, pinnedAt }` | 侧边栏房间列表重排 |
 | `room.unpinned` | `room` | durable | `both` | `{ roomId }` | 侧边栏房间列表重排 |
+| `message.pinned` | `message` | durable | `both` | `{ roomId, messageId, pinnedAt }` | patch Pinned Context drawer、消息 pin 状态 |
+| `message.unpinned` | `message` | durable | `both` | `{ roomId, messageId }` | patch Pinned Context drawer、消息 pin 状态 |
 | `task.unblocked` | `task` | durable | `both` | `{ taskId, roomId, unlockedBy }` | Kanban card 清除 blocked 指示器 |
+| `agent.contact.updated` | `agent` | durable | `both` | `{ agentBindingId, displayName, avatarUrl?, description?, disabledAt? }` | patch 联系人列表、room participant display、@ autocomplete 源 |
 | `wake_outbox.dispatched` | `orchestrator` | durable | `detail` | `{ outboxId, runId }` | 仅 audit/debug |
 
 **说明：**
 - `deployment.log.appended` 是 `ephemeral`：日志行量大且无需 replay；断线后通过 `GET /deployments/:id/logs` REST 补全。
 - `room.pinned` / `room.unpinned` 是 `visibility: both`：侧边栏（detail stream）和主流（main stream）均需消费，确保置顶后列表实时刷新；归档继续使用已有的 `room.closed` / `room.opened`（`visibility: both`）。
+- `agent.contact.updated` 用于联系人编辑/禁用后的 UI 实时刷新；历史消息 display snapshot 不重写。
 - Workflow 相关事件（`workflow.*`）不在 V1.2 注册，推 V1.3。
 
 **复用事件（不变更注册）：**

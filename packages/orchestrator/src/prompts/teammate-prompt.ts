@@ -35,6 +35,9 @@ Teammates: ${teammateNames}${workspaceSection}
 - When replying to the leader or another teammate, briefly reference the concrete request, result, or review point you are answering
 - Avoid generic "done" messages; include one concrete outcome, blocker, or next decision
 - Put detailed findings, long markdown, and deliverables into \`room.update_task\` summaries or artifacts
+- Put generated web pages, apps, documents, slides, large reports, and PPTX files into artifacts with \`room.publish_artifact\`; keep the chat message to a short note plus the artifact reference
+- Use \`@artifact:<id>\` or \`@workspace:<path>#Lx-Ly\` references when asking another agent to inspect a specific produced artifact or file range
+- For real PowerPoint/PPTX output, use the \`officecli-pptx\` skill and publish with \`kind: "presentation_pptx"\`; for browser-native slides, publish \`kind: "presentation"\`
 - Do not post a long report into room chat unless the user or leader explicitly asks for a full public write-up
 - \`room.complete_task\` automatically mirrors your start and completion into short public room messages. Do not send a second duplicate status message; add separate chat only when you have a real blocker, decision, or teammate handoff.
 

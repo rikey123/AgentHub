@@ -58,12 +58,59 @@ describe("SkillRegistry", () => {
     expect(currentDatabase().sqlite.prepare("SELECT type FROM events WHERE type = 'skill.created' AND json_extract(payload, '$.skillId') = ?").get(skillId)).toBeDefined();
   });
 
-  test("seedBuiltins is idempotent and seeds both builtins", () => {
+  test("seedBuiltins is idempotent and seeds all builtin artifact skills", () => {
     currentRegistry().seedBuiltins("ws_1");
     currentRegistry().seedBuiltins("ws_1");
 
-    expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM skills WHERE workspace_id = 'ws_1' AND origin = 'builtin'").get()).toMatchObject({ count: 2 });
-    expect(currentDatabase().sqlite.prepare("SELECT name FROM skills WHERE workspace_id = 'ws_1' AND origin = 'builtin' ORDER BY name ASC").all().map((row) => (row as { readonly name: string }).name)).toEqual(["skill-creator", "task-planner"]);
+    expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM skills WHERE workspace_id = 'ws_1' AND origin = 'builtin'").get()).toMatchObject({ count: 8 });
+    expect(currentDatabase().sqlite.prepare("SELECT name FROM skills WHERE workspace_id = 'ws_1' AND origin = 'builtin' ORDER BY name ASC").all().map((row) => (row as { readonly name: string }).name)).toEqual([
+      "document-builder",
+      "html-slides-builder",
+      "officecli-pptx",
+      "one-pager-builder",
+      "skill-creator",
+      "task-planner",
+      "web-app-builder",
+      "web-page-builder"
+    ]);
+  });
+
+  test("builtin artifact skills declare artifact_kind frontmatter", () => {
+    currentRegistry().seedBuiltins("ws_1");
+
+    const rows = currentDatabase().sqlite
+      .prepare("SELECT name, content FROM skills WHERE workspace_id = 'ws_1' AND origin = 'builtin' AND name IN ('web-page-builder', 'web-app-builder', 'one-pager-builder', 'html-slides-builder', 'document-builder', 'officecli-pptx') ORDER BY name ASC")
+      .all() as Array<{ readonly name: string; readonly content: string }>;
+
+    expect(rows.map((row) => row.name)).toEqual(["document-builder", "html-slides-builder", "officecli-pptx", "one-pager-builder", "web-app-builder", "web-page-builder"]);
+    expect(Object.fromEntries(rows.map((row) => [row.name, row.content.match(/^artifact_kind: (.+)$/mu)?.[1]]))).toEqual({
+      "document-builder": "document",
+      "html-slides-builder": "presentation",
+      "officecli-pptx": "presentation_pptx",
+      "one-pager-builder": "web_page",
+      "web-app-builder": "web_app",
+      "web-page-builder": "web_page"
+    });
+  });
+
+  test("builtin artifact skills are available as SKILL.md packages", () => {
+    const packageRoot = join(process.cwd(), "packages", "skills", "builtin");
+    const expected = {
+      "document-builder": "document",
+      "html-slides-builder": "presentation",
+      "officecli-pptx": "presentation_pptx",
+      "one-pager-builder": "web_page",
+      "web-app-builder": "web_app",
+      "web-page-builder": "web_page"
+    } as const;
+
+    for (const [name, artifactKind] of Object.entries(expected)) {
+      const skillPath = join(packageRoot, name, "SKILL.md");
+      const content = fs.readFileSync(skillPath, "utf8");
+
+      expect(content).toContain(`name: ${name}`);
+      expect(content).toContain(`artifact_kind: ${artifactKind}`);
+    }
   });
 
   test("resolveSkills returns room pool, adds extras, and excludes restricted room skills", () => {

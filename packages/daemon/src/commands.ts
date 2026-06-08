@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { Command, CommandBus, CommandErrorCode, CommandHandler, CommandMeta, CommandResult, EventBus, PublishInput } from "@agenthub/bus";
 import type { AgentHubDatabase } from "@agenthub/db";
 import { parseMentions, nameToSlug, type AssistedSelectorInput, type AssistedSelectorParticipant, type AssistedSelectorResult, type PendingTurnService } from "@agenthub/orchestrator";
+import type { MessageContextRef } from "@agenthub/protocol/domains";
 
 export type AssistedSelectorRouter = {
   readonly startTurn: (input: AssistedSelectorInput) => Promise<AssistedSelectorResult>;
@@ -44,11 +45,15 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
     return failed("validation_failed", `unknown room mode '${mode}' (supported: solo, assisted, team, squad)`);
   }
   const workspaceId = stringField(command, "workspaceId") ?? "default-workspace";
-  let primaryAgentId = stringField(command, "primaryAgentId") ?? stringField(command, "agentBindingId") ?? "mock-builder";
+  const explicitPrimaryAgentId = stringField(command, "primaryAgentId");
+  const explicitAgentBindingId = stringField(command, "agentBindingId");
+  let primaryAgentId = explicitPrimaryAgentId ?? explicitAgentBindingId ?? "mock-builder";
   const leaderRoleId = stringField(command, "leaderRoleId");
   const legacyAgentProfileId = stringField(command, "agentProfileId");
   const participants = Array.isArray(command.participants) ? command.participants : [];
   const skillIds = [...new Set(stringArrayField(command, "skillIds"))];
+  const participantSkillAssignments = participantSkillAssignmentField(command);
+  const allSkillIds = [...new Set([...skillIds, ...participantSkillAssignments.flatMap((assignment) => assignment.skillIds)])];
   const isTeamMode = mode === "team" || mode === "squad";
   if (isTeamMode && leaderRoleId === undefined) {
     return failed("validation_failed", "squad_mode_requires_leader_role_id");
@@ -56,21 +61,45 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
   if (mode === "solo" && participants.filter((item) => isObject(item) && (item.type === "agent" || (typeof item.roleId === "string" && typeof item.runtimeId === "string"))).length > 1) {
     return failed("validation_failed", "Solo rooms cannot contain multiple agents");
   }
-  if (skillIds.length > 0) {
-    const placeholders = skillIds.map(() => "?").join(", ");
-    const rows = options.database.sqlite.prepare(`SELECT id FROM skills WHERE workspace_id = ? AND id IN (${placeholders})`).all(workspaceId, ...skillIds) as { readonly id: string }[];
+  if (allSkillIds.length > 0) {
+    const placeholders = allSkillIds.map(() => "?").join(", ");
+    const rows = options.database.sqlite.prepare(`SELECT id FROM skills WHERE workspace_id = ? AND id IN (${placeholders})`).all(workspaceId, ...allSkillIds) as { readonly id: string }[];
     const found = new Set(rows.map((row) => row.id));
-    const missing = skillIds.find((skillId) => !found.has(skillId));
+    const missing = allSkillIds.find((skillId) => !found.has(skillId));
     if (missing !== undefined) return failed("not_found", `skill_not_found:${missing}`);
   }
 
   const roomId = randomUUID();
   const now = options.now?.() ?? Date.now();
   const lookupAgent = (agentId: string): { adapterId: string; name: string } => {
+    const binding = options.database.sqlite
+      .prepare(
+        `SELECT
+          COALESCE(roles.name, runtimes.name, agent_bindings.id) AS name,
+          runtimes.kind AS runtime_kind
+         FROM agent_bindings
+         LEFT JOIN roles ON roles.id = agent_bindings.role_id
+         LEFT JOIN runtimes ON runtimes.id = agent_bindings.runtime_id
+         WHERE agent_bindings.id = ?
+         LIMIT 1`
+      )
+      .get(agentId) as { readonly runtime_kind?: string | null; readonly name?: string | null } | undefined;
+    if (binding !== undefined) return { adapterId: binding.runtime_kind ?? "mock", name: binding.name ?? agentId };
     const row = options.database.sqlite
       .prepare("SELECT adapter_id, name FROM agent_profiles WHERE id = ?")
       .get(agentId) as { adapter_id?: string; name?: string } | undefined;
     return { adapterId: row?.adapter_id ?? "mock", name: row?.name ?? agentId };
+  };
+  const bindingStatus = (agentBindingId: string): "active" | "disabled" | "missing" => {
+    const row = options.database.sqlite
+      .prepare("SELECT disabled_at FROM agent_bindings WHERE id = ?")
+      .get(agentBindingId) as { readonly disabled_at: number | null } | undefined;
+    if (row === undefined) return "missing";
+    return row.disabled_at === null ? "active" : "disabled";
+  };
+  const rejectIfDisabledBinding = (agentBindingId: string): CommandResult | undefined => {
+    const status = bindingStatus(agentBindingId);
+    return status === "disabled" ? failed("validation_failed", "agent_binding_disabled") : undefined;
   };
 
   const lookupBinding = (roleId: string, runtimeId: string, modelConfigId: string | null | undefined): { readonly bindingId: string; readonly adapterId: string; readonly name: string } | undefined => {
@@ -88,6 +117,7 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
          LEFT JOIN roles ON roles.id = agent_bindings.role_id
          LEFT JOIN runtimes ON runtimes.id = agent_bindings.runtime_id
          WHERE agent_bindings.role_id = ? AND agent_bindings.runtime_id = ? AND ${modelConfigId === undefined ? "agent_bindings.model_config_id IS NULL" : "agent_bindings.model_config_id = ?"}
+           AND agent_bindings.disabled_at IS NULL
          LIMIT 1`
       )
       .get(...(modelConfigId === undefined ? [roleId, runtimeId] : [roleId, runtimeId, modelConfigId])) as
@@ -109,21 +139,37 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
   const resolvedParticipants: RoomParticipantRecord[] = [];
   let primaryParticipant: RoomParticipantRecord | undefined;
 
+  const primaryBindingError = (explicitPrimaryAgentId !== undefined ? rejectIfDisabledBinding(explicitPrimaryAgentId) : undefined)
+    ?? (explicitAgentBindingId !== undefined ? rejectIfDisabledBinding(explicitAgentBindingId) : undefined);
+  if (primaryBindingError !== undefined) return primaryBindingError;
+
   // In team/squad mode the primary agent is the leader; all other participants are teammates.
   // In assisted mode participants keep whatever role is specified (default: observer).
   for (const participant of participants) {
     if (!isObject(participant)) continue;
-    if (participant.type === "agent" && typeof participant.agentId === "string" && participant.agentId !== primaryAgentId) {
+    if (participant.type === "agent" && typeof participant.agentId === "string") {
+      const participantBindingId = typeof participant.agentBindingId === "string" ? participant.agentBindingId : participant.agentId;
+      const participantBindingError = rejectIfDisabledBinding(participantBindingId);
+      if (participantBindingError !== undefined) return participantBindingError;
       const info = lookupAgent(participant.agentId);
       const role = participantRole(participant, isTeamMode);
       const presence = participantPresence(participant, isTeamMode, role);
-      resolvedParticipants.push({ participantId: participant.agentId, agentBindingId: typeof participant.agentBindingId === "string" ? participant.agentBindingId : participant.agentId, adapterId: info.adapterId, name: info.name, role, presence });
+      const record: RoomParticipantRecord = { participantId: participant.agentId, agentBindingId: participantBindingId, adapterId: info.adapterId, name: info.name, role, presence };
+      resolvedParticipants.push(record);
+      if (participant.agentId === primaryAgentId || participantBindingId === primaryAgentId || role === "primary") {
+        primaryParticipant = record;
+      }
       continue;
     }
     if (typeof participant.roleId === "string" && typeof participant.runtimeId === "string") {
       const modelConfigId = stringField(participant as Record<string, unknown>, "modelConfigId");
       const binding = lookupBinding(participant.roleId, participant.runtimeId, modelConfigId);
-      if (binding === undefined) return failed("not_found", "agent_binding_not_found");
+      if (binding === undefined) {
+        const disabled = options.database.sqlite
+          .prepare(`SELECT 1 FROM agent_bindings WHERE role_id = ? AND runtime_id = ? AND ${modelConfigId === undefined ? "model_config_id IS NULL" : "model_config_id = ?"} AND disabled_at IS NOT NULL LIMIT 1`)
+          .get(...(modelConfigId === undefined ? [participant.roleId, participant.runtimeId] : [participant.roleId, participant.runtimeId, modelConfigId]));
+        return disabled !== undefined ? failed("validation_failed", "agent_binding_disabled") : failed("not_found", "agent_binding_not_found");
+      }
       const role = participantRole(participant, isTeamMode);
       const presence = participantPresence(participant, isTeamMode, role);
       const record: RoomParticipantRecord = { participantId: binding.bindingId, agentBindingId: binding.bindingId, adapterId: binding.adapterId, name: binding.name, role, presence };
@@ -137,12 +183,23 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
     }
   }
 
-  if (primaryParticipant === undefined && isTeamMode && resolvedParticipants.length > 0) {
+  if (primaryParticipant === undefined && isTeamMode && explicitPrimaryAgentId === undefined && explicitAgentBindingId === undefined && resolvedParticipants.length > 0) {
     primaryParticipant = resolvedParticipants[0];
   }
   if (primaryParticipant !== undefined) {
     primaryAgentId = primaryParticipant.participantId;
   }
+  if (primaryParticipant === undefined) {
+    const selectedPrimaryBindingError = rejectIfDisabledBinding(explicitAgentBindingId ?? primaryAgentId);
+    if (selectedPrimaryBindingError !== undefined) return selectedPrimaryBindingError;
+  }
+  const primary = primaryParticipant ?? (() => {
+    const info = lookupAgent(primaryAgentId);
+    return { participantId: primaryAgentId, agentBindingId: explicitAgentBindingId ?? primaryAgentId, adapterId: info.adapterId, name: info.name, role: "primary", presence: "active" } satisfies RoomParticipantRecord;
+  })();
+  const roomParticipantIds = new Set([primary.participantId, ...resolvedParticipants.map((participant) => participant.participantId)]);
+  const missingParticipantAssignment = participantSkillAssignments.find((assignment) => !roomParticipantIds.has(assignment.participantId));
+  if (missingParticipantAssignment !== undefined) return failed("not_found", `participant_not_found:${missingParticipantAssignment.participantId}`);
   const leaderPayload = leaderRoleId !== undefined ? { leaderRoleId } : {};
 
   options.database.sqlite.transaction(() => {
@@ -150,16 +207,12 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
     options.database.sqlite
       .prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, leader_role_id, archived_at, created_at, updated_at) VALUES (?, ?, ?, ?, 'conversation', ?, ?, NULL, ?, ?)")
       .run(roomId, workspaceId, title, mode, primaryAgentId, leaderRoleId ?? null, now, now);
-    const primary = primaryParticipant ?? (() => {
-      const info = lookupAgent(primaryAgentId);
-      return { participantId: primaryAgentId, agentBindingId: stringField(command, "agentBindingId") ?? primaryAgentId, adapterId: info.adapterId, name: info.name, role: "primary", presence: "active" } satisfies RoomParticipantRecord;
-    })();
     options.database.sqlite
-      .prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES (?, ?, 'agent', 'primary', ?, NULL, ?, 'active', ?)")
-      .run(roomId, primary.participantId, primary.adapterId, primary.agentBindingId, now);
+      .prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES (?, ?, 'agent', 'primary', ?, NULL, ?, ?, ?)")
+      .run(roomId, primary.participantId, primary.adapterId, primary.agentBindingId, primary.presence, now);
     options.database.sqlite
-      .prepare("INSERT OR REPLACE INTO agent_presence (room_id, agent_id, state, reason, status_line, updated_at) VALUES (?, ?, 'active', NULL, NULL, ?)")
-      .run(roomId, primary.participantId, now);
+      .prepare("INSERT OR REPLACE INTO agent_presence (room_id, agent_id, state, reason, status_line, updated_at) VALUES (?, ?, ?, NULL, NULL, ?)")
+      .run(roomId, primary.participantId, primary.presence, now);
     for (const participant of resolvedParticipants) {
       if (participant.participantId !== primary.participantId) {
         options.database.sqlite
@@ -175,6 +228,14 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
       options.database.sqlite.prepare("INSERT INTO room_skills (room_id, skill_id, enabled) VALUES (?, ?, 1) ON CONFLICT(room_id, skill_id) DO UPDATE SET enabled = 1").run(roomId, skillId);
       options.eventBus.publish({ id: randomUUID(), type: "skill.activated", schemaVersion: 1, workspaceId, roomId, payload: { skillId, roomId }, createdAt: now });
     }
+    for (const assignment of participantSkillAssignments) {
+      for (const skillId of assignment.skillIds) {
+        options.database.sqlite
+          .prepare("INSERT INTO agent_skills (room_participant_id, skill_id, mode) VALUES (?, ?, ?) ON CONFLICT(room_participant_id, skill_id) DO UPDATE SET mode = excluded.mode")
+          .run(`${roomId}:${assignment.participantId}`, skillId, assignment.mode);
+        options.eventBus.publish({ id: randomUUID(), type: "skill.activated", schemaVersion: 1, workspaceId, roomId, payload: { skillId, participantId: assignment.participantId }, createdAt: now });
+      }
+    }
     // Emit agent.joined + agent.state.changed for each participant so SSE consumers (and SSE
     // replay after a refresh) can rebuild the member roster without needing a separate API.
     // Without these events, refreshing the page lost all members until the daemon happened to
@@ -183,7 +244,7 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
       options.eventBus.publish({ id: randomUUID(), type: "agent.joined", schemaVersion: 1, workspaceId, roomId, agentId, payload: { agentId, agentName, role, adapterId }, createdAt: now });
       options.eventBus.publish({ id: randomUUID(), type: "agent.state.changed", schemaVersion: 1, workspaceId, roomId, agentId, payload: { agentId, state: presence }, createdAt: now });
     };
-    publishParticipantEvents(primary.participantId, primary.name, primary.adapterId, "primary", "active");
+    publishParticipantEvents(primary.participantId, primary.name, primary.adapterId, "primary", primary.presence);
     for (const participant of resolvedParticipants) {
       if (participant.participantId !== primary.participantId) {
         publishParticipantEvents(participant.participantId, participant.name, participant.adapterId, participant.role, participant.presence);
@@ -217,7 +278,8 @@ function addParticipant(options: DaemonCommandHandlersOptions, command: Command,
         roles.id AS role_id,
         roles.name AS role_name,
         roles.capabilities AS role_capabilities,
-        runtimes.kind AS runtime_kind
+        runtimes.kind AS runtime_kind,
+        agent_bindings.disabled_at AS disabled_at
        FROM agent_bindings
        LEFT JOIN roles ON roles.id = agent_bindings.role_id
        LEFT JOIN runtimes ON runtimes.id = agent_bindings.runtime_id
@@ -225,9 +287,10 @@ function addParticipant(options: DaemonCommandHandlersOptions, command: Command,
        LIMIT 1`
     )
     .get(agentBindingId) as
-    | { readonly binding_id: string; readonly workspace_id: string; readonly role_id: string | null; readonly role_name: string | null; readonly role_capabilities: string | null; readonly runtime_kind: string | null }
+    | { readonly binding_id: string; readonly workspace_id: string; readonly role_id: string | null; readonly role_name: string | null; readonly role_capabilities: string | null; readonly runtime_kind: string | null; readonly disabled_at: number | null }
     | undefined;
   if (binding === undefined) return failed("not_found", "agent_binding_not_found");
+  if (binding.disabled_at !== null) return failed("validation_failed", "agent_binding_disabled");
   if (binding.workspace_id !== room.workspace_id) return failed("validation_failed", "agent_binding_workspace_mismatch");
 
   const duplicate = options.database.sqlite
@@ -244,6 +307,7 @@ function addParticipant(options: DaemonCommandHandlersOptions, command: Command,
   const mailboxMessageId = randomUUID();
 
   options.database.sqlite.transaction(() => {
+    options.database.sqlite.prepare("UPDATE rooms SET last_activity_at = ?, updated_at = ? WHERE id = ?").run(now, now, roomId);
     options.database.sqlite
       .prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES (?, ?, 'agent', ?, ?, NULL, ?, ?, ?)")
       .run(roomId, agentBindingId, role, adapterId, agentBindingId, presence, now);
@@ -294,6 +358,8 @@ function sendMessage(options: DaemonCommandHandlersOptions, command: Command, me
   const members = roomMembers(options.database, roomId);
   // Parse @mentions in assisted mode; in team/squad mode the leader handles routing via MCP
   const mentions = (room.mode === "assisted") ? resolveMessageMentions(command, text, members) : [];
+  const mentionPayloads = mentions.map((agentBindingId) => ({ agentBindingId }));
+  const contextRefs = contextRefsFromCommand(command);
   const quotedMessageId = stringField(command, "quotedMessageId") ?? stringField(command, "quoted_message_id");
   const attachmentFileIds = stringArrayField(command, "attachmentFileIds", "attachments");
   const useAssistedSelector = room.mode === "assisted" && options.assistedSelector !== undefined;
@@ -307,6 +373,7 @@ function sendMessage(options: DaemonCommandHandlersOptions, command: Command, me
   }
 
   options.database.sqlite.transaction(() => {
+    options.database.sqlite.prepare("UPDATE rooms SET last_activity_at = ?, updated_at = ? WHERE id = ?").run(now, now, roomId);
     options.database.sqlite
       .prepare(
         `INSERT INTO messages (
@@ -315,13 +382,14 @@ function sendMessage(options: DaemonCommandHandlersOptions, command: Command, me
         ) VALUES (?, ?, ?, 'user', ?, NULL, 'user', 'completed', ?, ?, ?, ?, ?, NULL)`
       )
       .run(messageId, room.workspace_id, roomId, actorId(meta), quotedMessageId ?? null, busy ? "pending" : "immediate", pendingTurnId ?? null, now, now);
-    options.database.sqlite.prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, 1, 'text', ?, ?)").run(messageId, JSON.stringify({ text, mentions }), now);
+    const textPayload = { text, mentions: mentionPayloads, ...(contextRefs.length > 0 ? { refs: contextRefs } : {}) };
+    options.database.sqlite.prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, 1, 'text', ?, ?)").run(messageId, JSON.stringify(textPayload), now);
     if (attachmentFileIds.length > 0) {
       const placeholders = attachmentFileIds.map(() => "?").join(", ");
       options.database.sqlite.prepare(`UPDATE attachments SET message_id = ? WHERE file_id IN (${placeholders})`).run(messageId, ...attachmentFileIds);
     }
-    options.eventBus.publish(messageEvent("message.created", room.workspace_id, roomId, messageId, { text, senderId: actorId(meta), role: "user", turnDispatchMode: busy ? "pending" : "immediate", mentions, attachmentFileIds, ...(quotedMessageId !== undefined ? { quotedMessageId } : {}), ...(pendingTurnId !== undefined ? { pendingTurnId } : {}) }, now));
-    options.eventBus.publish(messageEvent("message.completed", room.workspace_id, roomId, messageId, { text }, now));
+    options.eventBus.publish(messageEvent("message.created", room.workspace_id, roomId, messageId, { text, senderId: actorId(meta), role: "user", turnDispatchMode: busy ? "pending" : "immediate", mentions: mentionPayloads, attachmentFileIds, ...(contextRefs.length > 0 ? { refs: contextRefs } : {}), ...(quotedMessageId !== undefined ? { quotedMessageId } : {}), ...(pendingTurnId !== undefined ? { pendingTurnId } : {}) }, now));
+    options.eventBus.publish(messageEvent("message.completed", room.workspace_id, roomId, messageId, { text, mentions: mentionPayloads, ...(contextRefs.length > 0 ? { refs: contextRefs } : {}) }, now));
     if (pendingTurnId && room.primary_agent_id) {
       options.database.sqlite.prepare("INSERT INTO pending_turns (id, room_id, user_message_id, primary_agent_id, status, enqueued_at, scheduled_at, cancelled_at, notes) VALUES (?, ?, ?, ?, 'queued', ?, NULL, NULL, NULL)").run(pendingTurnId, roomId, messageId, room.primary_agent_id, now);
       options.eventBus.publish(pendingTurnEvent("pending_turn.created", room.workspace_id, roomId, room.primary_agent_id, pendingTurnId, messageId, "queued", now));
@@ -420,7 +488,7 @@ function editMessage(options: DaemonCommandHandlersOptions, command: Command, me
     options.database.sqlite.prepare("UPDATE messages SET status = 'cancelled', updated_at = ? WHERE id = ?").run(now, messageId);
     options.eventBus.publish(messageEvent("message.updated", row.workspace_id, row.room_id, messageId, { text, replacement: true }, now));
   })();
-  return sendMessage(options, { type: "SendMessage", roomId: row.room_id, text, idempotencyKey: `edit:${messageId}:${now}` }, meta);
+  return sendMessage(options, { type: "SendMessage", roomId: row.room_id, text, mentions: mentionInputsFromCommand(command), refs: contextRefInputsFromCommand(command), idempotencyKey: `edit:${messageId}:${now}` }, meta);
 }
 
 function regenerateMessage(options: DaemonCommandHandlersOptions, command: Command, meta: CommandMeta): CommandResult | Promise<CommandResult> {
@@ -457,6 +525,7 @@ function pinMessage(options: DaemonCommandHandlersOptions, command: Command, met
     options.eventBus.publish({ id: randomUUID(), type: "context.item.visibility.changed", schemaVersion: 1, workspaceId: row.workspace_id, roomId: row.room_id, payload: { contextId, scope: "workspace", pinned: true, visibility: {} }, createdAt: now });
     // Echo the pin onto the originating message so SSE consumers can update the kebab state.
     options.eventBus.publish({ id: randomUUID(), type: "message.updated", schemaVersion: 1, workspaceId: row.workspace_id, roomId: row.room_id, payload: { messageId, pinnedAt: now, contextId }, createdAt: now });
+    options.eventBus.publish({ id: randomUUID(), type: "message.pinned", schemaVersion: 1, workspaceId: row.workspace_id, roomId: row.room_id, payload: { roomId: row.room_id, messageId, pinnedAt: now }, createdAt: now });
   })();
   return { ok: true, data: item, emittedEvents: latestContextEvents(options.database, contextId) };
 }
@@ -695,8 +764,69 @@ function resolveMessageMentions(command: Command, text: string, members: readonl
     mentions.push(agentId);
   };
   for (const agentId of parseMentions(text, members)) add(agentId);
-  for (const agentId of stringArrayField(command, "mentions", "mentionAgentIds", "mention_agent_ids")) add(agentId);
+  for (const agentId of mentionAgentIdsFromCommand(command)) add(agentId);
   return mentions;
+}
+
+function mentionInputsFromCommand(command: Command): readonly unknown[] {
+  const value = command.mentions ?? command.mentionAgentIds ?? command.mention_agent_ids;
+  return Array.isArray(value) ? value : [];
+}
+
+function contextRefInputsFromCommand(command: Command): readonly unknown[] {
+  return Array.isArray(command.refs) ? command.refs : [];
+}
+
+function contextRefsFromCommand(command: Command): MessageContextRef[] {
+  return contextRefInputsFromCommand(command)
+    .map((item) => normalizeContextRef(item))
+    .filter((item): item is MessageContextRef => item !== undefined);
+}
+
+function normalizeContextRef(item: unknown): MessageContextRef | undefined {
+  if (!isObject(item)) return undefined;
+  if (item.type === "artifact" && typeof item.artifactId === "string" && item.artifactId.length > 0) {
+    const range = lineRangeFromRef(item);
+    const slide = positiveIntegerField(item.slide);
+    return {
+      type: "artifact",
+      artifactId: item.artifactId,
+      ...(range !== undefined ? { lineStart: range.lineStart, lineEnd: range.lineEnd } : {}),
+      ...(slide !== undefined ? { slide } : {})
+    };
+  }
+  if (item.type === "workspace" && typeof item.path === "string" && item.path.length > 0) {
+    const range = lineRangeFromRef(item);
+    return {
+      type: "workspace",
+      path: item.path,
+      ...(range !== undefined ? { lineStart: range.lineStart, lineEnd: range.lineEnd } : {})
+    };
+  }
+  return undefined;
+}
+
+function lineRangeFromRef(item: Record<string, unknown>): { readonly lineStart: number; readonly lineEnd: number } | undefined {
+  const directStart = positiveIntegerField(item.lineStart);
+  const directEnd = positiveIntegerField(item.lineEnd);
+  if (directStart !== undefined && directEnd !== undefined) return { lineStart: directStart, lineEnd: directEnd };
+  const lines = item.lines;
+  if (Array.isArray(lines) && lines.length === 2) {
+    const tupleStart = positiveIntegerField(lines[0]);
+    const tupleEnd = positiveIntegerField(lines[1]);
+    if (tupleStart !== undefined && tupleEnd !== undefined) return { lineStart: tupleStart, lineEnd: tupleEnd };
+  }
+  return undefined;
+}
+
+function positiveIntegerField(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
+function mentionAgentIdsFromCommand(command: Command): string[] {
+  return mentionInputsFromCommand(command)
+    .map((item) => typeof item === "string" ? item : isObject(item) && typeof item.agentBindingId === "string" ? item.agentBindingId : undefined)
+    .filter((item): item is string => item !== undefined && item.length > 0);
 }
 
 function messageText(database: AgentHubDatabase, messageId: string): string {
@@ -750,14 +880,37 @@ function stringArrayField(command: Record<string, unknown>, ...keys: readonly st
   return [];
 }
 
+type ParticipantSkillAssignmentRecord = {
+  readonly participantId: string;
+  readonly skillIds: string[];
+  readonly mode: "add" | "restrict";
+};
+
+function participantSkillAssignmentField(command: Record<string, unknown>): ParticipantSkillAssignmentRecord[] {
+  const value = command.participantSkillAssignments;
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item): ParticipantSkillAssignmentRecord[] => {
+    if (!isObject(item)) return [];
+    const participantId = stringField(item, "participantId");
+    const skillIds = [...new Set(stringArrayField(item, "skillIds"))];
+    if (participantId === undefined || skillIds.length === 0) return [];
+    return [{
+      participantId,
+      skillIds,
+      mode: item.mode === "restrict" ? "restrict" : "add"
+    }];
+  });
+}
+
 function participantRole(participant: Record<string, unknown>, isTeamMode: boolean): string {
   if (isTeamMode) return "teammate";
   return participant.role === "teammate" || participant.role === "primary" ? participant.role : "observer";
 }
 
 function participantPresence(participant: Record<string, unknown>, isTeamMode: boolean, role: string): string {
-  if (isTeamMode || role === "teammate" || role === "primary") return "active";
-  return participant.defaultPresence === "active" ? "active" : "observing";
+  void isTeamMode;
+  void role;
+  return participant.defaultPresence === "observing" ? "observing" : "active";
 }
 
 function parseCapabilities(value: string | null): string[] {

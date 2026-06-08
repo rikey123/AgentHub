@@ -143,6 +143,7 @@ describe("daemon M1.4 composition", () => {
 
   afterEach(async () => {
     await daemon.close();
+    vi.useRealTimers();
     currentDaemon = undefined;
     currentModelConfigKeychain = undefined;
   });
@@ -160,6 +161,166 @@ describe("daemon M1.4 composition", () => {
     expect(runs.map((run) => run.status)).toEqual(["completed"]);
     const messages = await client.listMessages(room.data.roomId) as { readonly messages: readonly { readonly role: string; readonly status: string }[] };
     expect(messages.messages.some((message) => message.role === "assistant" && message.status === "completed")).toBe(true);
+  });
+
+  it("deployment provider CRUD masks credentials and publishes provider events in transactions", async () => {
+    const created = await fetch(`${baseUrl}/deployment-providers`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind: "caprover", name: "Captain", baseUrl: "https://captain.example", credential: "secret-token" })
+    });
+    expect(created.status).toBe(201);
+    const createdBody = await created.json() as { readonly provider?: Record<string, unknown> };
+    expect(createdBody.provider).toMatchObject({ kind: "caprover", name: "Captain", base_url: "https://captain.example", hasCredential: true });
+    expect(createdBody.provider).not.toHaveProperty("credential_ref");
+    const providerId = String(createdBody.provider?.id);
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'deployment.provider.created' AND json_extract(payload, '$.providerId') = ?").get(providerId)).toMatchObject({ count: 1 });
+
+    const listed = await fetch(`${baseUrl}/deployment-providers`);
+    const listedBody = await listed.json() as { readonly providers?: readonly Record<string, unknown>[] };
+    expect(listedBody.providers?.[0]).toMatchObject({ id: providerId, hasCredential: true });
+    expect(listedBody.providers?.[0]).not.toHaveProperty("credential_ref");
+
+    const updated = await fetch(`${baseUrl}/deployment-providers/${providerId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Captain Updated", credential: "new-secret" })
+    });
+    expect(updated.status).toBe(200);
+    const updatedBody = await updated.json() as { readonly provider?: Record<string, unknown> };
+    expect(updatedBody.provider).toMatchObject({ id: providerId, name: "Captain Updated", hasCredential: true });
+    expect(updatedBody.provider).not.toHaveProperty("credential_ref");
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'deployment.provider.updated' AND json_extract(payload, '$.providerId') = ?").get(providerId)).toMatchObject({ count: 1 });
+
+    const deleted = await fetch(`${baseUrl}/deployment-providers/${providerId}`, { method: "DELETE" });
+    expect(deleted.status).toBe(200);
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'deployment.provider.deleted' AND json_extract(payload, '$.providerId') = ?").get(providerId)).toMatchObject({ count: 1 });
+  });
+
+  it("serves preview-url and static-site deployment URLs from daemon routes", async () => {
+    daemon.database.sqlite.transaction(() => {
+      daemon.database.sqlite.prepare("INSERT INTO artifacts (id, workspace_id, room_id, task_id, run_id, message_id, type, kind, title, status, created_by, metadata, created_at, updated_at) VALUES ('artifact_deploy_route', 'default-workspace', NULL, NULL, NULL, NULL, 'file', 'web_page', 'Index', 'ready', 'agent_1', '{}', 1, 1)").run();
+      daemon.database.sqlite.prepare("INSERT INTO artifact_files (artifact_id, path, old_content, new_content, patch, additions, deletions, file_status, old_path, binary, no_newline_at_end, old_sha256, new_sha256, applied_state, content_path, created_at) VALUES ('artifact_deploy_route', 'index.html', NULL, '<h1>Deploy Route</h1>', NULL, 1, 0, 'added', NULL, 0, 0, NULL, NULL, NULL, NULL, 1)").run();
+    })();
+
+    const previewCreated = await fetch(`${baseUrl}/deployments`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ artifactId: "artifact_deploy_route", kind: "preview-url" })
+    });
+    expect(previewCreated.status).toBe(201);
+    const previewBody = await previewCreated.json() as { readonly deployment?: { readonly id?: string; readonly url?: string } };
+    const previewUrl = previewBody.deployment?.url ?? "";
+    expect(previewUrl).toContain("/preview/");
+    expect(previewUrl).not.toContain(previewBody.deployment?.id ?? "");
+    const preview = await fetch(previewUrl.replace("http://127.0.0.1:6677", baseUrl));
+    expect(preview.status).toBe(200);
+    expect(preview.headers.get("content-type")).toContain("text/html");
+    expect(await preview.text()).toContain("Deploy Route");
+    const legacyPreview = await fetch(`${baseUrl}/deployments/${previewBody.deployment?.id ?? ""}/preview`);
+    expect(legacyPreview.status).toBe(404);
+
+    const siteCreated = await fetch(`${baseUrl}/deployments`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ artifactId: "artifact_deploy_route", kind: "static-site" })
+    });
+    expect(siteCreated.status).toBe(201);
+    const siteBody = await siteCreated.json() as { readonly deployment?: { readonly url?: string } };
+    const siteUrl = siteBody.deployment?.url ?? "";
+    const site = await fetch(siteUrl.replace("http://127.0.0.1:6677", baseUrl));
+    expect(site.status).toBe(200);
+    expect(site.headers.get("content-type")).toContain("text/html");
+    expect(await site.text()).toContain("Deploy Route");
+
+    const zipCreated = await fetch(`${baseUrl}/deployments`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ artifactId: "artifact_deploy_route", kind: "source-zip" })
+    });
+    expect(zipCreated.status).toBe(201);
+    const zipBody = await zipCreated.json() as { readonly deployment?: { readonly id?: string; readonly downloadUrl?: string } };
+    expect(zipBody.deployment?.downloadUrl).toBe(`/deployments/${zipBody.deployment?.id ?? ""}/download`);
+    expect(zipBody.deployment?.downloadUrl).not.toContain("agenthub");
+    const zipDownload = await fetch(`${baseUrl}${zipBody.deployment?.downloadUrl ?? ""}`);
+    expect(zipDownload.status).toBe(200);
+    expect(zipDownload.headers.get("content-type")).toBe("application/zip");
+    expect(zipDownload.headers.get("content-disposition")).toBe("attachment; filename=\"artifact_deploy_route-v1.zip\"");
+    expect(Buffer.from(await zipDownload.arrayBuffer()).subarray(0, 4)).toEqual(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+  });
+
+  it("runs preview deployment expiry sweeper from daemon startup and stops it on close", async () => {
+    await daemon.close();
+    currentDaemon = undefined;
+    vi.useFakeTimers();
+    const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-expiry-sweeper-"));
+    let clock = 1_000;
+    daemon = createDaemon({ databasePath: join(dir, "agenthub.sqlite"), port: 0, modelTestFetch: modelTestFetchMock, now: () => clock });
+    currentDaemon = daemon;
+    const server = await daemon.start();
+    const address = server.address();
+    if (typeof address !== "object" || address === null) throw new Error("expected TCP address");
+    baseUrl = `http://127.0.0.1:${address.port}`;
+    daemon.database.sqlite.transaction(() => {
+      daemon.database.sqlite.prepare("INSERT INTO artifacts (id, workspace_id, room_id, task_id, run_id, message_id, type, kind, title, status, created_by, metadata, created_at, updated_at) VALUES ('artifact_expiry_timer', 'default-workspace', NULL, NULL, NULL, NULL, 'file', 'web_page', 'Expiry', 'ready', 'agent_1', '{}', 1, 1)").run();
+      daemon.database.sqlite.prepare("INSERT INTO artifact_files (artifact_id, path, old_content, new_content, patch, additions, deletions, file_status, old_path, binary, no_newline_at_end, old_sha256, new_sha256, applied_state, content_path, created_at) VALUES ('artifact_expiry_timer', 'index.html', NULL, '<h1>Expiry</h1>', NULL, 1, 0, 'added', NULL, 0, 0, NULL, NULL, NULL, NULL, 1)").run();
+    })();
+
+    const created = await fetch(`${baseUrl}/deployments`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ artifactId: "artifact_expiry_timer", kind: "preview-url" })
+    });
+    expect(created.status).toBe(201);
+    const body = await created.json() as { readonly deployment?: { readonly id?: string } };
+    const deploymentId = body.deployment?.id;
+    expect(deploymentId).toBeDefined();
+    clock += 30 * 60 * 1000 + 1;
+
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(daemon.database.sqlite.prepare("SELECT status FROM deployments WHERE id = ?").get(deploymentId)).toMatchObject({ status: "expired" });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'deployment.expired' AND json_extract(payload, '$.deploymentId') = ?").get(deploymentId)).toMatchObject({ count: 1 });
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+    await daemon.close();
+    expect(vi.getTimerCount()).toBe(0);
+    vi.useRealTimers();
+  });
+
+  it("authorizes daemon container-build commands through the permission engine before spawning", async () => {
+    await daemon.close();
+    currentDaemon = undefined;
+    const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-build-auth-"));
+    daemon = createDaemon({
+      databasePath: join(dir, "agenthub.sqlite"),
+      port: 0,
+      modelTestFetch: modelTestFetchMock,
+      deploymentCommandProbe: () => true
+    });
+    currentDaemon = daemon;
+    const server = await daemon.start();
+    const address = server.address();
+    if (typeof address !== "object" || address === null) throw new Error("expected TCP address");
+    baseUrl = `http://127.0.0.1:${address.port}`;
+
+    daemon.database.sqlite.transaction(() => {
+      daemon.database.sqlite.prepare("INSERT INTO artifacts (id, workspace_id, room_id, task_id, run_id, message_id, type, kind, title, status, created_by, metadata, created_at, updated_at) VALUES ('artifact_build_auth', 'default-workspace', NULL, NULL, NULL, NULL, 'file', 'web_page', 'Build', 'ready', 'agent_1', '{}', 1, 1)").run();
+      daemon.database.sqlite.prepare("INSERT INTO artifact_files (artifact_id, path, old_content, new_content, patch, additions, deletions, file_status, old_path, binary, no_newline_at_end, old_sha256, new_sha256, applied_state, content_path, created_at) VALUES ('artifact_build_auth', 'index.html', NULL, '<h1>Build</h1>', NULL, 1, 0, 'added', NULL, 0, 0, NULL, NULL, NULL, NULL, 1)").run();
+      daemon.database.sqlite.prepare("INSERT INTO permission_rules (id, workspace_id, agent_id, profile_id, resource_type, resource_match, action, remember, created_at) VALUES ('deny_build_rule', 'default-workspace', NULL, NULL, 'shell', 'nixpacks **', 'deny', 1, 1)").run();
+    })();
+
+    const created = await fetch(`${baseUrl}/deployments`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ artifactId: "artifact_build_auth", kind: "container-build" })
+    });
+
+    expect(created.status).toBe(201);
+    const body = await created.json() as { readonly deployment?: { readonly id?: string; readonly status?: string; readonly lastError?: string } };
+    expect(body.deployment).toMatchObject({ status: "failed" });
+    expect(daemon.database.sqlite.prepare("SELECT last_error FROM deployments WHERE id = ?").get(body.deployment?.id)).toMatchObject({ last_error: "permission_denied" });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'deployment.failed' AND json_extract(payload, '$.deploymentId') = ? AND json_extract(payload, '$.error') = 'permission_denied'").get(body.deployment?.id)).toMatchObject({ count: 1 });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'permission.resolved' AND json_extract(payload, '$.matchedRuleId') = 'deny_build_rule'").get()).toMatchObject({ count: 1 });
   });
 
   it("serves built web assets from the daemon without relying on Vite", async () => {
@@ -194,6 +355,36 @@ describe("daemon M1.4 composition", () => {
 
     const traversal = await fetch(`${baseUrl}/%2e%2e%2fpackage.json`);
     expect(traversal.status).toBe(400);
+  });
+
+  it("serves built web assets before token auth while preserving API misses", async () => {
+    await daemon.close();
+    currentDaemon = undefined;
+
+    const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-web-assets-token-"));
+    const webAssetsRoot = join(dir, "web-dist");
+    mkdirSync(join(webAssetsRoot, "assets"), { recursive: true });
+    writeFileSync(join(webAssetsRoot, "index.html"), '<!doctype html><div id="root"></div><script type="module" src="/assets/app.js"></script>');
+    writeFileSync(join(webAssetsRoot, "assets", "app.js"), "globalThis.__agenthubTokenWeb = true;");
+
+    daemon = createDaemon({ databasePath: join(dir, "agenthub.sqlite"), port: 0, webAssetsRoot, token: "dev-token", modelTestFetch: modelTestFetchMock });
+    currentDaemon = daemon;
+    const server = await daemon.start();
+    const address = server.address();
+    if (typeof address !== "object" || address === null) throw new Error("expected TCP address");
+    baseUrl = `http://127.0.0.1:${address.port}`;
+
+    const page = await fetch(`${baseUrl}/`);
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain("root");
+
+    const script = await fetch(`${baseUrl}/assets/app.js`);
+    expect(script.status).toBe(200);
+    expect(await script.text()).toContain("__agenthubTokenWeb");
+
+    const apiMiss = await fetch(`${baseUrl}/auth/not-a-static-page`);
+    expect(apiMiss.status).toBe(401);
+    expect(await apiMiss.json()).toMatchObject({ error: "unauthorized" });
   });
 
   it("rejects squad rooms without leaderRoleId", async () => {
@@ -336,6 +527,83 @@ describe("daemon M1.4 composition", () => {
     expect(roomId).not.toBe("");
     expect(daemon.database.sqlite.prepare("SELECT mode, leader_role_id, primary_agent_id FROM rooms WHERE id = ?").get(roomId)).toMatchObject({ mode: "solo", leader_role_id: null, primary_agent_id: "mock-builder" });
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM room_participants WHERE room_id = ?").get(roomId)).toMatchObject({ count: 2 });
+  });
+
+  it("lists rooms by pinned and last activity, supports search, and excludes archived rooms", async () => {
+    const now = Date.now();
+    const roleId = `role-room-search-${now}`;
+    const runtimeId = `runtime-room-search-${now}`;
+    const bindingId = `binding-room-search-${now}`;
+    daemon.database.sqlite.transaction(() => {
+      daemon.database.sqlite.prepare("INSERT INTO roles (id, workspace_id, name, avatar, description, prompt, capabilities, default_permission_profile_id, tags, is_builtin, source_path, version, created_at, updated_at) VALUES (?, 'default-workspace', 'Builder', NULL, NULL, 'Build', '[]', NULL, NULL, 0, NULL, NULL, ?, ?)").run(roleId, now, now);
+      daemon.database.sqlite.prepare("INSERT INTO runtimes (id, workspace_id, kind, name, command, args, env, detected_at, detected_path, detected_version, supported_caps, version, status, manifest_json, created_at, updated_at) VALUES (?, 'default-workspace', 'custom-acp', 'Runtime', NULL, NULL, NULL, NULL, NULL, NULL, '[]', NULL, NULL, '{}', ?, ?)").run(runtimeId, now, now);
+      daemon.database.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, avatar_url, contact_name, contact_description, created_at, updated_at) VALUES (?, 'default-workspace', ?, ?, NULL, NULL, NULL, 'Builder Contact', NULL, ?, ?)").run(bindingId, roleId, runtimeId, now, now);
+      daemon.database.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, pinned_at, last_activity_at, archived_at, created_at, updated_at) VALUES ('room_old', 'default-workspace', 'Old', 'solo', 'conversation', ?, NULL, ?, NULL, ?, ?)").run(bindingId, now - 10_000, now - 10_000, now - 10_000);
+      daemon.database.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, pinned_at, last_activity_at, archived_at, created_at, updated_at) VALUES ('room_active', 'default-workspace', 'Active', 'solo', 'conversation', ?, NULL, ?, NULL, ?, ?)").run(bindingId, now - 1_000, now - 1_000, now - 1_000);
+      daemon.database.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, pinned_at, last_activity_at, archived_at, created_at, updated_at) VALUES ('room_pinned', 'default-workspace', 'Pinned', 'solo', 'conversation', ?, ?, ?, NULL, ?, ?)").run(bindingId, now - 5_000, now - 20_000, now - 20_000, now - 20_000);
+      daemon.database.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, pinned_at, last_activity_at, archived_at, created_at, updated_at) VALUES ('room_archived', 'default-workspace', 'Archived Builder', 'solo', 'conversation', ?, NULL, ?, ?, ?, ?)").run(bindingId, now, now, now, now);
+      for (const roomId of ["room_old", "room_active", "room_pinned", "room_archived"]) {
+        daemon.database.sqlite.prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES (?, ?, 'agent', 'primary', 'mock', NULL, ?, 'active', ?)").run(roomId, bindingId, bindingId, now);
+      }
+    })();
+
+    const listed = await fetch(`${baseUrl}/rooms`);
+    const payload = await listed.json() as { readonly rooms: readonly { readonly id: string; readonly participantContactNames?: readonly string[] }[] };
+    expect(payload.rooms.map((room) => room.id).slice(0, 3)).toEqual(["room_pinned", "room_active", "room_old"]);
+    expect(payload.rooms.map((room) => room.id)).not.toContain("room_archived");
+    expect(payload.rooms.find((room) => room.id === "room_active")?.participantContactNames).toContain("Builder Contact");
+
+    const searched = await fetch(`${baseUrl}/rooms?q=Builder`);
+    const searchedPayload = await searched.json() as { readonly rooms: readonly { readonly id: string }[] };
+    expect(searchedPayload.rooms.map((room) => room.id)).toEqual(expect.arrayContaining(["room_pinned", "room_active", "room_old"]));
+    expect(searchedPayload.rooms.map((room) => room.id)).not.toContain("room_archived");
+  });
+
+  it("updates room last_activity_at on message send and participant join write paths", async () => {
+    const client = new AgentHubClient({ baseUrl });
+    const room = await client.createRoom({ title: "Activity Writes", mode: "solo", primaryAgentId: "mock-builder" }) as { readonly data: { readonly roomId: string } };
+    const initial = daemon.database.sqlite.prepare("SELECT last_activity_at FROM rooms WHERE id = ?").get(room.data.roomId) as { readonly last_activity_at: number | null };
+    expect(initial.last_activity_at).toBeNull();
+
+    await client.sendMessage(room.data.roomId, { text: "touch room activity", idempotencyKey: "touch-room-activity" });
+    const afterMessage = daemon.database.sqlite.prepare("SELECT last_activity_at FROM rooms WHERE id = ?").get(room.data.roomId) as { readonly last_activity_at: number | null };
+    expect(afterMessage.last_activity_at).toEqual(expect.any(Number));
+
+    const roleId = "role_activity_join";
+    const runtimeId = "runtime_activity_join";
+    const bindingId = "binding_activity_join";
+    daemon.database.sqlite.transaction(() => {
+      daemon.database.sqlite.prepare("INSERT OR IGNORE INTO runtimes (id, workspace_id, kind, name, command, args, env, detected_at, detected_path, detected_version, supported_caps, version, status, manifest_json, created_at, updated_at) VALUES (?, 'default-workspace', 'mock', 'Mock', 'mock', '[]', '[]', NULL, NULL, NULL, '[]', NULL, 'ready', '{}', 1, 1)").run(runtimeId);
+      daemon.database.sqlite.prepare("INSERT OR IGNORE INTO roles (id, workspace_id, name, prompt, capabilities, is_builtin, created_at, updated_at) VALUES (?, 'default-workspace', 'Joiner', '', '[]', 0, 1, 1)").run(roleId);
+      daemon.database.sqlite.prepare("INSERT OR IGNORE INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES (?, 'default-workspace', ?, ?, NULL, NULL, 1, 1)").run(bindingId, roleId, runtimeId);
+    })();
+
+    const beforeJoin = afterMessage.last_activity_at ?? 0;
+    const added = daemon.commandBus.dispatch({ type: "AddParticipant", roomId: room.data.roomId, agentBindingId: bindingId }, { actor: { type: "user", id: "local" }, traceId: "activity-join", origin: "http" });
+    expect(added).toMatchObject({ ok: true });
+    const afterJoin = daemon.database.sqlite.prepare("SELECT last_activity_at FROM rooms WHERE id = ?").get(room.data.roomId) as { readonly last_activity_at: number | null };
+    expect(afterJoin.last_activity_at).toBeGreaterThanOrEqual(beforeJoin);
+  });
+
+  it("pins and unpins a room with durable room events", async () => {
+    const room = await fetch(`${baseUrl}/rooms`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Pin Me", mode: "solo", primaryAgentId: "mock-builder" })
+    });
+    const body = await room.json() as { readonly data?: { readonly roomId?: string } };
+    const roomId = body.data?.roomId ?? "";
+
+    const pinned = await fetch(`${baseUrl}/rooms/${roomId}/pin`, { method: "POST" });
+    expect(pinned.status).toBe(200);
+    expect(daemon.database.sqlite.prepare("SELECT pinned_at FROM rooms WHERE id = ?").get(roomId)).toMatchObject({ pinned_at: expect.any(Number) });
+    expect(daemon.eventBus.replayDurableSinceSeq(0, { view: "main" }).filter((event) => event.type === "room.pinned" && (event.payload as Record<string, unknown>).roomId === roomId)).toHaveLength(1);
+    expect(daemon.eventBus.replayDurableSinceSeq(0, { view: "detail" }).filter((event) => event.type === "room.pinned" && (event.payload as Record<string, unknown>).roomId === roomId)).toHaveLength(1);
+
+    const unpinned = await fetch(`${baseUrl}/rooms/${roomId}/pin`, { method: "DELETE" });
+    expect(unpinned.status).toBe(200);
+    expect(daemon.database.sqlite.prepare("SELECT pinned_at FROM rooms WHERE id = ?").get(roomId)).toMatchObject({ pinned_at: null });
+    expect(daemon.eventBus.replayDurableSinceSeq(0, { view: "main" }).filter((event) => event.type === "room.unpinned" && (event.payload as Record<string, unknown>).roomId === roomId)).toHaveLength(1);
   });
 
   it("creates solo rooms from a V1 role/runtime/model binding without falling back to mock", async () => {
@@ -512,6 +780,85 @@ describe("daemon M1.4 composition", () => {
     expect(seededDaemon.database.sqlite.prepare("SELECT status, expects_review FROM tasks WHERE id = 'task_reconcile_a'").get()).toMatchObject({ status: "review", expects_review: 1 });
     expect(seededDaemon.database.sqlite.prepare("SELECT status, expects_review FROM tasks WHERE id = 'task_reconcile_b'").get()).toMatchObject({ status: "review", expects_review: 1 });
     expect(seededDaemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'team.dispatch.started' AND json_extract(payload, '$.sourceRunId') = 'run_source_reconcile'").get()).toMatchObject({ count: 1 });
+
+    await seededDaemon.close();
+  });
+
+  it("starts WakeOutboxDispatcher and drains pending wake rows without manual dispatchPending", async () => {
+    await daemon.close();
+    currentDaemon = undefined;
+    const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-wake-dispatcher-"));
+    const databasePath = join(dir, "agenthub.sqlite");
+    const seeded = createDatabase({ path: databasePath, applyMigrations: true });
+    try {
+      seeded.sqlite.transaction(() => {
+        seeded.sqlite.prepare("INSERT INTO workspaces (id, name, root_path, created_at, updated_at) VALUES ('ws_wake', 'Workspace', '.', 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO roles (id, workspace_id, name, prompt, capabilities, is_builtin, created_at, updated_at) VALUES ('role_wake', 'ws_wake', 'Leader', '', '[]', 0, 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES ('agent_wake', 'ws_wake', 'Leader', 'mock', NULL, '', '[]', NULL, 0, NULL, 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES ('binding_wake', 'ws_wake', 'role_wake', 'runtime_1', NULL, NULL, 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES ('room_wake', 'ws_wake', 'Wake Room', 'solo', 'conversation', 'agent_wake', NULL, 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES ('room_wake', 'agent_wake', 'agent', 'primary', 'mock', NULL, 'binding_wake', 'active', 1)").run();
+        seeded.sqlite.prepare("INSERT INTO wake_outbox (id, room_id, agent_id, reason, payload, status, attempt_count, max_attempts, created_at, dispatch_after) VALUES ('wake_startup_1', 'room_wake', 'agent_wake', 'aggregate', ?, 'dispatching', 0, 3, 1, NULL)").run(JSON.stringify({ taskIds: ["task_1"] }));
+      })();
+    } finally {
+      seeded.sqlite.close();
+    }
+
+    const seededDaemon = createDaemon({ databasePath, port: 0, modelTestFetch: modelTestFetchMock, now: () => 500 });
+    await seededDaemon.start();
+
+    await eventually(() => expect(seededDaemon.database.sqlite.prepare("SELECT status FROM wake_outbox WHERE id = 'wake_startup_1'").get()).toMatchObject({ status: "dispatched" }));
+    expect(seededDaemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM runs WHERE room_id = 'room_wake' AND wake_reason = 'task_review'").get()).toMatchObject({ count: 1 });
+    expect(seededDaemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'wake_outbox.dispatched' AND json_extract(payload, '$.outboxId') = 'wake_startup_1'").get()).toMatchObject({ count: 1 });
+
+    await seededDaemon.close();
+  });
+
+  it("queues restart_recovery wake_outbox for in-flight runs from a previous daemon", async () => {
+    await daemon.close();
+    currentDaemon = undefined;
+    const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-restart-recovery-"));
+    const databasePath = join(dir, "agenthub.sqlite");
+    const seeded = createDatabase({ path: databasePath, applyMigrations: true });
+    try {
+      seeded.sqlite.transaction(() => {
+        seeded.sqlite.prepare("INSERT INTO workspaces (id, name, root_path, created_at, updated_at) VALUES ('ws_restart', 'Workspace', '.', 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO roles (id, workspace_id, name, prompt, capabilities, is_builtin, created_at, updated_at) VALUES ('role_restart', 'ws_restart', 'Builder', '', '[]', 0, 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES ('agent_restart', 'ws_restart', 'Builder', 'mock', NULL, '', '[]', NULL, 0, NULL, 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES ('binding_restart', 'ws_restart', 'role_restart', 'runtime_1', NULL, NULL, 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES ('room_restart', 'ws_restart', 'Restart Room', 'solo', 'conversation', 'agent_restart', NULL, 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES ('room_restart', 'agent_restart', 'agent', 'primary', 'mock', 'session_restart', 'binding_restart', 'active', 1)").run();
+        seeded.sqlite.prepare(
+          `INSERT INTO runs (
+            id, workspace_id, task_id, room_id, agent_id, adapter_id, adapter_session_id, provider_conversation_id,
+            parent_run_id, status, wake_reason, waiting_reason, workspace_path, work_dir, workspace_mode, context_version,
+            target_files, mailbox_claim_count, pid_at_start, claimed_at, started_at, ended_at, input_tokens, output_tokens,
+            cached_tokens, cost_usd, model_id, failure_class, error, created_at, updated_at
+          ) VALUES ('run_restart', 'ws_restart', NULL, 'room_restart', 'agent_restart', 'mock', 'session_restart', NULL,
+            NULL, 'running', 'primary_turn', NULL, NULL, NULL, 'shadow_buffer', NULL,
+            '[]', 0, 1, 1, 2, NULL, NULL, NULL,
+            NULL, NULL, NULL, NULL, NULL, 1, 2)`
+        ).run();
+      })();
+    } finally {
+      seeded.sqlite.close();
+    }
+
+    const seededDaemon = createDaemon({ databasePath, port: 0, modelTestFetch: modelTestFetchMock, now: () => 500 });
+    await seededDaemon.start();
+
+    expect(seededDaemon.database.sqlite.prepare("SELECT status, failure_class, error FROM runs WHERE id = 'run_restart'").get()).toMatchObject({
+      status: "failed",
+      failure_class: "transient",
+      error: "daemon_restarted"
+    });
+    expect(seededDaemon.database.sqlite.prepare("SELECT room_id, agent_id, reason, status, payload FROM wake_outbox WHERE reason = 'restart_recovery'").get()).toMatchObject({
+      room_id: "room_restart",
+      agent_id: "agent_restart",
+      reason: "restart_recovery",
+      status: "pending",
+      payload: JSON.stringify({ runId: "run_restart" })
+    });
 
     await seededDaemon.close();
   });
@@ -1668,6 +2015,19 @@ describe("daemon M1.4 composition", () => {
     expect(listed.status).toBe(200);
     expect(listBody.agentBindings.map((binding) => binding.id)).toContain(bindingId);
 
+    const disabledAt = Date.now();
+    daemon.database.sqlite.prepare("UPDATE agent_bindings SET disabled_at = ?, updated_at = ? WHERE id = ?").run(disabledAt, disabledAt, bindingId);
+
+    const defaultList = await fetch(`${baseUrl}/agent-bindings?workspaceId=${encodeURIComponent(workspaceId)}`);
+    const defaultListBody = await defaultList.json() as { readonly agentBindings: readonly { readonly id: string }[] };
+    expect(defaultList.status).toBe(200);
+    expect(defaultListBody.agentBindings.map((binding) => binding.id)).not.toContain(bindingId);
+
+    const includeDisabledList = await fetch(`${baseUrl}/agent-bindings?workspaceId=${encodeURIComponent(workspaceId)}&includeDisabled=true`);
+    const includeDisabledBody = await includeDisabledList.json() as { readonly agentBindings: readonly { readonly id: string; readonly disabledAt?: number; readonly isDisabled?: boolean }[] };
+    expect(includeDisabledList.status).toBe(200);
+    expect(includeDisabledBody.agentBindings).toContainEqual(expect.objectContaining({ id: bindingId, disabledAt, isDisabled: true }));
+
     const fetched = await fetch(`${baseUrl}/agent-bindings/${bindingId}`);
     const fetchedBody = await fetched.json() as { readonly agentBinding?: { readonly id: string; readonly runtime: { readonly kind: string } } };
     expect(fetched.status).toBe(200);
@@ -1810,6 +2170,45 @@ describe("daemon M1.4 composition", () => {
     expect(daemon.mockAdapter.llmCallsFor(targetAgentId)).toBe(1);
     const runs = daemon.database.sqlite.prepare("SELECT agent_id, wake_reason FROM runs WHERE room_id = ? ORDER BY created_at ASC").all(room.data.roomId) as { readonly agent_id: string; readonly wake_reason: string }[];
     expect(runs[0]).toMatchObject({ agent_id: targetAgentId, wake_reason: "user_mention" });
+  });
+
+  it("routes assisted structured mention objects from V1.2 clients", async () => {
+    const client = new AgentHubClient({ baseUrl });
+    const targetAgentId = "agent-structured-mention";
+    daemon.database.sqlite.prepare("INSERT INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES (?, 'default-workspace', 'Structured Mention', 'mock', NULL, '', '{}', NULL, 0, NULL, ?, ?)").run(targetAgentId, Date.now(), Date.now());
+    const room = await client.createRoom({ title: "Structured Mention", mode: "assisted", primaryAgentId: "mock-builder", participants: [{ type: "agent", agentId: targetAgentId, role: "teammate", defaultPresence: "active" }] }) as { readonly data: { readonly roomId: string } };
+
+    const sent = await fetch(`${baseUrl}/rooms/${room.data.roomId}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "@ please review this", mentions: [{ agentBindingId: targetAgentId }], idempotencyKey: "mention-structured-1" })
+    });
+
+    expect(sent.status).toBe(200);
+    expect(daemon.mockAdapter.llmCallsFor(targetAgentId)).toBe(1);
+    const runs = daemon.database.sqlite.prepare("SELECT agent_id, wake_reason FROM runs WHERE room_id = ? ORDER BY created_at ASC").all(room.data.roomId) as { readonly agent_id: string; readonly wake_reason: string }[];
+    expect(runs[0]).toMatchObject({ agent_id: targetAgentId, wake_reason: "user_mention" });
+  });
+
+  it("preserves structured mentions when editing queued pending messages", async () => {
+    const client = new AgentHubClient({ baseUrl });
+    const targetAgentId = "agent-edit-structured-mention";
+    daemon.database.sqlite.prepare("INSERT INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES (?, 'default-workspace', 'Edit Structured Mention', 'mock', NULL, '', '{}', NULL, 0, NULL, ?, ?)").run(targetAgentId, Date.now(), Date.now());
+    const room = await client.createRoom({ title: "Edit Structured Mention", mode: "assisted", primaryAgentId: "mock-builder", participants: [{ type: "agent", agentId: targetAgentId, role: "teammate", defaultPresence: "active" }] }) as { readonly data: { readonly roomId: string } };
+    const messageId = "msg_edit_structured_mention";
+    seedPendingMessage(room.data.roomId, "mock-builder", messageId, "old");
+
+    const edited = await fetch(`${baseUrl}/messages/${messageId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "@ please use the selected reviewer", mentions: [{ agentBindingId: targetAgentId }] })
+    });
+
+    const payload = await edited.json() as { readonly ok: boolean; readonly data: { readonly messageId: string } };
+    expect(edited.status).toBe(200);
+    expect(payload.ok).toBe(true);
+    const createdEvent = daemon.database.sqlite.prepare("SELECT payload FROM events WHERE type = 'message.created' AND json_extract(payload, '$.messageId') = ?").get(payload.data.messageId) as { readonly payload: string } | undefined;
+    expect(JSON.parse(createdEvent?.payload ?? "{}")).toMatchObject({ mentions: [{ agentBindingId: targetAgentId }] });
   });
 
   it("uses the assisted selector model to choose the first active speaker", async () => {
@@ -2045,14 +2444,16 @@ describe("daemon M1.4 composition", () => {
     ]);
   });
 
-  it("pins messages into workspace context and regenerates assistant messages through WakeAgent", async () => {
+  it("pins messages as room context and regenerates assistant messages through WakeAgent", async () => {
     const client = new AgentHubClient({ baseUrl });
     const room = await client.createRoom({ title: "Pin Regen", mode: "solo", primaryAgentId: "mock-builder" }) as { readonly data: { readonly roomId: string } };
     const sent = await client.sendMessage(room.data.roomId, { text: "remember this", idempotencyKey: "pin-regen-1" }) as { readonly data: { readonly messageId: string } };
 
     const pinned = await fetch(`${baseUrl}/messages/${sent.data.messageId}/pin`, { method: "POST" });
     expect(pinned.status).toBe(200);
-    expect(daemon.database.sqlite.prepare("SELECT scope, pinned, content FROM context_items WHERE content = 'remember this'").get()).toMatchObject({ scope: "workspace", pinned: 1, content: "remember this" });
+    expect(daemon.database.sqlite.prepare("SELECT pinned_at FROM messages WHERE id = ?").get(sent.data.messageId)).toMatchObject({ pinned_at: expect.any(Number) });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM context_items WHERE source_message_id = ? AND pinned = 1").get(sent.data.messageId)).toMatchObject({ count: 0 });
+    expect(daemon.database.sqlite.prepare("SELECT type FROM events WHERE type = 'message.pinned' AND json_extract(payload, '$.messageId') = ?").get(sent.data.messageId)).toBeDefined();
 
     const assistant = daemon.database.sqlite.prepare("SELECT id FROM messages WHERE role = 'assistant' ORDER BY created_at DESC LIMIT 1").get() as { readonly id: string };
     const regenerated = await fetch(`${baseUrl}/messages/${assistant.id}/regenerate`, { method: "POST" });
@@ -2168,6 +2569,8 @@ describe("daemon M1.4 composition", () => {
     expect(second).toHaveLength(0);
     expect(activeDaemon().database.sqlite.prepare("SELECT status FROM tasks WHERE id = 'task_timeout_1'").get()).toMatchObject({ status: "blocked" });
     expect(activeDaemon().database.sqlite.prepare("SELECT COUNT(*) AS count FROM mailbox_messages WHERE room_id = 'room_timeout' AND to_agent_id = 'mock-builder' AND kind = 'task_timeout'").get()).toMatchObject({ count: 1 });
+    expect(activeDaemon().database.sqlite.prepare("SELECT COUNT(*) AS count FROM command_records WHERE command_type = 'WakeAgent' AND idempotency_key LIKE 'task-timeout:%'").get()).toMatchObject({ count: 0 });
+    expect(activeDaemon().database.sqlite.prepare("SELECT room_id, agent_id, reason, status FROM wake_outbox WHERE room_id = 'room_timeout' AND reason = 'task_blocked'").get()).toMatchObject({ room_id: "room_timeout", agent_id: "mock-builder", reason: "task_blocked", status: "pending" });
   });
 
   it("returns task activities over HTTP and keeps cancel on task.status.changed", async () => {
@@ -2320,7 +2723,7 @@ describe("daemon M1.4 composition", () => {
     const listed = await fetch(`${baseUrl}/skills`);
     const listedPayload = await listed.json() as { readonly skills: readonly { readonly id: string; readonly name: string; readonly origin: string; readonly content?: string }[] };
     expect(listed.status).toBe(200);
-    expect(listedPayload.skills.map((skill) => skill.name).sort()).toEqual(["skill-creator", "task-planner"]);
+    expect(listedPayload.skills.map((skill) => skill.name).sort()).toEqual(["document-builder", "html-slides-builder", "officecli-pptx", "one-pager-builder", "skill-creator", "task-planner", "web-app-builder", "web-page-builder"]);
     expect(listedPayload.skills.every((skill) => skill.content === undefined)).toBe(true);
 
     const builtinId = listedPayload.skills.find((skill) => skill.name === "task-planner")?.id ?? "";
@@ -2727,4 +3130,18 @@ async function waitFor<T>(read: () => T, done: (value: T) => boolean, options: {
   }
   if (!done(value)) throw new Error(`Timed out waiting for condition: ${JSON.stringify(value)}`);
   return value;
+}
+
+async function eventually(assertion: () => void): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    try {
+      assertion();
+      return;
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+  throw lastError;
 }

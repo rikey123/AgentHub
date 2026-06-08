@@ -112,6 +112,29 @@ describe("AdapterBridge Level-1 watchdog", () => {
       .find(([cmd]) => cmd.type === "WakeAgent" && cmd.reason === "agent_stalled");
     expect(wakeCall).toBeUndefined();
   });
+
+  test("terminal session clears watchdog and does not notify after completion", async () => {
+    currentBridge().handle({ type: "session.opened", sessionId: "sess_1" });
+    dispatchSpy!.mockClear();
+    publishSpy!.mockClear();
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    currentBridge().handle({ type: "session.ended", sessionId: "sess_1", reason: "completed" });
+    await vi.advanceTimersByTimeAsync(90_000);
+
+    const mailboxRow = currentDatabase().sqlite
+      .prepare("SELECT id FROM mailbox_messages WHERE room_id = ? AND to_agent_id = ?")
+      .get("room_1", "agent_leader") as { id: string } | undefined;
+    expect(mailboxRow).toBeUndefined();
+
+    const wakeCall = (dispatchSpy!.mock.calls as Array<[{ type: string; reason?: string }]>)
+      .find(([cmd]) => cmd.type === "WakeAgent" && cmd.reason === "agent_stalled");
+    expect(wakeCall).toBeUndefined();
+
+    const stalledEvents = (publishSpy!.mock.calls as Array<[{ type: string }]>)
+      .filter(([e]) => e.type === "room.stalled");
+    expect(stalledEvents).toHaveLength(0);
+  });
 });
 
 describe("AdapterBridge Level-2 stall escalation", () => {

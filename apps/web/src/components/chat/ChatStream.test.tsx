@@ -1,6 +1,20 @@
-import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it, vi } from "vitest";
 import type { RoomViewModel } from "../../types.ts";
-import { activeRunIndicatorProps, buildChatFeedItems } from "./ChatStream.tsx";
+import { ChatStream, activeRunIndicatorProps, buildChatFeedItems, latestRegenerableAgentMessageId, pinnedMessagesForDrawer } from "./ChatStream.tsx";
+
+vi.mock("@tanstack/react-virtual", () => ({
+  useVirtualizer: ({ count, estimateSize }: { readonly count: number; readonly estimateSize: () => number }) => {
+    const size = estimateSize();
+    return {
+      getTotalSize: () => count * size,
+      getVirtualItems: () => Array.from({ length: count }, (_, index) => ({ index, start: index * size })),
+      measureElement: () => undefined,
+      scrollToIndex: () => undefined
+    };
+  }
+}));
 
 describe("ChatStream task notification feed", () => {
   it("keeps delegated task updates out of the main chat feed", () => {
@@ -149,6 +163,137 @@ describe("ChatStream task notification feed", () => {
       turnIndex: 1
     });
   });
+
+  it("orders pinned messages newest first for the Pinned Context drawer", () => {
+    const room = roomFixture({
+      messages: [
+        messageFixture({ id: "old-pin", text: "Old durable context", pinnedAt: 100 }),
+        messageFixture({ id: "not-pin", text: "Regular message" }),
+        messageFixture({ id: "new-pin", text: "Latest durable context", pinnedAt: 200 })
+      ]
+    });
+
+    expect(pinnedMessagesForDrawer(room).map((message) => message.id)).toEqual(["new-pin", "old-pin"]);
+  });
+
+  it("renders a collapsed Pinned Context drawer with unpin actions", () => {
+    const html = renderToStaticMarkup(createElement(ChatStream, {
+      room: roomFixture({
+        messages: [
+          messageFixture({ id: "message-pin-1", text: "API base path is /api/v2", pinnedAt: 200 }),
+          messageFixture({ id: "message-pin-2", text: "Long artifact note", parts: [{ type: "card", seq: 1, card: { type: "artifact", artifactId: "artifact_1", kind: "web_page", title: "Large HTML" } }], pinnedAt: 100 })
+        ]
+      }),
+      onSelectMessage: vi.fn(),
+      onOpenRun: vi.fn(),
+      onReply: vi.fn(),
+      onQuote: vi.fn(),
+      onPin: vi.fn(),
+      onRegenerate: vi.fn(),
+      onDelete: vi.fn(),
+      onOpenTask: vi.fn(),
+      onOpenTasks: vi.fn(),
+      onCancelPending: vi.fn(),
+      onEditPending: vi.fn(),
+      csrfFetch: vi.fn<typeof fetch>(),
+      connectionStatus: "connected"
+    }));
+
+    expect(html).toContain("Pinned Context");
+    expect(html).toContain("2 pinned");
+    expect(html).toContain("API base path is /api/v2");
+    expect(html).toContain("@artifact:artifact_1");
+    expect(html).toContain("Unpin pinned message");
+  });
+
+  it("warns when pinned artifact messages are compacted", () => {
+    const html = renderToStaticMarkup(createElement(ChatStream, {
+      room: roomFixture({
+        messages: [
+          messageFixture({
+            id: "artifact-pin",
+            text: "Large HTML artifact content should not be expanded in the pinned drawer.",
+            parts: [{ type: "card", seq: 1, card: { type: "artifact", artifactId: "artifact_large", kind: "web_page", title: "Large HTML" } }],
+            pinnedAt: 300
+          })
+        ]
+      }),
+      onSelectMessage: vi.fn(),
+      onOpenRun: vi.fn(),
+      onReply: vi.fn(),
+      onQuote: vi.fn(),
+      onPin: vi.fn(),
+      onRegenerate: vi.fn(),
+      onDelete: vi.fn(),
+      onOpenTask: vi.fn(),
+      onOpenTasks: vi.fn(),
+      onCancelPending: vi.fn(),
+      onEditPending: vi.fn(),
+      csrfFetch: vi.fn<typeof fetch>(),
+      connectionStatus: "connected"
+    }));
+
+    expect(html).toContain("@artifact:artifact_large");
+    expect(html).toContain("Content compacted");
+  });
+
+  it("renders quoted replies with the original sender summary and jump target", () => {
+    const html = renderToStaticMarkup(createElement(ChatStream, {
+      room: roomFixture({
+        messages: [
+          messageFixture({
+            id: "source-message",
+            senderType: "agent",
+            senderName: "Builder",
+            text: "API base path is /api/v2.",
+            createdAt: 100
+          }),
+          messageFixture({
+            id: "reply-message",
+            senderType: "user",
+            senderName: "You",
+            text: "Use that path for the client.",
+            quotedMessageId: "source-message",
+            createdAt: 200
+          })
+        ]
+      }),
+      onSelectMessage: vi.fn(),
+      onOpenRun: vi.fn(),
+      onReply: vi.fn(),
+      onQuote: vi.fn(),
+      onPin: vi.fn(),
+      onRegenerate: vi.fn(),
+      onDelete: vi.fn(),
+      onOpenTask: vi.fn(),
+      onOpenTasks: vi.fn(),
+      onCancelPending: vi.fn(),
+      onEditPending: vi.fn(),
+      csrfFetch: vi.fn<typeof fetch>(),
+      connectionStatus: "connected"
+    }));
+
+    expect(html).toContain("data-quoted-message-id=\"source-message\"");
+    expect(html).toContain("aria-label=\"Open quoted message from Builder\"");
+    expect(html).toMatch(/<button[^>]+data-quoted-message-id="source-message"[^>]*>[\s\S]*Builder[\s\S]*API base path is \/api\/v2\./);
+    expect(html).not.toContain("引用 source-m");
+  });
+
+  it("identifies only the latest completed agent message as regenerable", () => {
+    expect(latestRegenerableAgentMessageId([
+      messageFixture({ id: "older-agent", text: "Earlier answer", senderType: "agent", status: "completed", createdAt: 100 }),
+      messageFixture({ id: "latest-user", text: "Follow-up", senderType: "user", status: "completed", createdAt: 150 }),
+      messageFixture({ id: "streaming-agent", text: "Still running", senderType: "agent", status: "streaming", createdAt: 175 }),
+      messageFixture({ id: "latest-agent", text: "Latest answer", senderType: "agent", status: "completed", createdAt: 200 })
+    ])).toBe("latest-agent");
+  });
+
+  it("uses createdAt rather than array order for the latest regenerable agent message", () => {
+    expect(latestRegenerableAgentMessageId([
+      messageFixture({ id: "newest-agent", text: "Newest answer", senderType: "agent", status: "completed", createdAt: 300 }),
+      messageFixture({ id: "older-agent", text: "Older answer", senderType: "agent", status: "completed", createdAt: 100 })
+    ])).toBe("newest-agent");
+  });
 });
 
 function roomFixture(patch: Partial<RoomViewModel>): RoomViewModel {
@@ -158,6 +303,7 @@ function roomFixture(patch: Partial<RoomViewModel>): RoomViewModel {
     mode: "team",
     primaryAgentId: undefined,
     participants: [],
+    participantContactNames: {},
     messages: [],
     briefs: [],
     unresolvedInterventions: [],
@@ -167,7 +313,26 @@ function roomFixture(patch: Partial<RoomViewModel>): RoomViewModel {
     runs: [],
     pendingTurns: [],
     mailboxFailures: [],
+    artifactVersionsById: {},
+    deploymentsById: {},
+    deploymentLogsById: {},
     unreadCount: 0,
+    ...patch
+  };
+}
+
+function messageFixture(patch: Partial<RoomViewModel["messages"][number]>): RoomViewModel["messages"][number] {
+  return {
+    id: "message-1",
+    roomId: "room-1",
+    senderType: "agent",
+    senderId: "agent",
+    senderName: "Agent",
+    role: "assistant",
+    status: "completed",
+    text: "",
+    parts: [],
+    createdAt: 1,
     ...patch
   };
 }

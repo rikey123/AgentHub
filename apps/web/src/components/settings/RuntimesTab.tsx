@@ -188,6 +188,11 @@ export function RuntimesTab({ data, fetchImpl = fetch, onChange }: RuntimesTabPr
                         <div className="flex min-w-0 items-center gap-2">
                           <Card.Title className="truncate">{runtime.name}</Card.Title>
                           <Chip size="sm" variant="soft" color="default">{runtime.kind}</Chip>
+                          {isExperimentalRuntime(runtime) ? (
+                            <Chip size="sm" variant="soft" color="warning" aria-label="Runtime maturity: experimental">
+                              experimental
+                            </Chip>
+                          ) : null}
                         </div>
                         <Card.Description>
                           <span className="ah-mono">{runtime.detectedPath ?? "No detected path"}</span>
@@ -374,6 +379,10 @@ function runtimeStatusLabel(status: RuntimeStatus, version: string, result: Runt
   if (status === "connected") return `Connected (v${result?.version ?? version})`;
   if (status === "error") return result?.error ?? "Detection failed";
   return "Ready to test";
+}
+
+function isExperimentalRuntime(runtime: RuntimeConfig): boolean {
+  return runtime.kind === "codex";
 }
 
 function draftFromRuntime(runtime: RuntimeConfig): RuntimeDraft {

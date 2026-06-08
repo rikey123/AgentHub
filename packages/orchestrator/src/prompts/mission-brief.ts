@@ -23,7 +23,15 @@ export type MissionBrief = {
   readonly myTaskTitle?: string;
   readonly siblingTasks: readonly SiblingTask[];
   readonly roomMemory: readonly MissionBriefEntry[];
+  readonly pinnedMessages: readonly PinnedMessageEntry[];
   readonly activePlan?: string;
+};
+
+export type PinnedMessageEntry = {
+  readonly messageId: string;
+  readonly role: string;
+  readonly text: string;
+  readonly pinnedAt: number;
 };
 
 const MAX_MISSION_BRIEF_CHARS = 800 * 4;
@@ -91,6 +99,7 @@ export function assembleMissionBrief(
   const siblingTasks = readSiblingTasks(database, roomId);
   const activePlan = readActivePlan(database, roomId);
   const roomMemory = readRoomMemory(database, roomId, goal, room.mode, leaderName, taskId, myTask, siblingTasks, activePlan);
+  const pinnedMessages = readPinnedMessages(database, roomId);
 
   return {
     goal,
@@ -100,6 +109,7 @@ export function assembleMissionBrief(
     ...(myTask !== undefined ? { myTaskTitle: myTask } : {}),
     siblingTasks,
     roomMemory,
+    pinnedMessages,
     ...(activePlan !== undefined ? { activePlan } : {})
   };
 }
@@ -136,6 +146,14 @@ export function buildMissionBriefBlock(brief: MissionBrief): string {
       lines.push(`<${entry.type}>${xmlEscape(entry.content)}</${entry.type}>`);
     }
     lines.push("</room-memory>");
+  }
+
+  if (brief.pinnedMessages.length > 0) {
+    lines.push("<pinned-messages>");
+    for (const message of brief.pinnedMessages) {
+      lines.push(`<message id="${xmlEscape(message.messageId)}" role="${xmlEscape(message.role)}" pinned-at="${message.pinnedAt}">${xmlEscape(message.text)}</message>`);
+    }
+    lines.push("</pinned-messages>");
   }
 
   if (brief.activePlan !== undefined) {
@@ -276,6 +294,24 @@ function estimateFixedMissionBriefChars(
   }
   if (activePlan !== undefined) total += activePlan.length;
   return total;
+}
+
+function readPinnedMessages(database: AgentHubDatabase, roomId: string): readonly PinnedMessageEntry[] {
+  const rows = database.sqlite.prepare(
+    `SELECT id, role, pinned_at
+     FROM messages
+     WHERE room_id = ?
+       AND pinned_at IS NOT NULL
+       AND deleted_at IS NULL
+     ORDER BY pinned_at DESC, id DESC
+     LIMIT 10`
+  ).all(roomId) as Array<{ readonly id: string; readonly role: string; readonly pinned_at: number }>;
+  return rows.map((row) => ({
+    messageId: row.id,
+    role: row.role,
+    text: messageText(database.sqlite, row.id) ?? "",
+    pinnedAt: row.pinned_at
+  })).filter((message) => message.text.trim().length > 0);
 }
 
 function estimateSerializedChars(...parts: readonly (string | undefined)[]): number {

@@ -1,6 +1,6 @@
 {
   "name": "@agenthub/daemon",
-  "version": "0.0.0",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -28,6 +28,8 @@
     "@agenthub/skills": "workspace:*",
     "@agenthub/security": "workspace:*",
     "@agenthub/sdk": "workspace:*",
+    "@types/archiver": "^8.0.0",
+    "archiver": "^8.0.0",
     "effect": "^3.19.6",
     "smol-toml": "^1.4.2"
   }
