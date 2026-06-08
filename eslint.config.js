@@ -6,6 +6,7 @@ export default tseslint.config(
     ignores: [
       ".git/**",
       ".sisyphus/**",
+      ".worktrees/**",
       "coverage/**",
       "**/dist/**",
       "**/build/**",
