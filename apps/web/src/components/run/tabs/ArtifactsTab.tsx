@@ -123,10 +123,10 @@ export function ArtifactsTab({ room, runId, csrfFetch }: ArtifactsTabProps) {
 
   return (
     <div className="flex flex-col gap-3 p-3">
-      {loading ? <div className="flex items-center gap-2"><Spinner size="sm" /><span className="text-sm">Loading artifacts…</span></div> : null}
+      {loading ? <div className="flex items-center gap-2"><Spinner size="sm" /><span className="text-sm">正在加载产物...</span></div> : null}
       {error ? <Chip size="sm" color="danger" variant="soft">{error}</Chip> : null}
       {cardArtifacts.length === 0 && terminals.length === 0 && !loading ? (
-        <p className="text-sm text-muted">No artifacts produced by this run.</p>
+        <p className="text-sm text-muted">这个 Run 暂未生成产物。</p>
       ) : null}
       {cardArtifacts.map(({ id, part }) =>
         part.type === "card" ? <CardRenderer key={id} card={part.card} csrfFetch={csrfFetch} /> : null
@@ -137,7 +137,7 @@ export function ArtifactsTab({ room, runId, csrfFetch }: ArtifactsTabProps) {
           <TerminalCard
             key={t.id}
             artifactId={t.id}
-            title={t.title || "Terminal"}
+            title={t.title || "终端"}
             lines={state?.lines ?? []}
             exitCode={state?.exitCode ?? null}
           />
@@ -146,7 +146,7 @@ export function ArtifactsTab({ room, runId, csrfFetch }: ArtifactsTabProps) {
       {artifacts.length > 0 ? (
         <Card variant="transparent" className="border border-border">
           <Card.Header>
-            <Card.Title className="text-sm">All artifacts</Card.Title>
+            <Card.Title className="text-sm">全部产物</Card.Title>
           </Card.Header>
           <Card.Content>
             <ul className="flex flex-col gap-1">
