@@ -55,8 +55,19 @@ describe("DeploymentService", () => {
   });
 
   test("appendLog persists log_path text and publishes ephemeral log lines", async () => {
-    const service = createDeploymentService({ database: currentDatabase(), eventBus: currentBus(), now: () => now, deploymentRoot: currentTempDir() });
-    const deployment = await service.createDeployment({ artifactId: "artifact_1", kind: "container-build", roomId: "room_1" });
+    const spawned: unknown[] = [];
+    const service = createDeploymentService({
+      database: currentDatabase(),
+      eventBus: currentBus(),
+      now: () => now,
+      deploymentRoot: currentTempDir(),
+      commandProbe: () => true,
+      spawnImpl: ((...args: unknown[]) => {
+        spawned.push(args);
+        return fakeRunningChild(99);
+      }) as never
+    });
+    const deployment = await service.createDeployment({ artifactId: "artifact_1", kind: "container-export", roomId: "room_1" });
     const seen: string[] = [];
     const unsubscribe = currentBus().subscribe("deployment.log.appended", (event) => {
       if (event.type === "deployment.log.appended") seen.push(String((event.payload as { readonly line?: string }).line ?? ""));
@@ -65,6 +76,7 @@ describe("DeploymentService", () => {
     await service.appendLog(deployment.id, "building\n");
     unsubscribe();
 
+    expect(spawned).toHaveLength(0);
     const row = currentDatabase().sqlite.prepare("SELECT log_path FROM deployments WHERE id = ?").get(deployment.id) as { readonly log_path: string };
     expect(readFileSync(row.log_path, "utf8")).toContain("building\n");
     expect(seen).toEqual(["building\n"]);
