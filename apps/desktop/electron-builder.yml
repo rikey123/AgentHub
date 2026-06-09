@@ -1,0 +1,57 @@
+appId: dev.agenthub.desktop
+productName: AgentHub
+artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+extraMetadata:
+  name: agenthub-desktop
+  main: dist/main.cjs
+directories:
+  output: release
+files:
+  - package.json
+  - dist/**
+asar: true
+asarUnpack:
+  - "**/*.node"
+buildDependenciesFromSource: false
+npmRebuild: false
+extraResources:
+  - from: package-resources/agenthub-node
+    to: agenthub-node
+  # Ship daemon native deps as a real node_modules next to the bundle so Node ESM resolution
+  # of bare imports (e.g. better-sqlite3) finds them. NODE_PATH does not apply to ESM, and the
+  # bundle's own directory is the only place bare specifiers resolve from.
+  - from: package-resources/agenthub-daemon-node-modules
+    to: agenthub-daemon/node_modules
+  - from: dist/daemon-sidecar.mjs
+    to: agenthub-daemon/daemon-sidecar.mjs
+  - from: ../../apps/web/dist
+    to: agenthub-web-dist
+  - from: ../../packages/db/migrations
+    to: agenthub-migrations
+  - from: ../../packages/agents/templates
+    to: agenthub-agent-templates
+  - from: ../../packages/orchestrator/src/mcp
+    to: agenthub-room-mcp
+    filter:
+      - room-mcp-stdio.mjs
+      - room-mcp-tools.json
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  # Code signing is config-ready but not performed by default.
+  # To sign for public distribution (removes the Windows "unknown publisher" / SmartScreen warning),
+  # provide a CA-issued (or EV) code-signing cert via standard electron-builder env vars before `dist`:
+  #   $env:CSC_LINK = "path-or-base64-of-cert.pfx"
+  #   $env:CSC_KEY_PASSWORD = "cert-password"
+  # electron-builder auto-detects these and signs; with no cert set, packaging proceeds unsigned.
+  # Self-signed certs do NOT clear SmartScreen and have no distribution trust value.
+  signtoolOptions:
+    signingHashAlgorithms:
+      - sha256
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+publish: null
