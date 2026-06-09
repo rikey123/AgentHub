@@ -30,4 +30,16 @@ describe("Vite daemon proxy", () => {
       "/recurring-tasks"
     ]));
   });
+
+  it("proxies V1.2 deployment endpoints to the daemon", () => {
+    const config = viteConfig as { server?: { proxy?: Record<string, unknown> } };
+    const proxyPrefixes = Object.keys(config.server?.proxy ?? {});
+
+    expect(proxyPrefixes).toEqual(expect.arrayContaining([
+      "/deployments",
+      "/deployment-providers",
+      "/preview",
+      "/sites"
+    ]));
+  });
 });
