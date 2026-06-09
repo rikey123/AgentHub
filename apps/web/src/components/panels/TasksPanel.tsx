@@ -1086,7 +1086,7 @@ function ActivityLinks({ activity }: { activity: TaskActivityViewModel }) {
   return (
     <div className="mt-2 flex flex-wrap gap-2 text-xs">
       {runId ? <a className="rounded-full bg-accent-soft px-2 py-1 text-accent-soft-foreground" href={`#run:${encodeURIComponent(runId)}`}>Run 详情：{runId}</a> : null}
-      {artifact ? <a className="rounded-full bg-surface px-2 py-1 text-muted" href={`#artifact:${encodeURIComponent(artifact)}`}>Artifact：{artifact}</a> : null}
+      {artifact ? <a className="rounded-full bg-surface px-2 py-1 text-muted" href={`#artifact:${encodeURIComponent(artifact)}`}>产物：{artifact}</a> : null}
     </div>
   );
 }
