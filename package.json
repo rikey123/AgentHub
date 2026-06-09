@@ -9,6 +9,17 @@
     "pnpm": ">=10.0.0",
     "bun": ">=1.1.0"
   },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "electron-winstaller",
+      "esbuild"
+    ],
+    "ignoredBuiltDependencies": [
+      "@fission-ai/openspec",
+      "keytar"
+    ]
+  },
   "scripts": {
     "build": "turbo run build",
     "ai-sdk-provider:check": "node scripts/checks/ai-sdk-provider-check.mjs",

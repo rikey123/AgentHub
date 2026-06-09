@@ -2,8 +2,3 @@ packages:
   - "apps/*"
   - "packages/*"
   - "packages/adapters/*"
-allowBuilds:
-  better-sqlite3: true
-  electron-winstaller: true
-  esbuild: true
-  keytar: false
