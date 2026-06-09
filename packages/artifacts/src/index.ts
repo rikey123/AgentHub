@@ -638,6 +638,7 @@ function listFiles(root: string, prefix = ""): string[] {
   const files: string[] = [];
   for (const entry of readdirSync(dir)) {
     const relativePath = normalizePath(prefix.length > 0 ? `${prefix}/${entry}` : entry);
+    if (relativePath === ".git" || relativePath.startsWith(".git/")) continue;
     const full = resolve(root, relativePath);
     const stat = statSync(full);
     if (stat.isDirectory()) files.push(...listFiles(root, relativePath));

@@ -1,7 +1,27 @@
 import { useEffect, useRef, useState } from "react";
 import type { EventEnvelope } from "@agenthub/protocol/events";
 import { EVENT_REGISTRY } from "@agenthub/protocol/events";
-import type { RoomViewModel, ProjectorState, MessageViewModel, BriefViewModel, RunViewModel, PermissionViewModel, InterventionViewModel, TaskActivityViewModel, TaskDelegationViewModel, TaskViewModel, SkillErrorViewModel, TaskFileChangeViewModel, WorktreeReviewViewModel, RoomExecutionPlanViewModel } from "../types.ts";
+import type {
+  RoomViewModel,
+  ProjectorState,
+  MessageViewModel,
+  BriefViewModel,
+  RunViewModel,
+  PermissionViewModel,
+  InterventionViewModel,
+  TaskActivityViewModel,
+  TaskDelegationViewModel,
+  TaskViewModel,
+  SkillErrorViewModel,
+  TaskFileChangeViewModel,
+  WorktreeReviewViewModel,
+  RoomExecutionPlanViewModel,
+  WorkflowViewModel,
+  WorkflowVersionViewModel,
+  WorkflowRunViewModel,
+  WorkflowNodeRunViewModel,
+  WorkflowEdgeDeliveryViewModel
+} from "../types.ts";
 import { ensureAuthSession } from "./useSdk.ts";
 
 type ProjectorListener = (state: ProjectorState) => void;
@@ -14,6 +34,7 @@ type DeltaBatch = {
 
 class Projector {
   private rooms = new Map<string, RoomViewModel>();
+  private workflows: WorkflowViewModel[] = [];
   private listeners = new Set<ProjectorListener>();
   private eventSource: EventSource | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -37,6 +58,46 @@ class Projector {
       return { ...room, tasks: updated };
     }
     return { ...room, tasks: [...room.tasks, task] };
+  }
+
+  private upsertWorkflow(workflow: WorkflowViewModel): void {
+    this.workflows = upsertById(this.workflows, workflow);
+  }
+
+  private deleteWorkflow(workflowId: string, deletedAt: number): void {
+    this.workflows = this.workflows.map((workflow) =>
+      workflow.id === workflowId ? { ...workflow, deletedAt } : workflow
+    );
+  }
+
+  private updateWorkflow(workflowId: string, update: (workflow: WorkflowViewModel) => WorkflowViewModel): boolean {
+    let updated = false;
+    this.workflows = this.workflows.map((workflow) => {
+      if (workflow.id !== workflowId) return workflow;
+      updated = true;
+      return update(workflow);
+    });
+    return updated;
+  }
+
+  private mirrorWorkflowToRoom(roomId: string | undefined, workflow: WorkflowViewModel): void {
+    if (!roomId) return;
+    const room = this.rooms.get(roomId);
+    if (!room) return;
+    const workflows = upsertById(room.workflows ?? [], workflow);
+    this.rooms.set(roomId, { ...room, workflows });
+  }
+
+  private mirrorWorkflowDeletionToRoom(roomId: string | undefined, workflowId: string, deletedAt: number): void {
+    if (!roomId) return;
+    const room = this.rooms.get(roomId);
+    if (!room) return;
+    this.rooms.set(roomId, {
+      ...room,
+      workflows: (room.workflows ?? []).map((workflow) =>
+        workflow.id === workflowId ? { ...workflow, deletedAt } : workflow
+      )
+    });
   }
 
   connect(view: "main" | "detail", roomId?: string, runId?: string): void {
@@ -151,6 +212,7 @@ class Projector {
   private getState(): ProjectorState {
     const state: ProjectorState = {
       rooms: new Map(this.rooms),
+      workflows: this.workflows,
       connectionStatus: this.connectionStatus
     };
     if (this.connectionError !== undefined) {
@@ -198,7 +260,15 @@ class Projector {
 
   apply(event: EventEnvelope): void {
     const roomId = event.roomId;
+    const payload = event.payload as Record<string, unknown> | undefined;
+
+    if (event.type.startsWith("workflow.")) {
+      this.applyWorkflowEvent(event, payload);
+      return;
+    }
+
     if (!roomId) return;
+    if (roomId.startsWith("workflow:")) return;
 
     const roomOrUndefined = this.rooms.get(roomId);
     let room: RoomViewModel;
@@ -224,7 +294,6 @@ class Projector {
       this.rooms.set(roomId, room);
     }
 
-    const payload = event.payload as Record<string, unknown> | undefined;
     let changed = false;
 
     switch (event.type) {
@@ -1197,6 +1266,87 @@ class Projector {
     }
   }
 
+  private applyWorkflowEvent(event: EventEnvelope, payload: Record<string, unknown> | undefined): void {
+    let changed = false;
+
+    switch (event.type) {
+      case "workflow.created":
+      case "workflow.version.updated": {
+        const workflowId = stringField(objectField(payload, "workflow"), "id") ?? stringField(payload, "workflowId");
+        const nextWorkflow = workflowFromPayload(
+          workflowId ? this.workflows.find((workflow) => workflow.id === workflowId) : undefined,
+          payload
+        );
+        if (nextWorkflow) {
+          this.upsertWorkflow(nextWorkflow);
+          this.mirrorWorkflowToRoom(event.roomId, nextWorkflow);
+          changed = true;
+        }
+        break;
+      }
+      case "workflow.deleted": {
+        if (payload && typeof payload.workflowId === "string") {
+          const deletedAt = typeof payload.deletedAt === "number" ? payload.deletedAt : event.createdAt;
+          this.deleteWorkflow(payload.workflowId, deletedAt);
+          this.mirrorWorkflowDeletionToRoom(event.roomId, payload.workflowId, deletedAt);
+          changed = true;
+        }
+        break;
+      }
+      case "workflow.run.started":
+      case "workflow.run.completed":
+      case "workflow.run.failed":
+      case "workflow.run.cancelled": {
+        if (payload && typeof payload.workflowId === "string") {
+          const workflowRun = workflowRunFromPayload(payload);
+          if (workflowRun && this.updateWorkflow(payload.workflowId, (workflow) => upsertWorkflowRun(workflow, workflowRun))) {
+            const workflow = this.workflows.find((item) => item.id === payload.workflowId);
+            if (workflow) this.mirrorWorkflowToRoom(event.roomId, workflow);
+            changed = true;
+          }
+        }
+        break;
+      }
+      case "workflow.node.queued":
+      case "workflow.node.started":
+      case "workflow.node.completed":
+      case "workflow.node.failed":
+      case "workflow.node.skipped":
+      case "workflow.node.cancelled": {
+        if (payload && typeof payload.workflowId === "string") {
+          const nodeRun = workflowNodeRunFromPayload(payload);
+          const workflowRunId = typeof payload.workflowRunId === "string" ? payload.workflowRunId : nodeRun?.workflowRunId;
+          if (nodeRun && workflowRunId && this.updateWorkflow(payload.workflowId, (workflow) => upsertWorkflowNodeRun(workflow, workflowRunId, nodeRun))) {
+            const workflow = this.workflows.find((item) => item.id === payload.workflowId);
+            if (workflow) this.mirrorWorkflowToRoom(event.roomId, workflow);
+            changed = true;
+          }
+        }
+        break;
+      }
+      case "workflow.edge.delivery.created":
+      case "workflow.edge.delivery.mailbox_created":
+      case "workflow.edge.delivery.delivered":
+      case "workflow.edge.delivery.cancelled":
+      case "workflow.edge.delivery.failed": {
+        if (payload && typeof payload.workflowId === "string") {
+          const delivery = workflowEdgeDeliveryFromPayload(payload);
+          const workflowRunId = typeof payload.workflowRunId === "string" ? payload.workflowRunId : delivery?.workflowRunId;
+          if (delivery && workflowRunId && this.updateWorkflow(payload.workflowId, (workflow) => upsertWorkflowEdgeDelivery(workflow, workflowRunId, delivery))) {
+            const workflow = this.workflows.find((item) => item.id === payload.workflowId);
+            if (workflow) this.mirrorWorkflowToRoom(event.roomId, workflow);
+            changed = true;
+          }
+        }
+        break;
+      }
+    }
+
+    if (changed) {
+      this.notify();
+    }
+  }
+
   private agentName(room: RoomViewModel, agentId: string): string | undefined {
     return room.participants.find((p) => p.id === agentId)?.name;
   }
@@ -1253,6 +1403,321 @@ function worktreeReview(existing: TaskViewModel["worktreeReviews"], review: Work
   return [...(existing ?? []).filter((item) => item.runId !== runId), nextReview].sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
+function workflowFromPayload(existing: WorkflowViewModel | undefined, payload: Record<string, unknown> | undefined): WorkflowViewModel | undefined {
+  const workflow = objectField(payload, "workflow");
+  const workflowId = stringField(workflow, "id") ?? stringField(payload, "workflowId");
+  if (!workflowId) return undefined;
+
+  const version = workflowVersionFromUnknown(objectField(payload, "version"));
+  const nodes = arrayField(payload, "nodes").map(workflowNodeFromUnknown).filter((item): item is NonNullable<typeof item> => item !== undefined);
+  const edges = arrayField(payload, "edges").map(workflowEdgeFromUnknown).filter((item): item is NonNullable<typeof item> => item !== undefined);
+  const hasNodes = Array.isArray(payload?.nodes);
+  const hasEdges = Array.isArray(payload?.edges);
+  const validation = workflowValidationFromUnknown(objectField(payload, "validation"));
+
+  return {
+    id: workflowId,
+    workspaceId: stringField(workflow, "workspaceId") ?? existing?.workspaceId ?? "default-workspace",
+    roomId: stringField(workflow, "roomId") ?? existing?.roomId,
+    name: stringField(workflow, "name") ?? existing?.name ?? "Untitled workflow",
+    description: stringField(workflow, "description") ?? existing?.description,
+    draftVersionId: stringField(workflow, "draftVersionId") ?? existing?.draftVersionId,
+    activeVersionId: stringField(workflow, "activeVersionId") ?? existing?.activeVersionId,
+    createdBy: stringField(workflow, "createdBy") ?? existing?.createdBy,
+    createdAt: numberField(workflow, "createdAt") ?? existing?.createdAt ?? Date.now(),
+    updatedAt: numberField(workflow, "updatedAt") ?? version?.updatedAt ?? existing?.updatedAt ?? Date.now(),
+    deletedAt: numberField(workflow, "deletedAt") ?? existing?.deletedAt,
+    versions: version ? upsertById(existing?.versions ?? [], version) : existing?.versions ?? [],
+    nodes: hasNodes ? nodes : existing?.nodes ?? [],
+    edges: hasEdges ? edges : existing?.edges ?? [],
+    runs: existing?.runs ?? [],
+    validation: validation ?? existing?.validation
+  };
+}
+
+function workflowVersionFromUnknown(input: Record<string, unknown> | undefined): WorkflowVersionViewModel | undefined {
+  const id = stringField(input, "id");
+  const workflowId = stringField(input, "workflowId");
+  if (!id || !workflowId) return undefined;
+  return {
+    id,
+    workflowId,
+    versionNumber: numberField(input, "versionNumber") ?? 1,
+    state: stringField(input, "state") === "locked" ? "locked" : "draft",
+    valid: booleanField(input, "valid") ?? false,
+    validationErrors: parseWorkflowIssues(input?.validationErrors),
+    viewport: recordField(input, "viewport"),
+    createdFromVersionId: stringField(input, "createdFromVersionId"),
+    lockedFromVersionId: stringField(input, "lockedFromVersionId"),
+    lockedAt: numberField(input, "lockedAt"),
+    createdAt: numberField(input, "createdAt") ?? Date.now(),
+    updatedAt: numberField(input, "updatedAt") ?? Date.now()
+  };
+}
+
+function workflowNodeFromUnknown(input: unknown) {
+  if (!isObject(input)) return undefined;
+  const id = stringField(input, "id");
+  const workflowVersionId = stringField(input, "workflowVersionId");
+  const nodeId = stringField(input, "nodeId");
+  if (!id || !workflowVersionId || !nodeId) return undefined;
+  const position = objectField(input, "position");
+  const size = objectField(input, "size");
+  return {
+    id,
+    workflowVersionId,
+    nodeId,
+    kind: stringField(input, "kind") === "note" ? "note" as const : "agent_context" as const,
+    displayName: stringField(input, "displayName") ?? nodeId,
+    agentBindingId: stringField(input, "agentBindingId"),
+    roleLabel: stringField(input, "roleLabel"),
+    prompt: stringField(input, "prompt") ?? "",
+    position: { x: numberField(position, "x") ?? 0, y: numberField(position, "y") ?? 0 },
+    size: size ? { width: numberField(size, "width") ?? 260, height: numberField(size, "height") ?? 160 } : undefined,
+    enabled: booleanField(input, "enabled") ?? true,
+    locked: booleanField(input, "locked") ?? false,
+    config: recordField(input, "config"),
+    createdAt: numberField(input, "createdAt") ?? Date.now(),
+    updatedAt: numberField(input, "updatedAt") ?? Date.now()
+  };
+}
+
+function workflowEdgeFromUnknown(input: unknown) {
+  if (!isObject(input)) return undefined;
+  const id = stringField(input, "id");
+  const workflowVersionId = stringField(input, "workflowVersionId");
+  const edgeId = stringField(input, "edgeId");
+  const sourceNodeId = stringField(input, "sourceNodeId");
+  const targetNodeId = stringField(input, "targetNodeId");
+  if (!id || !workflowVersionId || !edgeId || !sourceNodeId || !targetNodeId) return undefined;
+  return {
+    id,
+    workflowVersionId,
+    edgeId,
+    sourceNodeId,
+    targetNodeId,
+    label: stringField(input, "label"),
+    enabled: booleanField(input, "enabled") ?? true,
+    config: recordField(input, "config"),
+    createdAt: numberField(input, "createdAt") ?? Date.now(),
+    updatedAt: numberField(input, "updatedAt") ?? Date.now()
+  };
+}
+
+function workflowRunFromPayload(payload: Record<string, unknown>): WorkflowRunViewModel | undefined {
+  const input = objectField(payload, "run");
+  const id = stringField(input, "id");
+  const workflowId = stringField(input, "workflowId");
+  const workflowVersionId = stringField(input, "workflowVersionId");
+  const workspaceId = stringField(input, "workspaceId");
+  if (!input || !id || !workflowId || !workflowVersionId || !workspaceId) return undefined;
+  return {
+    id,
+    workflowId,
+    workflowVersionId,
+    workspaceId,
+    roomId: stringField(input, "roomId"),
+    status: workflowRunStatus(stringField(input, "status")),
+    seedContext: stringField(input, "seedContext"),
+    startedBy: stringField(input, "startedBy"),
+    startedAt: numberField(input, "startedAt"),
+    endedAt: numberField(input, "endedAt"),
+    failureReason: stringField(input, "failureReason"),
+    createdAt: numberField(input, "createdAt") ?? Date.now(),
+    updatedAt: numberField(input, "updatedAt") ?? Date.now(),
+    nodeRuns: [],
+    edgeDeliveries: []
+  };
+}
+
+function workflowNodeRunFromPayload(payload: Record<string, unknown>): WorkflowNodeRunViewModel | undefined {
+  const input = objectField(payload, "nodeRun");
+  const id = stringField(input, "id");
+  const workflowRunId = stringField(input, "workflowRunId");
+  const workflowNodeId = stringField(input, "workflowNodeId");
+  const nodeId = stringField(input, "nodeId");
+  if (!input || !id || !workflowRunId || !workflowNodeId || !nodeId) return undefined;
+  return {
+    id,
+    workflowRunId,
+    workflowNodeId,
+    nodeId,
+    agentRunId: stringField(input, "agentRunId"),
+    agentBindingId: stringField(input, "agentBindingId"),
+    status: workflowNodeRunStatus(stringField(input, "status")),
+    inputContexts: arrayField(input, "inputContexts").filter(isObject),
+    outputContext: objectField(input, "outputContext"),
+    error: stringField(input, "error"),
+    queuedAt: numberField(input, "queuedAt"),
+    startedAt: numberField(input, "startedAt"),
+    completedAt: numberField(input, "completedAt"),
+    createdAt: numberField(input, "createdAt") ?? Date.now(),
+    updatedAt: numberField(input, "updatedAt") ?? Date.now()
+  };
+}
+
+function workflowEdgeDeliveryFromPayload(payload: Record<string, unknown>): WorkflowEdgeDeliveryViewModel | undefined {
+  const input = objectField(payload, "delivery");
+  const id = stringField(input, "id");
+  const workflowRunId = stringField(input, "workflowRunId");
+  const workflowEdgeId = stringField(input, "workflowEdgeId");
+  const edgeId = stringField(input, "edgeId");
+  const sourceNodeId = stringField(input, "sourceNodeId");
+  const targetNodeId = stringField(input, "targetNodeId");
+  if (!input || !id || !workflowRunId || !workflowEdgeId || !edgeId || !sourceNodeId || !targetNodeId) return undefined;
+  return {
+    id,
+    workflowRunId,
+    workflowEdgeId,
+    edgeId,
+    sourceNodeId,
+    targetNodeId,
+    sourceNodeRunId: stringField(input, "sourceNodeRunId"),
+    targetNodeRunId: stringField(input, "targetNodeRunId"),
+    mailboxMessageId: stringField(input, "mailboxMessageId"),
+    status: workflowEdgeDeliveryStatus(stringField(input, "status")),
+    context: recordField(input, "context"),
+    idempotencyKey: stringField(input, "idempotencyKey"),
+    attemptCount: numberField(input, "attemptCount") ?? 0,
+    error: stringField(input, "error"),
+    createdAt: numberField(input, "createdAt") ?? Date.now(),
+    updatedAt: numberField(input, "updatedAt") ?? Date.now(),
+    deliveredAt: numberField(input, "deliveredAt")
+  };
+}
+
+function workflowValidationFromUnknown(input: Record<string, unknown> | undefined) {
+  if (!input) return undefined;
+  return {
+    runnable: booleanField(input, "runnable") ?? false,
+    issues: parseWorkflowIssues(input.issues),
+    upstreamByNodeId: recordOfStringArray(input.upstreamByNodeId),
+    downstreamByNodeId: recordOfStringArray(input.downstreamByNodeId)
+  };
+}
+
+function updateWorkflowById(room: RoomViewModel, workflowId: string, update: (workflow: WorkflowViewModel) => WorkflowViewModel): RoomViewModel {
+  const workflows = room.workflows ?? [];
+  return { ...room, workflows: workflows.map((workflow) => workflow.id === workflowId ? update(workflow) : workflow) };
+}
+
+function upsertWorkflowRun(workflow: WorkflowViewModel, run: WorkflowRunViewModel): WorkflowViewModel {
+  const existing = workflow.runs.find((item) => item.id === run.id);
+  return {
+    ...workflow,
+    runs: upsertById(workflow.runs, {
+      ...run,
+      nodeRuns: existing?.nodeRuns ?? run.nodeRuns,
+      edgeDeliveries: existing?.edgeDeliveries ?? run.edgeDeliveries
+    })
+  };
+}
+
+function upsertWorkflowNodeRun(workflow: WorkflowViewModel, workflowRunId: string, nodeRun: WorkflowNodeRunViewModel): WorkflowViewModel {
+  return {
+    ...workflow,
+    runs: workflow.runs.map((run) =>
+      run.id === workflowRunId
+        ? { ...run, nodeRuns: upsertById(run.nodeRuns, nodeRun) }
+        : run
+    )
+  };
+}
+
+function upsertWorkflowEdgeDelivery(workflow: WorkflowViewModel, workflowRunId: string, delivery: WorkflowEdgeDeliveryViewModel): WorkflowViewModel {
+  return {
+    ...workflow,
+    runs: workflow.runs.map((run) =>
+      run.id === workflowRunId
+        ? { ...run, edgeDeliveries: upsertById(run.edgeDeliveries, delivery) }
+        : run
+    )
+  };
+}
+
+function upsertById<T extends { readonly id: string }>(items: readonly T[], next: T): T[] {
+  const existingIndex = items.findIndex((item) => item.id === next.id);
+  if (existingIndex < 0) return [...items, next];
+  const updated = [...items];
+  updated[existingIndex] = { ...updated[existingIndex]!, ...next };
+  return updated;
+}
+
+function parseWorkflowIssues(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter(isObject)
+    .map((item) => ({
+      code: stringField(item, "code") ?? "unknown",
+      message: stringField(item, "message") ?? "Workflow validation issue",
+      nodeId: stringField(item, "nodeId"),
+      edgeId: stringField(item, "edgeId"),
+      severity: stringField(item, "severity") === "warning" ? "warning" as const : "error" as const
+    }));
+}
+
+function recordOfStringArray(value: unknown): Record<string, string[]> {
+  if (!isObject(value)) return {};
+  const result: Record<string, string[]> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (Array.isArray(item)) result[key] = item.filter((entry): entry is string => typeof entry === "string");
+  }
+  return result;
+}
+
+function workflowRunStatus(value: string | undefined): WorkflowRunViewModel["status"] {
+  if (value === "queued" || value === "completed" || value === "failed" || value === "cancelled") return value;
+  return "running";
+}
+
+function workflowNodeRunStatus(value: string | undefined): WorkflowNodeRunViewModel["status"] {
+  if (value === "waiting" || value === "running" || value === "completed" || value === "failed" || value === "skipped" || value === "cancelled") return value;
+  return "queued";
+}
+
+function workflowEdgeDeliveryStatus(value: string | undefined): WorkflowEdgeDeliveryViewModel["status"] {
+  if (value === "mailbox_created" || value === "delivered" || value === "failed" || value === "skipped" || value === "cancelled") return value;
+  return "queued";
+}
+
+function objectField(input: Record<string, unknown> | undefined, key: string): Record<string, unknown> | undefined {
+  if (!input) return undefined;
+  const value = input[key];
+  return isObject(value) ? value : undefined;
+}
+
+function recordField(input: Record<string, unknown> | undefined, key: string): Record<string, unknown> {
+  return objectField(input, key) ?? {};
+}
+
+function arrayField(input: Record<string, unknown> | undefined, key: string): unknown[] {
+  if (!input) return [];
+  const value = input[key];
+  return Array.isArray(value) ? value : [];
+}
+
+function stringField(input: Record<string, unknown> | undefined, key: string): string | undefined {
+  if (!input) return undefined;
+  const value = input[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function numberField(input: Record<string, unknown> | undefined, key: string): number | undefined {
+  if (!input) return undefined;
+  const value = input[key];
+  return typeof value === "number" ? value : undefined;
+}
+
+function booleanField(input: Record<string, unknown> | undefined, key: string): boolean | undefined {
+  if (!input) return undefined;
+  const value = input[key];
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 const globalProjector = new Projector();
 
 if (typeof window !== "undefined") {
@@ -1262,6 +1727,7 @@ if (typeof window !== "undefined") {
 export function useProjector(view: "main" | "detail", roomId?: string, runId?: string): ProjectorState {
   const [state, setState] = useState<ProjectorState>({
     rooms: new Map(),
+    workflows: [],
     connectionStatus: "disconnected"
   });
 

@@ -8,14 +8,47 @@ const mocks = vi.hoisted(() => ({
     createRoom: vi.fn(),
     sendMessage: vi.fn()
   },
+  featureRail: vi.fn(() => null),
+  homeView: vi.fn(() => null),
   newRoomDialog: vi.fn(() => null),
-  settingsModal: vi.fn(() => null)
+  settingsModal: vi.fn(() => null),
+  workflowCanvasView: vi.fn(() => null)
 }));
 
 vi.mock("react-hotkeys-hook", () => ({ useHotkeys: vi.fn() }));
 vi.mock("./hooks/useProjector.ts", () => ({
   useProjector: () => ({
-    rooms: new Map(),
+    rooms: new Map([
+      ["room-1", {
+        id: "room-1",
+        title: "Workflow room",
+        mode: "team",
+        participants: [],
+        messages: [],
+        briefs: [],
+        unresolvedInterventions: [],
+        pendingPermissions: [],
+        contextItems: [],
+        tasks: [],
+        runs: [],
+        pendingTurns: [],
+        mailboxFailures: [],
+        unreadCount: 0
+      }]
+    ]),
+    workflows: [
+      {
+        id: "workflow-1",
+        workspaceId: "default-workspace",
+        name: "Workspace workflow",
+        createdAt: 1,
+        updatedAt: 1,
+        versions: [],
+        nodes: [],
+        edges: [],
+        runs: []
+      }
+    ],
     connectionStatus: "connected",
     connectionError: undefined
   })
@@ -39,27 +72,31 @@ vi.mock("./components/shell/AppShell.tsx", () => ({
   AppShell: ({ topBar, rail, rooms, center, panel }: { topBar?: ReactNode; rail?: ReactNode; rooms?: ReactNode; center?: ReactNode; panel?: ReactNode }) => createElement("div", null, topBar, rail, rooms, center, panel)
 }));
 vi.mock("./components/shell/TopBar.tsx", () => ({ TopBar: () => null }));
-vi.mock("./components/shell/FeatureRail.tsx", () => ({ FeatureRail: () => null }));
+vi.mock("./components/shell/FeatureRail.tsx", () => ({ FeatureRail: mocks.featureRail }));
 vi.mock("./components/rooms/RoomList.tsx", () => ({ RoomList: () => null }));
-vi.mock("./components/home/HomeView.tsx", () => ({ HomeView: () => null }));
+vi.mock("./components/home/HomeView.tsx", () => ({ HomeView: mocks.homeView }));
 vi.mock("./components/chat/ChatStream.tsx", () => ({ ChatStream: () => null }));
 vi.mock("./components/chat/InputBox.tsx", () => ({ InputBox: () => null }));
 vi.mock("./components/chat/PendingTurnList.tsx", () => ({ PendingTurnList: () => null }));
 vi.mock("./components/panels/SidePanel.tsx", () => ({ SidePanel: () => null }));
 vi.mock("./components/run/RunDetailDrawer.tsx", () => ({ RunDetailDrawer: () => null }));
+vi.mock("./components/workflows/WorkflowCanvasView.tsx", () => ({ WorkflowCanvasView: mocks.workflowCanvasView }));
 vi.mock("./components/CommandPalette.tsx", () => ({ CommandPalette: () => null }));
 vi.mock("./components/KeymapModal.tsx", () => ({ KeymapModal: () => null }));
 vi.mock("./components/NewRoomDialog.tsx", () => ({ NewRoomDialog: mocks.newRoomDialog }));
 
-import App, { ChatRoomLayout } from "./App.tsx";
+import App, { ChatRoomLayout, isWorkspaceRailItem } from "./App.tsx";
 
 describe("App integration wiring", () => {
   beforeEach(() => {
     mocks.csrfFetch.mockReset();
     mocks.sdk.createRoom.mockReset();
     mocks.sdk.sendMessage.mockReset();
+    mocks.featureRail.mockClear();
+    mocks.homeView.mockClear();
     mocks.newRoomDialog.mockClear();
     mocks.settingsModal.mockClear();
+    mocks.workflowCanvasView.mockClear();
   });
 
   it("passes csrfFetch into SettingsModal so settings writes use browser CSRF", () => {
@@ -116,5 +153,13 @@ describe("App integration wiring", () => {
     expect(html).toContain("min-h-0 flex-1 overflow-hidden");
     expect(html).toContain('data-testid="chat-input-region"');
     expect(html).toContain("shrink-0");
+  });
+
+  it("treats workflow as a workspace-level rail item", () => {
+    renderToStaticMarkup(createElement(App));
+
+    expect(isWorkspaceRailItem("workflow")).toBe(true);
+    expect(isWorkspaceRailItem("chat")).toBe(false);
+    expect(isWorkspaceRailItem("tasks")).toBe(false);
   });
 });

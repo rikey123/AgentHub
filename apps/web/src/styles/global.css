@@ -1357,3 +1357,706 @@ html[data-theme="dark"],
   background: var(--overlay) !important;
   box-shadow: var(--surface-shadow);
 }
+
+.ah-workflow-view {
+  --ah-workflow-blue: var(--ah-dashboard-blue, var(--accent));
+  --ah-workflow-blue-dark: var(--ah-dashboard-blue-dark, var(--accent));
+  --ah-workflow-ink: var(--ah-dashboard-ink, var(--foreground));
+  --ah-workflow-muted: var(--ah-dashboard-muted, var(--muted));
+  --ah-workflow-border: var(--ah-dashboard-border, var(--border));
+  --ah-workflow-border-strong: var(--ah-dashboard-border-strong, var(--border));
+  --ah-workflow-panel: var(--ah-dashboard-panel, var(--surface));
+  --ah-workflow-panel-low: var(--ah-dashboard-panel-low, var(--surface-secondary));
+  --ah-workflow-card: var(--ah-dashboard-card, var(--overlay));
+  --ah-workflow-card-low: var(--ah-dashboard-card-low, var(--surface));
+  --ah-workflow-control: var(--ah-dashboard-control, var(--surface-secondary));
+  display: flex;
+  min-height: 0;
+  height: 100%;
+  flex-direction: column;
+  overflow: hidden;
+  background: linear-gradient(180deg, var(--ah-workflow-panel) 0%, var(--ah-workflow-panel-low) 100%);
+  color: var(--ah-workflow-ink);
+}
+
+.ah-workflow-toolbar {
+  display: flex;
+  min-height: 4.4rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--ah-workflow-border);
+  background: color-mix(in oklab, var(--ah-workflow-card) 88%, transparent);
+  padding: 0.85rem 1.1rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.74);
+}
+
+.ah-workflow-kicker {
+  margin: 0;
+  color: var(--ah-workflow-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.ah-workflow-toolbar h2,
+.ah-workflow-inspector h3 {
+  margin: 0;
+  color: var(--ah-workflow-ink);
+  font-size: 1rem;
+  font-weight: 760;
+  letter-spacing: 0;
+}
+
+.ah-workflow-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.ah-workflow-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 5.8rem;
+  height: 2rem;
+  border: 1px solid var(--ah-workflow-border-strong);
+  border-radius: 7px;
+  background: var(--ah-workflow-control);
+  color: var(--ah-workflow-blue-dark);
+  font-size: 0.78rem;
+  font-weight: 650;
+  line-height: 1;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    color 140ms ease;
+}
+
+.ah-workflow-button:hover,
+.ah-workflow-button:focus-visible {
+  border-color: color-mix(in oklab, var(--ah-workflow-blue) 42%, var(--ah-workflow-border));
+  background: color-mix(in oklab, var(--ah-workflow-control) 82%, white 18%);
+  color: var(--ah-workflow-ink);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ah-workflow-blue) 12%, transparent);
+}
+
+.ah-workflow-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  box-shadow: none;
+}
+
+.ah-workflow-button-full {
+  width: 100%;
+}
+
+.ah-workflow-button-primary,
+.ah-workflow-button-run {
+  border-color: var(--ah-workflow-blue);
+  background: var(--ah-workflow-blue);
+  color: white;
+}
+
+.ah-workflow-button-run {
+  border-color: var(--success);
+  background: var(--success);
+  color: var(--success-foreground);
+}
+
+.ah-workflow-button-stop {
+  border-color: var(--danger, oklch(0.58 0.19 28));
+  background: var(--danger, oklch(0.58 0.19 28));
+  color: var(--danger-foreground, white);
+}
+
+.ah-workflow-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--ah-workflow-border);
+  background: color-mix(in oklab, var(--warning-soft, oklch(0.91 0.08 78)) 58%, var(--ah-workflow-card) 42%);
+  color: var(--warning-soft-foreground, oklch(0.35 0.09 74));
+  padding: 0.55rem 1.1rem;
+  font-size: 0.8rem;
+}
+
+.ah-workflow-notice button {
+  border: 0;
+  background: transparent;
+  color: var(--ah-workflow-blue-dark);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.ah-workflow-runbar {
+  display: grid;
+  grid-template-columns: minmax(12rem, 1fr) minmax(11rem, auto) minmax(12rem, 1fr);
+  align-items: stretch;
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--ah-workflow-border);
+  background: color-mix(in oklab, var(--ah-workflow-card-low) 88%, transparent);
+  padding: 0.65rem 1.1rem;
+}
+
+.ah-workflow-run-io {
+  display: grid;
+  grid-template-columns: 1.9rem minmax(0, 1fr);
+  min-width: 0;
+  align-items: stretch;
+  gap: 0.45rem;
+}
+
+.ah-workflow-run-io > span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--ah-workflow-border-strong);
+  border-radius: 8px;
+  background: var(--ah-workflow-control);
+  color: var(--ah-workflow-ink);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.ah-workflow-run-center {
+  display: grid;
+  min-width: 0;
+  align-content: center;
+  gap: 0.45rem;
+}
+
+.ah-workflow-run-summary {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  color: var(--ah-workflow-muted);
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.ah-workflow-run-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 4.8rem;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-soft-foreground);
+  padding: 0.26rem 0.55rem;
+  font-size: 0.7rem;
+  font-weight: 760;
+  line-height: 1;
+}
+
+.ah-workflow-runbar textarea,
+.ah-workflow-textarea {
+  width: 100%;
+  min-height: 2.4rem;
+  max-height: 4.8rem;
+  resize: vertical;
+  border: 1px solid var(--field-border);
+  border-radius: 8px;
+  background: var(--field-background);
+  color: var(--ah-workflow-ink);
+  padding: 0.45rem 0.55rem;
+  font-size: 0.78rem;
+  line-height: 1.2rem;
+  outline: none;
+}
+
+.ah-workflow-textarea {
+  min-height: 7rem;
+  max-height: 13rem;
+}
+
+.ah-workflow-runbar textarea[readonly] {
+  resize: none;
+}
+
+.ah-workflow-runbar textarea:focus,
+.ah-workflow-textarea:focus {
+  border-color: color-mix(in oklab, var(--ah-workflow-blue) 42%, var(--field-border));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ah-workflow-blue) 12%, transparent);
+}
+
+.ah-workflow-run-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+}
+
+.ah-workflow-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 20rem;
+  min-height: 0;
+  flex: 1;
+}
+
+.ah-workflow-canvas {
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  border-right: 1px solid var(--ah-workflow-border);
+}
+
+.ah-workflow-canvas .react-flow {
+  background: linear-gradient(135deg, color-mix(in oklab, var(--ah-workflow-card) 90%, transparent), color-mix(in oklab, var(--ah-workflow-panel-low) 92%, transparent));
+}
+
+.ah-workflow-canvas .react-flow__edge-path {
+  stroke: var(--ah-workflow-blue);
+  stroke-width: 2;
+}
+
+.ah-workflow-canvas .ah-workflow-edge-ready .react-flow__edge-path,
+.ah-workflow-canvas .ah-workflow-edge-draft .react-flow__edge-path {
+  stroke: var(--ah-workflow-blue);
+  stroke-dasharray: none;
+  animation: none;
+}
+
+.ah-workflow-canvas .react-flow__edge.selected .react-flow__edge-path {
+  stroke: var(--ah-workflow-blue);
+  stroke-width: 2.5;
+}
+
+.ah-workflow-canvas .ah-workflow-edge-queued .react-flow__edge-path,
+.ah-workflow-canvas .ah-workflow-edge-mailbox-created .react-flow__edge-path,
+.ah-workflow-canvas .ah-workflow-edge-transferring .react-flow__edge-path,
+.ah-workflow-canvas .react-flow__edge.animated .react-flow__edge-path {
+  stroke: var(--ah-workflow-blue);
+  stroke-dasharray: 7 5;
+  animation: ah-workflow-edge-flow 900ms linear infinite;
+}
+
+.ah-workflow-canvas .ah-workflow-edge-delivered .react-flow__edge-path,
+.ah-workflow-canvas .ah-workflow-edge-completed .react-flow__edge-path {
+  stroke: var(--success);
+}
+
+.ah-workflow-canvas .ah-workflow-edge-failed .react-flow__edge-path {
+  stroke: var(--danger, oklch(0.58 0.19 28));
+  stroke-width: 2.5;
+}
+
+.ah-workflow-canvas .ah-workflow-edge-disabled .react-flow__edge-path,
+.ah-workflow-canvas .ah-workflow-edge-skipped .react-flow__edge-path,
+.ah-workflow-canvas .ah-workflow-edge-cancelled .react-flow__edge-path {
+  stroke: var(--ah-workflow-muted);
+  stroke-dasharray: 4 6;
+}
+
+.ah-workflow-canvas .react-flow__edge-text {
+  fill: var(--ah-workflow-muted);
+  font-size: 11px;
+}
+
+@keyframes ah-workflow-edge-flow {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+
+.ah-workflow-canvas .react-flow__controls {
+  border: 1px solid var(--ah-workflow-border);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: var(--surface-shadow);
+}
+
+.ah-workflow-canvas .react-flow__controls-button {
+  border-bottom: 1px solid var(--ah-workflow-border);
+  background: var(--ah-workflow-card);
+  color: var(--ah-workflow-ink);
+}
+
+.ah-workflow-canvas .react-flow__minimap {
+  border: 1px solid var(--ah-workflow-border);
+  border-radius: 8px;
+  background: var(--ah-workflow-card-low);
+  box-shadow: var(--surface-shadow);
+}
+
+.ah-workflow-node {
+  width: 16.4rem;
+  min-height: 9rem;
+  border: 1px solid var(--ah-workflow-border-strong);
+  border-radius: 8px;
+  background: linear-gradient(180deg, var(--ah-workflow-card) 0%, var(--ah-workflow-card-low) 100%);
+  color: var(--ah-workflow-ink);
+  box-shadow: var(--surface-shadow);
+  padding: 0.78rem;
+}
+
+.ah-workflow-node-selected {
+  border-color: var(--ah-workflow-blue);
+  box-shadow:
+    0 0 0 3px color-mix(in oklab, var(--ah-workflow-blue) 14%, transparent),
+    var(--surface-shadow);
+}
+
+.ah-workflow-node-disabled {
+  opacity: 0.58;
+}
+
+.ah-workflow-node-note {
+  border-color: color-mix(in oklab, var(--warning, oklch(0.78 0.13 78)) 54%, var(--ah-workflow-border));
+  background: color-mix(in oklab, var(--warning-soft, oklch(0.91 0.08 78)) 38%, var(--ah-workflow-card) 62%);
+}
+
+.ah-workflow-node-status-running,
+.ah-workflow-node-status-queued,
+.ah-workflow-node-status-waiting {
+  border-color: color-mix(in oklab, var(--ah-workflow-blue) 48%, var(--ah-workflow-border));
+}
+
+.ah-workflow-node-status-completed {
+  border-color: color-mix(in oklab, var(--success) 48%, var(--ah-workflow-border));
+}
+
+.ah-workflow-node-status-failed {
+  border-color: color-mix(in oklab, var(--danger, oklch(0.58 0.19 28)) 48%, var(--ah-workflow-border));
+}
+
+.ah-workflow-node-top,
+.ah-workflow-node-foot {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.ah-workflow-node-title {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.86rem;
+  font-weight: 760;
+}
+
+.ah-workflow-node-dot {
+  width: 0.58rem;
+  height: 0.58rem;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--ah-workflow-blue);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ah-workflow-blue) 14%, transparent);
+}
+
+.ah-workflow-node-note .ah-workflow-node-dot {
+  background: var(--warning, oklch(0.78 0.13 78));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--warning, oklch(0.78 0.13 78)) 16%, transparent);
+}
+
+.ah-workflow-node-status-running .ah-workflow-node-dot,
+.ah-workflow-status-running {
+  background: var(--ah-workflow-blue);
+  color: white;
+}
+
+.ah-workflow-node-status-queued .ah-workflow-node-dot,
+.ah-workflow-node-status-waiting .ah-workflow-node-dot,
+.ah-workflow-status-queued,
+.ah-workflow-status-waiting,
+.ah-workflow-status-mailbox-created {
+  background: var(--accent-soft);
+  color: var(--accent-soft-foreground);
+}
+
+.ah-workflow-node-status-completed .ah-workflow-node-dot,
+.ah-workflow-status-completed,
+.ah-workflow-status-delivered {
+  background: var(--success-soft);
+  color: var(--success-soft-foreground);
+}
+
+.ah-workflow-node-status-failed .ah-workflow-node-dot,
+.ah-workflow-status-failed {
+  background: var(--danger-soft, color-mix(in oklab, oklch(0.58 0.19 28) 18%, transparent));
+  color: var(--danger-soft-foreground, oklch(0.38 0.13 28));
+}
+
+.ah-workflow-status-cancelled,
+.ah-workflow-status-skipped,
+.ah-workflow-status-disabled {
+  background: var(--default);
+  color: var(--muted);
+}
+
+.ah-workflow-node-status,
+.ah-workflow-node-foot span {
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-soft-foreground);
+  padding: 0.18rem 0.42rem;
+  font-size: 0.66rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.ah-workflow-node-role {
+  margin: 0;
+  color: var(--ah-workflow-muted);
+  letter-spacing: 0;
+}
+
+.ah-workflow-node-role {
+  margin-top: 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.ah-workflow-node-foot {
+  margin-top: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.ah-workflow-node-note .ah-workflow-node-foot {
+  display: none;
+}
+
+.ah-workflow-handle {
+  width: 0.62rem;
+  height: 0.62rem;
+  border: 2px solid var(--ah-workflow-card);
+  background: var(--ah-workflow-blue);
+}
+
+.ah-workflow-inspector {
+  min-width: 0;
+  overflow: auto;
+  background: var(--ah-workflow-panel-low);
+}
+
+.ah-workflow-inspector-content {
+  display: grid;
+  gap: 0.85rem;
+  padding: 1rem;
+}
+
+.ah-workflow-meta {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+}
+
+.ah-workflow-meta div,
+.ah-workflow-neighbors {
+  border: 1px solid var(--ah-workflow-border);
+  border-radius: 8px;
+  background: var(--ah-workflow-card);
+  padding: 0.68rem;
+}
+
+.ah-workflow-meta dt,
+.ah-workflow-neighbors h4 {
+  margin: 0 0 0.28rem;
+  color: var(--ah-workflow-muted);
+  font-size: 0.7rem;
+  font-weight: 760;
+  letter-spacing: 0;
+}
+
+.ah-workflow-meta dd,
+.ah-workflow-neighbors p {
+  margin: 0;
+  color: var(--ah-workflow-ink);
+  font-size: 0.8rem;
+  line-height: 1.25rem;
+}
+
+.ah-workflow-meta-context dd {
+  overflow-wrap: anywhere;
+}
+
+.ah-workflow-neighbor-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.ah-workflow-neighbor-list button {
+  border: 1px solid var(--ah-workflow-border-strong);
+  border-radius: 999px;
+  background: var(--ah-workflow-control);
+  color: var(--ah-workflow-blue-dark);
+  padding: 0.28rem 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.ah-workflow-field {
+  display: grid;
+  gap: 0.38rem;
+  border: 1px solid var(--ah-workflow-border);
+  border-radius: 8px;
+  background: var(--ah-workflow-card);
+  padding: 0.68rem;
+}
+
+.ah-workflow-field label,
+.ah-workflow-field > span {
+  color: var(--ah-workflow-muted);
+  font-size: 0.7rem;
+  font-weight: 760;
+  letter-spacing: 0;
+}
+
+.ah-workflow-select {
+  width: 100%;
+  min-height: 2.1rem;
+  border: 1px solid var(--field-border);
+  border-radius: 7px;
+  background: var(--field-background);
+  color: var(--ah-workflow-ink);
+  padding: 0.35rem 0.55rem;
+  font-size: 0.78rem;
+  font-weight: 650;
+  outline: none;
+}
+
+.ah-workflow-select:focus {
+  border-color: color-mix(in oklab, var(--ah-workflow-blue) 42%, var(--field-border));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ah-workflow-blue) 12%, transparent);
+}
+
+.ah-workflow-select:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.ah-workflow-field-error {
+  margin: 0;
+  color: var(--danger, oklch(0.58 0.19 28));
+  font-size: 0.72rem;
+  line-height: 1.15rem;
+}
+
+.ah-workflow-empty-help {
+  border: 1px dashed var(--ah-workflow-border-strong);
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--ah-workflow-card) 72%, transparent);
+  color: var(--ah-workflow-muted);
+  padding: 0.85rem;
+  font-size: 0.8rem;
+  line-height: 1.3rem;
+}
+
+.ah-workflow-run-panel {
+  display: grid;
+  gap: 0.75rem;
+  border-top: 1px solid var(--ah-workflow-border);
+  padding: 1rem;
+}
+
+.ah-workflow-run-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.ah-workflow-run-grid div {
+  border: 1px solid var(--ah-workflow-border);
+  border-radius: 8px;
+  background: var(--ah-workflow-card);
+  padding: 0.58rem;
+}
+
+.ah-workflow-run-grid span,
+.ah-workflow-run-list p {
+  display: block;
+  color: var(--ah-workflow-muted);
+  font-size: 0.68rem;
+  font-weight: 720;
+}
+
+.ah-workflow-run-grid strong {
+  display: block;
+  margin-top: 0.18rem;
+  color: var(--ah-workflow-ink);
+  font-size: 0.86rem;
+}
+
+.ah-workflow-run-list {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.ah-workflow-run-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  border: 1px solid var(--ah-workflow-border);
+  border-radius: 8px;
+  background: var(--ah-workflow-card);
+  padding: 0.5rem 0.58rem;
+  color: var(--ah-workflow-ink);
+  font-size: 0.74rem;
+}
+
+.ah-workflow-run-row span {
+  display: grid;
+  gap: 0.14rem;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.ah-workflow-run-row small {
+  display: block;
+  overflow: hidden;
+  color: var(--ah-workflow-muted);
+  font-size: 0.68rem;
+  font-weight: 650;
+  line-height: 1rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ah-workflow-run-row strong {
+  flex: 0 0 auto;
+  font-size: 0.68rem;
+  text-transform: capitalize;
+}
+
+[data-theme="dark"] .ah-workflow-toolbar {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+[data-theme="dark"] .ah-workflow-button:hover,
+[data-theme="dark"] .ah-workflow-button:focus-visible {
+  background: color-mix(in oklab, var(--ah-workflow-control) 86%, white 6%);
+}
+
+@media (max-width: 980px) {
+  .ah-workflow-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ah-workflow-inspector {
+    display: none;
+  }
+
+  .ah-workflow-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .ah-workflow-runbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ah-workflow-run-actions {
+    justify-content: flex-start;
+  }
+}

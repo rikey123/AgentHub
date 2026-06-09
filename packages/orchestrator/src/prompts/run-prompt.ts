@@ -49,7 +49,11 @@ export function buildRunPrompt(run: RunRow, database: AgentHubDatabase, options:
   // skillsBlock is only present for shared-mode runs (spec D9 fallback injection).
   const priorProgress = run.task_id !== null ? buildPriorProgressBlock(database, run.task_id) : undefined;
   const batch = readCurrentRunMailbox(run, database, options);
-  const input = renderBatch(batch) ?? renderQueuedRunInput(run, database) ?? `Run ${run.id} for agent ${run.agent_id}`;
+  const batchInput = renderBatch(batch);
+  const queuedPromptDelta = batchInput !== undefined ? renderQueuedRunPromptDelta(run, database) : undefined;
+  const input = batchInput !== undefined
+    ? [queuedPromptDelta, batchInput].filter((part): part is string => part !== undefined && part.trim().length > 0).join("\n\n")
+    : renderQueuedRunInput(run, database) ?? `Run ${run.id} for agent ${run.agent_id}`;
   const leaderContext = renderLeaderRunContext(run, database);
   const assistedContext = renderAssistedGroupContext(run, database);
   return [options.skillsBlock, missionBriefBlock, priorProgress, rolePrompt, leaderContext, assistedContext, input].filter((part): part is string => part !== undefined && part.trim().length > 0).join("\n\n---\n\n");
@@ -113,6 +117,13 @@ function renderMailboxMessage(message: MailboxMessageDelivery): string {
       ? (message.fromName ?? message.fromId ?? "Agent")
       : (message.fromId ?? message.fromType ?? "System");
   const files = message.files.length > 0 ? `\nFiles: ${message.files.join(", ")}` : "";
+  if (message.roomId.startsWith("workflow:")) {
+    return [
+      `Workflow upstream context from ${sender}`,
+      "This is the input data for the current workflow node. Apply the current node prompt to this context.",
+      `Context: ${message.text}${files}`
+    ].join("\n");
+  }
   if (message.fromType === "agent") {
     return [
       `Agent-to-agent mailbox message from ${sender}`,
@@ -141,6 +152,14 @@ function renderQueuedRunInput(run: RunRow, database: AgentHubDatabase): string |
   return parts.length > 0 ? parts.join("\n\n") : undefined;
 }
 
+function renderQueuedRunPromptDelta(run: RunRow, database: AgentHubDatabase): string | undefined {
+  const payload = readQueuedRunPayload(run, database);
+  if (payload?.promptDelta === undefined) return undefined;
+  const rendered = renderPromptDelta(payload.promptDelta);
+  if (isMailboxReadInstruction(rendered)) return undefined;
+  return rendered;
+}
+
 function readQueuedRunPayload(run: RunRow, database: AgentHubDatabase): QueuedRunPayload | undefined {
   const event = database.sqlite.prepare("SELECT payload FROM events WHERE run_id = ? AND type = 'agent.run.queued' ORDER BY seq DESC LIMIT 1").get(run.id) as { readonly payload: string } | undefined;
   if (event === undefined) return undefined;
@@ -158,6 +177,10 @@ function pendingTurnText(database: AgentHubDatabase, pendingTurnId: string): str
 
 function renderPromptDelta(delta: AgentPromptDelta): string {
   return delta.kind === "first_wake" ? delta.fullRolePrompt : delta.instructions;
+}
+
+function isMailboxReadInstruction(text: string): boolean {
+  return text.includes("You have new agent-to-agent mailbox messages") && text.includes("Call room.read_mailbox");
 }
 
 function renderLeaderRunContext(run: RunRow, database: AgentHubDatabase): string | undefined {

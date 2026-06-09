@@ -197,6 +197,27 @@ The canonical event registry SHALL be extended with the following V1.0 event typ
 | `skill.deactivated` | skill | durable | detail | skill-system | Members panel REST-only；不要求 projector handler |
 | `skill.materialization_failed` | skill | durable | main | skill-system | 需要 projector handler（chat view inline error）|
 
+**Workflow canvas durable events**:
+
+| 事件类型 | category | durability | visibility | 来源 capability | 备注 |
+|---|---|---|---|---|---|
+| `workflow.created` | workflow | durable | both | agent-context-workflow-canvas | Workflow canvas projector |
+| `workflow.version.updated` | workflow | durable | both | agent-context-workflow-canvas | Workflow canvas projector |
+| `workflow.deleted` | workflow | durable | both | agent-context-workflow-canvas | Workflow canvas projector |
+| `workflow.run.started` | workflow | durable | both | agent-context-workflow-canvas | Workflow canvas projector |
+| `workflow.run.completed` | workflow | durable | both | agent-context-workflow-canvas | Workflow canvas projector |
+| `workflow.run.failed` | workflow | durable | both | agent-context-workflow-canvas | Workflow canvas projector |
+| `workflow.run.cancelled` | workflow | durable | both | agent-context-workflow-canvas | Workflow canvas projector |
+| `workflow.node.queued` | workflow | durable | both | agent-context-workflow-canvas | Workflow canvas projector |
+| `workflow.node.started` | workflow | durable | both | agent-context-workflow-canvas | Workflow canvas projector |
+| `workflow.node.completed` | workflow | durable | both | agent-context-workflow-canvas | Workflow canvas projector |
+| `workflow.node.failed` | workflow | durable | both | agent-context-workflow-canvas | Workflow canvas projector |
+| `workflow.node.skipped` | workflow | durable | both | agent-context-workflow-canvas | Workflow canvas projector |
+| `workflow.edge.delivery.created` | workflow | durable | both | agent-context-workflow-canvas | Workflow canvas projector |
+| `workflow.edge.delivery.mailbox_created` | workflow | durable | both | agent-context-workflow-canvas | Workflow canvas projector |
+| `workflow.edge.delivery.delivered` | workflow | durable | both | agent-context-workflow-canvas | Workflow canvas projector |
+| `workflow.edge.delivery.failed` | workflow | durable | both | agent-context-workflow-canvas | Workflow canvas projector |
+
 **V1.0 明确不引入的事件类型**（防止 spec agent 误加）：
 
 - `task.updated`：状态变化走 `task.status.changed`（V0 已注册），非状态型活动走 `task.activity.added`

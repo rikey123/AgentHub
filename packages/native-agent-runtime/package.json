@@ -14,10 +14,11 @@
     "@agenthub/db": "workspace:*",
     "@agenthub/orchestrator": "workspace:*",
     "@agenthub/protocol": "workspace:*",
-    "ai": "^5.0.0",
     "@ai-sdk/anthropic": "^1.0.0",
     "@ai-sdk/google": "^1.0.0",
     "@ai-sdk/openai": "^1.0.0",
-    "@ai-sdk/openai-compatible": "^1.0.0"
+    "@ai-sdk/openai-compatible": "^1.0.0",
+    "ai": "^5.0.0",
+    "zod": "3.25.76"
   }
 }

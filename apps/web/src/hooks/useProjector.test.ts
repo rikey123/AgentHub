@@ -26,12 +26,25 @@ function makeAgentEvent<T extends EventType>(type: T, roomId: string, agentId: s
   };
 }
 
+function makeWorkspaceEvent<T extends EventType>(type: T, payload: Record<string, unknown>, createdAt = Date.now()) {
+  return {
+    id: randomUUID(),
+    type,
+    schemaVersion: 1,
+    durability: "durable" as const,
+    visibility: "both" as const,
+    workspaceId: "default-workspace",
+    payload,
+    createdAt
+  };
+}
+
 describe("useProjector replay handling", () => {
   let emittedState: ProjectorState;
   let unsubscribe: (() => void) | undefined;
 
   beforeEach(() => {
-    emittedState = { rooms: new Map(), connectionStatus: "disconnected" };
+    emittedState = { rooms: new Map(), workflows: [], connectionStatus: "disconnected" };
     unsubscribe = getProjector().subscribe((state) => {
       emittedState = state;
     });
@@ -386,6 +399,318 @@ describe("useProjector replay handling", () => {
     expect(room?.skillErrors).toEqual([
       expect.objectContaining({ skillId: "skill-1", skillName: "task-planner", runId: "run-skill-1", error: "disk full" })
     ]);
+  });
+
+  it("rebuilds workflow graph and runtime state from durable workflow events", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "team" }));
+    projector.apply(makeEvent("workflow.created", roomId, {
+      workflow: {
+        id: "workflow-1",
+        workspaceId: "default-workspace",
+        roomId,
+        name: "Agent handoff",
+        draftVersionId: "workflow-version-1",
+        createdAt: 1,
+        updatedAt: 1
+      },
+      version: {
+        id: "workflow-version-1",
+        workflowId: "workflow-1",
+        versionNumber: 1,
+        state: "draft",
+        valid: true,
+        validationErrors: [],
+        viewport: {},
+        createdAt: 1,
+        updatedAt: 1
+      },
+      nodes: [
+        {
+          id: "workflow-node-row-a",
+          workflowVersionId: "workflow-version-1",
+          nodeId: "node-a",
+          kind: "agent_context",
+          displayName: "Planner",
+          prompt: "Plan",
+          position: { x: 10, y: 20 },
+          enabled: true,
+          locked: false,
+          config: {},
+          createdAt: 1,
+          updatedAt: 1
+        },
+        {
+          id: "workflow-node-row-b",
+          workflowVersionId: "workflow-version-1",
+          nodeId: "node-b",
+          kind: "agent_context",
+          displayName: "Reviewer",
+          prompt: "Review",
+          position: { x: 320, y: 20 },
+          enabled: true,
+          locked: false,
+          config: {},
+          createdAt: 1,
+          updatedAt: 1
+        }
+      ],
+      edges: [
+        {
+          id: "workflow-edge-row-ab",
+          workflowVersionId: "workflow-version-1",
+          edgeId: "edge-a-b",
+          sourceNodeId: "node-a",
+          targetNodeId: "node-b",
+          enabled: true,
+          config: {},
+          createdAt: 1,
+          updatedAt: 1
+        }
+      ],
+      validation: {
+        runnable: true,
+        issues: [],
+        upstreamByNodeId: { "node-b": ["node-a"] },
+        downstreamByNodeId: { "node-a": ["node-b"] }
+      }
+    }, 100));
+    projector.apply(makeEvent("workflow.run.started", roomId, {
+      workflowId: "workflow-1",
+      run: {
+        id: "workflow-run-1",
+        workflowId: "workflow-1",
+        workflowVersionId: "workflow-version-1",
+        workspaceId: "default-workspace",
+        roomId,
+        status: "running",
+        seedContext: "Investigate auth flow",
+        startedAt: 110,
+        createdAt: 110,
+        updatedAt: 110
+      }
+    }, 110));
+    projector.apply(makeEvent("workflow.node.queued", roomId, {
+      workflowId: "workflow-1",
+      workflowRunId: "workflow-run-1",
+      nodeRun: {
+        id: "workflow-node-run-a",
+        workflowRunId: "workflow-run-1",
+        workflowNodeId: "workflow-node-row-a",
+        nodeId: "node-a",
+        status: "queued",
+        inputContexts: [],
+        createdAt: 111,
+        updatedAt: 111
+      }
+    }, 111));
+    projector.apply(makeEvent("workflow.edge.delivery.mailbox_created", roomId, {
+      workflowId: "workflow-1",
+      workflowRunId: "workflow-run-1",
+      delivery: {
+        id: "workflow-delivery-ab",
+        workflowRunId: "workflow-run-1",
+        workflowEdgeId: "workflow-edge-row-ab",
+        edgeId: "edge-a-b",
+        sourceNodeId: "node-a",
+        targetNodeId: "node-b",
+        mailboxMessageId: "mailbox-1",
+        status: "mailbox_created",
+        context: {},
+        attemptCount: 1,
+        createdAt: 112,
+        updatedAt: 112
+      }
+    }, 112));
+    projector.apply(makeEvent("workflow.edge.delivery.delivered", roomId, {
+      workflowId: "workflow-1",
+      workflowRunId: "workflow-run-1",
+      delivery: {
+        id: "workflow-delivery-ab",
+        workflowRunId: "workflow-run-1",
+        workflowEdgeId: "workflow-edge-row-ab",
+        edgeId: "edge-a-b",
+        sourceNodeId: "node-a",
+        targetNodeId: "node-b",
+        mailboxMessageId: "mailbox-1",
+        status: "delivered",
+        context: { text: "A to B" },
+        attemptCount: 1,
+        createdAt: 112,
+        updatedAt: 113,
+        deliveredAt: 113
+      }
+    }, 113));
+
+    const workflow = emittedState.workflows.find((item) => item.id === "workflow-1");
+    expect(workflow).toMatchObject({
+      id: "workflow-1",
+      name: "Agent handoff",
+      nodes: [{ nodeId: "node-a" }, { nodeId: "node-b" }],
+      edges: [{ edgeId: "edge-a-b" }]
+    });
+    expect(workflow?.runs[0]).toMatchObject({
+      id: "workflow-run-1",
+      status: "running",
+      nodeRuns: [{ id: "workflow-node-run-a", status: "queued" }],
+      edgeDeliveries: [{ id: "workflow-delivery-ab", status: "delivered" }]
+    });
+    expect(emittedState.rooms.get(roomId)?.workflows?.[0]).toMatchObject({ id: "workflow-1" });
+  });
+
+  it("projects workspace workflows even when events are not room scoped", () => {
+    const projector = getProjector();
+    projector.apply(makeWorkspaceEvent("workflow.created", {
+      workflow: {
+        id: "workflow-workspace-1",
+        workspaceId: "default-workspace",
+        name: "Workspace handoff",
+        draftVersionId: "workflow-version-workspace",
+        createdAt: 1,
+        updatedAt: 1
+      },
+      version: {
+        id: "workflow-version-workspace",
+        workflowId: "workflow-workspace-1",
+        versionNumber: 1,
+        state: "draft",
+        valid: true,
+        validationErrors: [],
+        viewport: {},
+        createdAt: 1,
+        updatedAt: 1
+      },
+      nodes: [],
+      edges: [],
+      validation: {
+        runnable: false,
+        issues: [],
+        upstreamByNodeId: {},
+        downstreamByNodeId: {}
+      }
+    }, 100));
+
+    expect(emittedState.workflows.find((item) => item.id === "workflow-workspace-1")).toMatchObject({
+      name: "Workspace handoff",
+      roomId: undefined
+    });
+  });
+
+  it("replays workflow version updates without requiring a full workflow object", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "team" }));
+    projector.apply(makeEvent("workflow.created", roomId, {
+      workflow: {
+        id: "workflow-update-1",
+        workspaceId: "default-workspace",
+        roomId,
+        name: "Editable handoff",
+        draftVersionId: "workflow-version-draft",
+        createdAt: 1,
+        updatedAt: 1
+      },
+      version: {
+        id: "workflow-version-draft",
+        workflowId: "workflow-update-1",
+        versionNumber: 1,
+        state: "draft",
+        valid: true,
+        validationErrors: [],
+        viewport: {},
+        createdAt: 1,
+        updatedAt: 1
+      },
+      nodes: [
+        {
+          id: "workflow-update-node-a",
+          workflowVersionId: "workflow-version-draft",
+          nodeId: "node-a",
+          kind: "agent_context",
+          displayName: "Planner",
+          prompt: "Plan",
+          position: { x: 10, y: 20 },
+          enabled: true,
+          locked: false,
+          config: {},
+          createdAt: 1,
+          updatedAt: 1
+        }
+      ],
+      edges: [],
+      validation: {
+        runnable: true,
+        issues: [],
+        upstreamByNodeId: {},
+        downstreamByNodeId: {}
+      }
+    }, 100));
+
+    projector.apply(makeEvent("workflow.version.updated", roomId, {
+      workflowId: "workflow-update-1",
+      version: {
+        id: "workflow-version-draft",
+        workflowId: "workflow-update-1",
+        versionNumber: 2,
+        state: "draft",
+        valid: true,
+        validationErrors: [],
+        viewport: {},
+        createdAt: 1,
+        updatedAt: 200
+      },
+      nodes: [
+        {
+          id: "workflow-update-node-a",
+          workflowVersionId: "workflow-version-draft",
+          nodeId: "node-a",
+          kind: "agent_context",
+          displayName: "Planner",
+          prompt: "Plan",
+          position: { x: 20, y: 40 },
+          enabled: true,
+          locked: false,
+          config: {},
+          createdAt: 1,
+          updatedAt: 200
+        },
+        {
+          id: "workflow-update-note",
+          workflowVersionId: "workflow-version-draft",
+          nodeId: "note-1",
+          kind: "note",
+          displayName: "Design note",
+          prompt: "Summarize why this handoff exists.",
+          position: { x: 180, y: 120 },
+          enabled: true,
+          locked: false,
+          config: {},
+          createdAt: 200,
+          updatedAt: 200
+        }
+      ],
+      edges: [],
+      validation: {
+        runnable: true,
+        issues: [],
+        upstreamByNodeId: {},
+        downstreamByNodeId: {}
+      }
+    }, 200));
+
+    const workflow = emittedState.workflows.find((item) => item.id === "workflow-update-1");
+    expect(workflow).toMatchObject({
+      name: "Editable handoff",
+      updatedAt: 200,
+      nodes: [
+        { nodeId: "node-a", position: { x: 20, y: 40 } },
+        { nodeId: "note-1", kind: "note" }
+      ],
+      edges: []
+    });
+    expect(workflow?.versions[0]).toMatchObject({ versionNumber: 2, updatedAt: 200 });
+    expect(emittedState.rooms.get(roomId)?.workflows?.find((item) => item.id === "workflow-update-1")).toMatchObject({ id: "workflow-update-1" });
   });
 
   it("recognizes agent-authored message payloads even when replay lacks envelope agentId", () => {

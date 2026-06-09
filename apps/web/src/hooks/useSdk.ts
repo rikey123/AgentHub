@@ -30,7 +30,7 @@ export async function ensureAuthSession(fetchImpl: typeof fetch = fetch): Promis
 export function createCsrfFetch(fetchImpl: typeof fetch = fetch): typeof fetch {
   return async (input, init = {}) => {
     const method = (init.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
-    const mutating = method === "POST" || method === "PATCH" || method === "DELETE";
+    const mutating = method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE";
     if (isAuthSessionRequest(input)) {
       return fetchImpl(input, { ...init, credentials: init.credentials ?? "same-origin" });
     }

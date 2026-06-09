@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import { EventEnvelopeSchema } from "./envelope.ts";
-import { EVENT_REGISTRY } from "./registry.ts";
+import { EVENT_PAYLOAD_SCHEMAS, EVENT_REGISTRY } from "./registry.ts";
 
 export type SchemaCheckResult = {
   readonly ok: boolean;
@@ -22,6 +22,12 @@ export function checkProtocolSchemas(): SchemaCheckResult {
       errors.push(`event '${entry.type}' must remain v1 in the M0.3 skeleton`);
     }
 
+  }
+
+  for (const type of Object.keys(EVENT_PAYLOAD_SCHEMAS)) {
+    if (!seen.has(type)) {
+      errors.push(`payload schema registered for unknown event type '${type}'`);
+    }
   }
 
   const durableEntry = EVENT_REGISTRY.find((entry) => entry.durability === "durable");

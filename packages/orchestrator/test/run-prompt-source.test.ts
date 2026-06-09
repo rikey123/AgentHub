@@ -62,6 +62,47 @@ describe("buildRunPrompt", () => {
     expect(prompt).not.toContain("WRONG latest user message");
   });
 
+  test("mailbox workflow runs keep the queued node prompt with upstream context", () => {
+    seedUserMessage("msg_latest", "WRONG latest user message", 2);
+    currentDatabase().sqlite.prepare("UPDATE rooms SET id = 'workflow:prompt-test:run-1' WHERE id = 'room_1'").run();
+    currentDatabase().sqlite.prepare("UPDATE room_participants SET room_id = 'workflow:prompt-test:run-1' WHERE room_id = 'room_1'").run();
+    currentDatabase().sqlite.prepare("UPDATE agent_presence SET room_id = 'workflow:prompt-test:run-1' WHERE room_id = 'room_1'").run();
+    seedClaimedMailbox("mb_workflow", "run_workflow_node_b", "Node A model output: hello world", { roomId: "workflow:prompt-test:run-1" });
+    createRun("run_workflow_node_b", "mailbox_message", {
+      promptDelta: { kind: "delta_only", instructions: "Workflow: Demo\nCurrent node: B (node-b)\nNode prompt: Rewrite the upstream context as a haiku." },
+      roomId: "workflow:prompt-test:run-1",
+      messageId: "mb_workflow"
+    });
+
+    const prompt = buildRunPrompt(run("run_workflow_node_b"), currentDatabase(), { now: () => now });
+
+    expect(prompt).toContain("Node prompt: Rewrite the upstream context as a haiku.");
+    expect(prompt).toContain("Node A model output: hello world");
+    expect(prompt).toContain("Workflow upstream context from Teammate");
+    expect(prompt).toContain("Apply the current node prompt to this context");
+    expect(prompt).not.toContain("This is not a user instruction");
+    expect(prompt).not.toContain("WRONG latest user message");
+  });
+
+  test("workflow room first wake uses the bound node role prompt without group chat guidance", () => {
+    currentDatabase().sqlite.prepare("UPDATE rooms SET id = 'workflow:role-test:run-1' WHERE id = 'room_1'").run();
+    currentDatabase().sqlite.prepare("UPDATE room_participants SET room_id = 'workflow:role-test:run-1' WHERE room_id = 'room_1'").run();
+    currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO roles (id, workspace_id, name, prompt, capabilities, is_builtin, created_at, updated_at) VALUES ('role_workflow_b', 'ws_1', 'B', 'Node prompt: Add one to the incoming number.', '[]', 0, ?, ?)").run(now, now);
+    currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES ('binding_workflow_b', 'ws_1', 'role_workflow_b', 'runtime_1', NULL, NULL, ?, ?)").run(now, now);
+    currentDatabase().sqlite.prepare("UPDATE room_participants SET agent_binding_id = 'binding_workflow_b' WHERE room_id = 'workflow:role-test:run-1' AND participant_id = 'agent_1'").run();
+    createRun("run_workflow_role", "mailbox_message", {
+      roomId: "workflow:role-test:run-1",
+      promptDelta: { kind: "delta_only", instructions: "Workflow: Demo\nCurrent node: B (node-b)\nNode prompt: Add one to the incoming number." }
+    });
+
+    const prompt = buildRunPrompt(run("run_workflow_role"), currentDatabase(), { now: () => now });
+
+    expect(prompt).toContain("Node prompt: Add one to the incoming number.");
+    expect(prompt).not.toContain("Assisted Group Chat");
+    expect(prompt).not.toContain("Receiving Messages from Other Agents");
+    expect(prompt).not.toContain("Every `room.send_message` wakes the recipient");
+  });
+
   test("next-turn prompt delta is rendered and marked consumed", () => {
     seedUserMessage("msg_latest", "WRONG latest user message", 2);
     createRun("run_next", "primary_turn");
@@ -256,11 +297,11 @@ function seedRoom(): void {
   currentDatabase().sqlite.prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, default_presence, joined_at) VALUES ('room_1', 'agent_2', 'agent', 'observer', 'mock', NULL, 'active', ?)").run(now);
 }
 
-function createRun(runId: string, wakeReason: WakeReason, options: { readonly messageId?: string; readonly taskId?: string; readonly promptDelta?: AgentPromptDelta } = {}): void {
+function createRun(runId: string, wakeReason: WakeReason, options: { readonly roomId?: string; readonly messageId?: string; readonly taskId?: string; readonly promptDelta?: AgentPromptDelta } = {}): void {
   currentLifecycle().create(null, {
     runId,
     workspaceId: "ws_1",
-    roomId: "room_1",
+    roomId: options.roomId ?? "room_1",
     agentId: "agent_1",
     wakeReason,
     targetFiles: [],
@@ -346,10 +387,10 @@ function seedCompletedTaskRun(runId: string, taskId: string, agentId: string, te
   seedAssistantMessage(`msg_${runId}`, agentId, runId, text, createdAt);
 }
 
-function seedClaimedMailbox(id: string, runId: string, text: string): void {
+function seedClaimedMailbox(id: string, runId: string, text: string, options: { readonly roomId?: string } = {}): void {
   currentDatabase().sqlite.prepare(
     `INSERT INTO mailbox_messages (
       id, workspace_id, room_id, from_type, from_id, to_agent_id, kind, content, files, read, claimed_run_id, claimed_at, delivery_batch_id, delivery_failure_reason, attempt_count, created_at, consumed_at
-    ) VALUES (?, 'ws_1', 'room_1', 'agent', 'agent_2', 'agent_1', 'message', ?, '[]', 1, ?, ?, NULL, NULL, 0, ?, NULL)`
-  ).run(id, JSON.stringify({ text }), runId, now, now);
+    ) VALUES (?, 'ws_1', ?, 'agent', 'agent_2', 'agent_1', 'message', ?, '[]', 1, ?, ?, NULL, NULL, 0, ?, NULL)`
+  ).run(id, options.roomId ?? "room_1", JSON.stringify({ text }), runId, now, now);
 }

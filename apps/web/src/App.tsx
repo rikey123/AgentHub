@@ -11,6 +11,7 @@ import { InputBox } from "./components/chat/InputBox.tsx";
 import { PendingTurnList } from "./components/chat/PendingTurnList.tsx";
 import { SidePanel } from "./components/panels/SidePanel.tsx";
 import { RunDetailDrawer } from "./components/run/RunDetailDrawer.tsx";
+import { WorkflowCanvasView } from "./components/workflows/WorkflowCanvasView.tsx";
 import { CommandPalette, type PaletteCommand } from "./components/CommandPalette.tsx";
 import { KeymapModal } from "./components/KeymapModal.tsx";
 import { NewRoomDialog, type CreateRoomInput } from "./components/NewRoomDialog.tsx";
@@ -36,6 +37,10 @@ export function ChatRoomLayout({ chat, pendingTurns, input }: ChatRoomLayoutProp
       <div className="shrink-0" data-testid="chat-input-region">{input}</div>
     </div>
   );
+}
+
+export function isWorkspaceRailItem(item: RailItem): boolean {
+  return item === "workflow";
 }
 
 export default function App() {
@@ -77,6 +82,7 @@ export default function App() {
 
   const rooms = useMemo(() => Array.from(projector.rooms.values()), [projector.rooms]);
   const activeRoom = activeRoomId ? projector.rooms.get(activeRoomId) : undefined;
+  const workflowMode = isWorkspaceRailItem(rail);
   const panelRoom = activeRoom && contextOverlay?.roomId === activeRoom.id
     ? { ...activeRoom, contextItems: contextOverlay.items }
     : activeRoom;
@@ -207,6 +213,19 @@ export default function App() {
     setSidePanelTab("tasks");
   }, []);
 
+  const handleRailSelect = useCallback((item: RailItem) => {
+    if (isWorkspaceRailItem(item)) {
+      setActiveRunId(undefined);
+      setSelectedMessageId(undefined);
+      setEditingTurnId(undefined);
+    }
+    setRail(item);
+  }, []);
+
+  const openWorkflowCanvas = useCallback(() => {
+    handleRailSelect("workflow");
+  }, [handleRailSelect]);
+
   const handleOpenTask = useCallback(() => {
     openTasksPanel();
   }, [openTasksPanel]);
@@ -285,6 +304,7 @@ export default function App() {
   const commands = useMemo<PaletteCommand[]>(() => {
     const list: PaletteCommand[] = [
       { id: "new-room", label: "新建 room", group: "Rooms", perform: openNewRoom },
+      { id: "open-workflow", label: "打开工作流画布", group: "视图", keywords: ["workflow", "canvas", "agent", "graph"], perform: openWorkflowCanvas },
       { id: "open-settings", label: "打开设置", group: "设置", keywords: ["roles", "runtimes", "models", "permissions", "workspace", "mcp"], perform: openSettings },
       { id: "toggle-left", label: leftCollapsed ? "显示 rooms 面板" : "隐藏 rooms 面板", group: "视图", perform: () => setLeftCollapsed((v) => !v) },
       { id: "toggle-right", label: rightCollapsed ? "显示工作台面板" : "隐藏工作台面板", group: "视图", perform: () => setRightCollapsed((v) => !v) },
@@ -310,9 +330,11 @@ export default function App() {
       });
     }
     return list;
-  }, [rooms, openNewRoom, openSettings, leftCollapsed, rightCollapsed, setTheme, setDensity]);
+  }, [rooms, openNewRoom, openSettings, openWorkflowCanvas, leftCollapsed, rightCollapsed, setTheme, setDensity]);
 
-  const center = activeRoom ? (
+  const center = workflowMode ? (
+    <WorkflowCanvasView workflows={projector.workflows} csrfFetch={csrfFetch} />
+  ) : activeRoom ? (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
       {(activeRoom.skillErrors?.length ?? 0) > 0 ? (
         <div className="shrink-0 border-b border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-900 dark:border-danger-800 dark:bg-danger-950/40 dark:text-danger-100">
@@ -394,7 +416,7 @@ export default function App() {
           <TopBar
             connectionStatus={projector.connectionStatus}
             connectionError={projector.connectionError ?? bannerError}
-            roomTitle={activeRoom?.title}
+            roomTitle={workflowMode ? "Workflow" : activeRoom?.title}
             theme={theme}
             onCycleTheme={toggleTheme}
             onOpenCommandPalette={() => setPaletteOpen(true)}
@@ -405,19 +427,19 @@ export default function App() {
             rightCollapsed={rightCollapsed}
           />
         }
-        rail={<FeatureRail active={rail} onSelect={setRail} onOpenSettings={openSettings} />}
-        rooms={
+        rail={<FeatureRail active={rail} onSelect={handleRailSelect} onOpenSettings={openSettings} />}
+        rooms={workflowMode ? null : (
           <RoomList
             rooms={rooms}
             activeRoomId={activeRoomId}
             onSelect={setActiveRoomId}
             onCreate={openNewRoom}
           />
-        }
+        )}
         center={center}
-        panel={panelRoom ? <SidePanel key={`${panelRoom.id}:${sidePanelTab}`} room={panelRoom} csrfFetch={csrfFetch} initialTab={sidePanelTab} onOpenArtifact={handleOpenArtifact} /> : null}
-        roomsCollapsed={leftCollapsed}
-        panelCollapsed={rightCollapsed || !activeRoom}
+        panel={!workflowMode && panelRoom ? <SidePanel key={`${panelRoom.id}:${sidePanelTab}`} room={panelRoom} csrfFetch={csrfFetch} initialTab={sidePanelTab} onOpenArtifact={handleOpenArtifact} /> : null}
+        roomsCollapsed={workflowMode || leftCollapsed}
+        panelCollapsed={workflowMode || rightCollapsed || !activeRoom}
       />
       <CommandPalette isOpen={paletteOpen} onOpenChange={setPaletteOpen} commands={commands} />
       <KeymapModal isOpen={keymapOpen} onOpenChange={setKeymapOpen} />
