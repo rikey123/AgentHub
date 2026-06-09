@@ -87,8 +87,8 @@ jobs:
 
       - name: Test
         if: matrix.runtime == 'node22'
-        run: pnpm test
+        run: xvfb-run -a pnpm test
 
       - name: Test with Bun
         if: matrix.runtime == 'bun'
-        run: bun run test
+        run: xvfb-run -a bun run test

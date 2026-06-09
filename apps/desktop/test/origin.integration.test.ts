@@ -83,17 +83,32 @@ async function runElectronOriginProbe(root: string, baseUrl: string): Promise<El
 
   const electronPath = createRequire(import.meta.url)("electron") as string;
   await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    let stderr = "";
     const child = spawn(electronPath, electronProbeArgs(mainPath), {
       env: electronProbeEnv(baseUrl, outputPath),
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true
     });
-    let stderr = "";
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill("SIGKILL");
+      reject(new Error(`Electron origin probe timed out after 25000ms: ${stderr}`));
+    }, 25_000);
     child.stderr?.on("data", (chunk) => {
       stderr += String(chunk);
     });
-    child.once("error", reject);
+    child.once("error", (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      reject(error);
+    });
     child.once("exit", (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
       if (code === 0) resolve();
       else reject(new Error(`Electron origin probe exited with ${code ?? "unknown"}: ${stderr}`));
     });
