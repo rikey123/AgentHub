@@ -522,6 +522,26 @@ describe("TaskService and RoomMcpServer", () => {
     expect(currentDatabase().sqlite.prepare("SELECT type FROM events WHERE type = 'task.delegation.created' AND task_id = ?").get(created.data.taskId)).toBeDefined();
   });
 
+  test("room.review request_changes re-wakes the original assignee with review feedback", async () => {
+    seedDelegatedRoom("room_review_changes", "agent_leader_review", "role_leader_review", "role_builder_review", "binding_leader_review", "binding_builder_review", "agent_builder_review");
+    createRun("run_review_changes", { roomId: "room_review_changes", agentId: "agent_leader_review" });
+    const service = new TaskService({ database: currentDatabase(), eventBus: currentBus(), now: () => now });
+    const created = service.create({ roomId: "room_review_changes", title: "Fix attention example", description: "Add the missing example files", assigneeRoleId: "role_builder_review", expectsReview: true, sourceRunId: "run_review_changes", createdBy: "agent_leader_review" });
+    if (!created.ok) throw new Error("expected review task");
+    expect(service.updateStatus({ taskId: created.data.taskId, status: "review", reason: "missing_completion_report", blockerReason: "missing_completion_report" })).toMatchObject({ ok: true });
+    const mcp = new RoomMcpServer({ commandBus: commandBusWithHandlers(), taskService: service, database: currentDatabase(), eventBus: currentBus(), now: () => now });
+
+    const result = await mcp.callTool("room.review", { taskId: created.data.taskId, decision: "request_changes", reason: "Please add tests and call room.complete_task." }, { roomId: "room_review_changes", runId: "run_review_changes", agentId: "agent_leader_review" });
+
+    expect(result).toMatchObject({ ok: true, data: { task: expect.objectContaining({ status: "in_progress", assigneeAgentId: "agent_builder_review" }) } });
+    if (!result.ok || !isRecord(result.data) || !isRecord(result.data.wake) || typeof result.data.wake.runId !== "string") throw new Error("expected review wake run");
+    expect(currentDatabase().sqlite.prepare("SELECT status, blocker_reason FROM tasks WHERE id = ?").get(created.data.taskId)).toMatchObject({ status: "in_progress", blocker_reason: null });
+    expect(currentDatabase().sqlite.prepare("SELECT task_id, agent_id, wake_reason FROM runs WHERE id = ?").get(result.data.wake.runId)).toMatchObject({ task_id: created.data.taskId, agent_id: "agent_builder_review", wake_reason: "delegated_task" });
+    const queued = eventPayload("agent.run.queued", result.data.wake.runId) as { readonly promptDelta?: { readonly instructions?: string } };
+    expect(queued.promptDelta?.instructions).toContain("Please add tests and call room.complete_task.");
+    expect(queued.promptDelta?.instructions).toContain("Fix attention example");
+  });
+
   test("room.delegate backfills role and binding when dispatching legacy backlog tasks", async () => {
     seedDelegatedRoom("room_delegate_legacy", "agent_leader", "role_leader", "role_builder", "binding_leader", "binding_builder", "agent_builder");
     createRun("run_delegate_legacy", { roomId: "room_delegate_legacy", agentId: "agent_leader" });

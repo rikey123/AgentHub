@@ -14,7 +14,7 @@ import type { PermissionEngine, PermissionResource } from "../../../permissions/
 
 import { nameToSlug } from "../mention-parser.ts";
 import { MailboxService } from "../mailbox-service.ts";
-import { TaskService, normalizeStatus, normalizeTaskPriority, type TaskRow } from "../task-service.ts";
+import { TaskService, normalizeStatus, normalizeTaskPriority, type TaskRow, type TaskView } from "../task-service.ts";
 import type { TaskModeGroupChatPresenter } from "../task-mode-group-chat-presenter.ts";
 import { writeTcpMessage, createTcpMessageReader } from "./tcp-helpers.ts";
 
@@ -270,7 +270,7 @@ export class RoomMcpServer {
     if (name === "room.clear_blocker") return this.handleClearBlocker(input);
     if (name === "room.list_blockers") return this.handleListBlockers(session);
     if (name === "room.standup") return this.handleStandup(session);
-    if (name === "room.review") return this.handleReview(input, session);
+    if (name === "room.review") return this.handleReview(input, session, context);
     if (name === "todo.write") return this.handleTodoWrite(input, session, context);
     if (name === "room.read_mailbox") return this.handleReadMailbox(input, session, context);
     if (name === "room.send_message") return this.handleSendMessage(input, session, context);
@@ -1043,14 +1043,59 @@ export class RoomMcpServer {
     };
   }
 
-  private handleReview(input: unknown, session: RoomMcpSessionContext): RoomMcpToolResult {
+  private handleReview(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): RoomMcpToolResult {
     if (!isRecord(input) || typeof input.taskId !== "string") {
       return { ok: true, data: { tasks: this.options.taskService.list({ roomId: session.roomId }).filter((task) => task.status === "review") } };
     }
     const decision = typeof input.decision === "string" ? input.decision : undefined;
     if (decision === "approve") return commandResult(this.options.taskService.complete(input.taskId, typeof input.reason === "string" ? input.reason : "mcp_review_approved"));
-    if (decision === "reject" || decision === "request_changes") return commandResult(this.options.taskService.updateStatus({ taskId: input.taskId, status: "in_progress", reason: typeof input.reason === "string" ? input.reason : "mcp_review_changes_requested" }));
+    if (decision === "reject") return commandResult(this.options.taskService.updateStatus({ taskId: input.taskId, status: "in_progress", reason: typeof input.reason === "string" ? input.reason : "mcp_review_changes_requested" }));
+    if (decision === "request_changes") return this.handleReviewRequestChanges(input.taskId, typeof input.reason === "string" ? input.reason : "mcp_review_changes_requested", session, context);
     return commandResult(this.options.taskService.review(input.taskId));
+  }
+
+  private handleReviewRequestChanges(taskId: string, reason: string, session: RoomMcpSessionContext, context: RoomMcpCallContext): RoomMcpToolResult {
+    const reviewRunId = this.requireRunId(session, context);
+    const task = this.options.database.sqlite
+      .prepare(
+        `SELECT tasks.*
+         FROM tasks
+         INNER JOIN rooms ON rooms.id = tasks.room_id AND rooms.archived_at IS NULL
+         WHERE tasks.id = ? AND tasks.room_id = ?`
+      )
+      .get(taskId, session.roomId) as TaskRow | undefined;
+    if (task === undefined) return failure("not_found", `Task '${taskId}' not found`);
+    if (task.assignee_agent_id === null) return failure("validation_failed", "task has no assignee");
+
+    let result: RoomMcpToolResult | undefined;
+    try {
+      this.options.database.sqlite.transaction(() => {
+        const statusResult = this.options.taskService.updateStatus({ taskId, status: "in_progress", reason });
+        if (!statusResult.ok) throw new ReviewAbort(commandResult(statusResult));
+        const dispatched = this.dispatchInternal(
+          {
+            type: "WakeAgent",
+            roomId: session.roomId,
+            agentId: task.assignee_agent_id as string,
+            workspaceId: task.workspace_id,
+            reason: "delegated_task",
+            taskId,
+            promptDelta: { kind: "delta_only", instructions: reviewChangesInstructions(statusResult.data.task, reason) },
+            idempotencyKey: `review-request-changes:${reviewRunId}:${taskId}:${randomUUID()}`
+          },
+          session,
+          context
+        );
+        if (isPromiseLike(dispatched)) throw new ReviewAbort(failure("internal_error", "WakeAgent dispatch returned an async result"));
+        if (!dispatched.ok) throw new ReviewAbort(commandResult(dispatched));
+        result = { ok: true, data: { task: statusResult.data.task, taskId, wake: dispatched.data } };
+      })();
+    } catch (error) {
+      if (error instanceof ReviewAbort) return error.result;
+      throw error;
+    }
+
+    return result as RoomMcpToolResult;
   }
 
   private handleTodoWrite(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): RoomMcpToolResult {
@@ -1638,6 +1683,12 @@ class DelegateAbort extends Error {
   }
 }
 
+class ReviewAbort extends Error {
+  constructor(readonly result: RoomMcpToolResult) {
+    super("room.review aborted");
+  }
+}
+
 function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
   return typeof value === "object" && value !== null && typeof (value as { then?: unknown }).then === "function";
 }
@@ -1657,6 +1708,16 @@ function failure(code: string, message: string, details?: unknown): RoomMcpToolR
 
 function commandFailure<T>(code: CommandErrorCode, message: string, details?: unknown): CommandResult<T> {
   return { ok: false, error: { code, message, ...(details !== undefined ? { details } : {}) } };
+}
+
+function reviewChangesInstructions(task: TaskView, reason: string): string {
+  const parts = [
+    `Review requested changes for task: ${task.title}`,
+    task.description !== undefined ? `Original task details:\n${task.description}` : undefined,
+    `Reviewer feedback:\n${reason}`,
+    "Please continue the delegated task, address the feedback, and call room.complete_task with a structured summary before ending your turn."
+  ];
+  return parts.filter((part): part is string => part !== undefined).join("\n\n");
 }
 
 function taskIdForRun(database: AgentHubDatabase, runId: string): string | undefined {
