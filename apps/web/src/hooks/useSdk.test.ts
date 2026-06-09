@@ -40,6 +40,27 @@ describe("createCsrfFetch", () => {
     expect(new Headers(calls[1]?.init?.headers).get("x-agenthub-csrf")).toBe("csrf_test");
   });
 
+  it("attaches CSRF to PUT draft updates", async () => {
+    const calls: Array<{ input: string; init: RequestInit | undefined }> = [];
+    const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+      calls.push({ input: String(input), init });
+      if (String(input) === "/auth/session") {
+        return jsonResponse(200, { csrfToken: "csrf_put", expiresAt: Date.now() + 60_000 });
+      }
+      return jsonResponse(200, { ok: true });
+    });
+    const csrfFetch = createCsrfFetch(fetchImpl);
+
+    await csrfFetch("/workflows/workflow-1/draft", {
+      method: "PUT",
+      body: JSON.stringify({ nodes: [] })
+    });
+
+    const draftCall = calls.find((call) => call.input === "/workflows/workflow-1/draft");
+    expect(draftCall).toBeDefined();
+    expect(new Headers(draftCall?.init?.headers).get("x-agenthub-csrf")).toMatch(/^csrf_/);
+  });
+
   it("does not force JSON content-type for FormData uploads", async () => {
     const calls: Array<{ input: string; init: RequestInit | undefined }> = [];
     const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {

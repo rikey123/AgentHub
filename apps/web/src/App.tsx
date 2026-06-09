@@ -12,6 +12,7 @@ import { PendingTurnList } from "./components/chat/PendingTurnList.tsx";
 import { SidePanel } from "./components/panels/SidePanel.tsx";
 import { ArtifactsRailContainer, ContactsRailContainer, RunsRailView, TasksRailView } from "./components/rail/RailViews.tsx";
 import { RunDetailDrawer } from "./components/run/RunDetailDrawer.tsx";
+import { WorkflowCanvasView } from "./components/workflows/WorkflowCanvasView.tsx";
 import { CommandPalette, type PaletteCommand } from "./components/CommandPalette.tsx";
 import { KeymapModal } from "./components/KeymapModal.tsx";
 import { MobilePairingModal } from "./components/MobilePairingModal.tsx";
@@ -162,6 +163,10 @@ export function createRoomInputForContactStartChat(contact: AgentContactViewMode
   };
 }
 
+export function isWorkspaceRailItem(item: RailItem): boolean {
+  return item === "workflow";
+}
+
 export default function App() {
   const initialSettingsState = useMemo(() => {
     if (typeof window === "undefined") return { isOpen: false, tab: "roles" as SettingsTabId };
@@ -213,6 +218,7 @@ export default function App() {
     return allRooms.filter((room) => resultIds.has(room.id));
   }, [hasMatchingServerSearchResults, projector.roomSearchResultIds, projector.rooms]);
   const activeRoom = activeRoomId ? projector.rooms.get(activeRoomId) : undefined;
+  const workflowMode = isWorkspaceRailItem(rail);
   const panelRoom = activeRoom && contextOverlay?.roomId === activeRoom.id
     ? { ...activeRoom, contextItems: mergeContextItemsWithOverlay(activeRoom.contextItems, contextOverlay.items) }
     : activeRoom;
@@ -386,6 +392,19 @@ export default function App() {
     setSidePanelTab("tasks");
   }, []);
 
+  const handleRailSelect = useCallback((item: RailItem) => {
+    if (isWorkspaceRailItem(item)) {
+      setActiveRunId(undefined);
+      setSelectedMessageId(undefined);
+      setEditingTurnId(undefined);
+    }
+    setRail(item);
+  }, []);
+
+  const openWorkflowCanvas = useCallback(() => {
+    handleRailSelect("workflow");
+  }, [handleRailSelect]);
+
   const handleOpenTask = useCallback(() => {
     openTasksPanel();
   }, [openTasksPanel]);
@@ -464,6 +483,7 @@ export default function App() {
   const commands = useMemo<PaletteCommand[]>(() => {
     const list: PaletteCommand[] = [
       { id: "new-room", label: "新建 room", group: "Rooms", perform: openNewRoom },
+      { id: "open-workflow", label: "打开工作流画布", group: "视图", keywords: ["workflow", "canvas", "agent", "graph"], perform: openWorkflowCanvas },
       { id: "open-settings", label: "打开设置", group: "设置", keywords: ["roles", "runtimes", "models", "permissions", "workspace", "mcp"], perform: openSettings },
       { id: "toggle-left", label: leftCollapsed ? "显示 rooms 面板" : "隐藏 rooms 面板", group: "视图", perform: () => setLeftCollapsed((v) => !v) },
       { id: "toggle-right", label: rightCollapsed ? "显示工作台面板" : "隐藏工作台面板", group: "视图", perform: () => setRightCollapsed((v) => !v) },
@@ -489,7 +509,7 @@ export default function App() {
       });
     }
     return list;
-  }, [rooms, openRoom, openNewRoom, openSettings, leftCollapsed, rightCollapsed, setTheme, setDensity]);
+  }, [rooms, openRoom, openNewRoom, openSettings, openWorkflowCanvas, leftCollapsed, rightCollapsed, setTheme, setDensity]);
 
   const centerMode = workbenchCenterModeForRail(rail, activeRoom !== undefined);
   const roomCenter = activeRoom ? (
@@ -568,15 +588,17 @@ export default function App() {
   ) : (
     <HomeView rooms={rooms} onOpenRoom={openRoom} onCreate={openNewRoom} />
   );
-  const center = centerMode === "contacts"
-    ? <ContactsRailContainer fetchImpl={csrfFetch} onStartChat={handleStartContactChat} />
-    : centerMode === "runs"
-      ? <RunsRailView />
-      : centerMode === "tasks"
-        ? <TasksRailView />
-    : centerMode === "artifacts"
-      ? <ArtifactsRailContainer fetchImpl={csrfFetch} onReferenceArtifact={handleReferenceArtifactInChat} />
-      : roomCenter;
+  const center = workflowMode
+    ? <WorkflowCanvasView workflows={projector.workflows} csrfFetch={csrfFetch} />
+    : centerMode === "contacts"
+      ? <ContactsRailContainer fetchImpl={csrfFetch} onStartChat={handleStartContactChat} />
+      : centerMode === "runs"
+        ? <RunsRailView />
+        : centerMode === "tasks"
+          ? <TasksRailView />
+          : centerMode === "artifacts"
+            ? <ArtifactsRailContainer fetchImpl={csrfFetch} onReferenceArtifact={handleReferenceArtifactInChat} />
+            : roomCenter;
 
   return (
     <>
@@ -585,7 +607,7 @@ export default function App() {
           <TopBar
             connectionStatus={projector.connectionStatus}
             connectionError={projector.connectionError ?? bannerError}
-            roomTitle={activeRoom?.title}
+            roomTitle={workflowMode ? "Workflow" : activeRoom?.title}
             theme={theme}
             onCycleTheme={toggleTheme}
             onOpenCommandPalette={() => setPaletteOpen(true)}
@@ -597,8 +619,8 @@ export default function App() {
             rightCollapsed={rightCollapsed}
           />
         }
-        rail={<FeatureRail active={rail} onSelect={setRail} onOpenSettings={openSettings} />}
-        rooms={
+        rail={<FeatureRail active={rail} onSelect={handleRailSelect} onOpenSettings={openSettings} />}
+        rooms={workflowMode ? null : (
           <RoomList
             rooms={rooms}
             activeRoomId={activeRoomId}
@@ -608,11 +630,11 @@ export default function App() {
             onSearchQueryChange={setRoomSearchQuery}
             useServerSearchResults={hasMatchingServerSearchResults}
           />
-        }
+        )}
         center={center}
-        panel={panelRoom ? <SidePanel key={`${panelRoom.id}:${sidePanelTab}`} room={panelRoom} csrfFetch={csrfFetch} initialTab={sidePanelTab} onOpenArtifact={handleOpenArtifact} /> : null}
-        roomsCollapsed={leftCollapsed}
-        panelCollapsed={rightCollapsed || !activeRoom}
+        panel={!workflowMode && panelRoom ? <SidePanel key={`${panelRoom.id}:${sidePanelTab}`} room={panelRoom} csrfFetch={csrfFetch} initialTab={sidePanelTab} onOpenArtifact={handleOpenArtifact} /> : null}
+        roomsCollapsed={workflowMode || leftCollapsed}
+        panelCollapsed={workflowMode || rightCollapsed || !activeRoom}
       />
       <CommandPalette isOpen={paletteOpen} onOpenChange={setPaletteOpen} commands={commands} />
       <KeymapModal isOpen={keymapOpen} onOpenChange={setKeymapOpen} />

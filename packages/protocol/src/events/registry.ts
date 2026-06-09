@@ -1,5 +1,15 @@
 import { Schema } from "effect";
 import { EpochMillisSchema, IdSchema, type EventDurability, type EventVisibility } from "../primitives.ts";
+import {
+  AgentWorkflowEdgeDeliverySchema,
+  AgentWorkflowEdgeSchema,
+  AgentWorkflowNodeRunSchema,
+  AgentWorkflowNodeSchema,
+  AgentWorkflowRunSchema,
+  AgentWorkflowSchema,
+  AgentWorkflowVersionSchema,
+  WorkflowValidationResultSchema
+} from "../workflows.ts";
 
 export type EventCategory =
   | "room"
@@ -26,6 +36,7 @@ export type EventCategory =
   | "server"
   | "ui"
   | "skill"
+  | "workflow"
   | "worktree";
 
 export type EventRegistryEntry = {
@@ -199,6 +210,52 @@ export const WakeOutboxDispatchedPayloadSchema = Schema.Struct({
 });
 export type WakeOutboxDispatchedPayload = typeof WakeOutboxDispatchedPayloadSchema.Type;
 
+export const WorkflowCreatedPayloadSchema = Schema.Struct({
+  workflow: AgentWorkflowSchema,
+  version: AgentWorkflowVersionSchema,
+  nodes: Schema.Array(AgentWorkflowNodeSchema),
+  edges: Schema.Array(AgentWorkflowEdgeSchema),
+  validation: Schema.optional(WorkflowValidationResultSchema)
+});
+export type WorkflowCreatedPayload = typeof WorkflowCreatedPayloadSchema.Type;
+
+export const WorkflowVersionUpdatedPayloadSchema = Schema.Struct({
+  workflowId: IdSchema,
+  version: AgentWorkflowVersionSchema,
+  nodes: Schema.Array(AgentWorkflowNodeSchema),
+  edges: Schema.Array(AgentWorkflowEdgeSchema),
+  validation: WorkflowValidationResultSchema
+});
+export type WorkflowVersionUpdatedPayload = typeof WorkflowVersionUpdatedPayloadSchema.Type;
+
+export const WorkflowDeletedPayloadSchema = Schema.Struct({
+  workflowId: IdSchema,
+  workspaceId: IdSchema,
+  roomId: Schema.optional(IdSchema),
+  deletedAt: EpochMillisSchema
+});
+export type WorkflowDeletedPayload = typeof WorkflowDeletedPayloadSchema.Type;
+
+export const WorkflowRunPayloadSchema = Schema.Struct({
+  workflowId: IdSchema,
+  run: AgentWorkflowRunSchema
+});
+export type WorkflowRunPayload = typeof WorkflowRunPayloadSchema.Type;
+
+export const WorkflowNodeRunPayloadSchema = Schema.Struct({
+  workflowId: IdSchema,
+  workflowRunId: IdSchema,
+  nodeRun: AgentWorkflowNodeRunSchema
+});
+export type WorkflowNodeRunPayload = typeof WorkflowNodeRunPayloadSchema.Type;
+
+export const WorkflowEdgeDeliveryPayloadSchema = Schema.Struct({
+  workflowId: IdSchema,
+  workflowRunId: IdSchema,
+  delivery: AgentWorkflowEdgeDeliverySchema
+});
+export type WorkflowEdgeDeliveryPayload = typeof WorkflowEdgeDeliveryPayloadSchema.Type;
+
 export const EVENT_PAYLOAD_SCHEMAS = {
   "agent.profile.removed": AgentProfileRemovedPayloadSchema,
   "agent.profile.error": AgentProfileErrorPayloadSchema,
@@ -222,7 +279,25 @@ export const EVENT_PAYLOAD_SCHEMAS = {
   "message.unpinned": MessageUnpinnedPayloadSchema,
   "agent.contact.updated": AgentContactUpdatedPayloadSchema,
   "task.unblocked": TaskUnblockedPayloadSchema,
-  "wake_outbox.dispatched": WakeOutboxDispatchedPayloadSchema
+  "wake_outbox.dispatched": WakeOutboxDispatchedPayloadSchema,
+  "workflow.created": WorkflowCreatedPayloadSchema,
+  "workflow.version.updated": WorkflowVersionUpdatedPayloadSchema,
+  "workflow.deleted": WorkflowDeletedPayloadSchema,
+  "workflow.run.started": WorkflowRunPayloadSchema,
+  "workflow.run.completed": WorkflowRunPayloadSchema,
+  "workflow.run.failed": WorkflowRunPayloadSchema,
+  "workflow.run.cancelled": WorkflowRunPayloadSchema,
+  "workflow.node.queued": WorkflowNodeRunPayloadSchema,
+  "workflow.node.started": WorkflowNodeRunPayloadSchema,
+  "workflow.node.completed": WorkflowNodeRunPayloadSchema,
+  "workflow.node.failed": WorkflowNodeRunPayloadSchema,
+  "workflow.node.skipped": WorkflowNodeRunPayloadSchema,
+  "workflow.node.cancelled": WorkflowNodeRunPayloadSchema,
+  "workflow.edge.delivery.created": WorkflowEdgeDeliveryPayloadSchema,
+  "workflow.edge.delivery.mailbox_created": WorkflowEdgeDeliveryPayloadSchema,
+  "workflow.edge.delivery.delivered": WorkflowEdgeDeliveryPayloadSchema,
+  "workflow.edge.delivery.cancelled": WorkflowEdgeDeliveryPayloadSchema,
+  "workflow.edge.delivery.failed": WorkflowEdgeDeliveryPayloadSchema
 } as const;
 
 export const EVENT_REGISTRY = [
@@ -391,7 +466,26 @@ export const EVENT_REGISTRY = [
   { type: "skill.imported", category: "skill", durability: "durable", visibility: "detail", schemaVersion: 1 },
   { type: "skill.activated", category: "skill", durability: "durable", visibility: "detail", schemaVersion: 1 },
   { type: "skill.deactivated", category: "skill", durability: "durable", visibility: "detail", schemaVersion: 1 },
-  { type: "skill.materialization_failed", category: "skill", durability: "durable", visibility: "main", schemaVersion: 1 }
+  { type: "skill.materialization_failed", category: "skill", durability: "durable", visibility: "main", schemaVersion: 1 },
+  // workflow canvas events
+  { type: "workflow.created", category: "workflow", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "workflow.version.updated", category: "workflow", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "workflow.deleted", category: "workflow", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "workflow.run.started", category: "workflow", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "workflow.run.completed", category: "workflow", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "workflow.run.failed", category: "workflow", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "workflow.run.cancelled", category: "workflow", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "workflow.node.queued", category: "workflow", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "workflow.node.started", category: "workflow", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "workflow.node.completed", category: "workflow", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "workflow.node.failed", category: "workflow", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "workflow.node.skipped", category: "workflow", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "workflow.node.cancelled", category: "workflow", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "workflow.edge.delivery.created", category: "workflow", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "workflow.edge.delivery.mailbox_created", category: "workflow", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "workflow.edge.delivery.delivered", category: "workflow", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "workflow.edge.delivery.cancelled", category: "workflow", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "workflow.edge.delivery.failed", category: "workflow", durability: "durable", visibility: "both", schemaVersion: 1 }
 ] as const satisfies readonly EventRegistryEntry[];
 
 export type EventType = (typeof EVENT_REGISTRY)[number]["type"];

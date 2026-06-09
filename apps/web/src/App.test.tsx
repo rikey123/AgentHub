@@ -8,14 +8,16 @@ const mocks = vi.hoisted(() => ({
     createRoom: vi.fn(),
     sendMessage: vi.fn()
   },
+  featureRail: vi.fn(() => null),
+  homeView: vi.fn(() => null),
   newRoomDialog: vi.fn(() => null),
   settingsModal: vi.fn(() => null),
   commandPalette: vi.fn(() => null),
   contactsRailContainer: vi.fn(() => null),
   runsRailView: vi.fn(() => null),
   tasksRailView: vi.fn(() => null),
-  homeView: vi.fn(() => null),
   roomList: vi.fn(() => null),
+  workflowCanvasView: vi.fn(() => null),
   useProjector: vi.fn(),
   projectorRooms: new Map<string, unknown>(),
   stateOverrides: new Map<number, unknown>(),
@@ -85,11 +87,12 @@ vi.mock("./components/chat/InputBox.tsx", () => ({ InputBox: () => null }));
 vi.mock("./components/chat/PendingTurnList.tsx", () => ({ PendingTurnList: () => null }));
 vi.mock("./components/panels/SidePanel.tsx", () => ({ SidePanel: () => null }));
 vi.mock("./components/run/RunDetailDrawer.tsx", () => ({ RunDetailDrawer: () => null }));
+vi.mock("./components/workflows/WorkflowCanvasView.tsx", () => ({ WorkflowCanvasView: mocks.workflowCanvasView }));
 vi.mock("./components/CommandPalette.tsx", () => ({ CommandPalette: mocks.commandPalette }));
 vi.mock("./components/KeymapModal.tsx", () => ({ KeymapModal: () => null }));
 vi.mock("./components/NewRoomDialog.tsx", () => ({ NewRoomDialog: mocks.newRoomDialog }));
 
-import App, { ChatRoomLayout, createRoomInputForContactStartChat, draftWithArtifactReference, draftWithQuotedMessage, draftWithQuotedText, mergeContextItemsWithOverlay, messagePayloadForSendInput, messagePinRequestFor, replyPreviewForMessage, roomPinRequestFor, workbenchCenterModeForRail, workbenchNavigationForRoomOpen } from "./App.tsx";
+import App, { ChatRoomLayout, createRoomInputForContactStartChat, draftWithArtifactReference, draftWithQuotedMessage, draftWithQuotedText, isWorkspaceRailItem, mergeContextItemsWithOverlay, messagePayloadForSendInput, messagePinRequestFor, replyPreviewForMessage, roomPinRequestFor, workbenchCenterModeForRail, workbenchNavigationForRoomOpen } from "./App.tsx";
 
 function renderApp() {
   mocks.stateIndex = 0;
@@ -105,6 +108,7 @@ describe("App integration wiring", () => {
     mocks.csrfFetch.mockReset();
     mocks.sdk.createRoom.mockReset();
     mocks.sdk.sendMessage.mockReset();
+    mocks.featureRail.mockClear();
     mocks.newRoomDialog.mockClear();
     mocks.settingsModal.mockClear();
     mocks.commandPalette.mockClear();
@@ -113,9 +117,11 @@ describe("App integration wiring", () => {
     mocks.tasksRailView.mockClear();
     mocks.homeView.mockClear();
     mocks.roomList.mockClear();
+    mocks.workflowCanvasView.mockClear();
     mocks.useProjector.mockReset();
     mocks.useProjector.mockImplementation(() => ({
       rooms: new Map(mocks.projectorRooms),
+      workflows: [],
       connectionStatus: "connected",
       connectionError: undefined
     }));
@@ -863,5 +869,13 @@ describe("App integration wiring", () => {
     })).resolves.toBeUndefined();
 
     expect(mocks.stateCalls.some((call) => call.value === "room create failed")).toBe(true);
+  });
+
+  it("treats workflow as a workspace-level rail item", () => {
+    renderToStaticMarkup(createElement(App));
+
+    expect(isWorkspaceRailItem("workflow")).toBe(true);
+    expect(isWorkspaceRailItem("chat")).toBe(false);
+    expect(isWorkspaceRailItem("tasks")).toBe(false);
   });
 });

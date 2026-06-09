@@ -22,6 +22,7 @@
     "@react-spectrum/provider": "^3.11.0",
     "@tailwindcss/vite": "^4.3.0",
     "@tanstack/react-virtual": "^3.13.25",
+    "@xyflow/react": "^12.11.0",
     "ansi-to-html": "^0.7.2",
     "framer-motion": "^12.40.0",
     "monaco-editor": "^0.55.1",

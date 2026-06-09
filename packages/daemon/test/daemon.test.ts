@@ -63,6 +63,20 @@ vi.mock("../../native-agent-runtime/src/native-agent-adapter.ts", () => ({
         }
         resolveProviderMock({ id: "mock-native-config", provider: "openai", model: "gpt-4o", base_url: null, api_key_ref: null }, "test-key");
         streamTextMock({});
+        if (!run.room_id?.startsWith("workflow:")) return;
+        const lifecycle = (this.options as { readonly lifecycle?: { readonly markStarting?: (tx: null, runId: string, pid: number) => void; readonly markRunning?: (tx: null, runId: string, sessionId: string) => void; readonly complete?: (tx: null, runId: string, cost: { readonly inputTokens: number; readonly outputTokens: number; readonly cachedTokens: number; readonly costUsd: number; readonly modelId: string }, briefText?: string) => void } }).lifecycle;
+        const database = (this.options as { readonly database?: { readonly sqlite: { readonly transaction: <T>(fn: () => T) => () => T; readonly prepare: (sql: string) => { readonly run: (...params: unknown[]) => unknown } } } }).database;
+        const eventBus = (this.options as { readonly eventBus?: { readonly publish: (event: Record<string, unknown>) => unknown } }).eventBus;
+        if (run.status !== "starting") lifecycle?.markStarting?.(null, run.id, 1);
+        lifecycle?.markRunning?.(null, run.id, `session-${run.id}`);
+        const messageId = `msg_${run.id}`;
+        const text = run.agent_id?.includes("node-a") === true ? "Node A model output: hello world" : "Node B model output received: Node A model output: hello world";
+        database?.sqlite.transaction(() => {
+          database.sqlite.prepare("INSERT OR IGNORE INTO messages (id, workspace_id, room_id, sender_type, sender_id, run_id, role, status, quoted_message_id, turn_dispatch_mode, pending_turn_id, created_at, updated_at, deleted_at) VALUES (?, ?, ?, 'agent', ?, ?, 'assistant', 'completed', NULL, 'immediate', NULL, 1, 1, NULL)").run(messageId, run.workspace_id, run.room_id, run.agent_id, run.id);
+          database.sqlite.prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, 1, 'text', ?, 1)").run(messageId, JSON.stringify({ text }));
+          eventBus?.publish({ id: `event-${messageId}`, type: "message.completed", schemaVersion: 1, workspaceId: run.workspace_id, roomId: run.room_id, runId: run.id, agentId: run.agent_id, payload: { messageId, text }, createdAt: 1 });
+        })();
+        lifecycle?.complete?.(null, run.id, { inputTokens: 1, outputTokens: 1, cachedTokens: 0, costUsd: 0, modelId: "test-native" }, text);
       }
     }
 
@@ -108,6 +122,7 @@ describe("daemon M1.4 composition", () => {
   let assistedSpeakerSelectorMock: ReturnType<typeof vi.fn<AssistedSpeakerSelector>>;
 
   beforeEach(async () => {
+    vi.clearAllMocks();
     const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-test-"));
     modelTestFetchMock = vi.fn(async (request: RequestInfo | URL) => {
       const url = typeof request === "string" ? request : request instanceof URL ? request.toString() : request.url;
@@ -639,6 +654,181 @@ describe("daemon M1.4 composition", () => {
     expect(unpinned.status).toBe(200);
     expect(daemon.database.sqlite.prepare("SELECT pinned_at FROM rooms WHERE id = ?").get(roomId)).toMatchObject({ pinned_at: null });
     expect(daemon.eventBus.replayDurableSinceSeq(0, { view: "main" }).filter((event) => event.type === "room.unpinned" && (event.payload as Record<string, unknown>).roomId === roomId)).toHaveLength(1);
+  });
+
+  it("saves workflow drafts as graph rows and durable workflow events without mailbox rows", async () => {
+    const createResponse = await fetch(`${baseUrl}/workflows`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id: "workflow-api-test",
+        workspaceId: "default-workspace",
+        name: "API workflow",
+        viewport: { x: 1, y: 2, zoom: 0.9 },
+        nodes: [
+          { nodeId: "node-a", kind: "agent_context", displayName: "Planner", prompt: "Plan", position: { x: 10, y: 20 }, enabled: true, locked: false, config: {} },
+          { nodeId: "node-b", kind: "agent_context", displayName: "Reviewer", prompt: "Review", position: { x: 320, y: 20 }, enabled: true, locked: false, config: {} }
+        ],
+        edges: [
+          { edgeId: "edge-a-b", sourceNodeId: "node-a", targetNodeId: "node-b", enabled: true, label: "handoff", config: {} }
+        ]
+      })
+    });
+    const createPayload = await createResponse.json() as {
+      readonly workflow?: { readonly id: string; readonly draftVersionId?: string };
+      readonly version?: { readonly id: string; readonly valid: boolean };
+      readonly nodes?: readonly unknown[];
+      readonly edges?: readonly unknown[];
+      readonly validation?: { readonly runnable: boolean };
+    };
+
+    expect(createResponse.status).toBe(201);
+    expect(createPayload.workflow).toMatchObject({ id: "workflow-api-test", draftVersionId: createPayload.version?.id });
+    expect(createPayload.version).toMatchObject({ valid: true });
+    expect(createPayload.nodes).toHaveLength(2);
+    expect(createPayload.edges).toHaveLength(1);
+    expect(createPayload.validation).toMatchObject({ runnable: true });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM agent_workflows WHERE id = 'workflow-api-test'").get()).toMatchObject({ count: 1 });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM agent_workflow_nodes WHERE workflow_version_id = ?").get(createPayload.version?.id)).toMatchObject({ count: 2 });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM agent_workflow_edges WHERE workflow_version_id = ?").get(createPayload.version?.id)).toMatchObject({ count: 1 });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM mailbox_messages").get()).toMatchObject({ count: 0 });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'workflow.created' AND json_extract(payload, '$.workflow.id') = 'workflow-api-test'").get()).toMatchObject({ count: 1 });
+
+    const updateResponse = await fetch(`${baseUrl}/workflows/workflow-api-test/draft`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        workspaceId: "default-workspace",
+        name: "API workflow updated",
+        nodes: [
+          { nodeId: "node-a", kind: "agent_context", displayName: "Planner", prompt: "Plan", position: { x: 10, y: 20 }, enabled: true, locked: false, config: {} },
+          { nodeId: "node-b", kind: "agent_context", displayName: "Reviewer", prompt: "Review", position: { x: 360, y: 24 }, enabled: true, locked: false, config: {} },
+          { nodeId: "note-1", kind: "note", displayName: "Note", prompt: "Explain the handoff", position: { x: 180, y: -60 }, enabled: true, locked: false, config: {} }
+        ],
+        edges: [
+          { edgeId: "edge-a-b", sourceNodeId: "node-a", targetNodeId: "node-b", enabled: true, config: {} }
+        ]
+      })
+    });
+    const updatePayload = await updateResponse.json() as {
+      readonly workflow?: { readonly name: string };
+      readonly nodes?: readonly unknown[];
+      readonly validation?: { readonly runnable: boolean };
+    };
+
+    expect(updateResponse.status).toBe(200);
+    expect(updatePayload.workflow).toMatchObject({ name: "API workflow updated" });
+    expect(updatePayload.nodes).toHaveLength(3);
+    expect(updatePayload.validation).toMatchObject({ runnable: true });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM mailbox_messages").get()).toMatchObject({ count: 0 });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'workflow.version.updated' AND json_extract(payload, '$.workflowId') = 'workflow-api-test'").get()).toMatchObject({ count: 1 });
+  });
+
+  it("starts a workflow MVP run with native agents and passes node A output to B through mailbox", async () => {
+    const now = Date.now();
+    const modelConfigId = `model-workflow-native-${now}`;
+    daemon.database.sqlite.prepare("INSERT INTO model_configs (id, workspace_id, name, provider, model, base_url, api_key_ref, api_key_fingerprint, temperature, max_tokens, reasoning, extra, profile, created_at, updated_at) VALUES (?, 'default-workspace', 'Workflow Native Model', 'ollama', 'workflow-native-model', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)").run(modelConfigId, now, now);
+    const createResponse = await fetch(`${baseUrl}/workflows`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id: "workflow-run-api-test",
+        workspaceId: "default-workspace",
+        name: "Runtime workflow",
+        nodes: [
+          { nodeId: "node-a", kind: "agent_context", displayName: "A", prompt: "Send hello", position: { x: 10, y: 20 }, enabled: true, locked: false, config: { runtimeId: "native-default" } },
+          { nodeId: "node-b", kind: "agent_context", displayName: "B", prompt: "Receive hello", position: { x: 320, y: 20 }, enabled: true, locked: false, config: { runtimeId: "native-default" } }
+        ],
+        edges: [
+          { edgeId: "edge-a-b", sourceNodeId: "node-a", targetNodeId: "node-b", enabled: true, label: "hello", config: {} }
+        ]
+      })
+    });
+    expect(createResponse.status).toBe(201);
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM mailbox_messages").get()).toMatchObject({ count: 0 });
+
+    const runResponse = await fetch(`${baseUrl}/workflows/workflow-run-api-test/runs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ seedContext: "hello world" })
+    });
+    const runPayload = await runResponse.json() as {
+      readonly run?: {
+        readonly id: string;
+        readonly status: string;
+        readonly nodeRuns: readonly unknown[];
+        readonly edgeDeliveries: ReadonlyArray<{ readonly context?: { readonly text?: string }; readonly mailboxMessageId?: string }>;
+      };
+    };
+
+    expect(runResponse.status).toBe(201);
+    expect(runPayload.run).toMatchObject({ status: "running" });
+    expect(runPayload.run?.nodeRuns).toHaveLength(1);
+    expect(runPayload.run?.edgeDeliveries).toHaveLength(0);
+    const completed = await waitFor(
+      () => daemon.database.sqlite.prepare("SELECT status FROM agent_workflow_runs WHERE id = ?").get(runPayload.run?.id) as { readonly status: string } | undefined,
+      (row) => row?.status === "completed"
+    );
+    expect(completed).toMatchObject({ status: "completed" });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM agent_workflow_versions WHERE workflow_id = 'workflow-run-api-test' AND state = 'locked'").get()).toMatchObject({ count: 1 });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM agent_workflow_node_runs WHERE workflow_run_id = ?").get(runPayload.run?.id)).toMatchObject({ count: 2 });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM agent_workflow_edge_deliveries WHERE workflow_run_id = ? AND status = 'delivered'").get(runPayload.run?.id)).toMatchObject({ count: 1 });
+    const mailbox = daemon.database.sqlite.prepare("SELECT to_agent_id, content FROM mailbox_messages LIMIT 1").get() as { readonly to_agent_id: string; readonly content: string };
+    expect(mailbox.to_agent_id).toBe("workflow:workflow-run-api-test:node-b");
+    expect(JSON.parse(mailbox.content)).toMatchObject({ text: "Node A model output: hello world", fromNodeId: "node-a", toNodeId: "node-b" });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM runs WHERE wake_reason = 'mailbox_message' AND adapter_id = 'native'").get()).toMatchObject({ count: 2 });
+    expect(daemon.database.sqlite.prepare("SELECT output_context_json FROM agent_workflow_node_runs WHERE workflow_run_id = ? AND node_id = 'node-a'").get(runPayload.run?.id)).toMatchObject({ output_context_json: expect.stringContaining("Node A model output") });
+    expect(daemon.database.sqlite.prepare("SELECT output_context_json FROM agent_workflow_node_runs WHERE workflow_run_id = ? AND node_id = 'node-b'").get(runPayload.run?.id)).toMatchObject({ output_context_json: expect.stringContaining("Node B model output") });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'workflow.edge.delivery.mailbox_created' AND json_extract(payload, '$.delivery.context.text') = 'Node A model output: hello world'").get()).toMatchObject({ count: 1 });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'workflow.edge.delivery.delivered' AND json_extract(payload, '$.delivery.context.text') = 'Node A model output: hello world'").get()).toMatchObject({ count: 1 });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'mailbox.message.created' AND json_extract(payload, '$.text') = 'Node A model output: hello world'").get()).toMatchObject({ count: 1 });
+  });
+
+  it("cancels a running workflow run and active node delivery state", async () => {
+    const now = Date.now();
+    const createResponse = await fetch(`${baseUrl}/workflows`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id: "workflow-cancel-api-test",
+        workspaceId: "default-workspace",
+        name: "Cancellable workflow",
+        nodes: [
+          { nodeId: "node-a", kind: "agent_context", displayName: "A", prompt: "Start", position: { x: 10, y: 20 }, enabled: true, locked: false, config: { runtimeId: "native-default" } },
+          { nodeId: "node-b", kind: "agent_context", displayName: "B", prompt: "Finish", position: { x: 320, y: 20 }, enabled: true, locked: false, config: { runtimeId: "native-default" } }
+        ],
+        edges: [
+          { edgeId: "edge-a-b", sourceNodeId: "node-a", targetNodeId: "node-b", enabled: true, config: {} }
+        ]
+      })
+    });
+    expect(createResponse.status).toBe(201);
+    const version = daemon.database.sqlite.prepare("SELECT id FROM agent_workflow_versions WHERE workflow_id = 'workflow-cancel-api-test' AND state = 'draft'").get() as { readonly id: string };
+    const nodeA = daemon.database.sqlite.prepare("SELECT id FROM agent_workflow_nodes WHERE workflow_version_id = ? AND node_id = 'node-a'").get(version.id) as { readonly id: string };
+    const nodeB = daemon.database.sqlite.prepare("SELECT id FROM agent_workflow_nodes WHERE workflow_version_id = ? AND node_id = 'node-b'").get(version.id) as { readonly id: string };
+    const edge = daemon.database.sqlite.prepare("SELECT id FROM agent_workflow_edges WHERE workflow_version_id = ? AND edge_id = 'edge-a-b'").get(version.id) as { readonly id: string };
+
+    daemon.database.sqlite.transaction(() => {
+      daemon.database.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, leader_role_id, archived_at, created_at, updated_at) VALUES ('workflow:workflow-cancel-api-test:run-cancel-test', 'default-workspace', 'Workflow transport', 'solo', 'conversation', NULL, NULL, NULL, ?, ?)").run(now, now);
+      daemon.database.sqlite.prepare("INSERT INTO runs (id, workspace_id, task_id, room_id, agent_id, adapter_id, adapter_session_id, provider_conversation_id, parent_run_id, status, wake_reason, waiting_reason, workspace_path, work_dir, workspace_mode, context_version, target_files, mailbox_claim_count, pid_at_start, claimed_at, started_at, ended_at, input_tokens, output_tokens, cached_tokens, cost_usd, model_id, failure_class, error, created_at, updated_at) VALUES ('agent-run-cancel-test', 'default-workspace', NULL, 'workflow:workflow-cancel-api-test:run-cancel-test', 'workflow:workflow-cancel-api-test:node-a', 'native', NULL, NULL, NULL, 'running', 'mailbox_message', NULL, NULL, NULL, NULL, NULL, '[]', 0, NULL, NULL, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)").run(now, now, now);
+      daemon.database.sqlite.prepare("INSERT INTO agent_workflow_runs (id, workflow_id, workflow_version_id, workspace_id, room_id, status, seed_context, started_by, started_at, ended_at, failure_reason, created_at, updated_at) VALUES ('run-cancel-test', 'workflow-cancel-api-test', ?, 'default-workspace', NULL, 'running', 'A', 'local', ?, NULL, NULL, ?, ?)").run(version.id, now, now, now);
+      daemon.database.sqlite.prepare("INSERT INTO agent_workflow_node_runs (id, workflow_run_id, workflow_node_id, node_id, agent_run_id, agent_binding_id, status, input_context_json, output_context_json, error, queued_at, started_at, completed_at, created_at, updated_at) VALUES ('node-run-a-cancel-test', 'run-cancel-test', ?, 'node-a', 'agent-run-cancel-test', NULL, 'running', '[]', NULL, NULL, ?, ?, NULL, ?, ?)").run(nodeA.id, now, now, now, now);
+      daemon.database.sqlite.prepare("INSERT INTO agent_workflow_node_runs (id, workflow_run_id, workflow_node_id, node_id, agent_run_id, agent_binding_id, status, input_context_json, output_context_json, error, queued_at, started_at, completed_at, created_at, updated_at) VALUES ('node-run-b-cancel-test', 'run-cancel-test', ?, 'node-b', 'agent-run-b-cancel-test', NULL, 'queued', '[]', NULL, NULL, ?, NULL, NULL, ?, ?)").run(nodeB.id, now, now, now);
+      daemon.database.sqlite.prepare("INSERT INTO agent_workflow_edge_deliveries (id, workflow_run_id, workflow_edge_id, edge_id, source_node_id, target_node_id, source_node_run_id, target_node_run_id, mailbox_message_id, status, context_json, idempotency_key, attempt_count, error, created_at, updated_at, delivered_at) VALUES ('delivery-cancel-test', 'run-cancel-test', ?, 'edge-a-b', 'node-a', 'node-b', 'node-run-a-cancel-test', 'node-run-b-cancel-test', NULL, 'mailbox_created', '{\"text\":\"A to B\"}', 'cancel-test', 1, NULL, ?, ?, NULL)").run(edge.id, now, now);
+    })();
+
+    const response = await fetch(`${baseUrl}/workflows/workflow-cancel-api-test/runs/run-cancel-test/cancel`, { method: "POST" });
+    const payload = await response.json() as { readonly ok?: boolean; readonly cancelledRunIds?: readonly string[] };
+
+    expect(response.status).toBe(200);
+    expect(payload.ok).toBe(true);
+    expect(payload.cancelledRunIds).toContain("agent-run-cancel-test");
+    expect(daemon.database.sqlite.prepare("SELECT status FROM agent_workflow_runs WHERE id = 'run-cancel-test'").get()).toMatchObject({ status: "cancelled" });
+    expect(daemon.database.sqlite.prepare("SELECT status FROM agent_workflow_node_runs WHERE id = 'node-run-a-cancel-test'").get()).toMatchObject({ status: "cancelled" });
+    expect(daemon.database.sqlite.prepare("SELECT status FROM agent_workflow_edge_deliveries WHERE id = 'delivery-cancel-test'").get()).toMatchObject({ status: "cancelled" });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'workflow.run.cancelled' AND json_extract(payload, '$.run.id') = 'run-cancel-test'").get()).toMatchObject({ count: 1 });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'workflow.node.cancelled' AND json_extract(payload, '$.nodeRun.id') = 'node-run-a-cancel-test'").get()).toMatchObject({ count: 1 });
+    expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'workflow.edge.delivery.cancelled' AND json_extract(payload, '$.delivery.id') = 'delivery-cancel-test'").get()).toMatchObject({ count: 1 });
   });
 
   it("creates solo rooms from a V1 role/runtime/model binding without falling back to mock", async () => {

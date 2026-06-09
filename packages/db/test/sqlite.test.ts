@@ -50,6 +50,13 @@ const drizzleTables = [
   { exportName: "pendingTurns", table: schema.pendingTurns },
   { exportName: "runNextTurns", table: schema.runNextTurns },
   { exportName: "mailboxDeliveries", table: schema.mailboxDeliveries },
+  { exportName: "agentWorkflows", table: schema.agentWorkflows },
+  { exportName: "agentWorkflowVersions", table: schema.agentWorkflowVersions },
+  { exportName: "agentWorkflowNodes", table: schema.agentWorkflowNodes },
+  { exportName: "agentWorkflowEdges", table: schema.agentWorkflowEdges },
+  { exportName: "agentWorkflowRuns", table: schema.agentWorkflowRuns },
+  { exportName: "agentWorkflowNodeRuns", table: schema.agentWorkflowNodeRuns },
+  { exportName: "agentWorkflowEdgeDeliveries", table: schema.agentWorkflowEdgeDeliveries },
   { exportName: "authTokens", table: schema.authTokens },
   { exportName: "sessions", table: schema.sessions },
   { exportName: "outbox", table: schema.outbox },
@@ -299,6 +306,103 @@ const drizzleSmokeRows = {
     createdAt: 1
   },
   mailboxDeliveries: { deliveryBatchId: "batch_drizzle", runId: "run_drizzle", mailboxIds: "[]", nextTurnIds: "[]", deliveredAt: 1 },
+  agentWorkflows: {
+    id: "workflow_drizzle",
+    workspaceId: "ws_drizzle",
+    roomId: "room_drizzle",
+    name: "Review pipeline",
+    description: "Context handoff flow",
+    draftVersionId: "workflow_version_drizzle",
+    createdBy: "user_drizzle",
+    createdAt: 1,
+    updatedAt: 1
+  },
+  agentWorkflowVersions: {
+    id: "workflow_version_drizzle",
+    workflowId: "workflow_drizzle",
+    versionNumber: 1,
+    state: "draft",
+    valid: 1,
+    validationErrors: "[]",
+    viewportJson: "{}",
+    createdAt: 1,
+    updatedAt: 1
+  },
+  agentWorkflowNodes: {
+    id: "workflow_node_drizzle",
+    workflowVersionId: "workflow_version_drizzle",
+    nodeId: "node-a",
+    kind: "agent_context",
+    displayName: "Planner",
+    agentBindingId: "binding_drizzle",
+    roleLabel: "Planner",
+    prompt: "Plan",
+    positionX: 10,
+    positionY: 20,
+    width: 240,
+    height: 160,
+    enabled: 1,
+    locked: 0,
+    configJson: "{}",
+    createdAt: 1,
+    updatedAt: 1
+  },
+  agentWorkflowEdges: {
+    id: "workflow_edge_drizzle",
+    workflowVersionId: "workflow_version_drizzle",
+    edgeId: "edge-a-b",
+    sourceNodeId: "node-a",
+    targetNodeId: "node-b",
+    label: "handoff",
+    enabled: 1,
+    configJson: "{}",
+    createdAt: 1,
+    updatedAt: 1
+  },
+  agentWorkflowRuns: {
+    id: "workflow_run_drizzle",
+    workflowId: "workflow_drizzle",
+    workflowVersionId: "workflow_version_drizzle",
+    workspaceId: "ws_drizzle",
+    roomId: "room_drizzle",
+    status: "running",
+    seedContext: "Investigate auth flow",
+    startedBy: "user_drizzle",
+    startedAt: 1,
+    createdAt: 1,
+    updatedAt: 1
+  },
+  agentWorkflowNodeRuns: {
+    id: "workflow_node_run_drizzle",
+    workflowRunId: "workflow_run_drizzle",
+    workflowNodeId: "workflow_node_drizzle",
+    nodeId: "node-a",
+    agentRunId: "run_drizzle",
+    agentBindingId: "binding_drizzle",
+    status: "running",
+    inputContextJson: "[]",
+    outputContextJson: "{}",
+    queuedAt: 1,
+    startedAt: 1,
+    createdAt: 1,
+    updatedAt: 1
+  },
+  agentWorkflowEdgeDeliveries: {
+    id: "workflow_delivery_drizzle",
+    workflowRunId: "workflow_run_drizzle",
+    workflowEdgeId: "workflow_edge_drizzle",
+    edgeId: "edge-a-b",
+    sourceNodeId: "node-a",
+    targetNodeId: "node-b",
+    sourceNodeRunId: "workflow_node_run_drizzle",
+    mailboxMessageId: "mb_drizzle",
+    status: "mailbox_created",
+    contextJson: "{}",
+    idempotencyKey: "workflow_run_drizzle:edge-a-b:1",
+    attemptCount: 1,
+    createdAt: 1,
+    updatedAt: 1
+  },
   authTokens: { id: "tok_drizzle", fingerprint: "fp", hash: "hash", scopes: "[]", createdAt: 1 },
   sessions: { sessionId: "sess_drizzle", csrfTokenHash: "csrf", createdAt: 1, expiresAt: 2 },
   outbox: { eventId: "evt_drizzle", seq: 1, status: "pending", attempts: 0, enqueuedAt: 1 },
@@ -433,6 +537,7 @@ function applyAllMigrations(): void {
     "0013_messages_pinned.sql",
     "0014_v10.sql",
     "0015_v11.sql",
+    "0016_agent_workflows.sql",
     "0016_artifact_reviews.sql",
     "0017_artifact_review_comments.sql",
     "0018_artifact_lifecycle.sql",
@@ -551,7 +656,7 @@ describe("SQLite pragmas and migrations", () => {
 
   test("applies all migrations once and records them", () => {
     applyAllMigrations();
-    expect(countRows("__agenthub_migrations")).toBe(20);
+    expect(countRows("__agenthub_migrations")).toBe(21);
     expect(applyMigrations(currentDb())).toEqual([]);
 
     expect(tableNames()).toEqual([
@@ -560,6 +665,13 @@ describe("SQLite pragmas and migrations", () => {
       "agent_presence",
       "agent_profiles",
       "agent_skills",
+      "agent_workflow_edge_deliveries",
+      "agent_workflow_edges",
+      "agent_workflow_node_runs",
+      "agent_workflow_nodes",
+      "agent_workflow_runs",
+      "agent_workflow_versions",
+      "agent_workflows",
       "artifact_files",
       "artifact_reviews",
       "artifact_versions",
@@ -695,6 +807,64 @@ describe("SQLite pragmas and migrations", () => {
     expect(columnNames("run_file_changes")).toEqual(
       expect.arrayContaining(["id", "run_id", "task_id", "files_changed", "created_at"])
     );
+
+    // Workflow canvas tables and indexes
+    expect(tableNames()).toEqual(
+      expect.arrayContaining([
+        "agent_workflows",
+        "agent_workflow_versions",
+        "agent_workflow_nodes",
+        "agent_workflow_edges",
+        "agent_workflow_runs",
+        "agent_workflow_node_runs",
+        "agent_workflow_edge_deliveries"
+      ])
+    );
+    expect(columnNames("agent_workflows")).toEqual(
+      expect.arrayContaining(["id", "workspace_id", "room_id", "name", "draft_version_id", "active_version_id", "deleted_at"])
+    );
+    expect(columnNames("agent_workflow_nodes")).toEqual(
+      expect.arrayContaining(["workflow_version_id", "node_id", "kind", "display_name", "prompt", "position_x", "position_y", "enabled", "locked"])
+    );
+    expect(columnNames("agent_workflow_edges")).toEqual(
+      expect.arrayContaining(["workflow_version_id", "edge_id", "source_node_id", "target_node_id", "enabled", "config_json"])
+    );
+    expect(columnNames("agent_workflow_edge_deliveries")).toEqual(
+      expect.arrayContaining(["workflow_run_id", "workflow_edge_id", "edge_id", "source_node_id", "target_node_id", "mailbox_message_id", "idempotency_key"])
+    );
+    expect(indexNames("agent_workflows")).toEqual(
+      expect.arrayContaining(["idx_agent_workflows_workspace_name", "idx_agent_workflows_room", "idx_agent_workflows_updated"])
+    );
+    expect(indexNames("agent_workflow_versions")).toEqual(
+      expect.arrayContaining([
+        "idx_agent_workflow_versions_workflow_state",
+        "idx_agent_workflow_versions_workflow_updated",
+        "idx_agent_workflow_versions_unique_draft"
+      ])
+    );
+    expect(indexSql("idx_agent_workflow_versions_unique_draft")).toContain("WHERE state = 'draft'");
+    expect(indexNames("agent_workflow_nodes")).toEqual(
+      expect.arrayContaining(["idx_agent_workflow_nodes_version", "idx_agent_workflow_nodes_agent_binding"])
+    );
+    expect(indexNames("agent_workflow_edges")).toEqual(
+      expect.arrayContaining(["idx_agent_workflow_edges_version", "idx_agent_workflow_edges_source", "idx_agent_workflow_edges_target"])
+    );
+    expect(indexNames("agent_workflow_runs")).toEqual(
+      expect.arrayContaining(["idx_agent_workflow_runs_workflow_status", "idx_agent_workflow_runs_version", "idx_agent_workflow_runs_workspace"])
+    );
+    expect(indexNames("agent_workflow_node_runs")).toEqual(
+      expect.arrayContaining(["idx_agent_workflow_node_runs_run_status", "idx_agent_workflow_node_runs_workflow_node", "idx_agent_workflow_node_runs_agent_run"])
+    );
+    expect(indexNames("agent_workflow_edge_deliveries")).toEqual(
+      expect.arrayContaining([
+        "idx_agent_workflow_edge_deliveries_run_status",
+        "idx_agent_workflow_edge_deliveries_edge",
+        "idx_agent_workflow_edge_deliveries_source",
+        "idx_agent_workflow_edge_deliveries_target",
+        "idx_agent_workflow_edge_deliveries_idempotency"
+      ])
+    );
+    expect(indexSql("idx_agent_workflow_edge_deliveries_idempotency")).toContain("WHERE idempotency_key IS NOT NULL");
   });
 
   test("creates run_locks schema required by bus runtime", () => {
@@ -880,6 +1050,37 @@ describe("table-family CRUD smoke", () => {
     smokeCrud(
       "mailbox_deliveries",
       "INSERT INTO mailbox_deliveries (delivery_batch_id, run_id, mailbox_ids, next_turn_ids, delivered_at) VALUES ('batch_1', 'run_1', '[]', '[]', 1)"
+    );
+  });
+
+  test("agent workflow family tables", () => {
+    smokeCrud(
+      "agent_workflows",
+      "INSERT INTO agent_workflows (id, workspace_id, room_id, name, description, draft_version_id, created_by, created_at, updated_at) VALUES ('wf_1', 'ws_1', 'room_1', 'Review pipeline', 'Context handoff', 'wfv_1', 'user_1', 1, 1)"
+    );
+    smokeCrud(
+      "agent_workflow_versions",
+      "INSERT INTO agent_workflow_versions (id, workflow_id, version_number, state, valid, validation_errors, viewport_json, created_at, updated_at) VALUES ('wfv_1', 'wf_1', 1, 'draft', 1, '[]', '{}', 1, 1)"
+    );
+    smokeCrud(
+      "agent_workflow_nodes",
+      "INSERT INTO agent_workflow_nodes (id, workflow_version_id, node_id, kind, display_name, agent_binding_id, role_label, prompt, position_x, position_y, enabled, locked, config_json, created_at, updated_at) VALUES ('wfn_1', 'wfv_1', 'node-a', 'agent_context', 'Planner', 'binding_1', 'Planner', 'Plan', 10, 20, 1, 0, '{}', 1, 1)"
+    );
+    smokeCrud(
+      "agent_workflow_edges",
+      "INSERT INTO agent_workflow_edges (id, workflow_version_id, edge_id, source_node_id, target_node_id, label, enabled, config_json, created_at, updated_at) VALUES ('wfe_1', 'wfv_1', 'edge-a-b', 'node-a', 'node-b', 'handoff', 1, '{}', 1, 1)"
+    );
+    smokeCrud(
+      "agent_workflow_runs",
+      "INSERT INTO agent_workflow_runs (id, workflow_id, workflow_version_id, workspace_id, room_id, status, seed_context, started_by, started_at, created_at, updated_at) VALUES ('wfr_1', 'wf_1', 'wfv_1', 'ws_1', 'room_1', 'running', 'Investigate auth flow', 'user_1', 1, 1, 1)"
+    );
+    smokeCrud(
+      "agent_workflow_node_runs",
+      "INSERT INTO agent_workflow_node_runs (id, workflow_run_id, workflow_node_id, node_id, agent_run_id, agent_binding_id, status, input_context_json, queued_at, started_at, created_at, updated_at) VALUES ('wfnr_1', 'wfr_1', 'wfn_1', 'node-a', 'run_1', 'binding_1', 'running', '[]', 1, 1, 1, 1)"
+    );
+    smokeCrud(
+      "agent_workflow_edge_deliveries",
+      "INSERT INTO agent_workflow_edge_deliveries (id, workflow_run_id, workflow_edge_id, edge_id, source_node_id, target_node_id, source_node_run_id, mailbox_message_id, status, context_json, idempotency_key, attempt_count, created_at, updated_at) VALUES ('wfed_1', 'wfr_1', 'wfe_1', 'edge-a-b', 'node-a', 'node-b', 'wfnr_1', 'mb_1', 'mailbox_created', '{}', 'wfr_1:edge-a-b:1', 1, 1, 1)"
     );
   });
 

@@ -482,6 +482,34 @@ describe("OutboxDispatcher and DurableHandlerRegistry", () => {
     expect(handlerCursor("created-only")).toBe(2);
   });
 
+  test("continues catch-up after a handler publishes a reentrant durable event", async () => {
+    const handled: string[] = [];
+    const registry = new DurableHandlerRegistry({ database: currentDatabase(), retryDelaysMs: [0, 0, 0, 0, 0] });
+    registry.register({
+      name: "reentrant",
+      subscribes: ["message.created", "message.completed"],
+      handle: (event) => {
+        handled.push(`${event.seq}:${event.type}:${event.id}`);
+        if (event.id === "evt_reentrant_created") {
+          currentBus().publish(messageCompleted("evt_reentrant_inside", "room_1", "run_1"));
+        }
+      }
+    });
+    currentBus().setDurableNotifier((event) => registry.notify(event));
+
+    currentBus().publish(messageCreated("evt_reentrant_created", "room_1", "run_1"));
+    currentBus().publish(messageCompleted("evt_reentrant_after", "room_1", "run_1"));
+
+    await registry.catchUp();
+
+    expect(handled).toEqual([
+      "1:message.created:evt_reentrant_created",
+      "2:message.completed:evt_reentrant_inside",
+      "3:message.completed:evt_reentrant_after"
+    ]);
+    expect(handlerCursor("reentrant")).toBe(3);
+  });
+
   test("retries handler failure and advances cursor after later success", async () => {
     let attempts = 0;
     currentBus().publish(messageCreated("evt_retry", "room_1", "run_1"));

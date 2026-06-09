@@ -1,4 +1,12 @@
 import type { MessagePart, PermissionResource } from "@agenthub/protocol/domains";
+import type {
+  WorkflowEdgeDeliveryStatus,
+  WorkflowNodeKind,
+  WorkflowNodeRunStatus,
+  WorkflowRunStatus,
+  WorkflowValidationIssue,
+  WorkflowVersionState
+} from "@agenthub/protocol/workflows";
 
 export type ArtifactVersionViewModel = {
   readonly id: string;
@@ -254,6 +262,144 @@ export type SkillErrorViewModel = {
   readonly createdAt: number;
 };
 
+export type WorkflowCanvasPoint = {
+  readonly x: number;
+  readonly y: number;
+};
+
+export type WorkflowCanvasSize = {
+  readonly width: number;
+  readonly height: number;
+};
+
+export type WorkflowNodeViewModel = {
+  readonly id: string;
+  readonly workflowVersionId: string;
+  readonly nodeId: string;
+  readonly kind: WorkflowNodeKind;
+  readonly displayName: string;
+  readonly agentBindingId?: string | undefined;
+  readonly roleLabel?: string | undefined;
+  readonly prompt: string;
+  readonly position: WorkflowCanvasPoint;
+  readonly size?: WorkflowCanvasSize | undefined;
+  readonly enabled: boolean;
+  readonly locked: boolean;
+  readonly config: Record<string, unknown>;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+};
+
+export type WorkflowEdgeViewModel = {
+  readonly id: string;
+  readonly workflowVersionId: string;
+  readonly edgeId: string;
+  readonly sourceNodeId: string;
+  readonly targetNodeId: string;
+  readonly label?: string | undefined;
+  readonly enabled: boolean;
+  readonly config: Record<string, unknown>;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+};
+
+export type WorkflowVersionViewModel = {
+  readonly id: string;
+  readonly workflowId: string;
+  readonly versionNumber: number;
+  readonly state: WorkflowVersionState;
+  readonly valid: boolean;
+  readonly validationErrors: readonly WorkflowValidationIssue[];
+  readonly viewport: Record<string, unknown>;
+  readonly createdFromVersionId?: string | undefined;
+  readonly lockedFromVersionId?: string | undefined;
+  readonly lockedAt?: number | undefined;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+};
+
+export type WorkflowValidationViewModel = {
+  readonly runnable: boolean;
+  readonly issues: readonly WorkflowValidationIssue[];
+  readonly upstreamByNodeId: Readonly<Record<string, readonly string[]>>;
+  readonly downstreamByNodeId: Readonly<Record<string, readonly string[]>>;
+};
+
+export type WorkflowNodeRunViewModel = {
+  readonly id: string;
+  readonly workflowRunId: string;
+  readonly workflowNodeId: string;
+  readonly nodeId: string;
+  readonly agentRunId?: string | undefined;
+  readonly agentBindingId?: string | undefined;
+  readonly status: WorkflowNodeRunStatus;
+  readonly inputContexts: readonly Record<string, unknown>[];
+  readonly outputContext?: Record<string, unknown> | undefined;
+  readonly error?: string | undefined;
+  readonly queuedAt?: number | undefined;
+  readonly startedAt?: number | undefined;
+  readonly completedAt?: number | undefined;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+};
+
+export type WorkflowEdgeDeliveryViewModel = {
+  readonly id: string;
+  readonly workflowRunId: string;
+  readonly workflowEdgeId: string;
+  readonly edgeId: string;
+  readonly sourceNodeId: string;
+  readonly targetNodeId: string;
+  readonly sourceNodeRunId?: string | undefined;
+  readonly targetNodeRunId?: string | undefined;
+  readonly mailboxMessageId?: string | undefined;
+  readonly status: WorkflowEdgeDeliveryStatus;
+  readonly context: Record<string, unknown>;
+  readonly idempotencyKey?: string | undefined;
+  readonly attemptCount: number;
+  readonly error?: string | undefined;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+  readonly deliveredAt?: number | undefined;
+};
+
+export type WorkflowRunViewModel = {
+  readonly id: string;
+  readonly workflowId: string;
+  readonly workflowVersionId: string;
+  readonly workspaceId: string;
+  readonly roomId?: string | undefined;
+  readonly status: WorkflowRunStatus;
+  readonly seedContext?: string | undefined;
+  readonly startedBy?: string | undefined;
+  readonly startedAt?: number | undefined;
+  readonly endedAt?: number | undefined;
+  readonly failureReason?: string | undefined;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+  readonly nodeRuns: readonly WorkflowNodeRunViewModel[];
+  readonly edgeDeliveries: readonly WorkflowEdgeDeliveryViewModel[];
+};
+
+export type WorkflowViewModel = {
+  readonly id: string;
+  readonly workspaceId: string;
+  readonly roomId?: string | undefined;
+  readonly name: string;
+  readonly description?: string | undefined;
+  readonly draftVersionId?: string | undefined;
+  readonly activeVersionId?: string | undefined;
+  readonly createdBy?: string | undefined;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+  readonly deletedAt?: number | undefined;
+  readonly versions: readonly WorkflowVersionViewModel[];
+  readonly nodes: readonly WorkflowNodeViewModel[];
+  readonly edges: readonly WorkflowEdgeViewModel[];
+  readonly runs: readonly WorkflowRunViewModel[];
+  readonly validation?: WorkflowValidationViewModel | undefined;
+};
+
 export type RoomViewModel = {
   readonly id: string;
   readonly title: string;
@@ -284,12 +430,14 @@ export type RoomViewModel = {
   readonly stalledReason?: string | undefined;         // "leader_unavailable" | "leader_failed"
   readonly skillErrors?: readonly SkillErrorViewModel[] | undefined; // skill.materialization_failed (D9)
   readonly executionPlan?: RoomExecutionPlanViewModel | undefined; // task.plan.created (D8)
+  readonly workflows?: readonly WorkflowViewModel[] | undefined;
 };
 
 export type ProjectorState = {
   readonly rooms: Map<string, RoomViewModel>;
   readonly roomSearchResultIds?: readonly string[] | undefined;
   readonly roomSearchResultQuery?: string | undefined;
+  readonly workflows: readonly WorkflowViewModel[];
   readonly activeRoomId?: string | undefined;
   readonly activeRunId?: string | undefined;
   readonly connectionStatus: "connected" | "connecting" | "reconnecting" | "offline" | "disconnected";
