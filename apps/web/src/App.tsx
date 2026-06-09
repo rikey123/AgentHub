@@ -607,7 +607,7 @@ export default function App() {
           <TopBar
             connectionStatus={projector.connectionStatus}
             connectionError={projector.connectionError ?? bannerError}
-            roomTitle={workflowMode ? "Workflow" : activeRoom?.title}
+            roomTitle={workflowMode ? "工作流" : activeRoom?.title}
             theme={theme}
             onCycleTheme={toggleTheme}
             onOpenCommandPalette={() => setPaletteOpen(true)}

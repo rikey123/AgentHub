@@ -1968,11 +1968,6 @@ function workflowValidationFromUnknown(input: Record<string, unknown> | undefine
   };
 }
 
-function updateWorkflowById(room: RoomViewModel, workflowId: string, update: (workflow: WorkflowViewModel) => WorkflowViewModel): RoomViewModel {
-  const workflows = room.workflows ?? [];
-  return { ...room, workflows: workflows.map((workflow) => workflow.id === workflowId ? update(workflow) : workflow) };
-}
-
 function upsertWorkflowRun(workflow: WorkflowViewModel, run: WorkflowRunViewModel): WorkflowViewModel {
   const existing = workflow.runs.find((item) => item.id === run.id);
   return {

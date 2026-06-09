@@ -2550,6 +2550,13 @@ html[data-theme="dark"],
   line-height: 1.15rem;
 }
 
+.ah-workflow-field-hint {
+  margin: 0;
+  color: var(--ah-workflow-muted);
+  font-size: 0.72rem;
+  line-height: 1.15rem;
+}
+
 .ah-workflow-empty-help {
   border: 1px dashed var(--ah-workflow-border-strong);
   border-radius: 8px;
@@ -2558,6 +2565,159 @@ html[data-theme="dark"],
   padding: 0.85rem;
   font-size: 0.8rem;
   line-height: 1.3rem;
+}
+
+.ah-workflow-binding-card {
+  display: grid;
+  gap: 0.75rem;
+  border: 1px solid color-mix(in oklab, var(--ah-workflow-blue) 28%, var(--ah-workflow-border));
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--accent-soft) 24%, var(--ah-workflow-card) 76%);
+  padding: 0.75rem;
+}
+
+.ah-workflow-binding-head {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.ah-workflow-binding-head h4 {
+  margin: 0.12rem 0 0;
+  overflow: hidden;
+  color: var(--ah-workflow-ink);
+  font-size: 0.88rem;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ah-workflow-binding-meta {
+  display: grid;
+  gap: 0.42rem;
+  margin: 0;
+}
+
+.ah-workflow-binding-meta div {
+  display: grid;
+  grid-template-columns: 4rem minmax(0, 1fr);
+  gap: 0.5rem;
+}
+
+.ah-workflow-binding-meta dt {
+  color: var(--ah-workflow-muted);
+  font-size: 0.68rem;
+  font-weight: 760;
+}
+
+.ah-workflow-binding-meta dd {
+  margin: 0;
+  overflow: hidden;
+  color: var(--ah-workflow-ink);
+  font-size: 0.74rem;
+  line-height: 1.1rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ah-workflow-import-dialog {
+  max-width: min(92vw, 680px);
+}
+
+.ah-workflow-contact-list {
+  display: grid;
+  max-height: min(64vh, 520px);
+  gap: 0.45rem;
+  overflow: auto;
+}
+
+.ah-workflow-contact-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 4.6rem;
+  border: 1px solid var(--ah-workflow-border);
+  border-radius: 8px;
+  background: var(--ah-workflow-card);
+  padding: 0.68rem;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.ah-workflow-contact-item:hover,
+.ah-workflow-contact-item[data-focused="true"] {
+  border-color: color-mix(in oklab, var(--ah-workflow-blue) 38%, var(--ah-workflow-border));
+  background: color-mix(in oklab, var(--ah-workflow-card) 82%, var(--accent-soft) 18%);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ah-workflow-blue) 10%, transparent);
+}
+
+.ah-workflow-contact-avatar {
+  flex: 0 0 auto;
+}
+
+.ah-workflow-contact-main {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 0.16rem;
+}
+
+.ah-workflow-contact-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--ah-workflow-ink);
+  font-size: 0.86rem;
+  font-weight: 760;
+}
+
+.ah-workflow-contact-title > span:first-child,
+.ah-workflow-contact-subtitle,
+.ah-workflow-contact-description {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ah-workflow-contact-subtitle {
+  color: var(--ah-workflow-muted);
+  font-size: 0.74rem;
+  font-weight: 650;
+}
+
+.ah-workflow-contact-description {
+  color: var(--ah-workflow-muted);
+  font-size: 0.72rem;
+  line-height: 1rem;
+}
+
+.ah-workflow-contact-presence {
+  width: 0.48rem;
+  height: 0.48rem;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--muted);
+}
+
+.ah-workflow-contact-presence.is-available {
+  background: var(--success);
+}
+
+.ah-workflow-contact-presence.is-busy {
+  background: var(--warning);
+}
+
+.ah-workflow-contact-tags {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.35rem;
 }
 
 .ah-workflow-run-panel {

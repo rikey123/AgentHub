@@ -33,26 +33,27 @@ vi.mock("@xyflow/react", () => ({
   applyNodeChanges: vi.fn((_, nodes) => nodes)
 }));
 
-import { WorkflowCanvasView } from "./WorkflowCanvasView.tsx";
+import { WorkflowCanvasView, workflowDraftPayload } from "./WorkflowCanvasView.tsx";
 
 describe("WorkflowCanvasView", () => {
   it("renders the canvas toolbar and inspector from a local draft", () => {
     const html = renderToStaticMarkup(createElement(WorkflowCanvasView, { workflows: [] }));
 
-    expect(html).toContain("Workflow Canvas");
-    expect(html).toContain("Add node");
-    expect(html).toContain("Add note");
-    expect(html).toContain("Save draft");
-    expect(html).toContain("Start");
-    expect(html).toContain("Stop");
-    expect(html).toContain("A input text");
-    expect(html).toContain("B final output text");
-    expect(html).toContain("Input text");
-    expect(html).toContain("Final node output");
-    expect(html).toContain("Prompt");
-    expect(html).toContain("Kernel");
-    expect(html).toContain("No kernel selected");
-    expect(html).toContain("Run history");
+    expect(html).toContain("工作流画布");
+    expect(html).toContain("添加节点");
+    expect(html).toContain("添加备注");
+    expect(html).toContain("导入角色节点");
+    expect(html).toContain("保存草稿");
+    expect(html).toContain("启动");
+    expect(html).toContain("停止");
+    expect(html).toContain("A 输入内容");
+    expect(html).toContain("B 最终输出");
+    expect(html).toContain("输入要交给第一个节点的内容");
+    expect(html).toContain("最后一个节点的输出会显示在这里");
+    expect(html).toContain("提示词");
+    expect(html).toContain("运行内核");
+    expect(html).toContain("未选择运行内核");
+    expect(html).toContain("运行历史");
     expect(html).toContain('data-testid="react-flow"');
     expect(html).toContain('data-node-count="2"');
     expect(html).toContain('data-edge-count="0"');
@@ -165,12 +166,63 @@ describe("WorkflowCanvasView", () => {
     expect(html).toContain('data-node-count="2"');
     expect(html).toContain('data-node-statuses="running|ready"');
     expect(html).toContain('data-edge-count="0"');
-    expect(html).toContain("running");
-    expect(html).toContain("1 node run, 1 edge delivery");
+    expect(html).toContain("运行中");
+    expect(html).toContain("1 个节点运行，1 次边投递");
     expect(html).toContain("agent-run-1");
     expect(html).toContain("hello world");
-    expect(html).toContain("Node runs");
-    expect(html).toContain("Deliveries");
-    expect(html).toContain("B final output text");
+    expect(html).toContain("节点运行");
+    expect(html).toContain("边投递");
+    expect(html).toContain("B 最终输出");
+  });
+
+  it("keeps an imported role binding when building the draft payload", () => {
+    const workflow: WorkflowViewModel = {
+      id: "workflow-1",
+      workspaceId: "default-workspace",
+      name: "角色工作流",
+      draftVersionId: "version-1",
+      createdAt: 1,
+      updatedAt: 1,
+      versions: [],
+      nodes: [],
+      edges: [],
+      runs: []
+    };
+    const payload = workflowDraftPayload(workflow, [
+      {
+        id: "node-imported",
+        position: { x: 10, y: 20 },
+        width: 260,
+        height: 150,
+        data: {
+          label: "规划助手",
+          roleLabel: "规划师",
+          prompt: "请根据上游上下文规划下一步。",
+          runtimeId: "runtime-1",
+          agentBindingId: "binding-1",
+          roleId: "role-1",
+          modelConfigId: "model-1",
+          upstreamCount: 0,
+          downstreamCount: 0,
+          enabled: true,
+          locked: false,
+          kind: "agent_context",
+          config: { runtimeId: "runtime-1", agentBindingId: "binding-1", roleId: "role-1", modelConfigId: "model-1" }
+        }
+      } as never
+    ], []);
+
+    expect(payload.nodes[0]).toMatchObject({
+      nodeId: "node-imported",
+      displayName: "规划助手",
+      roleLabel: "规划师",
+      agentBindingId: "binding-1",
+      config: {
+        agentBindingId: "binding-1",
+        roleId: "role-1",
+        runtimeId: "runtime-1",
+        modelConfigId: "model-1"
+      }
+    });
   });
 });

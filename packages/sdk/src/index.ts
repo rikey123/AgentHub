@@ -245,12 +245,13 @@ export class AgentHubEventStream {
 
   subscribe(listener: AgentHubEventListener, onError?: AgentHubEventErrorListener): AgentHubEventSubscription {
     this.stopped = false;
-    const thisRef = this;
+    const getStatus = () => this.currentStatus;
+    const getCursor = () => this.currentCursor;
     void this.open(listener, onError);
     return {
       close: () => this.close(),
-      get status() { return thisRef.currentStatus; },
-      get cursor() { return thisRef.currentCursor; }
+      get status() { return getStatus(); },
+      get cursor() { return getCursor(); }
     };
   }
 
