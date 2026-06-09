@@ -155,7 +155,7 @@ export function ArtifactsTab({ room, runId, csrfFetch }: ArtifactsTabProps) {
 
   return (
     <div className="flex flex-col gap-3 p-3">
-      {loading ? <div className="flex items-center gap-2"><Spinner size="sm" /><span className="text-sm">Loading artifacts...</span></div> : null}
+      {loading ? <div className="flex items-center gap-2"><Spinner size="sm" /><span className="text-sm">正在加载产物...</span></div> : null}
       {error ? <Chip size="sm" color="danger" variant="soft">{error}</Chip> : null}
       <ArtifactWorkspaceFiltersBar artifacts={artifacts} filters={filters} onChange={setFilters} currentRunId={runId} />
       <ArtifactPreviewTabs
@@ -167,7 +167,7 @@ export function ArtifactsTab({ room, runId, csrfFetch }: ArtifactsTabProps) {
           if (preview && artifactPreviewTabKey(preview) === artifactPreviewTabKey(tab)) setPreview(undefined);
         }}
       />
-      {!hasVisibleArtifacts && !loading ? <p className="text-sm text-muted">No artifacts match these filters.</p> : null}
+      {!hasVisibleArtifacts && !loading ? <p className="text-sm text-muted">没有符合筛选条件的产物。</p> : null}
 
       {cardArtifacts.map(({ id, part }) =>
         part.type === "card" ? <CardRenderer key={id} card={part.card} csrfFetch={csrfFetch} /> : null
@@ -176,7 +176,7 @@ export function ArtifactsTab({ room, runId, csrfFetch }: ArtifactsTabProps) {
       {codeChanges.length > 0 ? (
         <Card variant="transparent" className="border border-border">
           <Card.Header>
-            <Card.Title className="text-sm">Code changes</Card.Title>
+            <Card.Title className="text-sm">代码变更</Card.Title>
           </Card.Header>
           <Card.Content>
             <div className="flex flex-col gap-3">
@@ -216,7 +216,7 @@ export function ArtifactsTab({ room, runId, csrfFetch }: ArtifactsTabProps) {
           <TerminalCard
             key={terminal.id}
             artifactId={terminal.id}
-            title={terminal.title || "Terminal"}
+            title={terminal.title || "终端"}
             lines={state?.lines ?? []}
             exitCode={state?.exitCode ?? null}
           />
@@ -226,7 +226,7 @@ export function ArtifactsTab({ room, runId, csrfFetch }: ArtifactsTabProps) {
       {otherArtifacts.length > 0 ? (
         <Card variant="transparent" className="border border-border">
           <Card.Header>
-            <Card.Title className="text-sm">Other artifacts</Card.Title>
+            <Card.Title className="text-sm">其他产物</Card.Title>
           </Card.Header>
           <Card.Content>
             <ul className="flex flex-col gap-1">
@@ -241,7 +241,7 @@ export function ArtifactsTab({ room, runId, csrfFetch }: ArtifactsTabProps) {
                       className="rounded-full bg-accent-soft px-2 py-1 text-xs font-semibold text-accent-soft-foreground"
                       onClick={() => openArtifactPreview(artifact, csrfFetch, setPreview, setPreviewTabs)}
                     >
-                      Preview
+                      预览
                     </button>
                   ) : null}
                 </li>
@@ -253,7 +253,7 @@ export function ArtifactsTab({ room, runId, csrfFetch }: ArtifactsTabProps) {
 
       <ArtifactPreviewModal
         isOpen={preview !== undefined}
-        name={preview?.name ?? "Artifact"}
+        name={preview?.name ?? "产物"}
         mimeType={preview?.mimeType}
         sizeBytes={preview?.sizeBytes}
         previewKind={normalizePreviewKind(undefined, preview?.mimeType, preview?.name ?? "artifact.txt")}
@@ -289,11 +289,11 @@ function ArtifactWorkspaceFiltersBar({ artifacts, filters, onChange, currentRunI
   return (
     <Card variant="transparent" className="border border-border">
       <Card.Content className="grid gap-2 p-3 sm:grid-cols-2 xl:grid-cols-5">
-        <FilterSelect label="Type" value={filters.type} options={typeOptions} onChange={(type) => update({ type })} />
-        <FilterSelect label="Status" value={filters.status} options={statusOptions} onChange={(status) => update({ status })} />
-        <FilterSelect label="Run" value={filters.runId} options={[currentRunId, ...runOptions.filter((value) => value !== currentRunId)]} allLabel="All runs" onChange={(nextRunId) => update({ runId: nextRunId })} />
-        <FilterSelect label="Task" value={filters.taskId} options={taskOptions} allLabel="All tasks" onChange={(taskId) => update({ taskId })} />
-        <FilterSelect label="Author" value={filters.createdBy} options={authorOptions} allLabel="All authors" onChange={(createdBy) => update({ createdBy })} />
+        <FilterSelect label="类型" value={filters.type} options={typeOptions} onChange={(type) => update({ type })} />
+        <FilterSelect label="状态" value={filters.status} options={statusOptions} onChange={(status) => update({ status })} />
+        <FilterSelect label="运行" value={filters.runId} options={[currentRunId, ...runOptions.filter((value) => value !== currentRunId)]} allLabel="全部运行" onChange={(nextRunId) => update({ runId: nextRunId })} />
+        <FilterSelect label="任务" value={filters.taskId} options={taskOptions} allLabel="全部任务" onChange={(taskId) => update({ taskId })} />
+        <FilterSelect label="作者" value={filters.createdBy} options={authorOptions} allLabel="全部作者" onChange={(createdBy) => update({ createdBy })} />
       </Card.Content>
     </Card>
   );
@@ -305,7 +305,7 @@ function ArtifactPreviewTabs({ tabs, active, onOpen, onClose }: { readonly tabs:
   return (
     <Card variant="transparent" className="border border-border">
       <Card.Content className="flex flex-wrap items-center gap-2 p-2">
-        <span className="px-1 text-xs font-semibold uppercase text-muted">Open previews</span>
+        <span className="px-1 text-xs font-semibold uppercase text-muted">已打开预览</span>
         {tabs.map((tab) => {
           const key = artifactPreviewTabKey(tab);
           const isActive = key === activeKey;
@@ -314,7 +314,7 @@ function ArtifactPreviewTabs({ tabs, active, onOpen, onClose }: { readonly tabs:
               <button type="button" className="min-h-7 max-w-[240px] truncate px-2 text-xs font-semibold" title={tab.path} onClick={() => onOpen(tab)}>
                 {tab.name}
               </button>
-              <button type="button" className="min-h-7 border-l border-border/60 px-2 text-xs font-semibold" aria-label={`Close preview ${tab.name}`} onClick={() => onClose(tab)}>
+              <button type="button" className="min-h-7 border-l border-border/60 px-2 text-xs font-semibold" aria-label={`关闭预览 ${tab.name}`} onClick={() => onClose(tab)}>
                 x
               </button>
             </span>
@@ -325,7 +325,7 @@ function ArtifactPreviewTabs({ tabs, active, onOpen, onClose }: { readonly tabs:
   );
 }
 
-function FilterSelect({ label, value, options, onChange, allLabel = "All" }: { readonly label: string; readonly value: string; readonly options: readonly string[]; readonly onChange: (value: string) => void; readonly allLabel?: string | undefined }) {
+function FilterSelect({ label, value, options, onChange, allLabel = "全部" }: { readonly label: string; readonly value: string; readonly options: readonly string[]; readonly onChange: (value: string) => void; readonly allLabel?: string | undefined }) {
   return (
     <label className="flex min-w-0 flex-col gap-1 text-xs">
       <span className="font-semibold uppercase text-muted">{label}</span>
@@ -384,30 +384,30 @@ function ArtifactReviewTools({ artifactId, files, selectedLine, csrfFetch, onRev
 
   return (
     <div className="mt-3 rounded-lg border border-border bg-surface-secondary px-3 py-2">
-      {selectedLine ? <p className="mb-2 text-xs text-accent-soft-foreground">Selected {selectedLine.filePath}:{selectedLine.lineNumber} ({selectedLine.side})</p> : null}
+      {selectedLine ? <p className="mb-2 text-xs text-accent-soft-foreground">已选择 {selectedLine.filePath}:{selectedLine.lineNumber}（{diffSideLabel(selectedLine.side)}）</p> : null}
       <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_84px_84px]">
         <label className="flex min-w-0 flex-col gap-1 text-xs">
-          <span className="font-semibold uppercase text-muted">File</span>
+          <span className="font-semibold uppercase text-muted">文件</span>
           <select className="min-h-8 rounded-md border border-border bg-surface px-2 text-sm" value={filePath} onChange={(event) => setFilePath(event.currentTarget.value)}>
-            <option value="">Whole artifact</option>
+            <option value="">整个产物</option>
             {files.map((file) => <option key={file.path} value={file.path}>{file.path}</option>)}
           </select>
         </label>
         <label className="flex flex-col gap-1 text-xs">
-          <span className="font-semibold uppercase text-muted">Line</span>
+          <span className="font-semibold uppercase text-muted">行</span>
           <input className="min-h-8 rounded-md border border-border bg-surface px-2 text-sm" inputMode="numeric" value={lineNumber} onChange={(event) => setLineNumber(event.currentTarget.value.replace(/\D/gu, ""))} />
         </label>
         <label className="flex flex-col gap-1 text-xs">
-          <span className="font-semibold uppercase text-muted">Side</span>
+          <span className="font-semibold uppercase text-muted">侧</span>
           <select className="min-h-8 rounded-md border border-border bg-surface px-2 text-sm" value={side} onChange={(event) => setSide(event.currentTarget.value === "old" ? "old" : "new")}>
-            <option value="new">New</option>
-            <option value="old">Old</option>
+            <option value="new">新</option>
+            <option value="old">旧</option>
           </select>
         </label>
       </div>
       <div className="mt-2 flex gap-2">
-        <input className="min-h-9 min-w-0 flex-1 rounded-md border border-border bg-surface px-2 text-sm" value={reason} placeholder="Review comment" onChange={(event) => setReason(event.currentTarget.value)} />
-        <button type="button" className="rounded-md bg-accent px-3 text-sm font-semibold text-accent-foreground disabled:opacity-60" disabled={pending || reason.trim().length === 0} onClick={submit}>{pending ? "Adding" : "Add"}</button>
+        <input className="min-h-9 min-w-0 flex-1 rounded-md border border-border bg-surface px-2 text-sm" value={reason} placeholder="审查意见" onChange={(event) => setReason(event.currentTarget.value)} />
+        <button type="button" className="rounded-md bg-accent px-3 text-sm font-semibold text-accent-foreground disabled:opacity-60" disabled={pending || reason.trim().length === 0} onClick={submit}>{pending ? "添加中" : "添加"}</button>
       </div>
       {error ? <p className="mt-1 text-xs text-danger-700 dark:text-danger-200">{error}</p> : null}
     </div>
@@ -419,18 +419,18 @@ function ArtifactReviewTimeline({ reviews, onFocus, onResolve, onDelete }: { rea
   if (visible.length === 0) return null;
   return (
     <div className="mt-3 border-t border-border pt-2">
-      <div className="mb-1 text-xs font-semibold uppercase text-muted">Review history</div>
+      <div className="mb-1 text-xs font-semibold uppercase text-muted">审查历史</div>
       <ol className="flex flex-col gap-1">
         {visible.map((review) => (
           <li key={review.id} className="flex flex-wrap items-center gap-2 text-xs">
             <Chip size="sm" variant="soft" color={review.decision === "rejected" || review.decision === "failed" ? "danger" : review.decision === "applied" ? "success" : "default"}>{review.decision}</Chip>
             <span className="text-muted">{review.reviewerKind}:{review.reviewerId}</span>
-            {review.status === "resolved" ? <Chip size="sm" variant="soft" color="success">resolved</Chip> : null}
-            {review.filePath ? <button type="button" className="text-muted ah-mono underline" onClick={() => onFocus(review.id)}>{review.filePath}{review.lineNumber !== undefined ? `:${review.lineNumber}` : ""}{reviewLineRangeLabel(review)}{review.side ? ` (${review.side})` : ""}</button> : null}
+            {review.status === "resolved" ? <Chip size="sm" variant="soft" color="success">已解决</Chip> : null}
+            {review.filePath ? <button type="button" className="text-muted ah-mono underline" onClick={() => onFocus(review.id)}>{review.filePath}{review.lineNumber !== undefined ? `:${review.lineNumber}` : ""}{reviewLineRangeLabel(review)}{review.side ? ` (${diffSideLabel(review.side)})` : ""}</button> : null}
             <span className="text-muted">{new Date(review.createdAt).toLocaleString()}</span>
             {review.reason ? <span className="truncate text-foreground">{review.reason}</span> : null}
-            {review.status !== "resolved" ? <button type="button" className="font-semibold text-accent underline" onClick={() => onResolve(review)}>Resolve</button> : null}
-            <button type="button" className="font-semibold text-danger underline" onClick={() => onDelete(review)}>Delete</button>
+            {review.status !== "resolved" ? <button type="button" className="font-semibold text-accent underline" onClick={() => onResolve(review)}>解决</button> : null}
+            <button type="button" className="font-semibold text-danger underline" onClick={() => onDelete(review)}>删除</button>
           </li>
         ))}
       </ol>
@@ -592,16 +592,16 @@ function ArtifactHeader({ artifact, csrfFetch, onArtifactChanged }: { readonly a
         </div>
         <h3 className="mt-1 truncate text-sm font-semibold">{artifact.title}</h3>
         <p className="mt-0.5 text-xs text-muted">
-          {artifact.createdBy ? `by ${artifact.createdBy}` : "unknown author"}
-          {artifact.runId ? ` / run ${artifact.runId}` : ""}
-          {artifact.taskId ? ` / task ${artifact.taskId}` : ""}
+          {artifact.createdBy ? `作者 ${artifact.createdBy}` : "未知作者"}
+          {artifact.runId ? ` / 运行 ${artifact.runId}` : ""}
+          {artifact.taskId ? ` / 任务 ${artifact.taskId}` : ""}
           {typeof artifact.metadata?.artifactFsMode === "string" ? ` / ${artifact.metadata.artifactFsMode}` : ""}
-          {typeof artifact.metadata?.baseRef === "string" ? ` / base ${artifact.metadata.baseRef}` : ""}
+          {typeof artifact.metadata?.baseRef === "string" ? ` / 基线 ${artifact.metadata.baseRef}` : ""}
         </p>
       </div>
       <div className="flex gap-2">
-        <button type="button" className="rounded-md border border-border px-2 py-1 text-xs font-semibold" disabled={pending !== undefined || artifact.archivedAt !== undefined} onClick={() => act("archive")}>{pending === "archive" ? "Archiving" : artifact.archivedAt !== undefined ? "Archived" : "Archive"}</button>
-        <button type="button" className="rounded-md bg-danger px-2 py-1 text-xs font-semibold text-danger-foreground" disabled={pending !== undefined} onClick={() => act("delete")}>{pending === "delete" ? "Deleting" : "Delete"}</button>
+        <button type="button" className="rounded-md border border-border px-2 py-1 text-xs font-semibold" disabled={pending !== undefined || artifact.archivedAt !== undefined} onClick={() => act("archive")}>{pending === "archive" ? "归档中" : artifact.archivedAt !== undefined ? "已归档" : "归档"}</button>
+        <button type="button" className="rounded-md bg-danger px-2 py-1 text-xs font-semibold text-danger-foreground" disabled={pending !== undefined} onClick={() => act("delete")}>{pending === "delete" ? "删除中" : "删除"}</button>
       </div>
     </div>
   );
@@ -629,7 +629,7 @@ function updateReviewStatus(artifactId: string, comment: DiffReviewComment | Art
 
 function editReviewComment(artifactId: string, comment: DiffReviewComment | ArtifactReviewSummary, csrfFetch: typeof fetch, setReviewsByArtifactId: SetReviewsByArtifactId): void {
   const current = typeof comment.reason === "string" ? comment.reason : "";
-  const nextReason = window.prompt("Edit review comment", current);
+  const nextReason = window.prompt("编辑审查意见", current);
   if (nextReason === null) return;
   const trimmed = nextReason.trim();
   if (trimmed.length === 0) return;
@@ -668,4 +668,8 @@ export function artifactReviewEditRequest(artifactId: string, comment: Pick<Diff
 
 function uniqueOptionValues(values: readonly string[]): string[] {
   return [...new Set(values)].sort((a, b) => a.localeCompare(b));
+}
+
+function diffSideLabel(side: "old" | "new"): string {
+  return side === "old" ? "旧" : "新";
 }

@@ -33,8 +33,8 @@ export function ToolsTab({ room, runId, onOpenRun, onOpenTask }: ToolsTabProps) 
     <div className="flex flex-col gap-3 p-3">
       {showCollaboration ? <CollaborationSection view={collaboration} onOpenRun={onOpenRun} onOpenTask={onOpenTask} /> : null}
       <section>
-        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Tool calls</h3>
-        {calls.length === 0 ? <p className="text-sm text-muted">No tool calls.</p> : (
+        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">工具调用</h3>
+        {calls.length === 0 ? <p className="text-sm text-muted">暂无工具调用。</p> : (
           <ul className="flex flex-col gap-2">
             {calls.map(({ messageId, idx, part }) => (
               <li key={`${messageId}-${idx}`}>
@@ -42,7 +42,7 @@ export function ToolsTab({ room, runId, onOpenRun, onOpenTask }: ToolsTabProps) 
                   <Card.Header>
                     <div className="flex items-center gap-2">
                       <Card.Title className="text-sm">
-                        {part.type === "tool_call" ? `Call · ${part.name}` : "Result"}
+                        {part.type === "tool_call" ? `调用 · ${part.name}` : "结果"}
                       </Card.Title>
                       {part.type === "tool_result" ? (
                         <Chip size="sm" variant="soft" color={part.ok ? "success" : "danger"}>
@@ -64,7 +64,7 @@ export function ToolsTab({ room, runId, onOpenRun, onOpenTask }: ToolsTabProps) 
       </section>
       {subagents.length > 0 ? (
         <section>
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Subagent runs</h3>
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">子 agent 运行</h3>
           <ul className="flex flex-col gap-2">
             {subagents.map((sub) => {
               const duration = sub.startedAt !== undefined && sub.endedAt !== undefined ? formatDuration(sub.endedAt - sub.startedAt) : undefined;
@@ -150,21 +150,21 @@ function flattenTaskTree(tasks: ReadonlyArray<TaskViewModel>, rootId: string): T
 function CollaborationSection({ view, onOpenRun, onOpenTask }: { view: RunTaskCollaborationView; onOpenRun?: ((runId: string) => void) | undefined; onOpenTask?: ((taskId: string) => void) | undefined }) {
   return (
     <section data-testid="run-task-collaboration">
-      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Multi-agent collaboration</h3>
+      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">多 agent 协作</h3>
       <Card variant="transparent" className="border border-border">
         <Card.Header>
           <div className="flex flex-wrap items-center gap-2">
-            <Card.Title className="text-sm">Delegated task context</Card.Title>
+            <Card.Title className="text-sm">委托任务上下文</Card.Title>
             {view.associatedTask ? <Chip size="sm" variant="soft" color={taskStatusColor(view.associatedTask.status)}>{view.associatedTask.status}</Chip> : null}
           </div>
-          <Card.Description className="text-xs">Linked runs and task tree for this delegated teammate run.</Card.Description>
+          <Card.Description className="text-xs">展示此委托队友运行关联的运行和任务树。</Card.Description>
         </Card.Header>
         <Card.Content>
           <div className="flex flex-col gap-3">
-            {view.parentRun ? <RunLink label="Parent Leader Run" run={view.parentRun} onOpenRun={onOpenRun} /> : null}
+            {view.parentRun ? <RunLink label="父级 Leader 运行" run={view.parentRun} onOpenRun={onOpenRun} /> : null}
             {view.siblingRuns.length > 0 ? (
               <div>
-                <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">Sibling delegated runs</div>
+                <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">同级委托运行</div>
                 <ul className="flex flex-col gap-1.5">
                   {view.siblingRuns.map((run) => <li key={run.id}><RunLink label={run.agentName} run={run} onOpenRun={onOpenRun} /></li>)}
                 </ul>
@@ -172,12 +172,12 @@ function CollaborationSection({ view, onOpenRun, onOpenTask }: { view: RunTaskCo
             ) : null}
             {view.tasks.length > 0 ? (
               <div>
-                <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">Task tree</div>
+                <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">任务树</div>
                 <ul className="flex flex-col gap-1.5" data-testid="run-task-tree">
                   {view.tasks.map((task) => <TaskTreeItem key={task.id} task={task} onOpenTask={onOpenTask} />)}
                 </ul>
               </div>
-            ) : <p className="text-xs text-muted">No task tree is linked to this run yet.</p>}
+            ) : <p className="text-xs text-muted">此运行尚未关联任务树。</p>}
           </div>
         </Card.Content>
       </Card>

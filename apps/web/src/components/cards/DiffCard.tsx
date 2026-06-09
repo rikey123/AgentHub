@@ -70,7 +70,7 @@ export function DiffCard({ card, csrfFetch }: DiffCardProps) {
     <Card variant="default">
       <Card.Header>
         <div className="flex items-center gap-2">
-          <Card.Title>Diff · {card.files.length} file{card.files.length === 1 ? "" : "s"}</Card.Title>
+          <Card.Title>Diff · {card.files.length} 个文件</Card.Title>
           <Chip size="sm" variant="soft" color="default">{String(card.applyStatus)}</Chip>
         </div>
         <Card.Description>
@@ -80,18 +80,18 @@ export function DiffCard({ card, csrfFetch }: DiffCardProps) {
       </Card.Header>
       <Card.Content>
         <DiffReviewViewer artifactId={card.artifactId} files={files && files.length > 0 ? files : fallbackFiles} compact />
-        {filesError ? <p className="mt-2 text-xs text-warning-700 dark:text-warning-200">Diff preview unavailable: {filesError}</p> : null}
+        {filesError ? <p className="mt-2 text-xs text-warning-700 dark:text-warning-200">Diff 预览不可用：{filesError}</p> : null}
         {error ? <p className="mt-2 text-xs text-danger">{error}</p> : null}
       </Card.Content>
       {hasFooterActions ? (
         <Card.Footer className="gap-2">
           {!isResolved ? (
             <>
-              <Button variant="primary" isPending={pending === "apply"} onPress={() => act("apply")}>Apply Diff</Button>
-              <Button variant="danger" isPending={pending === "reject"} onPress={() => act("reject")}>Reject</Button>
+              <Button variant="primary" isPending={pending === "apply"} onPress={() => act("apply")}>应用 Diff</Button>
+              <Button variant="danger" isPending={pending === "reject"} onPress={() => act("reject")}>拒绝</Button>
             </>
           ) : null}
-          {detailsHref ? <a className="inline-flex h-10 items-center rounded-md border border-border px-3 text-sm font-semibold text-foreground hover:bg-surface-secondary" href={detailsHref}>View Details</a> : null}
+          {detailsHref ? <a className="inline-flex h-10 items-center rounded-md border border-border px-3 text-sm font-semibold text-foreground hover:bg-surface-secondary" href={detailsHref}>查看详情</a> : null}
         </Card.Footer>
       ) : null}
     </Card>

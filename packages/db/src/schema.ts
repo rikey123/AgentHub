@@ -343,6 +343,12 @@ export const permissionProfiles = sqliteTable("permission_profiles", {
   updatedAt: integer("updated_at").notNull()
 });
 
+export const permissionSettings = sqliteTable("permission_settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: integer("updated_at").notNull()
+});
+
 export const permissionRules = sqliteTable("permission_rules", {
   id: text("id").primaryKey(),
   workspaceId: text("workspace_id").notNull(),

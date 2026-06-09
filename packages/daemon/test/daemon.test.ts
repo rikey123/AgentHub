@@ -163,6 +163,40 @@ describe("daemon M1.4 composition", () => {
     expect(messages.messages.some((message) => message.role === "assistant" && message.status === "completed")).toBe(true);
   });
 
+  it("exposes and updates the global default permission profile", async () => {
+    const initialResponse = await fetch(`${baseUrl}/permissions/profiles`);
+    const initial = await initialResponse.json() as {
+      readonly settings: { readonly defaultProfileId: string; readonly allowAllEnabled: boolean };
+      readonly profiles: readonly { readonly id: string; readonly name: string }[];
+    };
+
+    expect(initial.settings).toEqual({ defaultProfileId: "builder-strict", allowAllEnabled: false });
+    expect(initial.profiles.map((profile) => profile.id)).toContain("allow-all-local");
+
+    const enabledResponse = await fetch(`${baseUrl}/permissions/default-profile`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ allowAllEnabled: true })
+    });
+    const enabled = await enabledResponse.json() as {
+      readonly settings: { readonly defaultProfileId: string; readonly allowAllEnabled: boolean };
+    };
+
+    expect(enabledResponse.status).toBe(200);
+    expect(enabled.settings).toEqual({ defaultProfileId: "allow-all-local", allowAllEnabled: true });
+    expect(
+      daemon.database.sqlite
+        .prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'permission.resolved' AND json_extract(payload, '$.target') = 'permission-settings:default-profile' AND json_extract(payload, '$.allowAllEnabled') = 1")
+        .get()
+    ).toMatchObject({ count: 1 });
+
+    const refreshedResponse = await fetch(`${baseUrl}/permissions/profiles`);
+    const refreshed = await refreshedResponse.json() as {
+      readonly settings: { readonly defaultProfileId: string; readonly allowAllEnabled: boolean };
+    };
+    expect(refreshed.settings).toEqual({ defaultProfileId: "allow-all-local", allowAllEnabled: true });
+  });
+
   it("deployment provider CRUD masks credentials and publishes provider events in transactions", async () => {
     const created = await fetch(`${baseUrl}/deployment-providers`, {
       method: "POST",

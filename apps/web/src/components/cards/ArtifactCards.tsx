@@ -59,7 +59,7 @@ export function PreviewArtifactCard({ card, csrfFetch, onReferenceArtifact }: Ar
         headers: { accept: "application/json", "content-type": "application/json" },
         body: JSON.stringify({ artifactId: card.artifactId, kind: "preview-url" })
       });
-      if (!response.ok) throw new Error(`Deploy failed: ${response.status}`);
+      if (!response.ok) throw new Error(`部署失败：${response.status}`);
     } catch (error) {
       setDeployError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -70,7 +70,7 @@ export function PreviewArtifactCard({ card, csrfFetch, onReferenceArtifact }: Ar
     <Card variant="default" data-testid="preview-card">
       <Card.Header>
         <div className="flex items-center gap-2">
-          <Card.Title className="flex-1 truncate">Preview</Card.Title>
+          <Card.Title className="flex-1 truncate">预览</Card.Title>
           <Chip size="sm" variant="soft" color="accent">{card.kind}</Chip>
           {card.version !== undefined ? <Chip size="sm" variant="soft" color="default">v{card.version}</Chip> : null}
         </div>
@@ -88,9 +88,9 @@ export function PreviewArtifactCard({ card, csrfFetch, onReferenceArtifact }: Ar
         </div>
       </Card.Content>
       <Card.Footer className="flex-wrap gap-2">
-        <ArtifactExpandAction card={card} csrfFetch={csrfFetch} onReferenceArtifact={onReferenceArtifact} label="Edit" variant="primary" />
-        <Button size="sm" variant="secondary" isPending={deploying} isDisabled={deploying} onPress={() => void deploy()} data-endpoint="/deployments">Deploy</Button>
-        <a className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-semibold text-foreground hover:bg-surface-secondary" href={downloadUrl}>Download</a>
+        <ArtifactExpandAction card={card} csrfFetch={csrfFetch} onReferenceArtifact={onReferenceArtifact} label="编辑" variant="primary" />
+        <Button size="sm" variant="secondary" isPending={deploying} isDisabled={deploying} onPress={() => void deploy()} data-endpoint="/deployments">部署</Button>
+        <a className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-semibold text-foreground hover:bg-surface-secondary" href={downloadUrl}>下载</a>
         <ArtifactExpandAction card={card} csrfFetch={csrfFetch} onReferenceArtifact={onReferenceArtifact} />
       </Card.Footer>
     </Card>
@@ -102,7 +102,7 @@ export function DocumentCard({ card, csrfFetch, onReferenceArtifact }: ArtifactC
     <Card variant="default" data-testid="document-card">
       <Card.Header>
         <div className="flex items-center gap-2">
-          <Card.Title className="flex-1 truncate">Document</Card.Title>
+          <Card.Title className="flex-1 truncate">文档</Card.Title>
           <Chip size="sm" variant="soft" color="default">{card.kind}</Chip>
           {card.version !== undefined ? <Chip size="sm" variant="soft" color="default">v{card.version}</Chip> : null}
         </div>
@@ -110,14 +110,14 @@ export function DocumentCard({ card, csrfFetch, onReferenceArtifact }: ArtifactC
       </Card.Header>
       <Card.Content>
         <div className="rounded-lg border border-border bg-surface-secondary p-3 text-sm text-muted">
-          <p className="font-semibold text-foreground">Markdown summary</p>
-          <p className="mt-1">{card.summary ?? "Preview the first paragraphs, then expand for the full artifact studio."}</p>
+          <p className="font-semibold text-foreground">Markdown 摘要</p>
+          <p className="mt-1">{card.summary ?? "可先预览前几段内容，也可以展开进入完整产物工作台。"}</p>
         </div>
       </Card.Content>
       <Card.Footer className="flex-wrap gap-2">
-        <ArtifactExpandAction card={card} csrfFetch={csrfFetch} onReferenceArtifact={onReferenceArtifact} label="Edit" variant="primary" />
-        <Button size="sm" variant="secondary" onPress={() => onReferenceArtifact?.({ token: `@artifact:${card.artifactId}#L1-L1`, ref: { type: "artifact", artifactId: card.artifactId, lineStart: 1, lineEnd: 1 } })} data-reference-token={`@artifact:${card.artifactId}#L1-L1`}>Reference</Button>
-        <a className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-semibold text-foreground hover:bg-surface-secondary" href={artifactDownloadUrl(card.artifactId)}>Download</a>
+        <ArtifactExpandAction card={card} csrfFetch={csrfFetch} onReferenceArtifact={onReferenceArtifact} label="编辑" variant="primary" />
+        <Button size="sm" variant="secondary" onPress={() => onReferenceArtifact?.({ token: `@artifact:${card.artifactId}#L1-L1`, ref: { type: "artifact", artifactId: card.artifactId, lineStart: 1, lineEnd: 1 } })} data-reference-token={`@artifact:${card.artifactId}#L1-L1`}>引用</Button>
+        <a className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-semibold text-foreground hover:bg-surface-secondary" href={artifactDownloadUrl(card.artifactId)}>下载</a>
         <ArtifactExpandAction card={card} csrfFetch={csrfFetch} onReferenceArtifact={onReferenceArtifact} />
       </Card.Footer>
     </Card>
@@ -163,7 +163,7 @@ export function PresentationCard({ card, csrfFetch, onReferenceArtifact }: Artif
     <Card variant="default" data-testid="presentation-card">
       <Card.Header>
         <div className="flex items-center gap-2">
-          <Card.Title className="flex-1 truncate">{isPptx ? "PPTX preview" : "HTML slides"}</Card.Title>
+          <Card.Title className="flex-1 truncate">{isPptx ? "PPTX 预览" : "HTML 幻灯片"}</Card.Title>
           <Chip size="sm" variant="soft" color={isPptx ? "warning" : "accent"}>{card.kind}</Chip>
           {card.version !== undefined ? <Chip size="sm" variant="soft" color="default">v{card.version}</Chip> : null}
         </div>
@@ -172,15 +172,15 @@ export function PresentationCard({ card, csrfFetch, onReferenceArtifact }: Artif
       <Card.Content>
         {isPptx ? <PptxPreviewBody preview={pptPreview} /> : (
           <div className="rounded-lg border border-border bg-surface-secondary p-3 text-sm text-muted">
-            Slide {slide} thumbnail. Use fullscreen controls to navigate.
+            第 {slide} 页缩略图。可使用全屏控件翻页。
           </div>
         )}
       </Card.Content>
       <Card.Footer className="flex-wrap gap-2">
-        <Button size="sm" variant="tertiary" isDisabled={slide <= 1} onPress={() => setSlide((current) => Math.max(1, current - 1))}>Prev</Button>
-        <Button size="sm" variant="tertiary" isDisabled={slide >= slideCount} onPress={() => setSlide((current) => Math.min(slideCount, current + 1))}>Next</Button>
-        <Button size="sm" variant="secondary" onPress={() => onReferenceArtifact?.(artifactChatReferenceForSlide(card.artifactId, slide))} data-reference-token={`@artifact:${card.artifactId}#slide=${slide}`}>Reference Slide</Button>
-        <a className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-semibold text-foreground hover:bg-surface-secondary" href={artifactDownloadUrl(card.artifactId)}>Download</a>
+        <Button size="sm" variant="tertiary" isDisabled={slide <= 1} onPress={() => setSlide((current) => Math.max(1, current - 1))}>上一页</Button>
+        <Button size="sm" variant="tertiary" isDisabled={slide >= slideCount} onPress={() => setSlide((current) => Math.min(slideCount, current + 1))}>下一页</Button>
+        <Button size="sm" variant="secondary" onPress={() => onReferenceArtifact?.(artifactChatReferenceForSlide(card.artifactId, slide))} data-reference-token={`@artifact:${card.artifactId}#slide=${slide}`}>引用当前页</Button>
+        <a className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-semibold text-foreground hover:bg-surface-secondary" href={artifactDownloadUrl(card.artifactId)}>下载</a>
         <ArtifactExpandAction card={card} csrfFetch={csrfFetch} onReferenceArtifact={onReferenceArtifact} />
       </Card.Footer>
     </Card>
@@ -189,14 +189,14 @@ export function PresentationCard({ card, csrfFetch, onReferenceArtifact }: Artif
 
 function PptxPreviewBody({ preview }: { readonly preview: PptPreviewState }) {
   if (preview.status === "ready" && preview.previewUrl) {
-    return <iframe title="PPT Preview" src={preview.previewUrl} className="h-48 w-full rounded-lg border border-border bg-white" />;
+    return <iframe title="PPT 预览" src={preview.previewUrl} className="h-48 w-full rounded-lg border border-border bg-white" />;
   }
   const statusText = pptStatusText(preview.status, preview.error);
   return (
     <div className={`rounded-lg border p-3 text-sm ${preview.status === "startFailed" || preview.status === "installFailed" ? "border-danger/40 bg-danger/10" : "border-warning/40 bg-warning/10"}`}>
       <p className="font-semibold">{statusText.title}</p>
       <p className="mt-1 text-muted">{statusText.description}</p>
-      <p className="mt-2 text-xs text-muted">Download fallback is always available.</p>
+      <p className="mt-2 text-xs text-muted">无法预览时仍可下载文件。</p>
     </div>
   );
 }
@@ -206,7 +206,7 @@ export function GenericArtifactCard({ card, csrfFetch, onReferenceArtifact }: Ar
     <Card variant="default" data-testid="artifact-card">
       <Card.Header>
         <div className="flex items-center gap-2">
-          <Card.Title className="flex-1 truncate">Artifact</Card.Title>
+          <Card.Title className="flex-1 truncate">产物</Card.Title>
           <Chip size="sm" variant="soft" color="default">{card.kind}</Chip>
           {card.version !== undefined ? <Chip size="sm" variant="soft" color="default">v{card.version}</Chip> : null}
         </div>
@@ -214,11 +214,11 @@ export function GenericArtifactCard({ card, csrfFetch, onReferenceArtifact }: Ar
       </Card.Header>
       <Card.Content>
         <div className="rounded-lg border border-border bg-surface-secondary p-3 text-sm text-muted">
-          {card.kind === "source_code" ? "Source preview is available in the artifact studio." : "This artifact can be downloaded or expanded for details."}
+          {card.kind === "source_code" ? "源码预览可在产物工作台中查看。" : "可以下载此产物，或展开查看详情。"}
         </div>
       </Card.Content>
       <Card.Footer className="flex-wrap gap-2">
-        <a className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-semibold text-foreground hover:bg-surface-secondary" href={artifactDownloadUrl(card.artifactId)}>Download</a>
+        <a className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-semibold text-foreground hover:bg-surface-secondary" href={artifactDownloadUrl(card.artifactId)}>下载</a>
         <ArtifactExpandAction card={card} csrfFetch={csrfFetch} onReferenceArtifact={onReferenceArtifact} />
       </Card.Footer>
     </Card>
@@ -257,7 +257,7 @@ export function DeploymentCard({ card, csrfFetch }: { readonly card: DeploymentC
     setCopyError(undefined);
     const writer = globalThis.navigator?.clipboard?.writeText;
     if (writer === undefined) {
-      setCopyError("Clipboard is unavailable.");
+      setCopyError("剪贴板不可用。");
       return;
     }
     void writer.call(globalThis.navigator.clipboard, value).catch((err: unknown) => {
@@ -295,7 +295,7 @@ export function DeploymentCard({ card, csrfFetch }: { readonly card: DeploymentC
     <Card variant="default" data-testid="deployment-card">
       <Card.Header>
         <div className="flex items-center gap-2">
-          <Card.Title className="flex-1 truncate">Deployment</Card.Title>
+          <Card.Title className="flex-1 truncate">部署</Card.Title>
           <Chip size="sm" variant="soft" color="default">{card.kind}</Chip>
           <Chip size="sm" variant="soft" color={statusColor(card.status)}>{card.status}</Chip>
         </div>
@@ -305,35 +305,35 @@ export function DeploymentCard({ card, csrfFetch }: { readonly card: DeploymentC
         <div className="grid gap-2 text-sm">
           <p className="text-muted">{deploymentSubtitle(card)}</p>
           <div className="grid gap-1 rounded border border-border bg-surface-secondary/60 p-2">
-            <DeploymentStageRow label="Build" stage={buildStage(card.status)} />
-            <DeploymentStageRow label="Deploy" stage={deployStage(card.status)} />
+            <DeploymentStageRow label="构建" stage={buildStage(card.status)} />
+            <DeploymentStageRow label="部署" stage={deployStage(card.status)} />
           </div>
           {expiresLabel ? <p className="text-xs font-semibold text-warning-700 dark:text-warning-200">{expiresLabel}</p> : null}
-          {previewUrl ? <a className="text-accent underline underline-offset-2" href={previewUrl}>Open Preview</a> : null}
-          {downloadUrl ? <a className="text-accent underline underline-offset-2" href={downloadUrl}>Download ZIP</a> : null}
+          {previewUrl ? <a className="text-accent underline underline-offset-2" href={previewUrl}>打开预览</a> : null}
+          {downloadUrl ? <a className="text-accent underline underline-offset-2" href={downloadUrl}>下载 ZIP</a> : null}
           {previewUrl ? (
             <div className="grid gap-1 rounded bg-surface-secondary px-2 py-1">
-              <span className="text-xs font-semibold text-muted">Copy URL</span>
+              <span className="text-xs font-semibold text-muted">复制 URL</span>
               <code className="ah-mono text-xs">{previewUrl}</code>
             </div>
           ) : null}
           {imageTag ? <div className="ah-mono rounded bg-surface-secondary px-2 py-1 text-xs">{imageTag}</div> : null}
           {dockerCommand ? (
             <div className="grid gap-1 rounded bg-surface-secondary px-2 py-1">
-              <span className="text-xs font-semibold text-muted">Copy Docker Command</span>
+              <span className="text-xs font-semibold text-muted">复制 Docker 命令</span>
               <code className="ah-mono text-xs">{dockerCommand}</code>
             </div>
           ) : null}
           {error ? <div className="rounded border border-danger/40 bg-danger/10 p-2 text-danger">{error}</div> : null}
           {logs.length > 0 ? (
             <details className="rounded border border-border bg-surface-secondary" open={fallbackLogs.length > 0 ? true : undefined}>
-              <summary className="cursor-pointer px-2 py-1 text-xs font-semibold text-foreground">Logs</summary>
+              <summary className="cursor-pointer px-2 py-1 text-xs font-semibold text-foreground">日志</summary>
               <pre className="ah-mono max-h-32 overflow-auto p-2 text-xs">{logs.join("\n")}</pre>
             </details>
           ) : null}
           <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" variant="tertiary" isPending={logsLoading} isDisabled={logsLoading} onPress={() => void loadLogs()}>View Logs</Button>
-            <a className="text-xs font-semibold text-accent underline underline-offset-2" href={logsUrl}>Open full log</a>
+            <Button size="sm" variant="tertiary" isPending={logsLoading} isDisabled={logsLoading} onPress={() => void loadLogs()}>查看日志</Button>
+            <a className="text-xs font-semibold text-accent underline underline-offset-2" href={logsUrl}>打开完整日志</a>
           </div>
           {logsError ? <p className="text-xs text-danger">{logsError}</p> : null}
           {actionError ? <p className="text-xs text-danger">{actionError}</p> : null}
@@ -341,16 +341,16 @@ export function DeploymentCard({ card, csrfFetch }: { readonly card: DeploymentC
         </div>
       </Card.Content>
       <Card.Footer className="flex-wrap gap-2">
-        {previewUrl ? <a className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-semibold text-foreground hover:bg-surface-secondary" href={previewUrl}>Open</a> : null}
-        {downloadUrl ? <a className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-semibold text-foreground hover:bg-surface-secondary" href={downloadUrl}>Download ZIP</a> : null}
+        {previewUrl ? <a className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-semibold text-foreground hover:bg-surface-secondary" href={previewUrl}>打开</a> : null}
+        {downloadUrl ? <a className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-semibold text-foreground hover:bg-surface-secondary" href={downloadUrl}>下载 ZIP</a> : null}
         {previewUrl ? (
           <Button size="sm" variant="tertiary" onPress={() => copyText(previewUrl)}>
-            Copy URL
+            复制 URL
           </Button>
         ) : null}
         {dockerCommand ? (
           <Button size="sm" variant="tertiary" onPress={() => copyText(dockerCommand)}>
-            Copy Docker Command
+            复制 Docker 命令
           </Button>
         ) : null}
         {actions.map((action) => (
@@ -416,7 +416,7 @@ async function stopPptPreviewSession(csrfFetch: typeof fetch, artifactId: string
   }).catch(() => undefined);
 }
 
-function ArtifactExpandAction({ card, csrfFetch, onReferenceArtifact, label = "Expand Preview", variant = "secondary" }: ArtifactCardProps & { readonly label?: string | undefined; readonly variant?: "primary" | "secondary" | "tertiary" | undefined }) {
+function ArtifactExpandAction({ card, csrfFetch, onReferenceArtifact, label = "展开预览", variant = "secondary" }: ArtifactCardProps & { readonly label?: string | undefined; readonly variant?: "primary" | "secondary" | "tertiary" | undefined }) {
   const [preview, setPreview] = useState<ArtifactPreviewState | undefined>(undefined);
   const requestGenerationRef = useRef(0);
   const openPreview = async () => {
@@ -533,47 +533,47 @@ export function deploymentActionButtonState(action: DeploymentAction, pendingAct
 }
 
 function deploymentSubtitle(card: DeploymentCardData): string {
-  if (card.status === "queued") return "Queued for deployment.";
+  if (card.status === "queued") return "已进入部署队列。";
   if (card.status === "in_progress") return card.kind === "container-build" || card.kind === "self-hosted"
-    ? "Build and deploy are in progress."
-    : "Deploy is in progress.";
-  if (card.status === "failed") return "Deployment failed. Review logs, fix the issue, then retry.";
-  if (card.status === "cancelled") return "Deployment was cancelled before completion.";
-  if (card.status === "expired") return "Preview expired. Redeploy to create a fresh URL.";
-  if (card.status === "unpublished") return "Deployment is unpublished.";
-  if (card.downloadUrl && !card.url) return "Ready for download.";
-  if (card.imageTag && !card.url) return "Container image is ready.";
-  return "Deployment is ready.";
+    ? "正在构建并部署。"
+    : "正在部署。";
+  if (card.status === "failed") return "部署失败。请查看日志、修复问题后重试。";
+  if (card.status === "cancelled") return "部署已在完成前取消。";
+  if (card.status === "expired") return "预览已过期。重新部署可生成新的 URL。";
+  if (card.status === "unpublished") return "部署已下线。";
+  if (card.downloadUrl && !card.url) return "已可下载。";
+  if (card.imageTag && !card.url) return "容器镜像已就绪。";
+  return "部署已就绪。";
 }
 
 function pptStatusText(status: NonNullable<ArtifactCardData["pptStatus"]> | "ready", error?: string | undefined): { readonly title: string; readonly description: string } {
   if (status === "loading") {
     return {
-      title: "Loading PPT preview",
-      description: "Starting the read-only office preview bridge."
+      title: "正在加载 PPT 预览",
+      description: "正在启动只读 Office 预览桥接。"
     };
   }
   if (status === "installing") {
     return {
-      title: "Installing officecli",
-      description: "AgentHub is preparing the local PPT preview dependency."
+      title: "正在安装 officecli",
+      description: "AgentHub 正在准备本地 PPT 预览依赖。"
     };
   }
   if (status === "startFailed") {
     return {
-      title: "Preview start failed",
-      description: error ?? "officecli is installed, but the preview process could not start."
+      title: "预览启动失败",
+      description: error ?? "officecli 已安装，但预览进程无法启动。"
     };
   }
   if (status === "installFailed") {
     return {
-      title: "Install failed",
-      description: "Download the file if officecli preview cannot start."
+      title: "安装失败",
+      description: "如果 officecli 预览无法启动，请下载文件查看。"
     };
   }
   return {
-    title: "PPT Preview",
-    description: "The PPT preview bridge is ready."
+    title: "PPT 预览",
+    description: "PPT 预览桥接已就绪。"
   };
 }
 
@@ -587,10 +587,10 @@ function deploymentActions(card: DeploymentCardData): readonly DeploymentAction[
 }
 
 function actionLabel(action: DeploymentAction): string {
-  if (action === "redeploy") return "Redeploy";
-  if (action === "retry") return "Retry";
-  if (action === "cancel") return "Cancel";
-  return "Unpublish";
+  if (action === "redeploy") return "重新部署";
+  if (action === "retry") return "重试";
+  if (action === "cancel") return "取消";
+  return "下线";
 }
 
 function deploymentDownloadUrl(card: DeploymentCardData): string | undefined {
@@ -603,13 +603,13 @@ function deploymentDownloadUrl(card: DeploymentCardData): string | undefined {
 function formatDeploymentExpiry(expiresAt: number, now = Date.now()): string {
   const remainingMs = Math.max(0, expiresAt - now);
   const remainingMinutes = Math.ceil(remainingMs / 60_000);
-  if (remainingMinutes <= 0) return "Expires now";
+  if (remainingMinutes <= 0) return "即将过期";
   if (remainingMinutes >= 60) {
     const hours = Math.floor(remainingMinutes / 60);
     const minutes = remainingMinutes % 60;
-    return minutes === 0 ? `Expires in ${hours}h` : `Expires in ${hours}h ${minutes}m`;
+    return minutes === 0 ? `${hours} 小时后过期` : `${hours} 小时 ${minutes} 分钟后过期`;
   }
-  return `Expires in ${remainingMinutes}m`;
+  return `${remainingMinutes} 分钟后过期`;
 }
 
 function canUnpublish(kind: DeploymentCardData["kind"]): boolean {
@@ -657,9 +657,9 @@ function stageBarClass(stage: DeploymentStage): string {
 }
 
 function stageLabel(stage: DeploymentStage): string {
-  if (stage === "complete") return "done";
-  if (stage === "active") return "running";
-  if (stage === "failed") return "failed";
-  if (stage === "pending") return "queued";
-  return "stopped";
+  if (stage === "complete") return "完成";
+  if (stage === "active") return "运行中";
+  if (stage === "failed") return "失败";
+  if (stage === "pending") return "排队中";
+  return "已停止";
 }

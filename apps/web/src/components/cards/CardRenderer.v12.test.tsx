@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { deploymentActionButtonState, deploymentLogLines, loadArtifactPreviewState, loadDeploymentLogFallback } from "./ArtifactCards.tsx";
 import { CardRenderer } from "./CardRenderer.tsx";
+import { TerminalCard } from "./TerminalCard.tsx";
 
 describe("V1.2 artifact cards", () => {
   it("routes document artifact payloads to DocumentCard", () => {
@@ -17,11 +18,11 @@ describe("V1.2 artifact cards", () => {
       csrfFetch: vi.fn<typeof fetch>()
     }));
 
-    expect(html).toContain("Document");
+    expect(html).toContain("文档");
     expect(html).toContain("Launch brief.md");
     expect(html).toContain("v3");
     expect(html).toContain("/artifacts/artifact-doc-1/download");
-    expect(html).toContain("Expand Preview");
+    expect(html).toContain("展开预览");
   });
 
   it("prefers artifact filenames over display titles in artifact card headers", () => {
@@ -62,21 +63,21 @@ describe("V1.2 artifact cards", () => {
       csrfFetch: vi.fn<typeof fetch>()
     }));
 
-    expect(sourceCode).toContain("Artifact");
+    expect(sourceCode).toContain("产物");
     expect(sourceCode).toContain("src/app.ts");
     expect(sourceCode).toContain("source_code");
     expect(sourceCode).toContain("v4");
     expect(sourceCode).toContain("/artifacts/artifact-source-1/download");
-    expect(sourceCode).toContain("Expand Preview");
+    expect(sourceCode).toContain("展开预览");
     expect(sourceCode).toContain('data-testid="artifact-card"');
     expect(sourceCode).not.toContain('data-slot="card-content"><pre');
 
-    expect(genericFile).toContain("Artifact");
+    expect(genericFile).toContain("产物");
     expect(genericFile).toContain("dataset.csv");
     expect(genericFile).toContain("generic_file");
     expect(genericFile).toContain("v1");
     expect(genericFile).toContain("/artifacts/artifact-file-1/download");
-    expect(genericFile).toContain("Expand Preview");
+    expect(genericFile).toContain("展开预览");
     expect(genericFile).toContain('data-testid="artifact-card"');
     expect(genericFile).not.toContain('data-slot="card-content"><pre');
   });
@@ -93,12 +94,12 @@ describe("V1.2 artifact cards", () => {
       csrfFetch: vi.fn<typeof fetch>()
     }));
 
-    expect(html).toContain("Preview");
+    expect(html).toContain("预览");
     expect(html).toContain("landing.html");
-    expect(html).toContain("Edit");
-    expect(html).toContain("Deploy");
-    expect(html).toContain("Download");
-    expect(html).toContain("Expand Preview");
+    expect(html).toContain("编辑");
+    expect(html).toContain("部署");
+    expect(html).toContain("下载");
+    expect(html).toContain("展开预览");
     expect(html).toContain("sandbox=\"allow-scripts\"");
   });
 
@@ -124,15 +125,15 @@ describe("V1.2 artifact cards", () => {
       csrfFetch: vi.fn<typeof fetch>()
     }));
 
-    expect(slides).toContain("HTML slides");
-    expect(slides).toContain("Prev");
-    expect(slides).toContain("Next");
-    expect(slides).toContain("Reference Slide");
-    expect(slides).toContain("Expand Preview");
-    expect(pptx).toContain("PPTX preview");
-    expect(pptx).toContain("Loading PPT preview");
+    expect(slides).toContain("HTML 幻灯片");
+    expect(slides).toContain("上一页");
+    expect(slides).toContain("下一页");
+    expect(slides).toContain("引用当前页");
+    expect(slides).toContain("展开预览");
+    expect(pptx).toContain("PPTX 预览");
+    expect(pptx).toContain("正在加载 PPT 预览");
     expect(pptx).toContain("/artifacts/artifact-pptx-1/download");
-    expect(pptx).toContain("Expand Preview");
+    expect(pptx).toContain("展开预览");
   });
 
   it("renders document cards with edit reference download and expand footer actions", () => {
@@ -147,12 +148,12 @@ describe("V1.2 artifact cards", () => {
       csrfFetch: vi.fn<typeof fetch>()
     }));
 
-    expect(html).toContain("Document");
-    expect(html).toContain("Markdown summary");
-    expect(html).toContain("Edit");
-    expect(html).toContain("Reference");
-    expect(html).toContain("Download");
-    expect(html).toContain("Expand Preview");
+    expect(html).toContain("文档");
+    expect(html).toContain("Markdown 摘要");
+    expect(html).toContain("编辑");
+    expect(html).toContain("引用");
+    expect(html).toContain("下载");
+    expect(html).toContain("展开预览");
   });
 
   it("covers presentation_pptx loading installing ready failed and download fallback states", () => {
@@ -169,12 +170,12 @@ describe("V1.2 artifact cards", () => {
       csrfFetch: vi.fn<typeof fetch>()
     }));
 
-    expect(renderPptx("loading")).toContain("Loading PPT preview");
-    expect(renderPptx("installing")).toContain("Installing officecli");
-    expect(renderPptx("ready")).toContain("PPT Preview");
+    expect(renderPptx("loading")).toContain("正在加载 PPT 预览");
+    expect(renderPptx("installing")).toContain("正在安装 officecli");
+    expect(renderPptx("ready")).toContain("PPT 预览");
     expect(renderPptx("ready")).toContain("/api/ppt-proxy/4567/");
-    expect(renderPptx("startFailed")).toContain("Preview start failed");
-    expect(renderPptx("installFailed")).toContain("Install failed");
+    expect(renderPptx("startFailed")).toContain("预览启动失败");
+    expect(renderPptx("installFailed")).toContain("安装失败");
     for (const status of ["loading", "installing", "ready", "startFailed", "installFailed"]) {
       expect(renderPptx(status)).toContain(`/artifacts/artifact-pptx-${status}/download`);
     }
@@ -196,15 +197,52 @@ describe("V1.2 artifact cards", () => {
       csrfFetch: vi.fn<typeof fetch>()
     }));
 
-    expect(html).toContain("Deployment");
+    expect(html).toContain("部署");
     expect(html).toContain("container-build");
     expect(html).toContain("failed");
     expect(html).toContain("Docker is not available");
-    expect(html).toContain("Retry");
+    expect(html).toContain("重试");
     expect(html).toContain("/deployments/deployment-1/retry");
-    expect(html).toContain("View Logs");
+    expect(html).toContain("查看日志");
     expect(html).toContain("/deployments/deployment-1/logs");
     expect(html).toContain("Detecting providers...");
+  });
+
+  it("localizes diff card review actions", () => {
+    const html = renderToStaticMarkup(createElement(CardRenderer, {
+      card: {
+        type: "diff",
+        artifactId: "diff-artifact-1",
+        title: "Change set",
+        applyStatus: "pending",
+        files: [
+          { path: "src/app.ts", status: "modified", additions: 3, deletions: 1 },
+          { path: "src/theme.css", status: "added", additions: 8, deletions: 0 }
+        ]
+      } as never,
+      csrfFetch: vi.fn<typeof fetch>()
+    }));
+
+    expect(html).toContain("Diff · 2 个文件");
+    expect(html).toContain("应用 Diff");
+    expect(html).toContain("拒绝");
+    expect(html).toContain("查看详情");
+  });
+
+  it("localizes terminal artifact card actions", () => {
+    const html = renderToStaticMarkup(createElement(TerminalCard, {
+      artifactId: "terminal-artifact-1",
+      title: "终端",
+      lines: [
+        { stream: "stdout", text: "build started" },
+        { stream: "stderr", text: "warning" }
+      ],
+      exitCode: 1
+    }));
+
+    expect(html).toContain("退出码 1");
+    expect(html).toContain("2 行");
+    expect(html).toContain("展开");
   });
 
   it("renders deployment status-specific actions for running and ready cards", () => {
@@ -258,34 +296,34 @@ describe("V1.2 artifact cards", () => {
       csrfFetch: vi.fn<typeof fetch>()
     }));
 
-    expect(running).toContain("Build");
-    expect(running).toContain("Deploy");
-    expect(running).toContain("Cancel");
+    expect(running).toContain("构建");
+    expect(running).toContain("部署");
+    expect(running).toContain("取消");
     expect(running).toContain("/deployments/deployment-queued-1/cancel");
-    expect(running).toContain("View Logs");
-    expect(running).not.toContain("Unpublish");
+    expect(running).toContain("查看日志");
+    expect(running).not.toContain("下线");
 
-    expect(readySite).toContain("Deployment is ready.");
-    expect(readySite).toContain("Expires in");
-    expect(readySite).toContain("Open Preview");
-    expect(readySite).toContain("Copy URL");
-    expect(readySite).toContain("Redeploy");
+    expect(readySite).toContain("部署已就绪。");
+    expect(readySite).toContain("后过期");
+    expect(readySite).toContain("打开预览");
+    expect(readySite).toContain("复制 URL");
+    expect(readySite).toContain("重新部署");
     expect(readySite).toContain("/deployments/deployment-ready-1/redeploy");
-    expect(readySite).toContain("Unpublish");
+    expect(readySite).toContain("下线");
     expect(readySite).toContain("/deployments/deployment-ready-1/unpublish");
 
-    expect(readyExport).toContain("Ready for download");
-    expect(readyExport).toContain("Download ZIP");
+    expect(readyExport).toContain("已可下载。");
+    expect(readyExport).toContain("下载 ZIP");
     expect(readyExport).toContain("/deployments/deployment-export-1/download");
     expect(readyExport).not.toContain("C:\\workspace");
-    expect(readyExport).toContain("Redeploy");
-    expect(readyExport).not.toContain("Unpublish");
-    expect(readyExport).toContain("Copy Docker Command");
+    expect(readyExport).toContain("重新部署");
+    expect(readyExport).not.toContain("下线");
+    expect(readyExport).toContain("复制 Docker 命令");
     expect(readyExport).toContain("docker run agenthub-artifact:v2");
 
-    expect(expired).toContain("Redeploy");
+    expect(expired).toContain("重新部署");
     expect(expired).toContain("/deployments/deployment-expired-1/redeploy");
-    expect(expired).not.toContain("Retry");
+    expect(expired).not.toContain("重试");
   });
 
   it("hides stale deployment outputs after terminal or non-ready status updates", () => {
@@ -326,30 +364,30 @@ describe("V1.2 artifact cards", () => {
       csrfFetch: vi.fn<typeof fetch>()
     }));
 
-    expect(expiredWithStaleUrl).not.toContain("Open Preview");
-    expect(expiredWithStaleUrl).not.toContain("Copy URL");
+    expect(expiredWithStaleUrl).not.toContain("打开预览");
+    expect(expiredWithStaleUrl).not.toContain("复制 URL");
     expect(expiredWithStaleUrl).not.toContain("deployment-expired-stale-1/preview");
-    expect(expiredWithStaleUrl).toContain("Redeploy");
+    expect(expiredWithStaleUrl).toContain("重新部署");
 
-    expect(failedBuildWithStaleImage).not.toContain("Copy Docker Command");
+    expect(failedBuildWithStaleImage).not.toContain("复制 Docker 命令");
     expect(failedBuildWithStaleImage).not.toContain("docker run agenthub-artifact:failed");
-    expect(failedBuildWithStaleImage).toContain("Retry");
+    expect(failedBuildWithStaleImage).toContain("重试");
 
-    expect(runningExportWithStaleDownload).not.toContain("Download ZIP");
+    expect(runningExportWithStaleDownload).not.toContain("下载 ZIP");
     expect(runningExportWithStaleDownload).not.toContain("/deployments/deployment-running-stale-1/download");
     expect(runningExportWithStaleDownload).not.toContain("C:\\workspace");
-    expect(runningExportWithStaleDownload).toContain("Cancel");
+    expect(runningExportWithStaleDownload).toContain("取消");
   });
 
   it("renders every V1.2 deployment status with a visible lifecycle action", () => {
     const statuses = [
-      ["queued", "Queued for deployment.", "Cancel"],
-      ["in_progress", "in progress", "Cancel"],
-      ["ready", "Deployment is ready.", "Redeploy"],
-      ["failed", "Deployment failed", "Retry"],
-      ["cancelled", "Deployment was cancelled", "Redeploy"],
-      ["expired", "Preview expired", "Redeploy"],
-      ["unpublished", "Deployment is unpublished", "Redeploy"]
+      ["queued", "已进入部署队列。", "取消"],
+      ["in_progress", "正在部署。", "取消"],
+      ["ready", "部署已就绪。", "重新部署"],
+      ["failed", "部署失败", "重试"],
+      ["cancelled", "部署已在完成前取消。", "重新部署"],
+      ["expired", "预览已过期", "重新部署"],
+      ["unpublished", "部署已下线。", "重新部署"]
     ] as const;
 
     for (const [status, bodyText, actionText] of statuses) {

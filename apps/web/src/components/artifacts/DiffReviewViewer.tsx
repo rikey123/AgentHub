@@ -39,20 +39,20 @@ export function DiffReviewViewer({ artifactId, files, compact = false, largeDiff
   const totalDeletions = files.reduce((sum, file) => sum + (file.deletions ?? 0), 0);
 
   if (files.length === 0) {
-    return <p className="text-sm text-muted">No file changes recorded.</p>;
+    return <p className="text-sm text-muted">没有记录文件变更。</p>;
   }
 
   return (
     <div className="flex flex-col gap-2" data-testid="diff-review-viewer">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
-          <Chip size="sm" variant="soft" color="default">{files.length} file{files.length === 1 ? "" : "s"}</Chip>
+          <Chip size="sm" variant="soft" color="default">{files.length} 个文件</Chip>
           <span className="text-success">+{totalAdditions}</span>
           <span className="text-danger">-{totalDeletions}</span>
         </div>
         <div className="flex gap-1">
-          <Button size="sm" variant={mode === "unified" ? "primary" : "secondary"} onPress={() => setMode("unified")}>Unified</Button>
-          <Button size="sm" variant={mode === "split" ? "primary" : "secondary"} onPress={() => setMode("split")}>Split</Button>
+          <Button size="sm" variant={mode === "unified" ? "primary" : "secondary"} onPress={() => setMode("unified")}>统一视图</Button>
+          <Button size="sm" variant={mode === "split" ? "primary" : "secondary"} onPress={() => setMode("split")}>拆分视图</Button>
         </div>
       </div>
       <DisclosureGroup defaultExpandedKeys={files.slice(0, compact ? 2 : files.length).map((file) => file.path)}>
@@ -78,24 +78,24 @@ export function DiffReviewViewer({ artifactId, files, compact = false, largeDiff
                 <button
                   type="button"
                   className="ml-2 shrink-0 rounded-md border border-border px-2 py-1 text-xs font-semibold text-foreground hover:bg-surface-secondary"
-                  aria-label={`Open file ${file.path}`}
+                  aria-label={`打开文件 ${file.path}`}
                   data-view-file={file.path}
                   onClick={() => onViewFile(file)}
                 >
-                  Open file
+                  打开文件
                 </button>
               ) : null}
               <Disclosure.Body>
                 {file.patch === undefined || file.patch.length === 0 ? (
-                  <p className="rounded-md border border-border bg-surface-secondary p-3 text-xs text-muted">No patch text available for this file.</p>
+                  <p className="rounded-md border border-border bg-surface-secondary p-3 text-xs text-muted">此文件没有可用的 patch 文本。</p>
                 ) : isLarge && !canRender ? (
                   <Card variant="transparent" className="border border-warning/40 bg-warning/10">
                     <Card.Content className="flex flex-wrap items-center justify-between gap-2 p-3">
                       <div>
-                        <p className="text-sm font-semibold">Large diff</p>
-                        <p className="text-xs text-muted">{patchLines.length} lines. Rendering is paused to keep the UI responsive.</p>
+                        <p className="text-sm font-semibold">大型 diff</p>
+                        <p className="text-xs text-muted">{patchLines.length} 行。为保持界面响应，已暂停渲染。</p>
                       </div>
-                      <Button size="sm" variant="secondary" onPress={() => setExpandedLarge((current) => ({ ...current, [key]: true }))}>Render anyway</Button>
+                      <Button size="sm" variant="secondary" onPress={() => setExpandedLarge((current) => ({ ...current, [key]: true }))}>仍然渲染</Button>
                     </Card.Content>
                   </Card>
                 ) : mode === "split" ? (
@@ -265,13 +265,13 @@ function InlineComments({ comments, focusedCommentId, onResolveComment, onDelete
     <div className="border-y border-accent/20 bg-accent-soft/50 px-4 py-1 text-xs text-accent-soft-foreground">
       {comments.map((comment) => (
         <div key={comment.id} id={`artifact-review-${comment.id}`} data-comment-id={comment.id} data-focused={focusedCommentId === comment.id ? "true" : undefined} className={`flex flex-wrap items-center gap-2 whitespace-pre-wrap ${focusedCommentId === comment.id ? "rounded bg-accent/20 px-1" : ""}`}>
-          <span className="font-semibold">{comment.reviewerKind ?? "reviewer"}:{comment.reviewerId ?? "local"}</span>
+          <span className="font-semibold">{comment.reviewerKind ?? "审查者"}:{comment.reviewerId ?? "本地"}</span>
           {commentRangeLabel(comment) ? <span className="rounded bg-surface px-1 text-muted">{commentRangeLabel(comment)}</span> : null}
-          {comment.status === "resolved" ? <span className="rounded bg-success/10 px-1 text-success-900 dark:text-success-100">resolved</span> : null}
+          {comment.status === "resolved" ? <span className="rounded bg-success/10 px-1 text-success-900 dark:text-success-100">已解决</span> : null}
           {comment.reason ? <span> - {comment.reason}</span> : null}
-          {onEditComment ? <button type="button" className="font-semibold underline" onClick={() => onEditComment(comment)}>Edit</button> : null}
-          {comment.status !== "resolved" && onResolveComment ? <button type="button" className="font-semibold underline" onClick={() => onResolveComment(comment)}>Resolve</button> : null}
-          {onDeleteComment ? <button type="button" className="font-semibold underline" onClick={() => onDeleteComment(comment)}>Delete</button> : null}
+          {onEditComment ? <button type="button" className="font-semibold underline" onClick={() => onEditComment(comment)}>编辑</button> : null}
+          {comment.status !== "resolved" && onResolveComment ? <button type="button" className="font-semibold underline" onClick={() => onResolveComment(comment)}>解决</button> : null}
+          {onDeleteComment ? <button type="button" className="font-semibold underline" onClick={() => onDeleteComment(comment)}>删除</button> : null}
         </div>
       ))}
     </div>
@@ -280,5 +280,5 @@ function InlineComments({ comments, focusedCommentId, onResolveComment, onDelete
 
 function commentRangeLabel(comment: DiffReviewComment): string | undefined {
   if (comment.lineStart === undefined || comment.lineEnd === undefined || comment.lineStart === comment.lineEnd) return undefined;
-  return `lines ${comment.lineStart}-${comment.lineEnd}`;
+  return `行 ${comment.lineStart}-${comment.lineEnd}`;
 }

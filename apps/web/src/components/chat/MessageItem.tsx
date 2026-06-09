@@ -42,6 +42,7 @@ export function MessageItem(props: MessageItemProps) {
   const testId = `message-bubble-${isUser ? "user" : isSystem ? "system" : "agent"}`;
   const textPreview = publicAgentTextPreview(message.text, message.senderType, isStreaming);
   const visibleText = textPreview.collapsed && !expanded ? textPreview.preview : message.text;
+  const longMessageContentId = `long-message-content-${message.id}`;
   const selectMessage = () => {
     onSelect?.();
   };
@@ -106,21 +107,26 @@ export function MessageItem(props: MessageItemProps) {
             ) : null}
 
             {message.text ? (
-              <MessageTextView text={visibleText} isStreaming={isStreaming} />
+              <div
+                id={longMessageContentId}
+                className={[
+                  "relative",
+                  textPreview.collapsed && !expanded ? "ah-long-message-preview" : ""
+                ].join(" ")}
+              >
+                <MessageTextView text={visibleText} isStreaming={isStreaming} />
+                {textPreview.collapsed && !expanded ? <div className="ah-long-message-fade" aria-hidden="true" /> : null}
+              </div>
             ) : null}
 
             {textPreview.collapsed ? (
-              <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border/70 pt-2">
-                <Chip size="sm" variant="soft" color="default">长回复</Chip>
-                <Button size="sm" variant="tertiary" onPress={() => setExpanded((value) => !value)}>
-                  {expanded ? "收起" : "展开全文"}
-                </Button>
-                {message.runId && onOpenRun ? (
-                  <Button size="sm" variant="secondary" onPress={() => onOpenRun(message.runId!)}>
-                    打开运行详情
-                  </Button>
-                ) : null}
-              </div>
+              <LongMessageDisclosure
+                expanded={expanded}
+                contentId={longMessageContentId}
+                onToggle={() => setExpanded((value) => !value)}
+                runId={message.runId}
+                onOpenRun={onOpenRun}
+              />
             ) : null}
 
             {message.parts.length > 0 ? (
@@ -216,6 +222,55 @@ function QuotedMessageBubble(props: {
       <span className="block truncate font-semibold">{senderName}</span>
       <span className="block truncate">{preview}</span>
     </button>
+  );
+}
+
+function LongMessageDisclosure({
+  expanded,
+  contentId,
+  onToggle,
+  runId,
+  onOpenRun
+}: {
+  readonly expanded: boolean;
+  readonly contentId: string;
+  readonly onToggle: () => void;
+  readonly runId?: string | undefined;
+  readonly onOpenRun?: ((runId: string) => void) | undefined;
+}) {
+  return (
+    <div className="ah-long-message-disclosure" data-testid="long-message-disclosure">
+      <div className="min-w-0 flex-1">
+        <span className="ah-long-message-status">
+          {expanded ? "全文已展开" : "长回复 · 已折叠"}
+        </span>
+      </div>
+      <div className="flex shrink-0 items-center gap-1.5">
+        {runId && onOpenRun ? (
+          <Button
+            size="sm"
+            variant="tertiary"
+            className="ah-long-message-run-action"
+            data-testid="long-message-run-details"
+            onPress={() => onOpenRun(runId)}
+          >
+            运行详情
+          </Button>
+        ) : null}
+        <Button
+          size="sm"
+          variant="tertiary"
+          className="ah-long-message-toggle"
+          aria-expanded={expanded}
+          aria-controls={contentId}
+          data-message-action
+          onPress={onToggle}
+        >
+          <span>{expanded ? "收起" : "展开"}</span>
+          <span className={["ah-long-message-chevron", expanded ? "is-expanded" : ""].join(" ")} aria-hidden="true" />
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -353,7 +408,7 @@ export function shouldSelectMessageFromTarget(target: EventTarget | null): boole
 }
 
 export function copyCodeButtonLabel(copied: boolean): string {
-  return copied ? "Copied ✓" : "Copy Code";
+  return copied ? "已复制" : "复制代码";
 }
 
 export function pinActionLabel(isPinned: boolean): string {
@@ -390,7 +445,7 @@ function CodePartView({ part }: { part: Extract<MessageViewModel["parts"][number
     <div className="overflow-hidden rounded bg-surface-secondary">
       <div className="flex items-center justify-between gap-2 border-b border-border/70 px-2 py-1">
         <span className="text-[11px] font-semibold text-muted">{part.lang}</span>
-        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onPress={copyCode} aria-label="Copy code block">
+        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onPress={copyCode} aria-label="复制代码块">
           {copyCodeButtonLabel(copied)}
         </Button>
       </div>
@@ -434,7 +489,7 @@ function ArtifactAttachmentCard({ part, csrfFetch, onReferenceArtifact }: { part
         onClick={openPreview}
         disabled={!canPreview}
         data-testid="artifact-file-card"
-        aria-label="Open file preview"
+        aria-label="打开文件预览"
       >
         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-border bg-surface ah-mono text-xs font-semibold text-muted">
           {fileBadgeFor(part)}
@@ -446,7 +501,7 @@ function ArtifactAttachmentCard({ part, csrfFetch, onReferenceArtifact }: { part
             <span>{formatBytes(part.sizeBytes)}</span>
           </span>
         </span>
-        <span className="shrink-0 text-xs font-semibold text-accent">{loading ? "Loading" : canPreview ? "Open" : "Unavailable"}</span>
+        <span className="shrink-0 text-xs font-semibold text-accent">{loading ? "正在加载" : canPreview ? "打开" : "不可用"}</span>
       </button>
       <ArtifactPreviewModal
         isOpen={preview !== undefined}
@@ -471,16 +526,16 @@ function ArtifactAttachmentCard({ part, csrfFetch, onReferenceArtifact }: { part
 
 function previewLabelFor(previewKind: string | undefined, mimeType: string): string {
   if (previewKind === "markdown") return "Markdown";
-  if (previewKind === "code") return "Code";
+  if (previewKind === "code") return "代码";
   if (previewKind === "html") return "HTML";
   if (previewKind === "pdf") return "PDF";
-  if (previewKind === "image") return "Image";
-  if (previewKind === "text") return "Text";
+  if (previewKind === "image") return "图片";
+  if (previewKind === "text") return "文本";
   if (mimeType === "text/html") return "HTML";
   if (mimeType === "application/pdf") return "PDF";
   if (mimeType === "text/markdown") return "Markdown";
-  if (mimeType.startsWith("text/")) return "Text";
-  return "File";
+  if (mimeType.startsWith("text/")) return "文本";
+  return "文件";
 }
 
 function fileBadgeFor(part: Extract<MessageViewModel["parts"][number], { type: "attachment" }>): string {

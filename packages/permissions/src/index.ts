@@ -70,10 +70,13 @@ type ProfileRow = { readonly id: string; readonly name: string; readonly payload
 type Deferred = { readonly promise: Promise<PermissionResolution>; readonly resolve: (value: PermissionResolution) => void; readonly timer?: ReturnType<typeof setTimeout> };
 
 const sensitiveFileGlobs = [".env", ".env.*", "*.pem", "*.key", "id_rsa", "id_ed25519", ".aws/**", ".gcp/**", ".ssh/**", ".netrc", "**/credentials.json", "**/service-account*.json"];
+const DEFAULT_PROFILE_ID = "builder-strict";
+export const ALLOW_ALL_LOCAL_PROFILE_ID = "allow-all-local";
 const defaultTimeoutMs = 60_000;
 const defaultMaxWaitMs = 600_000;
 
 export const builtInPermissionProfiles: readonly PermissionProfile[] = [
+  { id: ALLOW_ALL_LOCAL_PROFILE_ID, name: "允许全部权限", file: { read: "allow", write: "allow", delete: "allow", externalDirectory: "allow" }, shell: { "*": "allow" }, tool: { "*": "allow" }, context: { read: "allow", write: "allow", share: "allow", memoryWrite: "allow" }, agent: { mention: "allow", invoke: "allow", interrupt: "allow", control: "allow" }, sensitiveFileWhitelist: [] },
   { id: "builder-strict", name: "Builder Strict", file: { read: "allow", write: "ask", delete: "ask", externalDirectory: "ask" }, shell: { "*": "ask" }, tool: { "*": "ask" }, context: { read: "allow", write: "ask", share: "ask", memoryWrite: "deny" }, agent: { mention: "allow", invoke: "ask", interrupt: "deny", control: "deny" }, sensitiveFileWhitelist: sensitiveFileGlobs },
   { id: "builder-loose", name: "Builder Loose", file: { read: "allow", write: "allow", delete: "ask", externalDirectory: "ask" }, shell: { "git *": "allow", "git push *": "ask", "npm test*": "allow", "pnpm test*": "allow", "pnpm.cmd test*": "allow", "*": "ask" }, tool: { "*": "ask" }, context: { read: "allow", write: "allow", share: "ask", memoryWrite: "deny" }, agent: { mention: "allow", invoke: "ask", interrupt: "ask", control: "deny" }, sensitiveFileWhitelist: sensitiveFileGlobs },
   { id: "read-only", name: "Read Only", file: { read: "allow", write: "deny", delete: "deny", externalDirectory: "deny" }, shell: { "*": "deny" }, tool: { "*": "ask" }, context: { read: "allow", write: "deny", share: "deny", memoryWrite: "deny" }, agent: { mention: "allow", invoke: "deny", interrupt: "deny", control: "deny" }, sensitiveFileWhitelist: sensitiveFileGlobs }
@@ -273,9 +276,9 @@ export class PermissionEngine {
   }
 
   private profileFor(profileId?: string): PermissionProfile {
-    const id = profileId ?? "builder-strict";
+    const id = profileId ?? permissionSettings(this.options.database).defaultProfileId;
     const row = this.options.database.sqlite.prepare("SELECT id, name, payload FROM permission_profiles WHERE id = ?").get(id) as ProfileRow | undefined;
-    if (!row) return builtInPermissionProfiles.find((profile) => profile.id === "builder-strict") as PermissionProfile;
+    if (!row) return builtInPermissionProfiles.find((profile) => profile.id === DEFAULT_PROFILE_ID) as PermissionProfile;
     return { id: row.id, name: row.name, ...(JSON.parse(row.payload) as Omit<PermissionProfile, "id" | "name">) };
   }
 
@@ -303,6 +306,35 @@ export function seedBuiltInPermissionProfiles(database: AgentHubDatabase, now = 
     const { id, name, ...payload } = profile;
     insert.run(id, name, JSON.stringify(payload), now, now);
   }
+  seedPermissionSettings(database, now);
+}
+
+export type PermissionSettings = {
+  readonly defaultProfileId: string;
+  readonly allowAllEnabled: boolean;
+};
+
+export function seedPermissionSettings(database: AgentHubDatabase, now = Date.now()): void {
+  database.sqlite
+    .prepare("INSERT OR IGNORE INTO permission_settings (key, value, updated_at) VALUES ('default_profile_id', ?, ?)")
+    .run(DEFAULT_PROFILE_ID, now);
+}
+
+export function permissionSettings(database: AgentHubDatabase): PermissionSettings {
+  const row = database.sqlite.prepare("SELECT value FROM permission_settings WHERE key = 'default_profile_id'").get() as { readonly value: string } | undefined;
+  const defaultProfileId = row?.value ?? DEFAULT_PROFILE_ID;
+  return { defaultProfileId, allowAllEnabled: defaultProfileId === ALLOW_ALL_LOCAL_PROFILE_ID };
+}
+
+export function setDefaultPermissionProfile(database: AgentHubDatabase, profileId: string, now = Date.now()): PermissionSettings {
+  database.sqlite
+    .prepare("INSERT INTO permission_settings (key, value, updated_at) VALUES ('default_profile_id', ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at")
+    .run(profileId, now);
+  return permissionSettings(database);
+}
+
+export function setAllowAllPermissions(database: AgentHubDatabase, enabled: boolean, now = Date.now()): PermissionSettings {
+  return setDefaultPermissionProfile(database, enabled ? ALLOW_ALL_LOCAL_PROFILE_ID : DEFAULT_PROFILE_ID, now);
 }
 
 export function createPermissionCommandHandlers(engine: PermissionEngine, database: AgentHubDatabase, eventBus: EventBus, now: () => number = Date.now): Partial<Record<Command["type"], CommandHandler>> {

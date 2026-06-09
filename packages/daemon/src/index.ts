@@ -13,7 +13,7 @@ import { createDatabase, type AgentHubDatabase } from "@agenthub/db";
 import { MockAdapterManager } from "@agenthub/adapter-mock";
 import { createInterventionCommandHandlers, InterventionEngine } from "@agenthub/interventions";
 import { ActiveWakesRegistry, AssistedSelectorGroupChatManager, checkTaskTimeouts, createCancelRunHandler, createCompleteTaskHandler, createConsumePendingTurnHandler, createCreateTaskHandler, createUpdateTaskHandler, createWakeAgentHandler, createWakeOutboxDispatcher, handleTeamDispatchReviewTerminal, MailboxService, maybePublishTeamDispatchCompleted, PendingTurnService, ReclaimStaleClaimedRun, reconcileTerminalDelegatedTaskRuns, RoomMcpServer, RunLifecycleService, RunQueue, StartupRecovery, TaskModeGroupChatPresenter, TaskService, WELL_KNOWN_CAPABILITY_TOKENS, type BriefResolver, type WakeOutboxDispatcher } from "@agenthub/orchestrator";
-import { createPermissionCommandHandlers, PermissionEngine, seedBuiltInPermissionProfiles } from "@agenthub/permissions";
+import { createPermissionCommandHandlers, permissionSettings, PermissionEngine, seedBuiltInPermissionProfiles, setAllowAllPermissions } from "@agenthub/permissions";
 import type { EventEnvelope } from "@agenthub/protocol/events";
 import { artifactContentTypeFor as protocolArtifactContentTypeFor } from "@agenthub/protocol/preview";
 import { SkillRegistry, listRuntimeLocalSkills, loadRuntimeLocalSkillBundle } from "@agenthub/skills";
@@ -1168,13 +1168,14 @@ async function route(ctx: RouteContext): Promise<void> {
   if (ctx.req.method === "POST" && parts[0] === "context" && parts[2] === "confirm") return dispatch(ctx, { ...(await body(ctx)), contextId: parts[1] }, "ConfirmContextItem");
   if (ctx.req.method === "POST" && parts[0] === "context" && parts[2] === "deprecate") return dispatch(ctx, { ...(await body(ctx)), contextId: parts[1] }, "DeprecateContextItem");
   if (ctx.req.method === "POST" && parts[0] === "context" && parts[2] === "pin") return dispatch(ctx, { ...(await body(ctx)), contextId: parts[1] }, "PinContextItem");
-  if (ctx.req.method === "GET" && url.pathname === "/permissions/profiles") return json(ctx.res, 200, { profiles: (all(ctx.database, "SELECT * FROM permission_profiles ORDER BY name ASC") as Array<Record<string, unknown>>).map(decodeProfilePayload) });
+  if (ctx.req.method === "GET" && url.pathname === "/permissions/profiles") return json(ctx.res, 200, permissionProfilesResponse(ctx.database));
   if (ctx.req.method === "GET" && parts[0] === "permissions" && parts[1] === "profiles" && parts[2]) {
     const row = get(ctx.database, "SELECT * FROM permission_profiles WHERE id = ?", parts[2]) as Record<string, unknown> | undefined;
     return json(ctx.res, 200, { profile: row !== undefined ? decodeProfilePayload(row) : undefined });
   }
   if (ctx.req.method === "POST" && url.pathname === "/permissions/profiles") return dispatch(ctx, await body(ctx), "CreatePermissionProfile");
   if (ctx.req.method === "PATCH" && parts[0] === "permissions" && parts[1] === "profiles" && parts[2]) return dispatch(ctx, { ...(await body(ctx)), profileId: parts[2] }, "PatchPermissionProfile");
+  if (ctx.req.method === "PATCH" && url.pathname === "/permissions/default-profile") return updateDefaultPermissionProfile(ctx, await body(ctx));
   if (ctx.req.method === "GET" && url.pathname === "/permissions/requests") return permissionRequests(ctx, url);
   if (ctx.req.method === "POST" && parts[0] === "permissions" && parts[2] === "resolve") return dispatch(ctx, { ...(await body(ctx)), requestId: parts[1] }, "ResolvePermission");
   if (ctx.req.method === "GET" && url.pathname === "/permissions/rules") return permissionRules(ctx, url);
@@ -1553,13 +1554,43 @@ async function testRuntime(ctx: RouteContext, runtimeId: string, input: Record<s
     const jobId = randomUUID();
     runtimeTestJobs.set(jobId, { status: "pending" });
     void runRuntimeTest(runtime).then(
-      (result) => runtimeTestJobs.set(jobId, { status: result.ok ? "completed" : "failed", result }),
+      (result) => {
+        persistRuntimeTestResult(ctx, runtimeId, runtime, result);
+        runtimeTestJobs.set(jobId, { status: result.ok ? "completed" : "failed", result });
+      },
       (error: unknown) => runtimeTestJobs.set(jobId, { status: "failed", result: { ok: false, error: error instanceof Error ? error.message : "runtime test failed", latencyMs: 0 } })
     );
     return json(ctx.res, 202, { jobId });
   }
   const result = await runRuntimeTest(runtime);
+  persistRuntimeTestResult(ctx, runtimeId, runtime, result);
   return json(ctx.res, 200, result);
+}
+
+function persistRuntimeTestResult(ctx: RouteContext, runtimeId: string, runtime: Record<string, unknown>, result: RuntimeTestResult): void {
+  const now = ctx.now?.() ?? Date.now();
+  const workspaceId = stringOrNull(runtime.workspace_id) ?? "default-workspace";
+  const status = result.ok ? "connected" : "error";
+  const version = result.ok ? result.version ?? stringOrNull(runtime.detected_version) ?? stringOrNull(runtime.version) : stringOrNull(runtime.version);
+  const detectedVersion = result.ok ? result.version ?? stringOrNull(runtime.detected_version) : stringOrNull(runtime.detected_version);
+  ctx.database.sqlite.transaction(() => {
+    ctx.database.sqlite.prepare("UPDATE runtimes SET detected_version = ?, version = ?, status = ?, updated_at = ? WHERE id = ?").run(detectedVersion, version, status, now, runtimeId);
+    ctx.eventBus.publish({
+      id: randomUUID(),
+      type: "runtime.updated",
+      schemaVersion: 1,
+      workspaceId,
+      payload: {
+        runtimeId,
+        kind: String(runtime.kind),
+        name: String(runtime.name),
+        status,
+        ...(detectedVersion !== null ? { detectedVersion } : {}),
+        ...(result.error !== undefined ? { error: result.error } : {})
+      },
+      createdAt: now
+    });
+  })();
 }
 
 function runtimeHealth(ctx: RouteContext, runtimeId: string): void {
@@ -2963,6 +2994,39 @@ function decodeProfilePayload(row: Record<string, unknown>): Record<string, unkn
   }
 }
 
+function permissionProfilesResponse(database: AgentHubDatabase): { readonly profiles: readonly Record<string, unknown>[]; readonly settings: ReturnType<typeof permissionSettings> } {
+  return {
+    profiles: (all(database, "SELECT * FROM permission_profiles ORDER BY name ASC") as Array<Record<string, unknown>>).map(decodeProfilePayload),
+    settings: permissionSettings(database)
+  };
+}
+
+function updateDefaultPermissionProfile(ctx: RouteContext, input: Record<string, unknown>): void {
+  const allowAllEnabled = input.allowAllEnabled;
+  if (typeof allowAllEnabled !== "boolean") return json(ctx.res, 400, { error: "validation_failed", message: "allowAllEnabled is required" });
+  const timestamp = ctx.now?.() ?? Date.now();
+  ctx.database.sqlite.transaction(() => {
+    const settings = setAllowAllPermissions(ctx.database, allowAllEnabled, timestamp);
+    ctx.eventBus.publish({
+      id: randomUUID(),
+      type: "permission.resolved",
+      schemaVersion: 1,
+      workspaceId: "default-workspace",
+      payload: {
+        audit: true,
+        actor: { type: "user", id: "local" },
+        action: "update",
+        target: "permission-settings:default-profile",
+        outcome: "saved",
+        defaultProfileId: settings.defaultProfileId,
+        allowAllEnabled: settings.allowAllEnabled
+      },
+      createdAt: timestamp
+    });
+  })();
+  return json(ctx.res, 200, permissionProfilesResponse(ctx.database));
+}
+
 function permissionRules(ctx: RouteContext, url: URL): void {
   const workspaceId = url.searchParams.get("workspaceId");
   if (workspaceId === null) return json(ctx.res, 200, { rules: all(ctx.database, "SELECT * FROM permission_rules ORDER BY created_at ASC") });
@@ -3318,6 +3382,15 @@ function agentContacts(ctx: RouteContext): void {
     ctx.database,
     `SELECT ab.id, ab.role_id, ab.runtime_id, ab.model_config_id, ab.contact_name, ab.avatar_url, ab.contact_description, ab.disabled_at, ab.updated_at,
             r.name AS role_name, r.capabilities, rt.kind AS runtime_kind, rt.status AS runtime_status,
+            (SELECT COUNT(*) FROM runtimes canonical
+             WHERE canonical.kind = CASE rt.kind
+               WHEN 'claude-code-default' THEN 'claude-code'
+               WHEN 'opencode-default' THEN 'opencode'
+               ELSE NULL
+             END
+               AND (canonical.workspace_id IS ab.workspace_id OR canonical.workspace_id IS rt.workspace_id OR canonical.workspace_id IS NULL)
+               AND canonical.id != rt.id
+               AND canonical.status IN ('available', 'connected', 'ready')) AS available_runtime_alias_count,
             (SELECT MAX(started_at) FROM runs WHERE runs.agent_id = ab.id OR runs.agent_id = r.id) AS last_used_at,
             (SELECT COUNT(*) FROM runs WHERE (runs.agent_id = ab.id OR runs.agent_id = r.id) AND runs.status IN ('running', 'queued', 'starting')) AS busy_count
      FROM agent_bindings ab
@@ -3396,6 +3469,7 @@ function parseCreateAgent(ctx: RouteContext, input: Record<string, unknown>): vo
 }
 
 function contactRow(row: Record<string, unknown>): Record<string, unknown> {
+  const runtimeAvailable = runtimeStatusAvailable(row.runtime_status) || Number(row.available_runtime_alias_count ?? 0) > 0;
   return {
     agentBindingId: row.id,
     displayName: stringField(row.contact_name) ?? stringField(row.role_name) ?? String(row.id),
@@ -3405,7 +3479,7 @@ function contactRow(row: Record<string, unknown>): Record<string, unknown> {
     ...(stringField(row.model_config_id) !== undefined ? { modelConfigId: stringField(row.model_config_id) } : {}),
     runtimeKind: row.runtime_kind,
     capabilities: parseJsonField(row.capabilities, []),
-    status: Number(row.busy_count ?? 0) > 0 ? "busy" : runtimeStatusAvailable(row.runtime_status) ? "available" : "offline",
+    status: Number(row.busy_count ?? 0) > 0 ? "busy" : runtimeAvailable ? "available" : "offline",
     ...(typeof row.disabled_at === "number" ? { disabledAt: row.disabled_at, isDisabled: true } : {}),
     ...(stringField(row.contact_description) !== undefined ? { description: stringField(row.contact_description) } : {}),
     ...(typeof row.last_used_at === "number" ? { lastUsedAt: row.last_used_at } : {})

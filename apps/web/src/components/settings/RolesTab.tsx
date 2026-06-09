@@ -145,7 +145,7 @@ export function RolesTab({ roles: initialRoles, modelConfigs, fetchImpl = fetch,
 
   return (
     <section className="grid gap-4 p-5 ah-roles-settings" data-testid="settings-panel-roles">
-      <div className="grid gap-4 lg:grid-cols-[minmax(280px,0.9fr)_minmax(360px,1.2fr)]">
+      <div className="grid gap-4 ah-roles-layout lg:grid-cols-[minmax(280px,0.9fr)_minmax(360px,1.2fr)]">
         <Card variant="default" className="ah-roles-list-panel">
           <Card.Header className="ah-roles-list-header">
             <div className="flex items-start justify-between gap-3">
@@ -210,7 +210,7 @@ export function RolesTab({ roles: initialRoles, modelConfigs, fetchImpl = fetch,
           </Card.Content>
         </Card>
 
-        <Card variant="default" className="border border-border bg-overlay">
+        <Card variant="default" className="ah-role-editor-card border border-border bg-overlay">
           <Card.Header>
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -220,7 +220,7 @@ export function RolesTab({ roles: initialRoles, modelConfigs, fetchImpl = fetch,
               <Chip size="sm" variant="soft" color={mode === "edit" ? "accent" : "success"}>{mode === "edit" ? "PATCH" : "POST"}</Chip>
             </div>
           </Card.Header>
-          <Card.Content className="grid gap-4">
+          <Card.Content className="grid gap-4 ah-role-editor-content">
             {mode === "edit" && selectedRole?.is_builtin ? (
               <div className="rounded-2xl border border-warning/40 bg-warning-soft p-3 text-sm text-warning-soft-foreground" role="alert">
                 {BUILTIN_ROLE_WARNING.replace("<id>", selectedRole.id)}
@@ -238,12 +238,15 @@ export function RolesTab({ roles: initialRoles, modelConfigs, fetchImpl = fetch,
             </TextField>
 
             <TextField value={draft.prompt} onChange={(value) => setDraft((current) => ({ ...current, prompt: value }))}>
-              <Label className="text-sm font-semibold">Prompt</Label>
+              <Label className="text-sm font-semibold">提示词</Label>
               <TextArea className="min-h-44" placeholder="描述这个角色的行为方式和职责" data-testid="roles-prompt-input" />
             </TextField>
 
             <div className="grid gap-2">
               <Label className="text-sm font-semibold">能力</Label>
+              <div className="rounded-xl border border-border bg-surface px-3 py-2 text-xs text-muted">
+                能力用于角色展示和团队分派，不会直接授权工具调用。文件、终端和上下文写入权限请在“许可”页配置。
+              </div>
               <div className="grid gap-2 rounded-2xl border border-border bg-surface p-3 sm:grid-cols-2" data-testid="roles-capabilities-input">
                 {WELL_KNOWN_CAPABILITY_TOKENS.map((token) => {
                   const selected = parseCapabilities(draft.capabilitiesText).includes(token);

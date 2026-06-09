@@ -38,7 +38,7 @@ describe("DiffReviewViewer", () => {
       files: [{ path: "huge.txt", fileStatus: "modified", additions: 650, deletions: 0, patch }]
     }));
 
-    expect(html).toContain("Large diff");
+    expect(html).toContain("大型 diff");
     expect(html).not.toContain("line 650");
   });
 
@@ -71,9 +71,9 @@ describe("DiffReviewViewer", () => {
     expect(html).toContain("data-comment-id=\"comment-1\"");
     expect(html).toContain("data-focused=\"true\"");
     expect(html).toContain("Check this line");
-    expect(html).toContain("Edit");
-    expect(html).toContain("Resolve");
-    expect(html).toContain("Delete");
+    expect(html).toContain("编辑");
+    expect(html).toContain("解决");
+    expect(html).toContain("删除");
   });
 
   it("renders line ranges when review comments include a selected range", () => {
@@ -97,7 +97,7 @@ describe("DiffReviewViewer", () => {
       comments: [{ id: "comment-1", filePath: "src/app.ts", lineNumber: 1, lineStart: 1, lineEnd: 2, side: "new", status: "open", reason: "Range comment" }]
     }));
 
-    expect(html).toContain("lines 1-2");
+    expect(html).toContain("行 1-2");
   });
 
   it("renders an Open file action when a view-file handler is available", () => {
@@ -121,7 +121,7 @@ describe("DiffReviewViewer", () => {
       onViewFile: () => undefined
     }));
 
-    expect(html).toContain("aria-label=\"Open file src/app.ts\"");
+    expect(html).toContain("aria-label=\"打开文件 src/app.ts\"");
     expect(html).toContain("data-view-file=\"src/app.ts\"");
   });
 

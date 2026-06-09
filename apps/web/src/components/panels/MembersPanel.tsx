@@ -1,5 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import { Avatar, Button, Chip, Input, Label, Modal, ScrollShadow, TextField } from "@heroui/react";
+import {
+  Avatar,
+  Button,
+  Chip,
+  Input,
+  Label,
+  Modal,
+  ScrollShadow,
+  Switch,
+  TextField
+} from "@heroui/react";
 import type { ParticipantViewModel, TaskViewModel } from "../../types.ts";
 import { initials } from "../../lib/format.ts";
 import { roleDisplayName } from "../../lib/roles.ts";
@@ -73,14 +83,23 @@ export function MembersPanel({
     };
   }, [addOpen, csrfFetch]);
 
-  const memberBindingIds = useMemo(() => new Set(members.map((member) => member.agentBindingId ?? member.id)), [members]);
+  const memberBindingIds = useMemo(
+    () => new Set(members.map((member) => member.agentBindingId ?? member.id)),
+    [members]
+  );
   const visibleBindings = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     return bindings
       .filter((binding) => !memberBindingIds.has(binding.id))
       .filter((binding) => {
         if (!normalizedQuery) return true;
-        return [binding.roleName, roleDisplayName(binding.roleName), binding.runtimeName, binding.runtimeKind, binding.modelName ?? ""]
+        return [
+          binding.roleName,
+          roleDisplayName(binding.roleName),
+          binding.runtimeName,
+          binding.runtimeKind,
+          binding.modelName ?? ""
+        ]
           .join(" ")
           .toLowerCase()
           .includes(normalizedQuery);
@@ -113,8 +132,17 @@ export function MembersPanel({
           <h3 className="text-base font-semibold">成员</h3>
           <p className="text-xs text-muted">此 Room 中有 {members.length} 名成员</p>
         </div>
-        <Button className="ah-pill-action" size="sm" variant="secondary" onPress={() => setAddOpen(true)} isDisabled={!roomId} aria-label="添加队友">
-          <span className="ah-pill-action-plus" aria-hidden="true">+</span>
+        <Button
+          className="ah-pill-action"
+          size="sm"
+          variant="secondary"
+          onPress={() => setAddOpen(true)}
+          isDisabled={!roomId}
+          aria-label="添加队友"
+        >
+          <span className="ah-pill-action-plus" aria-hidden="true">
+            +
+          </span>
           <span className="ah-pill-action-label">添加队友</span>
         </Button>
       </div>
@@ -135,7 +163,11 @@ export function MembersPanel({
         </ul>
       )}
 
-      {error ? <p className="text-xs text-danger" role="alert">{error}</p> : null}
+      {error ? (
+        <p className="text-xs text-danger" role="alert">
+          {error}
+        </p>
+      ) : null}
 
       {roomId ? <RoomSkillPool roomId={roomId} csrfFetch={csrfFetch} /> : null}
 
@@ -159,27 +191,42 @@ export function MembersPanel({
                       <div className="rounded-lg border border-dashed border-border bg-surface p-3 text-sm text-muted">
                         暂无可用绑定。
                       </div>
-                    ) : visibleBindings.map((binding) => (
-                      <button
-                        key={binding.id}
-                        type="button"
-                        className="grid gap-1 rounded-lg border border-border bg-surface px-3 py-2 text-left hover:bg-surface-secondary"
-                        onClick={() => addParticipant(binding.id)}
-                        disabled={pendingBindingId !== undefined}
-                      >
-                        <span className="flex min-w-0 items-center gap-2">
-                          <span className="min-w-0 flex-1 truncate text-sm font-semibold">{roleDisplayName(binding.roleName)}</span>
-                          <Chip size="sm" variant="soft" color={binding.runtimeKind === "native" ? "success" : "default"}>{binding.runtimeKind}</Chip>
-                        </span>
-                        <span className="truncate text-xs text-muted">{binding.runtimeName}{binding.modelName ? ` / ${binding.modelName}` : ""}</span>
-                      </button>
-                    ))}
+                    ) : (
+                      visibleBindings.map((binding) => (
+                        <button
+                          key={binding.id}
+                          type="button"
+                          className="grid gap-1 rounded-lg border border-border bg-surface px-3 py-2 text-left hover:bg-surface-secondary"
+                          onClick={() => addParticipant(binding.id)}
+                          disabled={pendingBindingId !== undefined}
+                        >
+                          <span className="flex min-w-0 items-center gap-2">
+                            <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+                              {roleDisplayName(binding.roleName)}
+                            </span>
+                            <Chip
+                              size="sm"
+                              variant="soft"
+                              color={binding.runtimeKind === "native" ? "success" : "default"}
+                            >
+                              {binding.runtimeKind}
+                            </Chip>
+                          </span>
+                          <span className="truncate text-xs text-muted">
+                            {binding.runtimeName}
+                            {binding.modelName ? ` / ${binding.modelName}` : ""}
+                          </span>
+                        </button>
+                      ))
+                    )}
                   </div>
                 </ScrollShadow>
               </div>
             </Modal.Body>
             <Modal.Footer>
-              <Button variant="secondary" onPress={() => setAddOpen(false)}>关闭</Button>
+              <Button variant="secondary" onPress={() => setAddOpen(false)}>
+                关闭
+              </Button>
             </Modal.Footer>
           </Modal.Dialog>
         </Modal.Container>
@@ -200,11 +247,17 @@ function RoomSkillPool({ roomId, csrfFetch }: { roomId: string; csrfFetch: typeo
     setLoading(true);
     setError(undefined);
     void Promise.all([
-      csrfFetch("/skills", { credentials: "same-origin", headers: { accept: "application/json" } }).then(async (response) => {
+      csrfFetch("/skills", {
+        credentials: "same-origin",
+        headers: { accept: "application/json" }
+      }).then(async (response) => {
         if (!response.ok) throw new Error(`Load skills failed: ${response.status}`);
         return response.json() as Promise<unknown>;
       }),
-      csrfFetch(`/rooms/${encodeURIComponent(roomId)}/skills`, { credentials: "same-origin", headers: { accept: "application/json" } }).then(async (response) => {
+      csrfFetch(`/rooms/${encodeURIComponent(roomId)}/skills`, {
+        credentials: "same-origin",
+        headers: { accept: "application/json" }
+      }).then(async (response) => {
         if (!response.ok) throw new Error(`Load room skills failed: ${response.status}`);
         return response.json() as Promise<unknown>;
       })
@@ -221,8 +274,10 @@ function RoomSkillPool({ roomId, csrfFetch }: { roomId: string; csrfFetch: typeo
     if (open) refresh();
   }, [open, roomId]);
 
-  const enabledIds = new Set(roomSkills.filter((skill) => skill.enabled !== false).map((skill) => skill.id));
-  const enabledSkills = roomSkills.filter((skill) => enabledIds.has(skill.id));
+  const enabledIds = new Set(
+    roomSkills.filter((skill) => skill.enabled !== false).map((skill) => skill.id)
+  );
+  const enabledCount = skills.filter((skill) => enabledIds.has(skill.id)).length;
 
   const setEnabled = (skillId: string, enabled: boolean) => {
     setPendingSkillId(skillId);
@@ -234,7 +289,8 @@ function RoomSkillPool({ roomId, csrfFetch }: { roomId: string; csrfFetch: typeo
       body: JSON.stringify({ skillId, enabled })
     })
       .then(async (response) => {
-        if (!response.ok) throw new Error(await responseError(response, "Update room skill failed"));
+        if (!response.ok)
+          throw new Error(await responseError(response, "Update room skill failed"));
         refresh();
       })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
@@ -242,7 +298,11 @@ function RoomSkillPool({ roomId, csrfFetch }: { roomId: string; csrfFetch: typeo
   };
 
   return (
-    <details className="ah-dashboard-section ah-skill-section" open={open} onToggle={(event) => setOpen((event.currentTarget as HTMLDetailsElement).open)}>
+    <details
+      className="ah-dashboard-section ah-skill-section"
+      open={open}
+      onToggle={(event) => setOpen((event.currentTarget as HTMLDetailsElement).open)}
+    >
       <summary className="ah-section-summary">
         <span className="ah-skill-toggle" aria-hidden="true">
           <span className="ah-skill-toggle-bars">
@@ -251,51 +311,49 @@ function RoomSkillPool({ roomId, csrfFetch }: { roomId: string; csrfFetch: typeo
             <span className="ah-skill-toggle-line ah-skill-toggle-line-3" />
           </span>
         </span>
-        <span className="min-w-0 flex-1 truncate">已分配 skills</span>
-        <span className="ah-sr-only">Room skill 池</span>
-        <Chip size="sm" variant="soft" color="accent">{enabledSkills.length}</Chip>
+        <span className="min-w-0 flex-1 truncate">Room 技能</span>
+        <span className="ah-sr-only">Room 技能开关</span>
+        <Chip size="sm" variant="soft" color={enabledCount > 0 ? "accent" : "default"}>
+          {enabledCount}/{skills.length}
+        </Chip>
       </summary>
       <div className="mt-3 grid gap-3">
-        {loading ? <p className="text-xs text-muted">正在加载 Room skills...</p> : null}
-        {error ? <p className="text-xs text-danger" role="alert">{error}</p> : null}
-        <div className="grid gap-2">
-          {enabledSkills.length === 0 ? (
-            <div className="ah-empty-row">暂无启用的 Room skills。</div>
-          ) : enabledSkills.map((skill) => (
-            <SkillRow
-              key={skill.id}
-              skill={skill}
-              actionLabel={`停用 ${skillDisplayName(skill)}`}
-              actionText="-"
-              pending={pendingSkillId !== undefined}
-              onAction={() => setEnabled(skill.id, false)}
-            />
-          ))}
-        </div>
+        {loading ? <p className="text-xs text-muted">正在加载 Room 技能...</p> : null}
+        {error ? (
+          <p className="text-xs text-danger" role="alert">
+            {error}
+          </p>
+        ) : null}
         {open ? (
-          <div className="grid gap-2">
+          <div className="grid gap-3">
             <div className="ah-subsection-label">
-              <span>Skill 池</span>
-              <Chip size="sm" variant="soft" color="default">{skills.length}</Chip>
+              <span>工作区技能池</span>
+              <Chip size="sm" variant="soft" color="default">
+                {enabledCount} 个已启用
+              </Chip>
             </div>
-            {skills.length === 0 && !loading ? <p className="text-xs text-muted">未找到工作区 skills。</p> : null}
-            {skills.map((skill) => {
-              const enabled = enabledIds.has(skill.id);
-              return (
-                <SkillRow
-                  key={skill.id}
-                  skill={skill}
-                  actionLabel={enabled ? `停用 ${skillDisplayName(skill)}` : `启用 ${skillDisplayName(skill)}`}
-                  actionText={enabled ? "-" : "+"}
-                  active={enabled}
-                  pending={pendingSkillId !== undefined}
-                  onAction={() => setEnabled(skill.id, !enabled)}
-                />
-              );
-            })}
+            {skills.length === 0 && !loading ? (
+              <p className="text-xs text-muted">当前工作区还没有可用技能。</p>
+            ) : null}
+            <div className="grid gap-2">
+              {skills.map((skill) => {
+                const enabled = enabledIds.has(skill.id);
+                return (
+                  <SkillToggleRow
+                    key={skill.id}
+                    skill={skill}
+                    enabled={enabled}
+                    pending={pendingSkillId !== undefined}
+                    onChange={(selected) => setEnabled(skill.id, selected)}
+                  />
+                );
+              })}
+            </div>
           </div>
         ) : null}
-        <p className="text-xs text-muted">在这里启用的 skills 可用于此 Room；停用后会隐藏或限制对应 skills。</p>
+        <p className="text-xs text-muted">
+          打开后，此技能会加入 Room 的默认技能池；关闭后，成员只会在单独追加时使用它。
+        </p>
       </div>
     </details>
   );
@@ -318,29 +376,53 @@ function MemberRow({
   return (
     <li className="ah-member-card">
       <div className="flex min-w-0 items-start gap-3">
-        <Avatar className="ah-agent-avatar"><Avatar.Fallback>{initials(member.name)}</Avatar.Fallback></Avatar>
+        <Avatar className="ah-agent-avatar">
+          <Avatar.Fallback>{initials(member.name)}</Avatar.Fallback>
+        </Avatar>
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <span className="min-w-0 truncate text-sm font-semibold">{roleDisplayName(member.name)}</span>
-            {isLeader ? <Chip size="sm" variant="soft" color="accent">Leader</Chip> : null}
-            <Chip size="sm" variant="soft" color={presenceColor(member.presence)}>{presenceLabel(member.presence)}</Chip>
+            <span className="min-w-0 truncate text-sm font-semibold">
+              {roleDisplayName(member.name)}
+            </span>
+            {isLeader ? (
+              <Chip size="sm" variant="soft" color="accent">
+                Leader
+              </Chip>
+            ) : null}
+            <Chip size="sm" variant="soft" color={presenceColor(member.presence)}>
+              {presenceLabel(member.presence)}
+            </Chip>
           </div>
-          <p className="mt-1 truncate text-xs text-muted">{member.role} / {member.adapterId}</p>
+          <p className="mt-1 truncate text-xs text-muted">
+            {member.role} / {member.adapterId}
+          </p>
           {task ? (
             <div className="mt-2 rounded-lg border border-border bg-surface-secondary px-2 py-1.5">
               <div className="flex min-w-0 items-center gap-2">
-                <Chip size="sm" variant="soft" color={taskStatusColor(task.status)}>{taskStatusLabel(task.status)}</Chip>
-                <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">{task.title}</span>
+                <Chip size="sm" variant="soft" color={taskStatusColor(task.status)}>
+                  {taskStatusLabel(task.status)}
+                </Chip>
+                <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
+                  {task.title}
+                </span>
               </div>
-              {task.blockerReason ? <p className="mt-1 truncate text-xs text-danger">{task.blockerReason}</p> : null}
+              {task.blockerReason ? (
+                <p className="mt-1 truncate text-xs text-danger">{task.blockerReason}</p>
+              ) : null}
             </div>
           ) : null}
           <div className="mt-2 flex flex-wrap gap-1.5">
             {capabilities.length === 0 ? (
-              <Chip size="sm" variant="soft" color="default">暂无能力</Chip>
-            ) : capabilities.map((capability) => (
-              <Chip key={capability} size="sm" variant="soft" color="default">{capability}</Chip>
-            ))}
+              <Chip size="sm" variant="soft" color="default">
+                暂无能力
+              </Chip>
+            ) : (
+              capabilities.map((capability) => (
+                <Chip key={capability} size="sm" variant="soft" color="default">
+                  {capability}
+                </Chip>
+              ))
+            )}
           </div>
           <MemberSkills roomId={roomId} participantId={member.id} csrfFetch={csrfFetch} />
         </div>
@@ -349,7 +431,15 @@ function MemberRow({
   );
 }
 
-function MemberSkills({ roomId, participantId, csrfFetch }: { roomId?: string | undefined; participantId: string; csrfFetch: typeof fetch }) {
+function MemberSkills({
+  roomId,
+  participantId,
+  csrfFetch
+}: {
+  roomId?: string | undefined;
+  participantId: string;
+  csrfFetch: typeof fetch;
+}) {
   const [open, setOpen] = useState(false);
   const [skills, setSkills] = useState<SkillSummary[]>([]);
   const [state, setState] = useState<MemberSkillState>({ effectiveSkills: [], overrides: [] });
@@ -362,14 +452,20 @@ function MemberSkills({ roomId, participantId, csrfFetch }: { roomId?: string | 
     setLoading(true);
     setError(undefined);
     void Promise.all([
-      csrfFetch("/skills", { credentials: "same-origin", headers: { accept: "application/json" } }).then(async (response) => {
-        if (!response.ok) throw new Error(`Load skills failed: ${response.status}`);
-        return response.json() as Promise<unknown>;
-      }),
-      csrfFetch(`/rooms/${encodeURIComponent(roomId)}/participants/${encodeURIComponent(participantId)}/skills`, {
+      csrfFetch("/skills", {
         credentials: "same-origin",
         headers: { accept: "application/json" }
       }).then(async (response) => {
+        if (!response.ok) throw new Error(`Load skills failed: ${response.status}`);
+        return response.json() as Promise<unknown>;
+      }),
+      csrfFetch(
+        `/rooms/${encodeURIComponent(roomId)}/participants/${encodeURIComponent(participantId)}/skills`,
+        {
+          credentials: "same-origin",
+          headers: { accept: "application/json" }
+        }
+      ).then(async (response) => {
         if (!response.ok) throw new Error(`Load member skills failed: ${response.status}`);
         return response.json() as Promise<unknown>;
       })
@@ -390,14 +486,18 @@ function MemberSkills({ roomId, participantId, csrfFetch }: { roomId?: string | 
     if (!roomId) return;
     setPending(`${mode}:${skillId}`);
     setError(undefined);
-    void csrfFetch(`/rooms/${encodeURIComponent(roomId)}/participants/${encodeURIComponent(participantId)}/skills`, {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { accept: "application/json", "content-type": "application/json" },
-      body: JSON.stringify({ skillId, mode })
-    })
+    void csrfFetch(
+      `/rooms/${encodeURIComponent(roomId)}/participants/${encodeURIComponent(participantId)}/skills`,
+      {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { accept: "application/json", "content-type": "application/json" },
+        body: JSON.stringify({ skillId, mode })
+      }
+    )
       .then(async (response) => {
-        if (!response.ok) throw new Error(await responseError(response, "Update skill override failed"));
+        if (!response.ok)
+          throw new Error(await responseError(response, "Update skill override failed"));
         refresh();
       })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
@@ -408,13 +508,17 @@ function MemberSkills({ roomId, participantId, csrfFetch }: { roomId?: string | 
     if (!roomId) return;
     setPending(`remove:${skillId}`);
     setError(undefined);
-    void csrfFetch(`/rooms/${encodeURIComponent(roomId)}/participants/${encodeURIComponent(participantId)}/skills/${encodeURIComponent(skillId)}`, {
-      method: "DELETE",
-      credentials: "same-origin",
-      headers: { accept: "application/json" }
-    })
+    void csrfFetch(
+      `/rooms/${encodeURIComponent(roomId)}/participants/${encodeURIComponent(participantId)}/skills/${encodeURIComponent(skillId)}`,
+      {
+        method: "DELETE",
+        credentials: "same-origin",
+        headers: { accept: "application/json" }
+      }
+    )
       .then(async (response) => {
-        if (!response.ok) throw new Error(await responseError(response, "Remove skill override failed"));
+        if (!response.ok)
+          throw new Error(await responseError(response, "Remove skill override failed"));
         refresh();
       })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
@@ -422,20 +526,36 @@ function MemberSkills({ roomId, participantId, csrfFetch }: { roomId?: string | 
   };
 
   return (
-    <details className="ah-member-skills" open={open} onToggle={(event) => setOpen((event.currentTarget as HTMLDetailsElement).open)}>
+    <details
+      className="ah-member-skills"
+      open={open}
+      onToggle={(event) => setOpen((event.currentTarget as HTMLDetailsElement).open)}
+    >
       <summary className="ah-member-skills-summary">
         <span>Skills</span>
-        <Chip size="sm" variant="soft" color="default">{state.effectiveSkills.length}</Chip>
+        <Chip size="sm" variant="soft" color="default">
+          {state.effectiveSkills.length}
+        </Chip>
       </summary>
       <div className="mt-3 grid gap-3">
         {loading ? <p className="text-xs text-muted">正在加载 skills...</p> : null}
-        {error ? <p className="text-xs text-danger" role="alert">{error}</p> : null}
+        {error ? (
+          <p className="text-xs text-danger" role="alert">
+            {error}
+          </p>
+        ) : null}
         <div className="flex flex-wrap gap-1">
           {state.effectiveSkills.length === 0 ? (
-            <Chip size="sm" variant="soft" color="default">暂无生效 skills</Chip>
-          ) : state.effectiveSkills.map((skill) => (
-            <Chip key={skill.id} size="sm" variant="soft" color="accent">{skillDisplayName(skill)}</Chip>
-          ))}
+            <Chip size="sm" variant="soft" color="default">
+              暂无生效 skills
+            </Chip>
+          ) : (
+            state.effectiveSkills.map((skill) => (
+              <Chip key={skill.id} size="sm" variant="soft" color="accent">
+                {skillDisplayName(skill)}
+              </Chip>
+            ))
+          )}
         </div>
         {open ? (
           <div className="grid gap-2">
@@ -445,12 +565,45 @@ function MemberSkills({ roomId, participantId, csrfFetch }: { roomId?: string | 
                 <div key={skill.id} className="ah-skill-override-row">
                   <div className="min-w-0">
                     <div className="truncate text-xs font-semibold">{skillDisplayName(skill)}</div>
-                    <div className="truncate text-xs text-muted">{override?.mode ? `覆盖：${skillOverrideModeLabel(override.mode)}` : skillDisplayDescription(skill) || "无覆盖"}</div>
+                    <div className="truncate text-xs text-muted">
+                      {override?.mode
+                        ? `覆盖：${skillOverrideModeLabel(override.mode)}`
+                        : skillDisplayDescription(skill) || "无覆盖"}
+                    </div>
                   </div>
                   <div className="flex shrink-0 flex-wrap gap-1">
-                    <Button isIconOnly size="sm" variant="secondary" isDisabled={pending !== undefined} onPress={() => writeOverride(skill.id, "add")} aria-label={`添加 ${skillDisplayName(skill)}`}>+</Button>
-                    <Button isIconOnly size="sm" variant="tertiary" isDisabled={pending !== undefined} onPress={() => writeOverride(skill.id, "restrict")} aria-label={`限制 ${skillDisplayName(skill)}`}>-</Button>
-                    {override ? <Button isIconOnly size="sm" variant="danger" isDisabled={pending !== undefined} onPress={() => removeOverride(skill.id)} aria-label={`清除 ${skillDisplayName(skill)}`}>x</Button> : null}
+                    <Button
+                      isIconOnly
+                      size="sm"
+                      variant="secondary"
+                      isDisabled={pending !== undefined}
+                      onPress={() => writeOverride(skill.id, "add")}
+                      aria-label={`添加 ${skillDisplayName(skill)}`}
+                    >
+                      +
+                    </Button>
+                    <Button
+                      isIconOnly
+                      size="sm"
+                      variant="tertiary"
+                      isDisabled={pending !== undefined}
+                      onPress={() => writeOverride(skill.id, "restrict")}
+                      aria-label={`限制 ${skillDisplayName(skill)}`}
+                    >
+                      -
+                    </Button>
+                    {override ? (
+                      <Button
+                        isIconOnly
+                        size="sm"
+                        variant="danger"
+                        isDisabled={pending !== undefined}
+                        onPress={() => removeOverride(skill.id)}
+                        aria-label={`清除 ${skillDisplayName(skill)}`}
+                      >
+                        x
+                      </Button>
+                    ) : null}
                   </div>
                 </div>
               );
@@ -462,54 +615,63 @@ function MemberSkills({ roomId, participantId, csrfFetch }: { roomId?: string | 
   );
 }
 
-function SkillRow({
+function SkillToggleRow({
   skill,
-  actionLabel,
-  actionText,
-  active,
+  enabled,
   pending,
-  onAction
+  onChange
 }: {
   skill: SkillSummary;
-  actionLabel: string;
-  actionText: string;
-  active?: boolean | undefined;
+  enabled: boolean;
   pending: boolean;
-  onAction: () => void;
+  onChange: (selected: boolean) => void;
 }) {
+  const name = skillDisplayName(skill);
   return (
-    <div className="ah-skill-row">
-      <span className="ah-skill-icon" aria-hidden="true">{skillDisplayName(skill).slice(0, 1).toUpperCase()}</span>
+    <div className={enabled ? "ah-skill-row ah-skill-row-active" : "ah-skill-row"}>
+      <span className="ah-skill-icon" aria-hidden="true">
+        {name.slice(0, 1).toUpperCase()}
+      </span>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-semibold">{skillDisplayName(skill)}</div>
-        <div className="truncate text-xs text-muted">{skillDisplayDescription(skill) || skill.origin || "无描述"}</div>
+        <div className="truncate text-sm font-semibold">{name}</div>
+        <div className="truncate text-xs text-muted">
+          {skillDisplayDescription(skill) || skill.origin || "无描述"}
+        </div>
       </div>
-      <Button
-        isIconOnly
-        size="sm"
-        variant={active ? "primary" : "secondary"}
-        className={active ? "ah-round-action ah-round-action-active" : "ah-round-action"}
-        isDisabled={pending}
-        onPress={onAction}
-        aria-label={actionLabel}
-      >
-        {actionText}
-      </Button>
+      <div className="ah-skill-row-action">
+        <span className={enabled ? "ah-skill-state is-enabled" : "ah-skill-state"}>
+          {enabled ? "已启用" : "未启用"}
+        </span>
+        <Switch
+          className="ah-room-skill-switch"
+          size="sm"
+          isSelected={enabled}
+          isDisabled={pending}
+          onChange={onChange}
+          aria-label={`${enabled ? "停用" : "启用"} ${name}`}
+        >
+          <Switch.Control>
+            <Switch.Thumb />
+          </Switch.Control>
+        </Switch>
+      </div>
     </div>
   );
 }
 
-function currentTaskForMember(member: ParticipantViewModel, tasks: ReadonlyArray<TaskViewModel>): TaskViewModel | undefined {
+function currentTaskForMember(
+  member: ParticipantViewModel,
+  tasks: ReadonlyArray<TaskViewModel>
+): TaskViewModel | undefined {
   const bindingId = member.agentBindingId ?? member.id;
-  return tasks.find((task) =>
-    task.status !== "completed"
-    && task.status !== "cancelled"
-    && (
-      task.assigneeAgentId === member.id
-      || task.assigneeBindingId === bindingId
-      || task.assigneeBindingId === member.id
-      || (member.roleId !== undefined && task.assigneeRoleId === member.roleId)
-    )
+  return tasks.find(
+    (task) =>
+      task.status !== "completed" &&
+      task.status !== "cancelled" &&
+      (task.assigneeAgentId === member.id ||
+        task.assigneeBindingId === bindingId ||
+        task.assigneeBindingId === member.id ||
+        (member.roleId !== undefined && task.assigneeRoleId === member.roleId))
   );
 }
 
@@ -578,13 +740,18 @@ function normalizeAgentBindings(payload: unknown): AgentBindingOption[] {
     const role = isRecord(row.role) ? row.role : {};
     const runtime = isRecord(row.runtime) ? row.runtime : {};
     const modelConfig = isRecord(row.modelConfig) ? row.modelConfig : undefined;
-    return [{
-      id,
-      roleName: stringValue(role.name) ?? stringValue(row.roleId ?? row.role_id) ?? id,
-      runtimeName: stringValue(runtime.name) ?? stringValue(row.runtimeId ?? row.runtime_id) ?? "Runtime",
-      runtimeKind: stringValue(runtime.kind) ?? "runtime",
-      modelName: modelConfig ? stringValue(modelConfig.name) ?? stringValue(modelConfig.model) : undefined
-    }];
+    return [
+      {
+        id,
+        roleName: stringValue(role.name) ?? stringValue(row.roleId ?? row.role_id) ?? id,
+        runtimeName:
+          stringValue(runtime.name) ?? stringValue(row.runtimeId ?? row.runtime_id) ?? "Runtime",
+        runtimeKind: stringValue(runtime.kind) ?? "runtime",
+        modelName: modelConfig
+          ? (stringValue(modelConfig.name) ?? stringValue(modelConfig.model))
+          : undefined
+      }
+    ];
   });
 }
 
@@ -594,20 +761,29 @@ function normalizeSkills(payload: unknown): SkillSummary[] {
     : isRecord(payload) && Array.isArray(payload.skills)
       ? payload.skills
       : [];
-  return rows.flatMap((row) => {
-    if (!isRecord(row)) return [];
-    const id = stringValue(row.id);
-    const name = stringValue(row.name);
-    if (!id || !name) return [];
-    return [{
-      id,
-      name,
-      description: stringValue(row.description),
-      origin: stringValue(row.origin),
-      mode: stringValue(row.mode),
-      enabled: typeof row.enabled === "boolean" ? row.enabled : typeof row.enabled === "number" ? row.enabled !== 0 : undefined
-    }];
-  }).sort((a, b) => a.name.localeCompare(b.name));
+  return rows
+    .flatMap((row) => {
+      if (!isRecord(row)) return [];
+      const id = stringValue(row.id);
+      const name = stringValue(row.name);
+      if (!id || !name) return [];
+      return [
+        {
+          id,
+          name,
+          description: stringValue(row.description),
+          origin: stringValue(row.origin),
+          mode: stringValue(row.mode),
+          enabled:
+            typeof row.enabled === "boolean"
+              ? row.enabled
+              : typeof row.enabled === "number"
+                ? row.enabled !== 0
+                : undefined
+        }
+      ];
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function normalizeMemberSkills(payload: unknown): MemberSkillState {
@@ -620,7 +796,7 @@ function normalizeMemberSkills(payload: unknown): MemberSkillState {
 
 async function responseError(response: Response, fallback: string): Promise<string> {
   try {
-    const payload = await response.clone().json() as unknown;
+    const payload = (await response.clone().json()) as unknown;
     if (isRecord(payload)) {
       const error = stringValue(payload.error);
       const message = stringValue(payload.message);

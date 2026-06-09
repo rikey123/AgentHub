@@ -17,7 +17,7 @@ describe("DiffCard", () => {
 
     expect(html).toContain("artifact-file-artifact-1-src%2Fapp.ts");
     expect(html).toContain("data-testid=\"diff-review-viewer\"");
-    expect(html).toContain("No patch text available for this file.");
+    expect(html).toContain("此文件没有可用的 patch 文本。");
   });
 
   it("labels apply explicitly and links to the full artifact review target", () => {
@@ -31,8 +31,8 @@ describe("DiffCard", () => {
       csrfFetch: vi.fn<typeof fetch>()
     }));
 
-    expect(html).toContain("Apply Diff");
-    expect(html).toContain("View Details");
+    expect(html).toContain("应用 Diff");
+    expect(html).toContain("查看详情");
     expect(html).toContain("href=\"#artifact:artifact-1:src%2Fapp.ts\"");
   });
 
@@ -47,10 +47,10 @@ describe("DiffCard", () => {
       csrfFetch: vi.fn<typeof fetch>()
     }));
 
-    expect(html).toContain("View Details");
+    expect(html).toContain("查看详情");
     expect(html).toContain("href=\"#artifact:artifact-1:src%2Fapp.ts\"");
-    expect(html).not.toContain("Apply Diff");
-    expect(html).not.toContain("Reject");
+    expect(html).not.toContain("应用 Diff");
+    expect(html).not.toContain("拒绝");
   });
 
   it("does not render a details link when no file target is available", () => {
@@ -64,7 +64,7 @@ describe("DiffCard", () => {
       csrfFetch: vi.fn<typeof fetch>()
     }));
 
-    expect(html).not.toContain("View Details");
+    expect(html).not.toContain("查看详情");
     expect(html).not.toContain("href=\"#artifact:artifact-1\"");
   });
 

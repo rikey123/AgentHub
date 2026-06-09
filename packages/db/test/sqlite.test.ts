@@ -38,6 +38,7 @@ const drizzleTables = [
   { exportName: "contextItems", table: schema.contextItems },
   { exportName: "contextVersions", table: schema.contextVersions },
   { exportName: "permissionProfiles", table: schema.permissionProfiles },
+  { exportName: "permissionSettings", table: schema.permissionSettings },
   { exportName: "permissionRules", table: schema.permissionRules },
   { exportName: "permissionRequests", table: schema.permissionRequests },
   { exportName: "interventions", table: schema.interventions },
@@ -226,6 +227,7 @@ const drizzleSmokeRows = {
   },
   contextVersions: { contextId: "ctx_drizzle", version: 1, payload: "{}", changedBy: "user", changedAt: 1 },
   permissionProfiles: { id: "pp_drizzle", name: "Strict", payload: "{}", createdAt: 1, updatedAt: 1 },
+  permissionSettings: { key: "drizzle_default_profile_id", value: "builder-strict", updatedAt: 1 },
   permissionRules: {
     id: "rule_drizzle",
     workspaceId: "ws_drizzle",
@@ -434,7 +436,8 @@ function applyAllMigrations(): void {
     "0016_artifact_reviews.sql",
     "0017_artifact_review_comments.sql",
     "0018_artifact_lifecycle.sql",
-    "0019_v12.sql"
+    "0019_v12.sql",
+    "0020_permission_settings.sql"
   ]);
 }
 
@@ -548,7 +551,7 @@ describe("SQLite pragmas and migrations", () => {
 
   test("applies all migrations once and records them", () => {
     applyAllMigrations();
-    expect(countRows("__agenthub_migrations")).toBe(19);
+    expect(countRows("__agenthub_migrations")).toBe(20);
     expect(applyMigrations(currentDb())).toEqual([]);
 
     expect(tableNames()).toEqual([
@@ -582,6 +585,7 @@ describe("SQLite pragmas and migrations", () => {
       "permission_profiles",
       "permission_requests",
       "permission_rules",
+      "permission_settings",
       "role_drafts",
       "roles",
       "room_participants",

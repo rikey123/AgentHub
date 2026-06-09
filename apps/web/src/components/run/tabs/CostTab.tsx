@@ -50,7 +50,7 @@ export function CostTab({ run, workspaceId = "default-workspace", csrfFetch }: C
   }, [run.agentId, run.cost, workspaceId, fetcher]);
 
   if (!run.cost) {
-    return <div className="p-6 text-center text-sm text-muted">No cost recorded yet.</div>;
+    return <div className="p-6 text-center text-sm text-muted">暂无成本记录。</div>;
   }
   const c = run.cost;
   const rows: Array<[string, string]> = [
@@ -73,7 +73,7 @@ export function CostTab({ run, workspaceId = "default-workspace", csrfFetch }: C
     <div className="flex flex-col gap-3 p-3">
       <Card variant="transparent" className="border border-border">
         <Card.Header>
-          <Card.Title>Run cost</Card.Title>
+          <Card.Title>运行成本</Card.Title>
           <Chip size="sm" variant="soft" color="default">{run.status}</Chip>
         </Card.Header>
         <Card.Content>

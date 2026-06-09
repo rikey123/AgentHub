@@ -27,15 +27,18 @@ describe("MembersPanel team management contract", () => {
       }
     ];
 
-    const html = renderToStaticMarkup(createElement(MembersPanel, {
-      roomId: "room_1",
-      members,
-      tasks,
-      csrfFetch: vi.fn<typeof fetch>()
-    }));
+    const html = renderToStaticMarkup(
+      createElement(MembersPanel, {
+        roomId: "room_1",
+        members,
+        tasks,
+        csrfFetch: vi.fn<typeof fetch>()
+      })
+    );
 
     expect(html).toContain("添加队友");
-    expect(html).toContain("Room skill 池");
+    expect(html).toContain("Room 技能");
+    expect(html).toContain("Room 技能开关");
     expect(html).toContain("构建者");
     expect(html).toContain("code.edit");
     expect(html).toContain("file.write");

@@ -113,7 +113,7 @@ describe("RuntimesTab REST integration contract", () => {
   it("surfaces delete conflicts when a runtime still has bindings", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => jsonResponse(409, { error: "runtime_has_bindings" }));
 
-    await expect(deleteRuntimeConfig(fetchImpl, "custom-acp-bound")).rejects.toThrow("Runtime is still used by agent bindings");
+    await expect(deleteRuntimeConfig(fetchImpl, "custom-acp-bound")).rejects.toThrow("该运行时仍被 agent bindings 使用");
     expect(fetchImpl).toHaveBeenCalledWith("/runtimes/custom-acp-bound", expect.objectContaining({ method: "DELETE" }));
   });
 
@@ -150,7 +150,7 @@ describe("RuntimesTab REST integration contract", () => {
 
     expect(html).toContain("Codex");
     expect(html).toContain("codex");
-    expect(html).toContain('aria-label="Runtime maturity: experimental"');
+    expect(html).toContain('aria-label="运行时成熟度：实验性"');
   });
 });
 

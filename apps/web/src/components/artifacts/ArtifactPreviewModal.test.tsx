@@ -43,7 +43,7 @@ describe("ArtifactPreviewContent", () => {
       name: "archive.zip"
     }));
 
-    expect(html).toContain("Preview is not available");
+    expect(html).toContain("暂时无法预览");
     expect(html).toContain("archive.zip");
   });
 
@@ -107,7 +107,7 @@ describe("ArtifactPreviewContent", () => {
     const html = renderToStaticMarkup(createElement(ArtifactPreviewError, { message: "Failed to load", onRetry: () => undefined }));
 
     expect(html).toContain("Failed to load");
-    expect(html).toContain("Retry");
+    expect(html).toContain("重试");
   });
 
   it("shows preview editor history raw tabs for editable text artifacts", () => {
@@ -130,11 +130,11 @@ describe("ArtifactPreviewContent", () => {
       downloadUrl: "/artifacts/artifact_1/files/landing.html/raw"
     }));
 
-    expect(html).toContain("Artifact Studio");
-    expect(html).toContain("Preview");
-    expect(html).toContain("Editor");
-    expect(html).toContain("History");
-    expect(html).toContain("Raw");
+    expect(html).toContain("产物工作台");
+    expect(html).toContain("预览");
+    expect(html).toContain("编辑器");
+    expect(html).toContain("历史");
+    expect(html).toContain("原始");
   });
 
   it("renders the Artifact Studio editor panel for editable artifacts", () => {
@@ -149,10 +149,10 @@ describe("ArtifactPreviewContent", () => {
       initialTab: "editor"
     }));
 
-    expect(html).toContain("Monaco editor");
+    expect(html).toContain("Monaco 编辑器");
     expect(html).toContain("data-testid=\"artifact-monaco-editor\"");
     expect(html).not.toContain("<textarea");
-    expect(html).toContain("Reference in Chat");
+    expect(html).toContain("引用到聊天");
     expect(html).toContain("data-reference-token=\"@artifact:artifact_1#L1-L1\"");
   });
 
@@ -166,11 +166,11 @@ describe("ArtifactPreviewContent", () => {
       downloadUrl: "/artifacts/artifact_2/files/deck.pptx/raw"
     }));
 
-    expect(html).toContain("Artifact Studio");
-    expect(html).toContain("Preview");
-    expect(html).toContain("History");
-    expect(html).toContain("Raw");
-    expect(html).not.toContain("Editor");
+    expect(html).toContain("产物工作台");
+    expect(html).toContain("预览");
+    expect(html).toContain("历史");
+    expect(html).toContain("原始");
+    expect(html).not.toContain("编辑器");
   });
 
   it("renders binary metadata in Artifact Studio raw view", () => {
@@ -185,7 +185,7 @@ describe("ArtifactPreviewContent", () => {
       initialTab: "raw"
     }));
 
-    expect(html).toContain("Binary metadata");
+    expect(html).toContain("二进制元数据");
     expect(html).toContain("deck.pptx");
     expect(html).toContain("1.0 KB");
   });
@@ -278,9 +278,9 @@ describe("ArtifactPreviewContent", () => {
 
     expect(html).toContain("v1");
     expect(html).toContain("initial page");
-    expect(html).toContain("Compare");
-    expect(html).toContain("Restore");
-    expect(html).not.toContain("Download");
+    expect(html).toContain("对比");
+    expect(html).toContain("恢复");
+    expect(html).not.toContain("下载");
   });
 
   it("renders binary version history rows with restore and binary download affordances", () => {
@@ -301,9 +301,9 @@ describe("ArtifactPreviewContent", () => {
     expect(html).toContain("deck.pptx");
     expect(html).toContain("1.0 KB");
     expect(html).toContain("abc123");
-    expect(html).toContain("Restore");
-    expect(html).toContain("Download");
-    expect(html).not.toContain("Diff");
+    expect(html).toContain("恢复");
+    expect(html).toContain("下载");
+    expect(html).not.toContain("差异");
   });
 
   it("renders raw text for text artifacts and metadata for binary artifacts", () => {
@@ -326,7 +326,7 @@ describe("ArtifactPreviewContent", () => {
     expect(binary).toContain("deck.pptx");
     expect(binary).toContain("application/vnd.openxmlformats-officedocument.presentationml.presentation");
     expect(binary).toContain("abc123");
-    expect(binary).toContain("Download");
+    expect(binary).toContain("下载");
     expect(binary).not.toContain("hello raw");
   });
 

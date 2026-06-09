@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  RoleGeneratorModal,
   buildGeneratedRoleInput,
   createGeneratedRole,
   deleteRoleGenerationJob,
@@ -10,6 +11,23 @@ import {
 import { upsertRole, type RoleConfig } from "./RolesTab.tsx";
 
 describe("RoleGeneratorModal REST integration contract", () => {
+  it("renders Chinese copy with a scroll-safe body and separated footer", () => {
+    const componentSource = RoleGeneratorModal.toString();
+
+    expect(componentSource).toContain("用 AI 生成角色");
+    expect(componentSource).toContain("模型配置");
+    expect(componentSource).toContain("描述");
+    expect(componentSource).toContain("取消");
+    expect(componentSource).toContain("生成");
+    expect(componentSource).toContain("保存");
+    expect(componentSource).toContain("role-generator-body");
+    expect(componentSource).toContain("overflow-y-auto");
+    expect(componentSource).toContain("role-generator-footer");
+    expect(componentSource).not.toContain("Generate role with AI");
+    expect(componentSource).not.toContain("Model config");
+    expect(componentSource).not.toContain("Draft preview");
+  });
+
   it("generates a draft, polls every 500ms, saves a real role, and removes the draft job", async () => {
     vi.useFakeTimers();
     const previousEventSource = globalThis.EventSource;

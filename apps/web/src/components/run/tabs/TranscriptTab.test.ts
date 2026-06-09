@@ -18,9 +18,25 @@ describe("TranscriptTab empty state", () => {
     }), "run-failed");
 
     expect(state).toEqual({
-      title: "Run failed before a transcript was created.",
+      title: "运行在创建转录前失败。",
       description: "No available channel for model gpt-5.4-mini",
       tone: "danger"
+    });
+  });
+
+  it("shows a localized empty state while the run has no transcript yet", () => {
+    expect(getTranscriptEmptyState(roomFixture({
+      runs: [
+        {
+          id: "run-running",
+          agentId: "agent-pm",
+          agentName: "Project Manager",
+          status: "running"
+        }
+      ]
+    }), "run-running")).toEqual({
+      title: "此运行暂无转录。",
+      tone: "default"
     });
   });
 });
