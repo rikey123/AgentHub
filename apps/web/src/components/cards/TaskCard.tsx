@@ -13,7 +13,7 @@ export function TaskCard({ card }: { card: TaskCardData }) {
           <Chip size="sm" variant="soft" color={taskStatusColor(String(card.status))}>{String(card.status)}</Chip>
         </div>
         {card.assigneeAgentId ? (
-          <Card.Description>Assigned to {card.assigneeAgentId}</Card.Description>
+          <Card.Description>负责人：{card.assigneeAgentId}</Card.Description>
         ) : null}
       </Card.Header>
     </Card>

@@ -14,9 +14,9 @@ export function TypingIndicator({ runId, agentName, status, mode, turnIndex, onS
   const isAssisted = mode === "assisted";
   const isCancelling = status === "cancelling";
   const label = isAssisted
-    ? `${agentName} is ${isCancelling ? "stopping" : "speaking"}`
-    : `${agentName} is`;
-  const chipLabel = isCancelling ? "Stopping discussion" : isAssisted && turnIndex !== undefined ? `Group turn ${turnIndex}` : status;
+    ? `${agentName}${isCancelling ? " 正在停止" : " 正在发言"}`
+    : `${agentName} 正在处理`;
+  const chipLabel = isCancelling ? "正在停止讨论" : isAssisted && turnIndex !== undefined ? `第 ${turnIndex} 轮` : runStatusLabel(status);
   const canStop = isAssisted && !isCancelling && runId !== undefined && onStopDiscussion !== undefined;
   return (
     <div className="px-4 py-2" role="status" aria-live="polite" data-chat-typing-indicator>
@@ -34,10 +34,18 @@ export function TypingIndicator({ runId, agentName, status, mode, turnIndex, onS
         <Spinner size="sm" color="current" />
         {canStop ? (
           <Button size="sm" variant="danger-soft" onPress={() => onStopDiscussion(runId)}>
-            Stop discussion
+            停止讨论
           </Button>
         ) : null}
       </div>
     </div>
   );
+}
+
+function runStatusLabel(status: string): string {
+  if (status === "starting") return "启动中";
+  if (status === "running") return "运行中";
+  if (status === "cancelling") return "停止中";
+  if (status === "queued") return "排队中";
+  return status;
 }

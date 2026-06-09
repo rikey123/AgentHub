@@ -120,24 +120,24 @@ export function replyPreviewForMessage(message: MessageViewModel): string {
 function messagePartPreview(part: MessageViewModel["parts"][number] | undefined): string | undefined {
   if (part === undefined) return undefined;
   if (part.type === "text") return part.text.trim() || undefined;
-  if (part.type === "code") return part.lang ? `Code - ${part.lang}` : "Code";
-  if (part.type === "attachment") return `Attachment - ${part.name}`;
-  if (part.type === "tool_call") return `Tool call - ${part.name}`;
-  if (part.type === "tool_result") return `Tool result - ${part.ok ? "ok" : "error"}`;
+  if (part.type === "code") return part.lang ? `代码 - ${part.lang}` : "代码";
+  if (part.type === "attachment") return `附件 - ${part.name}`;
+  if (part.type === "tool_call") return `工具调用 - ${part.name}`;
+  if (part.type === "tool_result") return `工具结果 - ${part.ok ? "成功" : "失败"}`;
   if (part.type === "card") return cardPreview(part.card);
   return undefined;
 }
 
 function cardPreview(card: MessageCard): string {
-  if (card.type === "artifact") return `Artifact - ${card.title}`;
-  if (card.type === "deployment") return `Deployment - ${card.status}`;
-  if (card.type === "diff") return `Diff - ${card.files.length} file${card.files.length === 1 ? "" : "s"}`;
-  if (card.type === "context") return `Context - ${card.title}`;
-  if (card.type === "task") return `Task - ${card.title}`;
-  if (card.type === "preview") return `Preview - ${card.kind}`;
-  if (card.type === "permission") return `Permission - ${card.status}`;
-  if (card.type === "intervention") return `Intervention - ${card.reason}`;
-  return `Card - ${card.type}`;
+  if (card.type === "artifact") return `产物 - ${card.title}`;
+  if (card.type === "deployment") return `部署 - ${card.status}`;
+  if (card.type === "diff") return `Diff - ${card.files.length} 个文件`;
+  if (card.type === "context") return `上下文 - ${card.title}`;
+  if (card.type === "task") return `任务 - ${card.title}`;
+  if (card.type === "preview") return `预览 - ${card.kind}`;
+  if (card.type === "permission") return `权限 - ${card.status}`;
+  if (card.type === "intervention") return `干预 - ${card.reason}`;
+  return `卡片 - ${card.type}`;
 }
 
 export function workbenchCenterModeForRail(rail: RailItem, hasActiveRoom: boolean): "home" | "room" | "contacts" | "runs" | "tasks" | "artifacts" {
@@ -332,7 +332,7 @@ export default function App() {
     setBannerError(undefined);
     try {
       const response = await csrfFetch(`/rooms/${encodeURIComponent(activeRoomId)}/discussion/stop`, { method: "POST" });
-      if (!response.ok) throw new Error(`Stop discussion failed with ${response.status}`);
+      if (!response.ok) throw new Error(`停止讨论失败（${response.status}）`);
     } catch (err) {
       setBannerError(err instanceof Error ? err.message : String(err));
     }
@@ -383,7 +383,7 @@ export default function App() {
   }, [csrfFetch]);
 
   const handleDelete = useCallback(async (id: string) => {
-    if (!window.confirm("Delete this message?")) return;
+    if (!window.confirm("删除这条消息？")) return;
     await csrfFetch(`/messages/${encodeURIComponent(id)}`, { method: "DELETE" });
   }, [csrfFetch]);
 
@@ -422,7 +422,7 @@ export default function App() {
     setBannerError(undefined);
     try {
       const response = await csrfFetch(`/rooms/${encodeURIComponent(roomId)}/unstall`, { method: "POST" });
-      if (!response.ok) throw new Error(`Unstall failed with ${response.status}`);
+      if (!response.ok) throw new Error(`解除阻塞失败（${response.status}）`);
     } catch (err) {
       setBannerError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -482,15 +482,15 @@ export default function App() {
 
   const commands = useMemo<PaletteCommand[]>(() => {
     const list: PaletteCommand[] = [
-      { id: "new-room", label: "新建 room", group: "Rooms", perform: openNewRoom },
+      { id: "new-room", label: "新建房间", group: "房间", perform: openNewRoom },
       { id: "open-workflow", label: "打开工作流画布", group: "视图", keywords: ["workflow", "canvas", "agent", "graph"], perform: openWorkflowCanvas },
       { id: "open-settings", label: "打开设置", group: "设置", keywords: ["roles", "runtimes", "models", "permissions", "workspace", "mcp"], perform: openSettings },
-      { id: "toggle-left", label: leftCollapsed ? "显示 rooms 面板" : "隐藏 rooms 面板", group: "视图", perform: () => setLeftCollapsed((v) => !v) },
+      { id: "toggle-left", label: leftCollapsed ? "显示房间列表" : "隐藏房间列表", group: "视图", perform: () => setLeftCollapsed((v) => !v) },
       { id: "toggle-right", label: rightCollapsed ? "显示工作台面板" : "隐藏工作台面板", group: "视图", perform: () => setRightCollapsed((v) => !v) },
       { id: "panel-context", label: "工作台：上下文", group: "视图", perform: () => { setRightCollapsed(false); setSidePanelTab("context"); } },
       { id: "panel-tasks", label: "工作台：任务", group: "视图", perform: () => { setRightCollapsed(false); setSidePanelTab("tasks"); } },
       { id: "panel-members", label: "工作台：成员", group: "视图", perform: () => { setRightCollapsed(false); setSidePanelTab("members"); } },
-      { id: "panel-debug", label: "工作台：DEBUG", group: "视图", perform: () => { setRightCollapsed(false); setSidePanelTab("debug"); } },
+      { id: "panel-debug", label: "工作台：诊断", group: "视图", perform: () => { setRightCollapsed(false); setSidePanelTab("debug"); } },
       { id: "panel-cost", label: "工作台：计费", group: "视图", perform: () => { setRightCollapsed(false); setSidePanelTab("cost"); } },
       { id: "theme-light", label: "主题：浅色", group: "主题", keywords: ["theme", "light"], perform: () => setTheme("light") },
       { id: "theme-dark", label: "主题：深色", group: "主题", keywords: ["theme", "dark"], perform: () => setTheme("dark") },
@@ -502,8 +502,8 @@ export default function App() {
     for (const room of rooms) {
       list.push({
         id: `room-${room.id}`,
-        label: `打开 room · ${room.title}`,
-        group: "Rooms",
+        label: `打开房间 · ${room.title}`,
+        group: "房间",
         keywords: [room.id, room.mode],
         perform: () => openRoom(room.id)
       });
@@ -516,11 +516,11 @@ export default function App() {
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
       {(activeRoom.skillErrors?.length ?? 0) > 0 ? (
         <div className="shrink-0 border-b border-danger-200 bg-danger-50 px-4 py-3 text-sm text-danger-900 dark:border-danger-800 dark:bg-danger-950/40 dark:text-danger-100">
-          <div className="font-semibold">Skill loading errors</div>
+          <div className="font-semibold">技能加载异常</div>
           <div className="mt-2 space-y-2">
             {activeRoom.skillErrors!.map((skillError) => (
               <div key={`${skillError.runId}:${skillError.skillId}:${skillError.createdAt}`}>
-                Skill '{skillError.skillName ?? skillError.skillId}' failed to load. The run has been stopped.
+                技能“{skillError.skillName ?? skillError.skillId}”加载失败，本次运行已停止。
                 <div className="text-xs opacity-80">{skillError.error}</div>
               </div>
             ))}
@@ -691,7 +691,7 @@ function contextItemStatus(status: unknown): ContextItemViewModel["status"] {
 
 function contextItemTitle(type: string, content: string): string {
   const prefix: Record<string, string> = {
-    artifact: "Artifact",
+    artifact: "产物",
     constraint: "约束",
     decision: "决策",
     fact: "事实",
@@ -718,13 +718,13 @@ function StalledRoomBanner({ reason, taskIds, tasks, pending, onDismiss }: { rea
     <div className="shrink-0 border-b border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-950 dark:border-warning-800 dark:bg-warning-950/35 dark:text-warning-100" role="status">
       <div className="flex flex-wrap items-start gap-3">
         <div className="min-w-0 flex-1">
-          <div className="font-semibold">Room stalled{reason ? `: ${reason.replace(/_/gu, " ")}` : ""}</div>
+          <div className="font-semibold">房间已暂停{reason ? `：${reason.replace(/_/gu, " ")}` : ""}</div>
           <div className="mt-1 text-xs opacity-85">
-            {labels.length > 0 ? `Tasks: ${labels.join(", ")}` : "No task ids were reported."}
+            {labels.length > 0 ? `相关任务：${labels.join("、")}` : "未报告相关任务。"}
           </div>
         </div>
         <Button size="sm" variant="secondary" isPending={pending} onPress={onDismiss}>
-          Dismiss
+          知道了
         </Button>
       </div>
     </div>

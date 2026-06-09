@@ -21,22 +21,22 @@ function roomInitials(title: string) {
 
 function relativeRoomTime(room: RoomViewModel) {
   const latestActivity = latestRoomActivity(room);
-  if (latestActivity === undefined) return "No messages";
+  if (latestActivity === undefined) return "暂无消息";
   const minutes = Math.max(0, Math.round((Date.now() - latestActivity) / 60000));
-  if (minutes < 1) return "Just now";
-  if (minutes < 60) return `${minutes}m`;
+  if (minutes < 1) return "刚刚";
+  if (minutes < 60) return `${minutes} 分钟前`;
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}h`;
-  return `${Math.round(hours / 24)}d`;
+  if (hours < 24) return `${hours} 小时前`;
+  return `${Math.round(hours / 24)} 天前`;
 }
 
 function roomPreview(room: RoomViewModel) {
   const latest = room.messages[room.messages.length - 1];
   if (latest?.text.trim()) return latest.text.trim();
-  if (room.pendingTurns.length > 0) return `${room.pendingTurns.length} queued turn${room.pendingTurns.length === 1 ? "" : "s"}`;
-  if (room.runs.some((run) => run.status === "running" || run.status === "starting")) return "Agents are working";
-  if (room.participants.length > 0) return `${room.participants.length} members ready`;
-  return "Start the room conversation";
+  if (room.pendingTurns.length > 0) return `${room.pendingTurns.length} 条消息排队中`;
+  if (room.runs.some((run) => run.status === "running" || run.status === "starting")) return "Agent 正在工作";
+  if (room.participants.length > 0) return `${room.participants.length} 名成员就绪`;
+  return "开始房间对话";
 }
 
 function participantContactLabels(room: RoomViewModel): string[] {
@@ -111,8 +111,8 @@ export function RoomList({ rooms, activeRoomId, onSelect, onCreate, onTogglePin,
       <div className="border-b border-border px-3 pb-3 pt-3">
         <div className="mb-3 flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted">Workspace</p>
-            <h2 className="truncate text-lg font-semibold">Rooms</h2>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted">工作区</p>
+            <h2 className="truncate text-lg font-semibold">房间</h2>
           </div>
           <Button size="sm" variant="primary" className="rounded-full px-4" onPress={onCreate} aria-label="新建房间" data-testid="room-list-create-room">
             + 新建
@@ -138,16 +138,16 @@ export function RoomList({ rooms, activeRoomId, onSelect, onCreate, onTogglePin,
 
         {totalPending > 0 ? (
           <div className="mt-3 rounded-xl border border-warning bg-warning-soft px-3 py-2 text-xs text-warning-soft-foreground">
-            {totalPending} queued turn{totalPending === 1 ? "" : "s"} waiting across rooms.
+            共有 {totalPending} 条消息正在跨房间排队。
           </div>
         ) : null}
       </div>
 
       <ScrollShadow className="flex-1 overflow-auto" orientation="vertical">
-        <ul aria-label="Rooms" className="flex flex-col gap-2 p-2">
+        <ul aria-label="房间列表" className="flex flex-col gap-2 p-2">
           {filtered.length === 0 ? (
             <li className="rounded-2xl border border-dashed border-border bg-overlay/60 px-4 py-8 text-center text-sm text-muted">
-              {query ? "没有查找到相应的房间。" : "No rooms yet. Create one to start."}
+              {query ? "没有查找到相应的房间。" : "还没有房间。新建一个房间开始协作。"}
             </li>
           ) : null}
           {filtered.map((room) => {
@@ -172,7 +172,7 @@ export function RoomList({ rooms, activeRoomId, onSelect, onCreate, onTogglePin,
                 <button
                   type="button"
                   aria-current={active ? "true" : undefined}
-                  aria-label={`Open room ${room.title}`}
+                  aria-label={`打开房间 ${room.title}`}
                   className="flex w-full gap-3 rounded-xl text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                   onClick={() => onSelect(room.id)}
                 >
@@ -200,11 +200,11 @@ export function RoomList({ rooms, activeRoomId, onSelect, onCreate, onTogglePin,
                       size="sm"
                       variant={isPinned ? "secondary" : "ghost"}
                       className="h-7 px-2 text-xs"
-                      aria-label={`${isPinned ? "Unpin" : "Pin"} room ${room.title}`}
+                      aria-label={`${isPinned ? "取消置顶" : "置顶"}房间 ${room.title}`}
                       data-testid={`room-list-${isPinned ? "unpin" : "pin"}-${room.id}`}
                       onPress={() => onTogglePin(room.id, isPinned)}
                     >
-                      {isPinned ? "Unpin" : "Pin"}
+                      {isPinned ? "取消置顶" : "置顶"}
                     </Button>
                   ) : null}
                   <Chip size="sm" variant="soft" color="default">{roomModeLabel(room.mode)}</Chip>
@@ -234,14 +234,14 @@ export function RoomList({ rooms, activeRoomId, onSelect, onCreate, onTogglePin,
             <li data-testid="room-list-archive-entry" className="rounded-2xl border border-border bg-overlay/55 px-3 py-3">
               <details>
                 <summary className="cursor-pointer text-sm font-semibold text-muted">
-                  Archived rooms ({archivedRooms.length})
+                  已归档房间（{archivedRooms.length}）
                 </summary>
-                <ul className="mt-3 flex flex-col gap-2" aria-label="Archived rooms">
+                <ul className="mt-3 flex flex-col gap-2" aria-label="已归档房间">
                   {archivedRooms.map((room) => (
                     <li key={room.id} className="rounded-xl border border-border/70 bg-surface/70">
                       <button
                         type="button"
-                        aria-label={`Open archived room ${room.title}`}
+                        aria-label={`打开已归档房间 ${room.title}`}
                         className="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm text-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                         onClick={() => onSelect(room.id)}
                       >

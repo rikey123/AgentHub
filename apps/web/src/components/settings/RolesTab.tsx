@@ -166,7 +166,7 @@ export function RolesTab({ roles: initialRoles, modelConfigs, fetchImpl = fetch,
           <Card.Content>
             {roles.length === 0 ? (
               <div className="ah-roles-empty">
-                尚未从 <code className="ah-mono">/roles</code> 返回角色。
+                当前还没有可用角色。
               </div>
             ) : (
               <ul className="ah-roles-list" aria-label="角色">
@@ -215,9 +215,9 @@ export function RolesTab({ roles: initialRoles, modelConfigs, fetchImpl = fetch,
             <div className="flex items-start justify-between gap-3">
               <div>
                 <Card.Title>{mode === "edit" && selectedRole ? `编辑 ${roleDisplayName(selectedRole.name)}` : "创建角色"}</Card.Title>
-                <Card.Description>通过 REST 保存；不附加 SSE 订阅。</Card.Description>
+                <Card.Description>保存后即可用于联系人、房间和工作流节点。</Card.Description>
               </div>
-              <Chip size="sm" variant="soft" color={mode === "edit" ? "accent" : "success"}>{mode === "edit" ? "PATCH" : "POST"}</Chip>
+              <Chip size="sm" variant="soft" color={mode === "edit" ? "accent" : "success"}>{mode === "edit" ? "编辑中" : "新建"}</Chip>
             </div>
           </Card.Header>
           <Card.Content className="grid gap-4 ah-role-editor-content">
@@ -298,7 +298,7 @@ export function RolesTab({ roles: initialRoles, modelConfigs, fetchImpl = fetch,
             </Modal.Header>
             <Modal.Body>
               <p className="text-sm text-muted">
-                确认删除 <span className="font-semibold text-foreground">{deleteTarget?.name}</span>？如果仍有 agent bindings 引用该角色，daemon 会拒绝删除。
+                确认删除 <span className="font-semibold text-foreground">{deleteTarget?.name}</span>？如果仍有 Agent 联系人引用该角色，系统会阻止删除。
               </p>
             </Modal.Body>
             <Modal.Footer className="gap-2">

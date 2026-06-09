@@ -33,7 +33,7 @@ async function issueMobileToken(csrfFetch: typeof fetch): Promise<ConnectionConf
   });
   if (!response.ok) throw new Error(`签发失败（${response.status}）`);
   const payload = (await response.json()) as IssueResult;
-  if (payload.connection === undefined) throw new Error("daemon 未返回连接配置");
+  if (payload.connection === undefined) throw new Error("本地服务未返回连接配置");
   return payload.connection;
 }
 
@@ -111,7 +111,7 @@ export function MobilePairingModal({ isOpen, onOpenChange, csrfFetch }: MobilePa
 
                 {isLoopback(state.connection.host) && (
                   <p className="rounded-lg border border-warning/40 bg-warning-soft p-2.5 text-xs text-warning-soft-foreground">
-                    当前 daemon 绑定在 {state.connection.host}，手机无法直连。请将 daemon 绑定到局域网 IP（如 192.168.x.x，并配置 token 与 remote.enabled），手机与电脑连同一 Wi-Fi 后再验证。
+                    当前本地服务绑定在 {state.connection.host}，手机无法直连。请在远程访问设置中启用移动端连接，并将监听地址改为局域网 IP（如 192.168.x.x）；手机与电脑连同一 Wi-Fi 后再验证。
                   </p>
                 )}
               </div>

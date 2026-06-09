@@ -28,7 +28,7 @@ export function AppShell({ topBar, rail, rooms, center, panel, panelCollapsed, r
         style={{ gridTemplateColumns: cols, transition: "grid-template-columns 200ms ease" }}
       >
         <aside aria-label="Primary navigation" className="border-r border-border bg-surface/90 overflow-hidden backdrop-blur">{rail}</aside>
-        <aside aria-label="Rooms panel" className="border-r border-border bg-surface/85 overflow-hidden backdrop-blur">
+        <aside aria-label="房间列表" className="border-r border-border bg-surface/85 overflow-hidden backdrop-blur">
           <div className={roomsCollapsed ? "hidden" : "h-full"}>{rooms}</div>
         </aside>
         <main id="agenthub-workbench-main" className="min-w-0 overflow-hidden">{center}</main>

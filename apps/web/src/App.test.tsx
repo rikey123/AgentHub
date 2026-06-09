@@ -261,7 +261,7 @@ describe("App integration wiring", () => {
       text: "",
       parts: [{ type: "card", seq: 1, card: { type: "artifact", artifactId: "artifact_1", kind: "document", title: "Launch plan", version: 2 } }],
       createdAt: 1_700_000_000
-    })).toBe("Builder: Artifact - Launch plan");
+    })).toBe("Builder: 产物 - Launch plan");
 
     expect(replyPreviewForMessage({
       id: "message_2",
@@ -274,7 +274,7 @@ describe("App integration wiring", () => {
       text: "",
       parts: [{ type: "attachment", seq: 1, fileId: "file_1", name: "requirements.md", mimeType: "text/markdown", sizeBytes: 1024 }],
       createdAt: 1_700_000_001
-    })).toBe("You: Attachment - requirements.md");
+    })).toBe("You: 附件 - requirements.md");
   });
 
   it("builds Reply previews from the first useful message part", () => {
@@ -292,7 +292,7 @@ describe("App integration wiring", () => {
         { type: "attachment", seq: 2, fileId: "file_1", name: "requirements.md", mimeType: "text/markdown", sizeBytes: 1024 }
       ],
       createdAt: 1_700_000_000
-    })).toBe("Builder: Attachment - requirements.md");
+    })).toBe("Builder: 附件 - requirements.md");
   });
 
   it("preserves structured context refs in the SDK send payload", () => {

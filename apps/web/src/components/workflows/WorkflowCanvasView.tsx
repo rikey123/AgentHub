@@ -395,7 +395,7 @@ export function WorkflowCanvasView({ workflows, csrfFetch = fetch }: WorkflowCan
   }, [selection]);
 
   const showUnavailable = useCallback((action: string) => {
-    setServiceNotice(`${action} 会在后续工作流 API 完整接入后开放。`);
+    setServiceNotice(`${action} 暂不可用。`);
   }, []);
 
   const persistDraft = useCallback(async () => {
@@ -736,7 +736,7 @@ function Inspector({
       <dl className="ah-workflow-meta">
         <div><dt>节点</dt><dd>{nodes.length}</dd></div>
         <div><dt>连线</dt><dd>{edges.length}</dd></div>
-        <div><dt>模式</dt><dd>仅 DAG</dd></div>
+        <div><dt>模式</dt><dd>有向流程</dd></div>
       </dl>
       <div className="ah-workflow-empty-help">
         选择节点或连线后，可以查看上下游上下文和运行状态。
@@ -763,7 +763,7 @@ function NodeBindingPanel({ node, onUnbind }: { readonly node: AgentWorkflowNode
   if (!node.agentBindingId) {
     return (
       <div className="ah-workflow-empty-help">
-        这是独立工作流节点。可以在工具栏导入已有角色节点，复用联系人里的 runtime、模型和权限配置。
+        这是独立工作流节点。可以在工具栏导入已有角色节点，复用联系人里的运行时、模型和权限配置。
       </div>
     );
   }

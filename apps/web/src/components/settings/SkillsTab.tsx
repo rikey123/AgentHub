@@ -352,7 +352,7 @@ export function SkillsTab({
 
           {sortedSkills.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-border bg-surface p-4 text-sm text-muted">
-              /skills 暂未返回技能。
+              当前工作区还没有可用技能。
             </div>
           ) : (
             <div className="grid gap-2">

@@ -216,7 +216,7 @@ export function SettingsModal({
   const statusLabel = loading
     ? "加载中"
     : status === "error"
-      ? `${errorCount} 个 REST 错误`
+      ? `${errorCount} 项加载失败`
       : `${loadedCount}/${expectedLoadedCount} 已加载`;
 
   return (
@@ -441,7 +441,7 @@ export function SettingsPanel({
             <p className="mt-1 text-xs text-muted">{panelDescription(tab.id)}</p>
           </div>
           <Chip size="sm" variant="soft" color={tab.endpoint ? "accent" : "default"}>
-            {tab.endpoint ? endpointPaths[tab.endpoint] : "占位"}
+            {tab.endpoint ? endpointPaths[tab.endpoint] : "只读"}
           </Chip>
         </div>
 
@@ -489,12 +489,12 @@ function SettingsSkeleton() {
 function PlaceholderState({ tab, data }: { tab: (typeof SETTINGS_TABS)[number]; data: unknown }) {
   return (
     <div className="rounded-2xl border border-dashed border-border bg-surface p-4 text-sm text-muted">
-      <p className="font-medium text-foreground">{tab.label} 的内容将在后续设置任务中补齐。</p>
+      <p className="font-medium text-foreground">此设置项当前仅供查看。</p>
       <p className="mt-1 text-xs">
-        当前仅使用 REST 启动数据，并把数据保存在设置弹窗本地。
+        当前页面展示已加载的本地配置。
         {tab.endpoint && data !== undefined
-          ? " 接口数据已加载，可供后续标签页实现使用。"
-          : " 未附加实时订阅。"}
+          ? " 你可以在相关专用标签页中继续配置。"
+          : " 暂不支持在这里直接编辑。"}
       </p>
     </div>
   );
@@ -663,8 +663,7 @@ export function PermissionsSettingsTab({
             </Chip>
           </div>
           <Card.Description className="text-xs">
-            这里展示 GET /permissions/rules 返回的已保存 allow、deny 和 ask 决策。V1.0 daemon API
-            暂未暴露规则创建能力。
+            这里展示已记住的 allow、deny 和 ask 决策。新增规则会在你处理权限请求后自动记录。
           </Card.Description>
         </Card.Header>
         <Card.Content className="grid gap-2">
@@ -736,7 +735,7 @@ export function PermissionsSettingsTab({
             </Card.Description>
           </Card.Header>
           <Card.Content className="grid gap-1 text-xs text-muted">
-            <div>规则按 agent-binding 配置。</div>
+            <div>每个 Agent 可使用不同规则。</div>
             <div className="ah-mono">配置 ID: {profile.id}</div>
           </Card.Content>
         </Card>
@@ -762,7 +761,7 @@ export function WorkspaceTab({ workspace }: { workspace: unknown }) {
       "artifactStorage",
       "artifact_storage_mode",
       "artifactStorageMode"
-    ]) ?? "产物存储由 daemon 管理";
+    ]) ?? "产物存储由本地服务管理";
   const attachmentLimit = readWorkspaceNumber(workspace, [
     "attachment_max_bytes",
     "attachmentMaxBytes",
@@ -775,7 +774,7 @@ export function WorkspaceTab({ workspace }: { workspace: unknown }) {
       "gcPolicy",
       "attachment_gc_policy",
       "attachmentGcPolicy"
-    ]) ?? "垃圾回收由 daemon 管理";
+    ]) ?? "清理策略由本地服务管理";
   const updatedAt = readWorkspaceNumber(workspace, ["updated_at", "updatedAt"]);
 
   return (
@@ -789,7 +788,7 @@ export function WorkspaceTab({ workspace }: { workspace: unknown }) {
             </Chip>
           </div>
           <Card.Description className="text-xs">
-            本地存储、产物和附件清理都会从此路径解析。V1.0 暂未暴露 PATCH /workspaces 接口。
+            本地存储、产物和附件清理都会从此路径解析。当前版本仅支持查看工作区位置。
           </Card.Description>
         </Card.Header>
         <Card.Content className="grid gap-2 text-sm">
@@ -797,8 +796,7 @@ export function WorkspaceTab({ workspace }: { workspace: unknown }) {
             <span className="text-muted">名称：</span> {workspaceName ?? workspaceId ?? "工作区"}
           </div>
           <div>
-            <span className="text-muted">配置接口：</span> GET /workspaces/
-            {workspaceId ?? "default-workspace"}
+            <span className="text-muted">工作区 ID：</span> {workspaceId ?? "default-workspace"}
           </div>
           <div className="ah-mono rounded-xl border border-border bg-surface px-3 py-2 text-xs">
             {rootPath}
@@ -840,7 +838,7 @@ export function McpPlaceholder() {
           <Card.Description className="text-xs">当前仅展示已启用的房间 MCP 工具。</Card.Description>
         </Card.Header>
         <Card.Content className="grid gap-3 text-sm text-muted">
-          <p>这些工具由房间运行时自动提供，此处为只读清单。本期暂不提供管理能力。</p>
+          <p>这些工具由房间运行时自动提供。当前页面为只读清单，用于确认可用工具范围。</p>
           <div className="grid gap-2 sm:grid-cols-2">
             {ROOM_MCP_TOOLS.map((tool) => (
               <div
@@ -1042,7 +1040,7 @@ export function DeployProvidersSettingsTab({
             </Chip>
           </div>
           <Card.Description className="text-xs">
-            V1.2 支持配置 CapRover 自托管部署提供方。令牌存在 daemon keychain 中，不会回显到前端。
+            支持配置 CapRover 自托管部署提供方。令牌会保存在本机安全凭据存储中，不会回显到前端。
           </Card.Description>
         </Card.Header>
         <Card.Content className="grid gap-3">
@@ -1531,7 +1529,7 @@ function panelDescription(tab: SettingsTabId): string {
     case "runtimes":
       return "本地运行时检测和命令配置。";
     case "models":
-      return "provider、model、keychain 和测试调用配置。";
+      return "提供方、模型、密钥和连接测试配置。";
     case "skills":
       return "标准 SKILL.md 包，用于房间和 agent 能力引导。";
     case "permissions":
@@ -1539,7 +1537,7 @@ function panelDescription(tab: SettingsTabId): string {
     case "workspace":
       return "工作区根目录、产物、附件限制和清理策略。";
     case "deploy-providers":
-      return "V1.2 部署使用的 CapRover 提供方凭据和连接检查。";
+      return "部署使用的 CapRover 提供方凭据和连接检查。";
     case "mcp":
       return "MCP / 工具当前为只读清单。";
   }

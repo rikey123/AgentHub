@@ -114,7 +114,7 @@ function messageSummaryText(message: RoomViewModel["messages"][number]): string 
     }
   }
 
-  return "Quoted message";
+  return "被引用消息";
 }
 
 function truncateQuotedPreview(text: string, maxLength: number): string {
@@ -235,7 +235,7 @@ export function ChatStream(props: ChatStreamProps) {
             </div>
           ) : showEmptyState ? (
             <div className="flex h-full flex-col items-center justify-center gap-2 text-sm text-muted">
-              <p>No messages yet.</p>
+              <p>还没有消息。</p>
               <p>发送一条消息来开始对话。</p>
             </div>
           ) : (
@@ -306,7 +306,7 @@ function PinnedContextDrawer({ messages, onUnpin }: { readonly messages: RoomVie
   return (
     <details className="mx-3 mt-2 shrink-0 rounded-xl border border-border bg-overlay/85 px-3 py-2 shadow-sm">
       <summary className="cursor-pointer text-sm font-semibold">
-        Pinned Context <span className="ml-2 text-xs font-medium text-muted">{messages.length} pinned</span>
+        已固定上下文 <span className="ml-2 text-xs font-medium text-muted">{messages.length} 条</span>
       </summary>
       <div className="mt-2 flex flex-col gap-2">
         {messages.map((message) => (
@@ -320,14 +320,14 @@ function PinnedContextDrawer({ messages, onUnpin }: { readonly messages: RoomVie
                   size="sm"
                   variant="ghost"
                   className="h-7 px-2 text-xs"
-                  aria-label={`Unpin pinned message ${message.id}`}
+                  aria-label={`取消固定消息 ${message.id}`}
                   onPress={() => onUnpin(message.id)}
                 >
-                  Unpin
+                  取消固定
                 </Button>
               </div>
               {pinnedArtifactRef(message) !== undefined ? (
-                <p className="text-[11px] font-medium text-warning-soft-foreground">Content compacted to avoid expanding large artifacts.</p>
+                <p className="text-[11px] font-medium text-warning-soft-foreground">已折叠大型产物内容，避免撑开上下文。</p>
               ) : null}
             </div>
           </div>
@@ -343,7 +343,7 @@ function pinnedMessagePreview(message: RoomViewModel["messages"][number]): strin
   if (artifactRef !== undefined && text.length > 0) return `${artifactRef} ${truncatePinnedMessageText(text, 140)}`;
   if (artifactRef !== undefined) return artifactRef;
   if (text.length > 0) return truncatePinnedMessageText(text, 160);
-  return "Pinned message";
+  return "已固定消息";
 }
 
 function pinnedArtifactRef(message: RoomViewModel["messages"][number]): string | undefined {

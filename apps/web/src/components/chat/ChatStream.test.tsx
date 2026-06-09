@@ -199,11 +199,11 @@ describe("ChatStream task notification feed", () => {
       connectionStatus: "connected"
     }));
 
-    expect(html).toContain("Pinned Context");
-    expect(html).toContain("2 pinned");
+    expect(html).toContain("已固定上下文");
+    expect(html).toContain("2 条");
     expect(html).toContain("API base path is /api/v2");
     expect(html).toContain("@artifact:artifact_1");
-    expect(html).toContain("Unpin pinned message");
+    expect(html).toContain("取消固定消息");
   });
 
   it("warns when pinned artifact messages are compacted", () => {
@@ -234,7 +234,7 @@ describe("ChatStream task notification feed", () => {
     }));
 
     expect(html).toContain("@artifact:artifact_large");
-    expect(html).toContain("Content compacted");
+    expect(html).toContain("已折叠大型产物内容");
   });
 
   it("renders quoted replies with the original sender summary and jump target", () => {

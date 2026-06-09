@@ -392,7 +392,7 @@ describe("SettingsModal integration contract", () => {
     );
 
     expect(html).toContain("只读清单");
-    expect(html).toContain("本期暂不提供管理能力");
+    expect(html).toContain("当前仅展示已启用的房间 MCP 工具");
     expect(html).not.toContain("content arrives in later settings tasks");
     expect(html).not.toContain("This shell keeps the data local");
     expect(html).not.toContain("No live subscription is attached");
@@ -430,7 +430,7 @@ describe("SettingsModal integration contract", () => {
     expect(html).toContain("src/**");
     expect(html).toContain("allow");
     expect(html).toContain("删除规则");
-    expect(html).toContain("V1.0 daemon API 暂未暴露规则创建能力。");
+    expect(html).toContain("新增规则会在你处理权限请求后自动记录。");
   });
 
   it("renders workspace metadata as read-only when the daemon only exposes GET /workspaces/:id", () => {
@@ -448,9 +448,8 @@ describe("SettingsModal integration contract", () => {
     );
 
     expect(html).toContain("只读");
-    expect(html).toContain("GET /workspaces/ws_1");
-    expect(html).toContain("V1.0 暂未暴露 PATCH /workspaces 接口。");
-    expect(html).toContain("配置接口：");
+    expect(html).toContain("当前版本仅支持查看工作区位置。");
+    expect(html).toContain("产物存储由本地服务管理");
     expect(html).toContain("工作树模式：");
     expect(html).toContain("垃圾回收：");
     expect(html).toContain("C:/project/AgentHub");
@@ -554,7 +553,7 @@ describe("SettingsModal integration contract", () => {
     );
 
     expect(html).toContain("添加 CapRover 提供方");
-    expect(html).toContain("V1.2 支持配置 CapRover");
+    expect(html).toContain("支持配置 CapRover 自托管部署提供方");
     expect(html).not.toContain("Vercel");
     expect(html).not.toContain("Cloudflare");
   });

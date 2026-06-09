@@ -482,10 +482,10 @@ export function TasksPanel({ roomId, tasks, csrfFetch, executionPlan, onOpenArti
 
 function BoardHealthStrip({ summary, compact = false }: { summary: TaskBoardSummary; compact?: boolean | undefined }) {
   const metrics = [
-    { key: "active", label: "进行中", value: summary.active, detail: `${summary.runningRuns} 个运行中的 run`, color: "accent" as ChipColor },
+    { key: "active", label: "进行中", value: summary.active, detail: `${summary.runningRuns} 个运行中`, color: "accent" as ChipColor },
     { key: "blocked", label: "阻塞", value: summary.blocked, detail: "需要关注", color: "danger" as ChipColor },
     { key: "review", label: "待评审", value: summary.review, detail: "等待确认", color: "warning" as ChipColor },
-    { key: "ready", label: "可应用", value: summary.readyToApply, detail: "Worktree 可应用", color: "success" as ChipColor },
+    { key: "ready", label: "可应用", value: summary.readyToApply, detail: "工作区变更可应用", color: "success" as ChipColor },
     { key: "conflicts", label: "冲突", value: summary.conflicts, detail: "需要处理", color: "danger" as ChipColor },
     { key: "files", label: "变更", value: summary.filesChanged, detail: "包含文件变更", color: "default" as ChipColor },
     { key: "waiting", label: "等待中", value: summary.waitingDependencies, detail: "前置任务未完成", color: "warning" as ChipColor }
@@ -721,7 +721,7 @@ function TaskKanbanCard({ task, allTasks, onOpen }: { task: TaskViewModel; allTa
         <div className="grid grid-cols-2 gap-1.5 text-[11px] text-muted">
           <TaskCardFact label="前置任务" value={unresolved > 0 ? `${unresolved} 个未完成` : "无"} tone={unresolved > 0 ? "warning" : "default"} />
           <TaskCardFact label="文件" value={fileCount > 0 ? String(fileCount) : "无"} tone={fileCount > 0 ? "accent" : "default"} />
-          <TaskCardFact label="Worktree" value={worktreeLabel(worktree)} tone={worktreeTone(worktree)} />
+          <TaskCardFact label="工作区变更" value={worktreeLabel(worktree)} tone={worktreeTone(worktree)} />
           <TaskCardFact label="轮次" value={task.maxTurns !== undefined ? `${turnCount}/${task.maxTurns}` : String(turnCount)} tone="default" />
         </div>
         <div className="flex items-center gap-2 text-xs text-muted">
@@ -987,8 +987,8 @@ function WorktreeSection({ roomId, task, csrfFetch, onOpenArtifact }: { roomId: 
 
   if (!review || (review.status !== "ready_for_review" && review.status !== "conflict")) {
     return (
-      <DetailCard title="Worktree">
-        <p className="text-sm text-muted">暂无待处理的 Worktree 变更。</p>
+      <DetailCard title="工作区变更">
+        <p className="text-sm text-muted">暂无待处理的工作区变更。</p>
       </DetailCard>
     );
   }
@@ -1005,7 +1005,7 @@ function WorktreeSection({ roomId, task, csrfFetch, onOpenArtifact }: { roomId: 
   };
 
   const discard = () => {
-    if (!window.confirm("丢弃 Worktree 变更？")) return;
+    if (!window.confirm("丢弃工作区变更？")) return;
     setPending("discard");
     setError(undefined);
     void csrfFetch(`/rooms/${encodeURIComponent(roomId)}/worktrees/${encodeURIComponent(review.runId)}/discard`, { method: "POST" })
@@ -1017,7 +1017,7 @@ function WorktreeSection({ roomId, task, csrfFetch, onOpenArtifact }: { roomId: 
   };
 
   return (
-    <DetailCard title="Worktree">
+    <DetailCard title="工作区变更">
       <div className="flex flex-col gap-2">
         <div className="flex flex-wrap gap-2">
           <Chip size="sm" variant="soft" color={review.status === "conflict" ? "danger" : "success"}>{review.status === "conflict" ? "合并冲突" : "变更可应用"}</Chip>
@@ -1109,7 +1109,7 @@ function ActivityLinks({ activity }: { activity: TaskActivityViewModel }) {
 
   return (
     <div className="mt-2 flex flex-wrap gap-2 text-xs">
-      {runId ? <a className="rounded-full bg-accent-soft px-2 py-1 text-accent-soft-foreground" href={`#run:${encodeURIComponent(runId)}`}>Run 详情：{runId}</a> : null}
+      {runId ? <a className="rounded-full bg-accent-soft px-2 py-1 text-accent-soft-foreground" href={`#run:${encodeURIComponent(runId)}`}>运行详情：{runId}</a> : null}
       {artifact ? <a className="rounded-full bg-surface px-2 py-1 text-muted" href={`#artifact:${encodeURIComponent(artifact)}`}>产物：{artifact}</a> : null}
     </div>
   );
@@ -1140,17 +1140,17 @@ function ProofOfWorkSection({ roomId, task, csrfFetch }: { roomId: string; task:
   };
 
   return (
-    <DetailCard title="Proof of work">
+    <DetailCard title="交付证明">
       <div className="flex flex-col gap-2 text-sm">
         <div className="grid gap-2 sm:grid-cols-3">
-          <ProofMetric label="Files" value={String(counts.changedFiles)} tone={counts.changedFiles > 0 ? "accent" : "default"} />
-          <ProofMetric label="Worktree" value={worktreeLabel(latestReview)} tone={worktreeTone(latestReview)} />
-          <ProofMetric label="Proof" value={String(counts.proofActivities)} tone={counts.proofActivities > 0 ? "success" : "default"} />
+          <ProofMetric label="文件" value={String(counts.changedFiles)} tone={counts.changedFiles > 0 ? "accent" : "default"} />
+          <ProofMetric label="工作区变更" value={worktreeLabel(latestReview)} tone={worktreeTone(latestReview)} />
+          <ProofMetric label="证据" value={String(counts.proofActivities)} tone={counts.proofActivities > 0 ? "success" : "default"} />
         </div>
         <div className="grid gap-2 text-xs sm:grid-cols-3">
-          <span className="rounded-md bg-surface-secondary px-2 py-1">File runs: {counts.fileRuns}</span>
-          <span className="rounded-md bg-surface-secondary px-2 py-1">Worktree reviews: {counts.worktreeReviews}</span>
-          <span className="rounded-md bg-surface-secondary px-2 py-1">Template v{taskDeliveryReportTemplateVersion}</span>
+          <span className="rounded-md bg-surface-secondary px-2 py-1">文件记录：{counts.fileRuns}</span>
+          <span className="rounded-md bg-surface-secondary px-2 py-1">工作树审查：{counts.worktreeReviews}</span>
+          <span className="rounded-md bg-surface-secondary px-2 py-1">报告模板 v{taskDeliveryReportTemplateVersion}</span>
         </div>
         {validationActivities.length > 0 ? (
           <ul className="flex flex-col gap-1.5">
@@ -1165,18 +1165,18 @@ function ProofOfWorkSection({ roomId, task, csrfFetch }: { roomId: string; task:
             ))}
           </ul>
         ) : (
-          <p className="text-xs text-muted">No validation evidence has been recorded yet.</p>
+          <p className="text-xs text-muted">还没有记录验证证据。</p>
         )}
         {reportArtifact ? (
           <div className="rounded-md border border-success/30 bg-success/10 px-2 py-1 text-xs">
-            Report artifact: <span className="ah-mono">{reportArtifact.artifactId}</span> / <span className="ah-mono">{reportArtifact.path}</span>
-            {reportArtifact.evidenceCounts ? <span className="ml-2 text-muted">({reportArtifact.evidenceCounts.changedFiles} files, {reportArtifact.evidenceCounts.proofActivities} proof)</span> : null}
+            报告产物：<span className="ah-mono">{reportArtifact.artifactId}</span> / <span className="ah-mono">{reportArtifact.path}</span>
+            {reportArtifact.evidenceCounts ? <span className="ml-2 text-muted">（{reportArtifact.evidenceCounts.changedFiles} 个文件，{reportArtifact.evidenceCounts.proofActivities} 条证据）</span> : null}
           </div>
         ) : null}
         {reportError ? <p className="text-xs text-danger-700 dark:text-danger-200">{reportError}</p> : null}
         <div>
           <Button size="sm" variant="secondary" onPress={createReport} isDisabled={reportPending}>
-            {reportPending ? "Updating..." : "Create/update delivery report"}
+            {reportPending ? "正在更新..." : "生成 / 更新交付报告"}
           </Button>
         </div>
       </div>
@@ -1187,54 +1187,54 @@ function ProofOfWorkSection({ roomId, task, csrfFetch }: { roomId: string; task:
 export function taskDeliveryReportMarkdown(task: TaskViewModel): string {
   const counts = taskReportEvidenceCounts(task);
   const lines = [
-    `# Task Delivery Report: ${task.title}`,
+    `# 任务交付报告：${task.title}`,
     "",
-    `- Template version: ${taskDeliveryReportTemplateVersion}`,
-    `- Generated at: ${new Date().toISOString()}`,
-    `- Task: \`${task.id}\``,
-    `- Status: ${task.status}`,
-    `- Assignee: ${task.assigneeRoleId ?? task.assigneeAgentId ?? "Unassigned"}`,
-    `- Source run: ${task.sourceRunId ?? "-"}`,
+    `- 模板版本：${taskDeliveryReportTemplateVersion}`,
+    `- 生成时间：${new Date().toISOString()}`,
+    `- 任务：\`${task.id}\``,
+    `- 状态：${taskStatusLabel(task.status)}`,
+    `- 负责人：${task.assigneeRoleId ?? task.assigneeAgentId ?? "未分配"}`,
+    `- 来源运行：${task.sourceRunId ?? "-"}`,
     "",
-    "## Evidence Summary",
+    "## 证据概览",
     "",
-    `- File runs: ${counts.fileRuns}`,
-    `- Changed files: ${counts.changedFiles}`,
-    `- Worktree reviews: ${counts.worktreeReviews}`,
-    `- Proof activities: ${counts.proofActivities}`,
-    `- Review decisions: ${counts.reviewDecisions}`,
-    `- Unresolved comments: ${counts.unresolvedComments}`,
+    `- 文件记录：${counts.fileRuns}`,
+    `- 变更文件：${counts.changedFiles}`,
+    `- 工作区评审：${counts.worktreeReviews}`,
+    `- 验证活动：${counts.proofActivities}`,
+    `- 评审决策：${counts.reviewDecisions}`,
+    `- 未解决评论：${counts.unresolvedComments}`,
     "",
-    "## Description",
+    "## 描述",
     "",
-    task.description?.trim() || "No description provided.",
+    task.description?.trim() || "暂无描述。",
     "",
-    "## File Changes"
+    "## 文件变更"
   ];
   const fileRuns = task.fileChangeRuns ?? [];
   if (fileRuns.length === 0) {
-    lines.push("", "No file changes recorded.");
+    lines.push("", "暂无文件变更记录。");
   } else {
     for (const run of fileRuns) {
-      lines.push("", `### Run ${run.runId}${run.artifactId ? ` / artifact ${run.artifactId}` : ""}`);
+      lines.push("", `### 运行 ${run.runId}${run.artifactId ? ` / 产物 ${run.artifactId}` : ""}`);
       for (const file of run.files) lines.push(`- \`${file.path}\` (${file.change}, +${file.linesAdded ?? 0} / -${file.linesRemoved ?? 0})`);
     }
   }
-  lines.push("", "## Worktree Reviews");
+  lines.push("", "## 工作区评审");
   const worktreeReviews = task.worktreeReviews ?? [];
   if (worktreeReviews.length === 0) {
-    lines.push("", "No worktree review records.");
+    lines.push("", "暂无工作区评审记录。");
   } else {
     for (const review of worktreeReviews) {
-      lines.push("", `- run \`${review.runId}\`: ${review.status}${review.artifactId ? ` / artifact ${review.artifactId}` : ""}`);
+      lines.push("", `- 运行 \`${review.runId}\`：${review.status}${review.artifactId ? ` / 产物 ${review.artifactId}` : ""}`);
       for (const path of review.filesChanged ?? []) lines.push(`  - \`${path}\``);
-      if (review.conflictDiff) lines.push(`  - conflict: ${review.conflictDiff.slice(0, 500)}`);
+      if (review.conflictDiff) lines.push(`  - 冲突：${review.conflictDiff.slice(0, 500)}`);
     }
   }
-  lines.push("", "## Proof And Validation");
+  lines.push("", "## 证明与验证");
   const proof = (task.activities ?? []).filter((activity) => proofActivityKinds.has(activity.kind));
   if (proof.length === 0) {
-    lines.push("", "No validation evidence has been recorded yet.");
+    lines.push("", "还没有记录验证证据。");
   } else {
     lines.push("");
     for (const activity of proof) lines.push(`- ${activity.kind}: ${summarizeTaskActivityPayload(activity.payload)}`);
@@ -1310,11 +1310,11 @@ function attentionColor(task: TaskViewModel): ChipColor {
 }
 
 function attentionReason(task: TaskViewModel, unresolved: number, fileCount: number, worktree: WorktreeReviewViewModel | undefined): string {
-  if (worktree?.status === "conflict") return "Worktree 存在合并冲突，需要人工处理。";
+  if (worktree?.status === "conflict") return "工作区变更存在合并冲突，需要人工处理。";
   if (task.blockerReason) return humanizeReason(task.blockerReason);
   if (task.status === "blocked") return "任务已阻塞。";
   if (task.status === "review") return "任务正在等待评审。";
-  if (worktree?.status === "ready_for_review") return "Worktree 变更已可应用。";
+  if (worktree?.status === "ready_for_review") return "工作区变更已可应用。";
   if (unresolved > 0) return `还有 ${unresolved} 个前置任务未完成。`;
   if (fileCount > 0) return `已记录 ${fileCount} 个变更文件。`;
   return "需要关注。";
@@ -1322,7 +1322,7 @@ function attentionReason(task: TaskViewModel, unresolved: number, fileCount: num
 
 function blockerText(task: TaskViewModel): string {
   if (task.blockerReason) return humanizeReason(task.blockerReason);
-  if (hasWorktreeConflict(task)) return "Worktree 冲突";
+  if (hasWorktreeConflict(task)) return "工作区冲突";
   return "阻塞";
 }
 

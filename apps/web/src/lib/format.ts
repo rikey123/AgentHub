@@ -55,8 +55,11 @@ export function initials(name: string): string {
   return (parts[0]![0]! + parts[parts.length - 1]![0]!).toUpperCase();
 }
 
-// 房间模式统一以英文大写展示（SOLO / ASSISTED / SQUAD / TEAM / WAR_ROOM）。
-// HomeView 与 RoomList 共用，保证两处一致。
 export function roomModeLabel(mode: string): string {
-  return mode.toUpperCase();
+  if (mode === "solo") return "单人";
+  if (mode === "assisted") return "协作";
+  if (mode === "squad") return "小队";
+  if (mode === "team") return "团队";
+  if (mode === "war_room") return "作战室";
+  return mode;
 }

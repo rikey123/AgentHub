@@ -155,7 +155,7 @@ export function RuntimesTab({ data, fetchImpl = fetch, onChange }: RuntimesTabPr
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
             <h3 className="text-sm font-semibold">运行时</h3>
-            <p className="mt-1 text-xs text-muted">本地 runtime 检测和自定义 ACP 命令配置。</p>
+            <p className="mt-1 text-xs text-muted">本地运行时检测和自定义 ACP 命令配置。</p>
           </div>
           <Button variant="primary" size="sm" onPress={addCustomRuntime} data-testid="runtime-add-custom">
             添加自定义 ACP
@@ -164,7 +164,7 @@ export function RuntimesTab({ data, fetchImpl = fetch, onChange }: RuntimesTabPr
 
         {runtimes.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-border bg-surface p-4 text-sm text-muted">
-            暂无已注册的运行时。添加自定义 ACP runtime，或重启 daemon 初始化 native runtime 检测。
+            暂无已注册的运行时。添加自定义 ACP 运行时，或重启本地服务初始化内置运行时检测。
           </div>
         ) : (
           <div className="grid gap-3 md:grid-cols-2">
@@ -211,7 +211,7 @@ export function RuntimesTab({ data, fetchImpl = fetch, onChange }: RuntimesTabPr
                     <Card.Content className="grid gap-3 border-t border-border pt-3">
                       {!editable ? (
                         <div className="rounded-2xl border border-dashed border-border bg-surface p-3 text-xs text-muted">
-                          Native runtime 在设置中为只读。此处仅展示检测和测试结果，命令配置由 daemon 管理。
+                          内置运行时在设置中为只读。此处仅展示检测和测试结果，命令配置由本地服务管理。
                         </div>
                       ) : (
                         <>

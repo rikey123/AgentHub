@@ -27,11 +27,11 @@ export function SidePanel({ room, csrfFetch, initialTab = "context", onOpenArtif
       </header>
       <Tabs defaultSelectedKey={initialTab} className="flex min-h-0 flex-1 flex-col">
         <Tabs.ListContainer className="ah-side-tabs-wrap pb-4">
-          <Tabs.List aria-label="Workbench panels" className="ah-side-tabs">
+          <Tabs.List aria-label="工作台面板" className="ah-side-tabs">
             <DashboardTab id="context" testId="side-panel-tab-context" count={panelCounts.context} label="上下文" />
             <DashboardTab id="tasks" testId="side-panel-tab-tasks" count={panelCounts.tasks} label="任务" />
             <DashboardTab id="members" testId="side-panel-tab-members" count={panelCounts.members} label="成员" />
-            <DashboardTab id="debug" testId="side-panel-tab-debug" label="Debug" />
+            <DashboardTab id="debug" testId="side-panel-tab-debug" label="诊断" />
             <DashboardTab id="cost" testId="side-panel-tab-cost" label="计费" />
           </Tabs.List>
         </Tabs.ListContainer>

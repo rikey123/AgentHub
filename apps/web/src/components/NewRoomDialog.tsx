@@ -68,10 +68,10 @@ export type ContactFirstParticipantConfig = {
 };
 
 export const ROOM_MODE_OPTIONS: ReadonlyArray<{ value: RoomMode; title: string; description: string }> = [
-  { value: "solo", title: "Solo", description: "仅包含一个主 agent。" },
-  { value: "assisted", title: "Assisted", description: "主 agent 可搭配可选协作者。" },
-  { value: "squad", title: "Squad", description: "由 leader role 协调一个聚焦小组。" },
-  { value: "team", title: "Team", description: "由 leader role 在活跃队友之间分派工作。" }
+  { value: "solo", title: "单人", description: "仅包含一个主智能体。" },
+  { value: "assisted", title: "协作", description: "主智能体可搭配可选协作者。" },
+  { value: "squad", title: "小队", description: "由负责人角色协调一个聚焦小组。" },
+  { value: "team", title: "团队", description: "由负责人角色在活跃队友之间分派工作。" }
 ];
 
 export type BuildV1ParticipantInput = V1RoomParticipant & {
@@ -116,7 +116,7 @@ export function buildCreateRoomInput(input: {
   legacyAgentParticipants: LegacyAgentParticipant[];
   v1Participants: BuildV1ParticipantInput[];
 }): CreateRoomInput {
-  const title = input.title.trim() || "新建 Room";
+  const title = input.title.trim() || "新建房间";
   const skillIds = Array.from(new Set(input.skillIds ?? [])).filter((id) => id.length > 0);
   const selectedSkills = skillIds.length > 0 ? { skillIds } : {};
   const toV1Participant = (
@@ -308,7 +308,7 @@ function runtimeOptions(runtimes: readonly { id: string; name: string; kind: str
 
 function modelOptions(modelConfigs: readonly { id: string; name: string; provider: string; model: string }[], placeholder: string): SelectOption[] {
   return [
-    { id: "", title: placeholder, description: "当前 Runtime 不需要指定模型时可置为空。", badge: "optional", tone: "default" },
+    { id: "", title: placeholder, description: "当前运行时不需要指定模型时可置为空。", badge: "可选", tone: "default" },
     ...modelConfigs.map((config) => ({
       id: config.id,
       title: config.name,
@@ -320,8 +320,8 @@ function modelOptions(modelConfigs: readonly { id: string; name: string; provide
 }
 
 const presenceOptions: SelectOption[] = [
-  { id: "active", title: "活跃", description: "进入 Room 后即可响应。", badge: "live", tone: "success" },
-  { id: "observing", title: "观察中", description: "安静加入，并等待任务委派。", badge: "quiet", tone: "default" }
+  { id: "active", title: "活跃", description: "进入房间后即可响应。", badge: "可响应", tone: "success" },
+  { id: "observing", title: "观察中", description: "安静加入，并等待任务委派。", badge: "安静加入", tone: "default" }
 ];
 
 function StyledSelect({
@@ -443,7 +443,7 @@ export function ContactFirstPicker({
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
           <h3 className="text-sm font-semibold">联系人</h3>
-          <p className="text-xs text-muted">选择要加入 Room 的 agent 联系人。</p>
+          <p className="text-xs text-muted">选择要加入房间的 Agent 联系人。</p>
         </div>
         <Chip size="sm" variant="soft" color={selectedIds.size > 0 ? "accent" : "default"}>
           已选择 {selectedIds.size} 个
@@ -453,7 +453,7 @@ export function ContactFirstPicker({
       {loading ? <p className="mb-2 text-xs text-muted">正在加载联系人...</p> : null}
       {sorted.length === 0 && !loading ? (
         <div className="rounded-xl border border-dashed border-border bg-surface p-3 text-sm text-muted">
-          暂无可用联系人。可在右侧高级配置中使用角色和 Runtime 创建 Room。
+          暂无可用联系人。可在右侧高级配置中使用角色和运行时创建房间。
         </div>
       ) : (
         <ListBox
@@ -578,10 +578,10 @@ export function RoleBindingRow({
           testId={`${testIdPrefix}-role`}
         />
         <StyledSelect
-          label="Runtime"
+          label="运行时"
           value={runtimeId}
           options={runtimeOptions(runtimes)}
-          placeholder="选择 Runtime"
+          placeholder="选择运行时"
           onChange={(value) => onChange({ runtimeId: value })}
           testId={`${testIdPrefix}-runtime`}
           isDisabled={runtimes.length === 0}
@@ -706,7 +706,7 @@ export async function ensureAgentBindingsForParticipants(options: {
     });
     const payload = await readJson(response);
     if (!response.ok) {
-      throw new Error(`为 ${participant.roleId}/${participant.runtimeId} 创建 agent 绑定失败：${errorMessage(payload, response.status)}`);
+      throw new Error(`为 ${participant.roleId}/${participant.runtimeId} 创建 Agent 绑定失败：${errorMessage(payload, response.status)}`);
     }
     const created = normalizeCreatedAgentBinding(payload, participant);
     known.set(key, created);
@@ -738,11 +738,11 @@ function normalizeCreatedAgentBinding(payload: unknown, participant: BuildV1Part
     ? (payload as { readonly agentBinding?: unknown }).agentBinding
     : payload;
   if (!record || typeof record !== "object") {
-    throw new Error("创建 agent 绑定返回了无效响应。");
+    throw new Error("创建 Agent 绑定返回了无效响应。");
   }
   const row = record as Record<string, unknown>;
   const id = stringValue(row.id);
-  if (!id) throw new Error("创建 agent 绑定未返回 id。");
+  if (!id) throw new Error("创建 Agent 绑定未返回 ID。");
   return {
     id,
     roleId: stringValue(row.roleId ?? row.role_id) ?? participant.roleId,
@@ -768,12 +768,12 @@ function errorMessage(payload: unknown, status: number): string {
 }
 
 const CREATE_ROOM_ERROR_TEXT: Record<string, string> = {
-  "Native runtime participants require a model config.": "native Runtime 参与者需要指定模型配置。",
-  "Solo rooms require exactly one role participant.": "Solo Room 需要且仅需要一个 role 参与者。",
-  "Assisted rooms require a primary role participant.": "Assisted Room 需要一个主 role 参与者。",
-  "Pick a leader role.": "请选择 leader role。",
-  "Add at least one role participant.": "请至少添加一个 role 参与者。",
-  "Leader role must be included as a participant.": "leader role 必须包含在参与者中。"
+  "Native runtime participants require a model config.": "内置运行时参与者需要指定模型配置。",
+  "Solo rooms require exactly one role participant.": "单人房间需要且仅需要一个角色参与者。",
+  "Assisted rooms require a primary role participant.": "协作房间需要一个主角色参与者。",
+  "Pick a leader role.": "请选择负责人角色。",
+  "Add at least one role participant.": "请至少添加一个角色参与者。",
+  "Leader role must be included as a participant.": "负责人角色必须包含在参与者中。"
 };
 
 function displayErrorMessage(error: unknown): string {
@@ -831,7 +831,7 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
 
   useEffect(() => {
     if (isOpen) {
-      setTitle(`Room ${new Date().toLocaleString([], { hour: "2-digit", minute: "2-digit", month: "short", day: "2-digit" })}`);
+      setTitle(`房间 ${new Date().toLocaleString([], { hour: "2-digit", minute: "2-digit", month: "2-digit", day: "2-digit" })}`);
       setError(undefined);
       setMode("assisted");
       setLeaderRoleId("");
@@ -1101,7 +1101,7 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
     }
 
     if (!leaderBinding) {
-      setError("请选择主 role 绑定。");
+      setError("请选择主角色绑定。");
       return;
     }
     setSubmitting(true);
@@ -1168,9 +1168,9 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
                 <IconRobot />
               </div>
               <div className="min-w-0">
-                <Modal.Heading>新建 Room</Modal.Heading>
+                <Modal.Heading>新建房间</Modal.Heading>
                 <p className="mt-1 max-w-xl text-sm text-muted">
-                  配置一个本地 agent 工作区，包含一个主 agent，并可按需添加协作者。
+                  配置一个本地智能体工作区，包含一个主智能体，并可按需添加协作者。
                 </p>
               </div>
             </div>
@@ -1196,7 +1196,7 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
                       className="gap-0"
                       value={mode}
                       onChange={(v: unknown) => setMode(v as RoomMode)}
-                      aria-label="Room 模式"
+                      aria-label="房间模式"
                     >
                       <div className="ah-room-mode-grid">
                         {ROOM_MODE_OPTIONS.map((option) => (
@@ -1229,7 +1229,7 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
                           <div>
                             <h3 className="text-sm font-semibold">高级配置</h3>
                             <p className="text-xs text-muted">
-                              覆盖联系人 role/runtime/model/presence，并为特定联系人追加技能。
+                              覆盖联系人角色、运行时、模型和在线状态，并为特定联系人追加技能。
                             </p>
                           </div>
                           <Chip size="sm" variant="soft" color={selectedLeader ? "accent" : "default"}>
@@ -1238,7 +1238,7 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
                         </div>
 
                         {optionsError ? <p className="mb-2 text-xs text-danger">{optionsError}</p> : null}
-                        {optionsLoading ? <p className="mb-2 text-xs text-muted">正在加载角色、Runtime 和模型...</p> : null}
+                        {optionsLoading ? <p className="mb-2 text-xs text-muted">正在加载角色、运行时和模型...</p> : null}
 
                         <div className="grid gap-3">
                           {selectedContacts.map((contact, index) => {
@@ -1251,7 +1251,7 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
                                     <p className="truncate text-xs text-muted">{contact.agentBindingId}</p>
                                   </div>
                                   <div className="flex flex-wrap justify-end gap-1.5">
-                                    <Chip size="sm" variant="soft" color={index === 0 ? "accent" : "default"}>{index === 0 ? "主 agent" : "协作者"}</Chip>
+                                    <Chip size="sm" variant="soft" color={index === 0 ? "accent" : "default"}>{index === 0 ? "主智能体" : "协作者"}</Chip>
                                     <Chip size="sm" variant="soft" color={contactStatusColor(contact.status)}>{contactStatusLabel(contact.status)}</Chip>
                                   </div>
                                 </div>
@@ -1317,8 +1317,8 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
                             <h3 className="text-sm font-semibold">高级配置</h3>
                             <p className="text-xs text-muted">
                               {teamMode
-                                ? "未选择联系人时，可手动配置 leader、队友、Runtime 和模型。"
-                                : "未选择联系人时，可手动配置主 agent 的角色、Runtime 和模型。"}
+                                ? "未选择联系人时，可手动配置负责人、队友、运行时和模型。"
+                                : "未选择联系人时，可手动配置主智能体的角色、运行时和模型。"}
                             </p>
                           </div>
                           <Chip size="sm" variant="soft" color={selectedLeader ? "accent" : "default"}>
@@ -1327,11 +1327,11 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
                         </div>
 
                         {optionsError ? <p className="mb-2 text-xs text-danger">{optionsError}</p> : null}
-                        {optionsLoading ? <p className="mb-2 text-xs text-muted">正在加载角色、Runtime 和模型...</p> : null}
+                        {optionsLoading ? <p className="mb-2 text-xs text-muted">正在加载角色、运行时和模型...</p> : null}
 
                         {leaderBinding ? (
                           <RoleBindingRow
-                            title={teamMode ? "Leader 绑定" : "主绑定"}
+                            title={teamMode ? "负责人绑定" : "主绑定"}
                             roleId={leaderBinding.roleId}
                             runtimeId={leaderBinding.runtimeId}
                             modelConfigId={leaderBinding.modelConfigId}
@@ -1344,7 +1344,7 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
                           />
                         ) : (
                           <div className="rounded-xl border border-dashed border-border bg-surface p-3 text-sm text-muted">
-                            正在加载 role 绑定选项...
+                            正在加载角色绑定选项...
                           </div>
                         )}
 
@@ -1360,7 +1360,7 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
                             {v1Participants.length === 0 ? (
                               <div className="rounded-xl border border-dashed border-border bg-surface p-3 text-sm text-muted">
                                 {teamMode
-                                  ? "在此添加队友角色。上方的 leader 绑定始终会包含在内。"
+                                  ? "在此添加队友角色。上方的负责人绑定始终会包含在内。"
                                   : "在此添加协作者角色。上方的主绑定始终会包含在内。"}
                               </div>
                             ) : v1Participants.map((participant, index) => {
@@ -1392,8 +1392,8 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
                     <section className="ah-new-room-panel">
                       <div className="mb-3 flex items-start justify-between gap-3">
                         <div>
-                          <h3 className="text-sm font-semibold">Room 技能</h3>
-                          <p className="text-xs text-muted">选中的 SKILL.md 包会在下一次运行时对该 Room 可用。</p>
+                          <h3 className="text-sm font-semibold">房间技能</h3>
+                          <p className="text-xs text-muted">选中的 SKILL.md 包会在下一次运行时对该房间可用。</p>
                         </div>
                         <Chip size="sm" variant="soft" color={selectedSkillIds.size > 0 ? "accent" : "default"}>
                           已选择 {selectedSkillIds.size} 个
@@ -1450,10 +1450,10 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
           <Modal.Footer className="border-t border-border bg-surface/90 px-5 py-4">
             <div className="mr-auto hidden text-xs text-muted sm:block">
               {mode === "solo"
-                ? "主Agent将加入此Room。"
+                ? "主智能体将加入此房间。"
                 : teamMode
-                  ? `leader和${v1Participants.length}名队友将加入此Room。`
-                  : `主Agent和${v1Participants.length}名协作者将加入此Room。`}
+                  ? `负责人和 ${v1Participants.length} 名队友将加入此房间。`
+                  : `主智能体和 ${v1Participants.length} 名协作者将加入此房间。`}
             </div>
             <Button slot="close" variant="tertiary">取消</Button>
             <Button
@@ -1462,7 +1462,7 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
               isDisabled={submitting || (selectedContacts.length === 0 && !leaderBinding)}
               onPress={() => void handleSubmit()}
             >
-              创建 Room
+              创建房间
             </Button>
           </Modal.Footer>
         </Modal.Dialog>

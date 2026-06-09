@@ -663,7 +663,7 @@ export function InputBox(props: InputBoxProps) {
     const next: Attachment[] = [];
     for (const file of Array.from(files)) {
       if (file.size > MAX_ATTACH_BYTES) {
-        setError(`${file.name} exceeds 50MB`);
+        setError(`${file.name} 超过 50MB，无法上传。`);
         continue;
       }
       const fd = new FormData();
@@ -671,7 +671,7 @@ export function InputBox(props: InputBoxProps) {
       try {
         const res = await props.csrfFetch("/attachments", { method: "POST", body: fd, headers: {} });
         if (!res.ok) {
-          setError(`Upload failed (${res.status})`);
+          setError(`上传失败（${res.status}）`);
           continue;
         }
         const json = await res.json() as { id?: string; fileId?: string; name?: string; sizeBytes?: number };
@@ -712,7 +712,7 @@ export function InputBox(props: InputBoxProps) {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (/\b409\b|already (started|consumed|scheduled)/i.test(message)) {
-        setError("This message has already started processing; edit no longer applies.");
+        setError("这条消息已经开始处理，不能再编辑。");
       } else {
         setError(message);
       }
@@ -744,7 +744,7 @@ export function InputBox(props: InputBoxProps) {
               {props.connectionStatus === "connected" ? "就绪" : props.connectionStatus}
             </Chip>
             <span>{activeParticipants.length} 活跃成员</span>
-            <span>{agentCount} Agents</span>
+            <span>{agentCount} 个 Agent</span>
             {props.pendingCount > 0 ? <span>{props.pendingCount} 待处理</span> : null}
           </div>
           {queueFull ? <span className="text-warning-soft-foreground">已达队列上限</span> : null}
@@ -752,8 +752,8 @@ export function InputBox(props: InputBoxProps) {
 
         {props.editingTurnId ? (
           <div className="mb-2 flex items-center gap-2 rounded-xl border border-warning bg-warning-soft px-3 py-2 text-xs shadow-sm">
-            <span className="flex-1">Editing queued message <span className="ah-mono text-muted">{props.editingTurnId?.slice(0, 8)}</span></span>
-            <Button size="sm" variant="ghost" onPress={() => props.onCancelEdit?.()}>Cancel edit</Button>
+            <span className="flex-1">正在编辑队列消息 <span className="ah-mono text-muted">{props.editingTurnId?.slice(0, 8)}</span></span>
+            <Button size="sm" variant="ghost" onPress={() => props.onCancelEdit?.()}>取消编辑</Button>
           </div>
         ) : null}
 
@@ -771,7 +771,7 @@ export function InputBox(props: InputBoxProps) {
                 <span className="ah-mono">{att.name} / {formatBytes(att.sizeBytes)}</span>
                 <button
                   type="button"
-                  aria-label={`Remove ${att.name}`}
+                  aria-label={`移除 ${att.name}`}
                   className="ml-1 text-muted hover:text-foreground"
                   onClick={() => setAttachments((prev) => prev.filter((a) => a.fileId !== att.fileId))}
                 >
@@ -787,7 +787,7 @@ export function InputBox(props: InputBoxProps) {
         {mentionQuery !== undefined && filteredMentions.length > 0 ? (
           <ul
             role="listbox"
-            aria-label="Mention participants and contacts"
+            aria-label="提及成员和联系人"
             className="mb-2 grid max-h-48 gap-1 overflow-auto rounded-2xl border border-border bg-overlay p-1.5 shadow-[var(--overlay-shadow)] sm:grid-cols-2"
           >
             {filteredMentions.map((candidate, i) => {
@@ -930,7 +930,7 @@ export function InputBox(props: InputBoxProps) {
 
         {error ? <p className="mt-2 px-1 text-xs text-danger" role="alert">{error}</p> : null}
         {props.connectionStatus !== "connected" ? (
-          <span className="ah-sr-only" aria-live="polite">Connection: {props.connectionStatus}</span>
+          <span className="ah-sr-only" aria-live="polite">连接状态：{props.connectionStatus}</span>
         ) : null}
       </div>
     </div>

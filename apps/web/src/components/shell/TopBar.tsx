@@ -129,7 +129,7 @@ export function TopBar(props: TopBarProps) {
           <Tooltip>
             <Button className="ah-topbar-command-button" variant="ghost" size="sm" onPress={props.onOpenCommandPalette} aria-label="打开命令面板">
               <span className="ah-topbar-search-icon" aria-hidden="true" />
-              <span className="ah-topbar-search-placeholder">搜索....</span>
+              <span className="ah-topbar-search-placeholder">搜索或运行命令...</span>
             </Button>
             <Tooltip.Content>命令面板</Tooltip.Content>
           </Tooltip>

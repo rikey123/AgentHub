@@ -41,7 +41,7 @@ export function TranscriptTab({ room, runId }: { room: RoomViewModel; runId: str
             <Alert.Content>
               <div className="flex items-center gap-2">
                 <Alert.Title>上下文已压缩</Alert.Title>
-                <Chip size="sm" variant="soft" color="warning">PreCompact</Chip>
+                <Chip size="sm" variant="soft" color="warning">压缩前</Chip>
               </div>
               <Alert.Description>
                 <span className="block text-xs text-muted">{preCompact.title}</span>

@@ -92,9 +92,9 @@ describe("RoomList V1.2 behavior", () => {
       onTogglePin: vi.fn()
     }));
 
-    expect(html).toContain("Pin room Room 1");
-    expect(html).toContain("Unpin room Room 2");
-    expect(html).toContain("Open room Room 1");
+    expect(html).toContain("置顶房间 Room 1");
+    expect(html).toContain("取消置顶房间 Room 2");
+    expect(html).toContain("打开房间 Room 1");
     expect(html).not.toContain("role=\"listbox\"");
     expect(html).not.toContain("role=\"option\"");
     expect(html).not.toContain("Archive");
@@ -114,7 +114,7 @@ describe("RoomList V1.2 behavior", () => {
     expect(html).toContain("data-testid=\"room-list-item-active\"");
     expect(html).not.toContain("data-testid=\"room-list-item-archived\"");
     expect(html).toContain("data-testid=\"room-list-archive-entry\"");
-    expect(html).toContain("Archived rooms");
+    expect(html).toContain("已归档房间");
     expect(html).toContain("1");
   });
 });

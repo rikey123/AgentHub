@@ -82,7 +82,7 @@ export function ContactsRailContainer({ fetchImpl, onStartChat, onEditContact, o
   const testConnection = async (contact: AgentContactViewModel) => {
     const runtimeId = contact.runtimeId;
     if (!runtimeId) {
-      updateContact({ ...contact, runtimeHealth: { status: "error", error: "Runtime id missing" } });
+      updateContact({ ...contact, runtimeHealth: { status: "error", error: "缺少 Runtime ID" } });
       return;
     }
     setTestingId(contact.agentBindingId);
@@ -219,7 +219,7 @@ export function ContactsRailView({ contacts, loading, error, onStartChat, onCrea
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 flex-wrap items-center gap-2">
                     <h2 className="truncate text-sm font-semibold">{contact.displayName}</h2>
-                    <Chip size="sm" variant="soft" color={contactStatusColor(contact.status)}>{contact.status}</Chip>
+                    <Chip size="sm" variant="soft" color={contactStatusColor(contact.status)}>{contactStatusLabel(contact.status)}</Chip>
                   </div>
                   <p className="mt-1 truncate text-xs text-muted">{contact.roleName ?? contact.roleId} / {contact.runtimeName ?? contact.runtimeKind}</p>
                   <RuntimeHealthMessage contact={contact} />
@@ -353,8 +353,8 @@ export function RunsRailView() {
           <Card.Description className="text-xs">从聊天中打开运行，可查看转录、工具、产物和成本。</Card.Description>
         </Card.Header>
         <Card.Content className="grid gap-2 text-sm text-muted">
-          <p>daemon 运行生命周期事件到达后，最近运行会显示在这里。</p>
-          <p className="text-xs">仍可使用运行详情抽屉进行细查。</p>
+          <p>从任意房间打开一次运行详情后，这里会保留最近活动，方便继续查看转录、工具和产物。</p>
+          <p className="text-xs">正在运行的 Agent 会在聊天底部实时显示状态。</p>
         </Card.Content>
       </Card>
     </RailSurface>
@@ -373,8 +373,8 @@ export function TasksRailView() {
           <Card.Description className="text-xs">查看阻塞、委托工作、交付证明和待审查变更。</Card.Description>
         </Card.Header>
         <Card.Content className="grid gap-2 text-sm text-muted">
-          <p>打开房间后可在侧栏查看任务看板；此入口让任务始终可从主导航访问。</p>
-          <p className="text-xs">解除阻塞的任务会通过 task.unblocked 事件实时更新，无需刷新。</p>
+          <p>打开房间侧栏即可查看任务看板、委派链路和交付证明。</p>
+          <p className="text-xs">任务状态会随房间活动自动更新，无需刷新页面。</p>
         </Card.Content>
       </Card>
     </RailSurface>
@@ -924,6 +924,12 @@ function contactStatusColor(status: AgentContactViewModel["status"]): "success" 
   if (status === "available") return "success";
   if (status === "busy") return "warning";
   return "default";
+}
+
+function contactStatusLabel(status: AgentContactViewModel["status"]): string {
+  if (status === "available") return "在线";
+  if (status === "busy") return "忙碌";
+  return "离线";
 }
 
 function statusRank(status: AgentContactViewModel["status"]): number {

@@ -28,7 +28,7 @@ export function HomeView({ rooms, onOpenRoom, onCreate }: HomeViewProps) {
         <div className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-2xl font-semibold">AgentHub</h1>
-            <p className="text-sm text-muted">Your local-first multi-agent workbench.</p>
+            <p className="text-sm text-muted">本地优先的多 Agent 工作台。</p>
           </div>
           <div className="flex gap-2">
             <Button variant="primary" onPress={onCreate}>新建房间</Button>
@@ -48,7 +48,7 @@ export function HomeView({ rooms, onOpenRoom, onCreate }: HomeViewProps) {
         </div>
 
         <section className="flex flex-col gap-2">
-          <h2 className="text-sm font-semibold">Rooms</h2>
+          <h2 className="text-sm font-semibold">房间</h2>
           {sorted.length === 0 ? (
             <Card variant="default" className="items-center text-center">
               <Card.Header>

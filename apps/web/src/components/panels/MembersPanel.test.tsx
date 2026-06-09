@@ -37,13 +37,13 @@ describe("MembersPanel team management contract", () => {
     );
 
     expect(html).toContain("添加队友");
-    expect(html).toContain("Room 技能");
-    expect(html).toContain("Room 技能开关");
+    expect(html).toContain("房间技能");
+    expect(html).toContain("房间技能开关");
     expect(html).toContain("构建者");
     expect(html).toContain("code.edit");
     expect(html).toContain("file.write");
     expect(html).toContain("Build member management UI");
     expect(html).toContain("进行中");
-    expect(html).toContain("Skills");
+    expect(html).toContain("技能");
   });
 });

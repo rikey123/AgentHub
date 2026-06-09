@@ -10,7 +10,7 @@ export function PreviewCard({ card }: { card: PreviewCardData }) {
     <Card variant="default">
       <Card.Header>
         <div className="flex items-center gap-2">
-          <Card.Title className="flex-1">Preview</Card.Title>
+          <Card.Title className="flex-1">预览</Card.Title>
           <Chip size="sm" variant="soft" color="default">{card.kind}</Chip>
         </div>
         <Card.Description className="ah-mono truncate">{card.url}</Card.Description>
@@ -27,10 +27,10 @@ export function PreviewCard({ card }: { card: PreviewCardData }) {
       </Card.Content>
       <Card.Footer className="gap-2">
         <Button variant="secondary" onPress={() => setOpen((v) => !v)}>
-          {open ? "Hide preview" : "Show preview"}
+          {open ? "收起预览" : "显示预览"}
         </Button>
         <Button variant="ghost" onPress={() => window.open(card.url, "_blank", "noopener,noreferrer")}>
-          Open
+          打开
         </Button>
       </Card.Footer>
     </Card>

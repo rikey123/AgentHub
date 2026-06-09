@@ -12,8 +12,8 @@ describe("TypingIndicator", () => {
       turnIndex: 2
     }));
 
-    expect(html).toContain("Reviewer is speaking");
-    expect(html).toContain("Group turn 2");
+    expect(html).toContain("Reviewer 正在发言");
+    expect(html).toContain("第 2 轮");
     expect(html).not.toContain(">starting<");
   });
 
@@ -27,9 +27,9 @@ describe("TypingIndicator", () => {
       onStopDiscussion: () => undefined
     }));
 
-    expect(html).toContain("Stop discussion");
-    expect(html).toContain("Reviewer is speaking");
-    expect(html).toContain("Group turn 4");
+    expect(html).toContain("停止讨论");
+    expect(html).toContain("Reviewer 正在发言");
+    expect(html).toContain("第 4 轮");
   });
 
   it("renders cancelling feedback instead of another stop action", () => {
@@ -42,8 +42,8 @@ describe("TypingIndicator", () => {
       onStopDiscussion: () => undefined
     }));
 
-    expect(html).toContain("Builder is stopping");
-    expect(html).toContain("Stopping discussion");
-    expect(html).not.toContain("Stop discussion");
+    expect(html).toContain("Builder 正在停止");
+    expect(html).toContain("正在停止讨论");
+    expect(html).not.toContain("停止讨论</button>");
   });
 });

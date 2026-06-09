@@ -14,11 +14,11 @@ export function PendingTurnList({ turns, onCancel, onEdit }: PendingTurnListProp
   return (
     <div className="border-t border-border bg-surface px-3 py-2" data-testid="pending-turn-list">
       <div className="flex items-center gap-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">Pending ({turns.length})</h3>
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">待发送（{turns.length}）</h3>
         {turns.length >= 20 ? (
-          <Chip size="sm" variant="soft" color="warning" role="alert">Queue limit reached</Chip>
+          <Chip size="sm" variant="soft" color="warning" role="alert">队列已满</Chip>
         ) : turns.length >= 15 ? (
-          <Chip size="sm" variant="soft" color="warning" role="alert">Queue almost full</Chip>
+          <Chip size="sm" variant="soft" color="warning" role="alert">队列即将满</Chip>
         ) : null}
       </div>
       <ScrollShadow className="mt-2 max-h-32 overflow-auto" orientation="vertical">
@@ -29,7 +29,7 @@ export function PendingTurnList({ turns, onCancel, onEdit }: PendingTurnListProp
                 <Card.Header className="gap-1">
                   <div className="flex items-center gap-2 text-xs">
                     <Chip size="sm" variant="soft" color={pendingTurnColor(turn.pendingTurnStatus)}>
-                      {turn.pendingTurnStatus ?? "queued"} ({turn.pendingTurnPosition ?? index + 1})
+                      {pendingTurnStatusLabel(turn.pendingTurnStatus)}（{turn.pendingTurnPosition ?? index + 1}）
                     </Chip>
                     <span className="text-muted">{formatTime(turn.createdAt)}</span>
                   </div>
@@ -40,23 +40,23 @@ export function PendingTurnList({ turns, onCancel, onEdit }: PendingTurnListProp
                 size="sm"
                 variant="secondary"
                 onPress={() => onEdit(turn.id)}
-                aria-label="Edit pending turn"
+                aria-label="编辑待发送消息"
                 data-testid={`pending-turn-edit-${turn.pendingTurnId}`}
               >
-                Edit
+                编辑
               </Button>
               <Button
                 size="sm"
                 variant="danger"
-                aria-label="Cancel pending turn"
+                aria-label="取消待发送消息"
                 data-testid={`pending-turn-cancel-${turn.pendingTurnId}`}
                 onPress={() => {
-                  if (turn.pendingTurnId && window.confirm("Cancel queued message?")) {
+                  if (turn.pendingTurnId && window.confirm("取消这条待发送消息？")) {
                     onCancel(turn.pendingTurnId);
                   }
                 }}
               >
-                Cancel
+                取消
               </Button>
             </li>
           ))}
@@ -64,4 +64,11 @@ export function PendingTurnList({ turns, onCancel, onEdit }: PendingTurnListProp
       </ScrollShadow>
     </div>
   );
+}
+
+function pendingTurnStatusLabel(status: MessageViewModel["pendingTurnStatus"]): string {
+  if (status === "scheduled") return "已排期";
+  if (status === "consumed") return "处理中";
+  if (status === "cancelled") return "已取消";
+  return "排队中";
 }

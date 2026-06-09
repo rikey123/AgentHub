@@ -20,7 +20,7 @@ const groups: Array<{ title: string; rows: Array<[string[], string]> }> = [
       [["⌘", "K"], "命令面板"],
       [["?"], "显示此帮助"],
       [["g", "r"], "聚焦 rooms 面板"],
-      [["g", "d"], "聚焦 DEBUG 面板"]
+      [["g", "d"], "聚焦诊断面板"]
     ]
   },
   {

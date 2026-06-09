@@ -3,7 +3,7 @@ import { Card } from "@heroui/react";
 
 export function DebugPanel({ room }: { room: RoomViewModel }) {
   const rows: Array<[string, number | string]> = [
-    ["Room ID", room.id],
+    ["房间 ID", room.id],
     ["消息", room.messages.length],
     ["简报", room.briefs.length],
     ["运行", room.runs.length],
@@ -18,7 +18,7 @@ export function DebugPanel({ room }: { room: RoomViewModel }) {
     <div className="px-3 py-2">
       <Card variant="transparent" className="border border-border">
         <Card.Header className="pb-1">
-          <Card.Title>Debug 快照</Card.Title>
+          <Card.Title>诊断快照</Card.Title>
         </Card.Header>
         <Card.Content className="pt-0">
           <table className="w-full text-sm">

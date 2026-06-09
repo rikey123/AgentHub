@@ -9,8 +9,8 @@ export function UnknownCard({ card }: UnknownCardProps) {
     <Card variant="default">
       <Card.Header>
         <div className="flex items-center gap-2">
-          <Card.Title>Card</Card.Title>
-          <Chip size="sm" variant="soft" color="default">{card.type ?? "unknown"}</Chip>
+          <Card.Title>不支持的卡片</Card.Title>
+          <Chip size="sm" variant="soft" color="default">{card.type ?? "未知类型"}</Chip>
         </div>
       </Card.Header>
       <Card.Content>

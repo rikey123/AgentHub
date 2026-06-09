@@ -271,16 +271,16 @@ describe("TasksPanel V1.1 Kanban task view contract", () => {
       ]
     }));
 
-    expect(report).toContain("# Task Delivery Report: Ship artifact review");
-    expect(report).toContain("Template version: 2");
-    expect(report).toContain("Generated at:");
-    expect(report).toContain("Changed files: 1");
-    expect(report).toContain("Worktree reviews: 1");
-    expect(report).toContain("Proof activities: 1");
-    expect(report).toContain("Status: completed");
-    expect(report).toContain("Assignee: builder");
+    expect(report).toContain("# 任务交付报告：Ship artifact review");
+    expect(report).toContain("模板版本：2");
+    expect(report).toContain("生成时间：");
+    expect(report).toContain("变更文件：1");
+    expect(report).toContain("工作区评审：1");
+    expect(report).toContain("验证活动：1");
+    expect(report).toContain("状态：已完成");
+    expect(report).toContain("负责人：builder");
     expect(report).toContain("- `src/a.ts` (modified, +4 / -1)");
-    expect(report).toContain("- run `run-worktree`: applied");
+    expect(report).toContain("- 运行 `run-worktree`：applied");
     expect(report).toContain("- validation: pnpm check:all passed");
     expect(report).not.toContain("Non-proof chatter");
   });

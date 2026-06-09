@@ -18,16 +18,16 @@ function briefKey(roomId: string, brief: BriefViewModel, index: number): string 
 function briefTitle(brief: BriefViewModel): string {
   switch (brief.kind) {
     case "run_started":
-      return `${brief.agentName} started a run`;
+      return `${brief.agentName} 开始运行`;
     case "run_failed":
-      return `${brief.agentName} needs attention`;
+      return `${brief.agentName} 需要关注`;
     case "run_cancelled":
-      return `${brief.agentName} run cancelled`;
+      return `${brief.agentName} 运行已取消`;
     case "phase_completed":
-      return `${brief.agentName} finished a phase`;
+      return `${brief.agentName} 完成了一个阶段`;
     case "run_completed":
     default:
-      return `${brief.agentName} sent a message`;
+      return `${brief.agentName} 发送了新消息`;
   }
 }
 
@@ -61,12 +61,12 @@ export function RunBriefToasts({ roomId, briefs, onOpenRun }: RunBriefToastsProp
       notifiedBriefs.add(key);
 
       Toast.toast(briefTitle(brief), {
-        description: brief.summary || "打开运行详情可查看 transcript、工具调用、产物和成本。",
+        description: brief.summary || "打开运行详情可查看转录、工具调用、产物和成本。",
         variant: briefVariant(brief),
         timeout: 5000,
         ...(brief.runId ? {
           actionProps: {
-            children: "Open",
+            children: "打开",
             onPress: () => onOpenRun(brief.runId)
           }
         } : {})
@@ -78,9 +78,15 @@ export function RunBriefToasts({ roomId, briefs, onOpenRun }: RunBriefToastsProp
     <Toast.Provider placement="top end" width={380} maxVisibleToasts={3}>
       {({ toast }) => {
         const content = toast.content;
-        const title = typeof content?.title === "string" ? content.title : "Run update";
+        const title = typeof content?.title === "string" ? content.title : "运行更新";
         const description = typeof content?.description === "string" ? content.description : "";
-        const agentName = title.split(" sent ")[0]?.split(" started ")[0]?.split(" needs ")[0]?.split(" run ")[0]?.split(" finished ")[0] ?? "Agent";
+        const agentName = title
+          .split(" 发送")[0]
+          ?.split(" 开始")[0]
+          ?.split(" 需要")[0]
+          ?.split(" 运行")[0]
+          ?.split(" 完成")[0]
+          ?? "Agent";
         return (
           <Toast toast={toast} variant={content?.variant} className="border border-border bg-overlay/95 shadow-overlay backdrop-blur">
             <Avatar size="sm" className="shrink-0">

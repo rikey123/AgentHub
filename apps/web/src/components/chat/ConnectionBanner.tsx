@@ -13,9 +13,9 @@ export function ConnectionBanner({ status, error, onRetry }: ConnectionBannerPro
     status === "reconnecting" || status === "connecting" ? "warning" :
     "default";
   const title =
-    status === "offline" ? "Connection lost" :
-    status === "reconnecting" ? "Reconnecting…" :
-    status === "connecting" ? "Connecting…" : "Disconnected";
+    status === "offline" ? "连接已断开" :
+    status === "reconnecting" ? "正在重新连接..." :
+    status === "connecting" ? "正在连接..." : "连接不可用";
   return (
     <Alert status={alertStatus as never} role={status === "offline" ? "alert" : "status"} aria-live={status === "offline" ? "assertive" : "polite"}>
       <Alert.Content>
@@ -23,7 +23,7 @@ export function ConnectionBanner({ status, error, onRetry }: ConnectionBannerPro
         {error ? <Alert.Description>{error}</Alert.Description> : null}
         {onRetry ? (
           <div className="mt-2">
-            <Button size="sm" variant="ghost" onPress={onRetry}>Retry</Button>
+            <Button size="sm" variant="ghost" onPress={onRetry}>重试</Button>
           </div>
         ) : null}
       </Alert.Content>

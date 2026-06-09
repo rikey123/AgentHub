@@ -28,7 +28,7 @@ export function InterventionCard({ card, csrfFetch }: InterventionCardProps) {
         method: "POST",
         body: JSON.stringify(body)
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(`请求失败（${res.status}）`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -40,11 +40,11 @@ export function InterventionCard({ card, csrfFetch }: InterventionCardProps) {
     <Card variant="default" className="border border-accent/30">
       <Card.Header>
         <div className="flex items-center gap-2">
-          <Card.Title>Intervention</Card.Title>
+          <Card.Title>需要处理</Card.Title>
           <Chip size="sm" variant="soft" color={interventionPriorityColor(String(card.priority))}>
-            {String(card.priority)}
+            {interventionPriorityLabel(String(card.priority))}
           </Chip>
-          <Chip size="sm" variant="soft" color="default">{String(card.status)}</Chip>
+          <Chip size="sm" variant="soft" color="default">{interventionStatusLabel(String(card.status))}</Chip>
         </div>
         <Card.Description>{card.reason}</Card.Description>
       </Card.Header>
@@ -53,8 +53,8 @@ export function InterventionCard({ card, csrfFetch }: InterventionCardProps) {
           <TextArea
             value={effective}
             onChange={(e) => setEffective(e.currentTarget.value)}
-            aria-label="Effective text"
-            placeholder="Optional override text"
+            aria-label="最终采用的文本"
+            placeholder="可选：覆盖原文本"
             className="min-h-20"
           />
         ) : (
@@ -64,12 +64,30 @@ export function InterventionCard({ card, csrfFetch }: InterventionCardProps) {
       </Card.Content>
       {!resolved ? (
         <Card.Footer className="gap-2 flex-wrap">
-          <Button variant="primary" isPending={pending === "approve"} onPress={() => act("approve")}>Approve</Button>
-          <Button variant="secondary" isPending={pending === "later"} onPress={() => act("later")}>Later</Button>
-          <Button variant="tertiary" isPending={pending === "ignore"} onPress={() => act("ignore")}>Ignore</Button>
-          <Button variant="danger" isPending={pending === "reject"} onPress={() => act("reject")}>Reject</Button>
+          <Button variant="primary" isPending={pending === "approve"} onPress={() => act("approve")}>批准</Button>
+          <Button variant="secondary" isPending={pending === "later"} onPress={() => act("later")}>稍后处理</Button>
+          <Button variant="tertiary" isPending={pending === "ignore"} onPress={() => act("ignore")}>忽略</Button>
+          <Button variant="danger" isPending={pending === "reject"} onPress={() => act("reject")}>拒绝</Button>
         </Card.Footer>
       ) : null}
     </Card>
   );
+}
+
+function interventionPriorityLabel(priority: string): string {
+  if (priority === "high") return "高优先级";
+  if (priority === "medium") return "中优先级";
+  if (priority === "low") return "低优先级";
+  return priority;
+}
+
+function interventionStatusLabel(status: string): string {
+  if (status === "pending") return "待处理";
+  if (status === "approved") return "已批准";
+  if (status === "ignored") return "已忽略";
+  if (status === "rejected") return "已拒绝";
+  if (status === "snoozed") return "已稍后";
+  if (status === "resolved") return "已解决";
+  if (status === "closed") return "已关闭";
+  return status;
 }

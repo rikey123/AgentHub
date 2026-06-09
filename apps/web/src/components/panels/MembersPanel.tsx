@@ -130,7 +130,7 @@ export function MembersPanel({
       <div className="ah-panel-heading">
         <div className="min-w-0">
           <h3 className="text-base font-semibold">成员</h3>
-          <p className="text-xs text-muted">此 Room 中有 {members.length} 名成员</p>
+          <p className="text-xs text-muted">此房间中有 {members.length} 名成员</p>
         </div>
         <Button
           className="ah-pill-action"
@@ -148,7 +148,7 @@ export function MembersPanel({
       </div>
 
       {members.length === 0 ? (
-        <EmptyState label="此 Room 暂无成员。" />
+        <EmptyState label="此房间暂无成员。" />
       ) : (
         <ul className="flex flex-col gap-1.5" role="list">
           {members.map((member) => (
@@ -311,14 +311,14 @@ function RoomSkillPool({ roomId, csrfFetch }: { roomId: string; csrfFetch: typeo
             <span className="ah-skill-toggle-line ah-skill-toggle-line-3" />
           </span>
         </span>
-        <span className="min-w-0 flex-1 truncate">Room 技能</span>
-        <span className="ah-sr-only">Room 技能开关</span>
+        <span className="min-w-0 flex-1 truncate">房间技能</span>
+        <span className="ah-sr-only">房间技能开关</span>
         <Chip size="sm" variant="soft" color={enabledCount > 0 ? "accent" : "default"}>
           {enabledCount}/{skills.length}
         </Chip>
       </summary>
       <div className="mt-3 grid gap-3">
-        {loading ? <p className="text-xs text-muted">正在加载 Room 技能...</p> : null}
+        {loading ? <p className="text-xs text-muted">正在加载房间技能...</p> : null}
         {error ? (
           <p className="text-xs text-danger" role="alert">
             {error}
@@ -352,7 +352,7 @@ function RoomSkillPool({ roomId, csrfFetch }: { roomId: string; csrfFetch: typeo
           </div>
         ) : null}
         <p className="text-xs text-muted">
-          打开后，此技能会加入 Room 的默认技能池；关闭后，成员只会在单独追加时使用它。
+          打开后，此技能会加入房间默认技能池；关闭后，成员只会在单独追加时使用它。
         </p>
       </div>
     </details>
@@ -532,13 +532,13 @@ function MemberSkills({
       onToggle={(event) => setOpen((event.currentTarget as HTMLDetailsElement).open)}
     >
       <summary className="ah-member-skills-summary">
-        <span>Skills</span>
+        <span>技能</span>
         <Chip size="sm" variant="soft" color="default">
           {state.effectiveSkills.length}
         </Chip>
       </summary>
       <div className="mt-3 grid gap-3">
-        {loading ? <p className="text-xs text-muted">正在加载 skills...</p> : null}
+        {loading ? <p className="text-xs text-muted">正在加载技能...</p> : null}
         {error ? (
           <p className="text-xs text-danger" role="alert">
             {error}
@@ -547,7 +547,7 @@ function MemberSkills({
         <div className="flex flex-wrap gap-1">
           {state.effectiveSkills.length === 0 ? (
             <Chip size="sm" variant="soft" color="default">
-              暂无生效 skills
+              暂无生效技能
             </Chip>
           ) : (
             state.effectiveSkills.map((skill) => (

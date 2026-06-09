@@ -207,10 +207,10 @@ export function MessageItem(props: MessageItemProps) {
             {isPending ? (
               <div className="mt-3 flex gap-2">
                 {onEditPending ? (
-                  <Button size="sm" variant={isUser ? "secondary" : "outline"} onPress={onEditPending}>Edit</Button>
+                  <Button size="sm" variant={isUser ? "secondary" : "outline"} onPress={onEditPending}>编辑</Button>
                 ) : null}
                 {onCancelPending ? (
-                  <Button size="sm" variant="danger" onPress={onCancelPending}>Cancel</Button>
+                  <Button size="sm" variant="danger" onPress={onCancelPending}>取消发送</Button>
                 ) : null}
               </div>
             ) : null}
@@ -231,8 +231,8 @@ export function MessageItem(props: MessageItemProps) {
               </Dropdown.Trigger>
               <Dropdown.Popover>
                 <Dropdown.Menu aria-label="消息操作">
-                  {onReply ? <Dropdown.Item onAction={onReply}>Reply</Dropdown.Item> : null}
-                  {onQuote ? <Dropdown.Item onAction={onQuote}>Quote</Dropdown.Item> : null}
+                  {onReply ? <Dropdown.Item onAction={onReply}>回复</Dropdown.Item> : null}
+                  {onQuote ? <Dropdown.Item onAction={onQuote}>引用</Dropdown.Item> : null}
                   {onRegenerate && message.senderType === "agent" && message.status === "completed" ? (
                     <Dropdown.Item onAction={onRegenerate}>{regenerateActionLabel()}</Dropdown.Item>
                   ) : null}
@@ -270,7 +270,7 @@ function QuotedMessageBubble(props: {
   readonly onOpenQuotedMessage?: ((id: string) => void) | undefined;
 }) {
   const targetId = props.quotedMessage?.id ?? props.quotedMessageId;
-  const senderName = props.quotedMessage?.senderName ?? "Quoted message";
+  const senderName = props.quotedMessage?.senderName ?? "被引用消息";
   const preview = props.quotedMessage?.preview || props.quotedMessageId.slice(0, 8);
 
   return (
@@ -500,7 +500,7 @@ function CodePartView({ part }: { part: Extract<MessageViewModel["parts"][number
     setCopyError(undefined);
     const writer = globalThis.navigator?.clipboard?.writeText;
     if (!writer) {
-      setCopyError("Clipboard is unavailable.");
+      setCopyError("当前浏览器不可用剪贴板。");
       return;
     }
 
