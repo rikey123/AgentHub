@@ -8,7 +8,13 @@ build/
 coverage/
 .turbo/
 .vite/
+release/
+apps/desktop/package-resources/
 playwright-report/
+
+# Capacitor generated native project (scaffolded on demand via `cap add android`)
+apps/mobile/android/
+apps/mobile/ios/
 test-results/
 
 # Local runtime state
@@ -81,3 +87,7 @@ Thumbs.db
 .claude/settings.local.json
 .playwright-mcp/
 .sisyphus/run-continuation/
+
+#reference
+reference/
+
