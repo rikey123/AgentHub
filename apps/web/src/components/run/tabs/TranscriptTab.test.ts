@@ -18,7 +18,7 @@ describe("TranscriptTab empty state", () => {
     }), "run-failed");
 
     expect(state).toEqual({
-      title: "Run failed before a transcript was created.",
+      title: "Run 在生成记录前失败。",
       description: "No available channel for model gpt-5.4-mini",
       tone: "danger"
     });
