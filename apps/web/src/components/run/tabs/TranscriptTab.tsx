@@ -40,7 +40,7 @@ export function TranscriptTab({ room, runId }: { room: RoomViewModel; runId: str
           <Alert color="warning">
             <Alert.Content>
               <div className="flex items-center gap-2">
-                <Alert.Title>Context compacted</Alert.Title>
+                <Alert.Title>上下文已压缩</Alert.Title>
                 <Chip size="sm" variant="soft" color="warning">PreCompact</Chip>
               </div>
               <Alert.Description>
@@ -80,10 +80,10 @@ export function getTranscriptEmptyState(room: RoomViewModel, runId: string): Tra
   const run = room.runs.find((item) => item.id === runId);
   if (run?.status === "failed") {
     return {
-      title: "Run failed before a transcript was created.",
+      title: "Run 在生成记录前失败。",
       ...(run.error !== undefined && run.error.trim().length > 0 ? { description: run.error } : {}),
       tone: "danger"
     };
   }
-  return { title: "No transcript for this run yet.", tone: "default" };
+  return { title: "这个 Run 暂无记录。", tone: "default" };
 }
