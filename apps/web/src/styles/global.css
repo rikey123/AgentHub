@@ -154,6 +154,159 @@ html, body, #root {
   box-shadow: 0 0 0 2px var(--accent-soft-hover);
 }
 
+.ah-run-detail-drawer {
+  --ah-run-panel-border: color-mix(in oklab, var(--border) 84%, transparent);
+  --ah-run-panel-bg: color-mix(in oklab, var(--surface) 88%, transparent);
+}
+
+.ah-run-detail-drawer [data-slot="header"] {
+  padding: 1.25rem 1.5rem 0.95rem;
+}
+
+.ah-run-detail-drawer [data-slot="heading"] {
+  max-width: calc(100% - 2.75rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 1.08rem;
+  font-weight: 720;
+  letter-spacing: 0;
+}
+
+.ah-run-detail-drawer [data-slot="body"] {
+  min-height: 0;
+}
+
+.ah-run-detail-tabs-wrap {
+  margin: 0 1.25rem 0.75rem;
+  overflow-x: auto;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--surface-secondary) 88%, transparent);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--border) 64%, transparent),
+    0 10px 24px rgba(22, 45, 74, 0.08);
+}
+
+.ah-run-detail-tabs-wrap::-webkit-scrollbar {
+  display: none;
+}
+
+.ah-run-detail-tabs {
+  display: flex;
+  min-width: max-content;
+  gap: 0.2rem;
+  padding: 0.28rem;
+}
+
+.ah-run-detail-tab {
+  min-width: max-content;
+  height: 2.15rem;
+  padding: 0 0.9rem;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 680;
+  letter-spacing: 0;
+  white-space: nowrap;
+  transition:
+    background-color 160ms ease,
+    color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.ah-run-detail-tab:hover,
+.ah-run-detail-tab:focus-visible {
+  color: var(--foreground);
+  background: color-mix(in oklab, var(--surface-tertiary) 72%, transparent);
+}
+
+.ah-run-detail-tab[aria-selected="true"],
+.ah-run-detail-tab[data-selected="true"] {
+  color: var(--foreground);
+  background: color-mix(in oklab, var(--overlay) 86%, var(--accent-soft));
+  box-shadow:
+    0 8px 18px rgba(19, 40, 68, 0.12),
+    inset 0 0 0 1px color-mix(in oklab, var(--border) 72%, transparent);
+}
+
+.ah-run-detail-tab [data-slot="separator"] {
+  display: none;
+}
+
+.ah-run-tools-tab {
+  color: var(--foreground);
+}
+
+.ah-run-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.9rem;
+  border: 1px solid var(--ah-run-panel-border);
+  border-radius: 10px;
+  background: var(--ah-run-panel-bg);
+  box-shadow:
+    0 10px 22px rgba(22, 45, 74, 0.055),
+    inset 0 1px 0 rgba(255, 255, 255, 0.38);
+}
+
+.ah-run-section-title {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 760;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ah-run-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.65;
+}
+
+.ah-run-collab-card,
+.ah-run-tool-card {
+  background: color-mix(in oklab, var(--surface) 76%, transparent);
+  box-shadow: none;
+}
+
+.ah-run-link {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.28rem 0.55rem;
+  width: 100%;
+  align-items: center;
+  border: 1px solid color-mix(in oklab, var(--border) 80%, transparent);
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--surface-secondary) 72%, transparent);
+  padding: 0.55rem 0.65rem;
+  color: var(--foreground);
+  text-align: left;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    transform 160ms ease;
+}
+
+.ah-run-link:hover,
+.ah-run-link:focus-visible {
+  border-color: color-mix(in oklab, var(--accent) 38%, var(--border));
+  background: color-mix(in oklab, var(--surface-tertiary) 76%, transparent);
+  transform: translateY(-1px);
+}
+
+.ah-run-link .ah-mono {
+  grid-column: 1 / -1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
 .ah-topbar {
   min-width: 0;
   color: var(--foreground);
@@ -736,15 +889,15 @@ html, body, #root {
 
 .ah-pill-action {
   position: relative;
-  width: auto;
-  min-width: 6.15rem;
+  width: 1.85rem;
+  min-width: 1.85rem;
   height: 1.7rem;
   overflow: hidden;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.36rem;
-  padding: 0 0.72rem;
+  gap: 0;
+  padding: 0;
   border-radius: 999px;
   border: 1px solid #bcd7f4;
   background: #eef7ff;
@@ -753,6 +906,10 @@ html, body, #root {
     0 4px 10px rgba(47, 91, 145, 0.045),
     inset 0 1px 0 rgba(255, 255, 255, 0.75);
   transition:
+    width 220ms ease,
+    min-width 220ms ease,
+    gap 220ms ease,
+    padding 220ms ease,
     border-color 180ms ease,
     background-color 180ms ease,
     box-shadow 180ms ease;
@@ -790,18 +947,27 @@ html, body, #root {
 }
 
 .ah-pill-action-label {
-  max-width: 4.2rem;
+  max-width: 0;
   overflow: hidden;
   white-space: nowrap;
-  opacity: 1;
+  opacity: 0;
   text-align: center;
   font-size: 0.78rem;
   font-weight: 700;
   line-height: 1;
+  transform: translateX(-0.18rem);
+  transition:
+    max-width 220ms ease,
+    opacity 160ms ease,
+    transform 220ms ease;
 }
 
 .ah-pill-action:hover,
 .ah-pill-action:focus-visible {
+  width: 6.15rem;
+  min-width: 6.15rem;
+  gap: 0.36rem;
+  padding: 0 0.72rem;
   border-color: #9fc6ef;
   background: #f5fbff;
   box-shadow:
@@ -810,8 +976,16 @@ html, body, #root {
     0 7px 16px rgba(47, 91, 145, 0.08);
 }
 
+.ah-pill-action:hover .ah-pill-action-label,
+.ah-pill-action:focus-visible .ah-pill-action-label {
+  max-width: 4.2rem;
+  opacity: 1;
+  transform: translateX(0);
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .ah-pill-action {
+  .ah-pill-action,
+  .ah-pill-action-label {
     transition-duration: 0ms;
   }
 }
