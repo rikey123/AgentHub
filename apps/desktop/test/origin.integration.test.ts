@@ -83,7 +83,7 @@ async function runElectronOriginProbe(root: string, baseUrl: string): Promise<El
 
   const electronPath = createRequire(import.meta.url)("electron") as string;
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(electronPath, [mainPath], {
+    const child = spawn(electronPath, electronProbeArgs(mainPath), {
       env: electronProbeEnv(baseUrl, outputPath),
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true
@@ -100,6 +100,11 @@ async function runElectronOriginProbe(root: string, baseUrl: string): Promise<El
   });
 
   return JSON.parse(readFileSync(outputPath, "utf8")) as ElectronOriginProbeResult;
+}
+
+function electronProbeArgs(mainPath: string): string[] {
+  if (process.platform === "linux" && process.env.CI === "true") return ["--no-sandbox", mainPath];
+  return [mainPath];
 }
 
 function electronProbeEnv(baseUrl: string, outputPath: string): NodeJS.ProcessEnv {
