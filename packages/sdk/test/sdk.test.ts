@@ -1,6 +1,47 @@
 import { describe, expect, it } from "vitest";
 
-import { AgentHubClient } from "../src/index.ts";
+import { AgentHubClient, AgentHubEventStream, parseMobileConnectionConfig, type EventSourceLike } from "../src/index.ts";
+
+type Listener = (event: MessageEvent<string>) => void;
+
+class FakeEventSource implements EventSourceLike {
+  onopen: ((event: Event) => void) | null = null;
+  onerror: ((event: Event) => void) | null = null;
+  onmessage: ((event: MessageEvent<string>) => void) | null = null;
+  readonly listeners = new Map<string, Listener[]>();
+  closed = false;
+
+  constructor(readonly url: string) {}
+
+  addEventListener(type: string, listener: Listener): void {
+    const listeners = this.listeners.get(type) ?? [];
+    listeners.push(listener);
+    this.listeners.set(type, listeners);
+  }
+
+  close(): void {
+    this.closed = true;
+  }
+
+  emit(type: string, data: unknown): void {
+    const event = { data: JSON.stringify(data) } as MessageEvent<string>;
+    for (const listener of this.listeners.get(type) ?? []) listener(event);
+  }
+}
+
+function envelope(seq: number, type = "room.created") {
+  return {
+    id: `evt_${seq}`,
+    type,
+    schemaVersion: 1,
+    durability: "durable",
+    visibility: "main",
+    seq,
+    workspaceId: "workspace_1",
+    payload: { seq },
+    createdAt: 1_700_000_000_000 + seq
+  };
+}
 
 describe("AgentHubClient", () => {
   it("calls JSON daemon APIs", async () => {
@@ -107,4 +148,154 @@ describe("AgentHubClient", () => {
 
     expect(calls).toEqual([{ url: "http://daemon/rooms/room_1/discussion/stop", method: "POST" }]);
   });
+
+  it("parses mobile connection configs from qrPayload JSON", () => {
+    const config = parseMobileConnectionConfig(JSON.stringify({
+      version: 1,
+      url: "http://192.168.1.10:6677",
+      host: "192.168.1.10",
+      port: 6677,
+      token: "ah_token",
+      tokenId: "token_1",
+      scopes: ["read"],
+      expiresAt: null
+    }));
+
+    expect(config).toEqual({
+      version: 1,
+      url: "http://192.168.1.10:6677",
+      host: "192.168.1.10",
+      port: 6677,
+      token: "ah_token",
+      tokenId: "token_1",
+      scopes: ["read"],
+      expiresAt: null
+    });
+  });
+
+  it("parses mobile connection configs from scanned URLs", () => {
+    const config = parseMobileConnectionConfig("http://192.168.1.10:6677/qr-login?token=ah_token");
+
+    expect(config).toMatchObject({
+      version: 1,
+      url: "http://192.168.1.10:6677",
+      host: "192.168.1.10",
+      port: 6677,
+      token: "ah_token"
+    });
+  });
+
+  it("builds mobile snapshot and read-only preview requests", async () => {
+    const calls: Array<{ readonly url: string; readonly headers: HeadersInit | undefined }> = [];
+    const client = new AgentHubClient({
+      baseUrl: "http://daemon",
+      token: "ah_token",
+      fetchImpl: (async (url, init) => {
+        calls.push({ url: String(url), headers: init?.headers });
+        return new Response(JSON.stringify(String(url).includes("/sync/snapshot")
+          ? { view: "mobile", cursor: 9, rooms: [], tasks: [], runs: [], permissions: [], artifacts: [] }
+          : { artifact: { id: "artifact_1" }, file: { path: "src/index.ts" }, content: "preview" }), { status: 200 });
+      }) as typeof fetch
+    });
+
+    await client.syncSnapshot({ roomId: "room_1" });
+    await client.mobileArtifactPreview("artifact_1", "src/index.ts");
+
+    expect(calls).toEqual([
+      { url: "http://daemon/sync/snapshot?view=mobile&roomId=room_1", headers: { accept: "application/json", authorization: "Bearer ah_token" } },
+      { url: "http://daemon/mobile/artifacts/artifact_1/files/src%2Findex.ts", headers: { accept: "application/json", authorization: "Bearer ah_token" } }
+    ]);
+  });
+
+  it("subscribes to SSE with an injected cursor store and deduplicates replayed events", async () => {
+    const writes: number[] = [];
+    const sources: FakeEventSource[] = [];
+    const delivered: number[] = [];
+    const stream = new AgentHubEventStream({
+      baseUrl: "http://daemon/",
+      view: "main",
+      cursorStore: {
+        read: () => 4,
+        write: (cursor) => { writes.push(cursor); }
+      },
+      eventSourceFactory: (url) => {
+        const source = new FakeEventSource(url);
+        sources.push(source);
+        return source;
+      }
+    });
+
+    const subscription = stream.subscribe((event) => { if (event.seq !== undefined) delivered.push(event.seq); });
+    await waitFor(() => sources.length > 0);
+
+    expect(sources[0]?.url).toBe("http://daemon/event?view=main&cursor=4");
+    sources[0]?.emit("room.created", envelope(4));
+    sources[0]?.emit("room.created", envelope(5));
+    sources[0]?.emit("room.created", envelope(6));
+    await waitFor(() => delivered.length === 2);
+
+    expect(delivered).toEqual([5, 6]);
+    expect(writes).toEqual([5, 6]);
+    expect(subscription.cursor).toBe(6);
+    subscription.close();
+  });
+
+  it("reconnects SSE from the latest cursor after errors", async () => {
+    const sources: FakeEventSource[] = [];
+    const stream = new AgentHubEventStream({
+      baseUrl: "http://daemon",
+      reconnect: { initialDelayMs: 1, maxDelayMs: 1 },
+      eventSourceFactory: (url) => {
+        const source = new FakeEventSource(url);
+        sources.push(source);
+        return source;
+      }
+    });
+
+    const subscription = stream.subscribe(() => undefined);
+    await waitFor(() => sources.length > 0);
+    sources[0]?.emit("room.created", envelope(7));
+    sources[0]?.onerror?.(new Event("error"));
+    await waitFor(() => sources.length > 1);
+
+    expect(sources[1]?.url).toBe("http://daemon/event?view=main&cursor=7");
+    subscription.close();
+  });
+
+  it("can poll JSON sync events and continue from the stored cursor", async () => {
+    const calls: string[] = [];
+    const writes: number[] = [];
+    const delivered: number[] = [];
+    const stream = new AgentHubEventStream({
+      baseUrl: "http://daemon",
+      channel: "json-poll",
+      view: "mobile",
+      token: "token_1",
+      pollIntervalMs: 1_000,
+      cursorStore: {
+        read: () => 10,
+        write: (cursor) => { writes.push(cursor); }
+      },
+      fetchImpl: (async (url, init) => {
+        calls.push(`${String(url)} ${JSON.stringify(init?.headers ?? {})}`);
+        return new Response(JSON.stringify({ events: [envelope(10), envelope(11), envelope(12)], nextCursor: 12 }), { status: 200 });
+      }) as typeof fetch
+    });
+
+    const subscription = stream.subscribe((event) => { if (event.seq !== undefined) delivered.push(event.seq); });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    expect(calls).toEqual(['http://daemon/sync/events?view=mobile&sinceSeq=10 {"accept":"application/json","authorization":"Bearer token_1"}']);
+    expect(delivered).toEqual([11, 12]);
+    expect(writes).toEqual([11, 12]);
+    subscription.close();
+  });
 });
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  const deadline = Date.now() + 100;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+}
