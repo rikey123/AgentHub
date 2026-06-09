@@ -34,9 +34,9 @@ export function TerminalCard({ artifactId, title, lines, exitCode = null }: Term
           <div className="flex items-center gap-2">
             <Card.Title className="flex-1 truncate">{title}</Card.Title>
             {showExitBadge ? (
-              <Chip size="sm" color="danger" variant="primary">exit {exitCode}</Chip>
+              <Chip size="sm" color="danger" variant="primary">退出码 {exitCode}</Chip>
             ) : null}
-            <Chip size="sm" variant="soft" color="default">{lines.length} lines</Chip>
+            <Chip size="sm" variant="soft" color="default">{lines.length} 行</Chip>
           </div>
           <Card.Description className="ah-mono truncate">{artifactId}</Card.Description>
         </Card.Header>
@@ -45,10 +45,10 @@ export function TerminalCard({ artifactId, title, lines, exitCode = null }: Term
             {showSpinner ? (
               <div className="flex items-center gap-2 text-muted">
                 <Spinner size="sm" />
-                <span>Loading…</span>
+                <span>正在加载...</span>
               </div>
             ) : lines.length === 0 ? (
-              <div className="text-muted">No output.</div>
+              <div className="text-muted">暂无输出。</div>
             ) : (
               lines.slice(-10).map((line, i) => (
                 <div
@@ -65,8 +65,8 @@ export function TerminalCard({ artifactId, title, lines, exitCode = null }: Term
             <Chip size="sm" variant="soft" color="default">stdout {stdoutCount}</Chip>
             <Chip size="sm" variant="soft" color={stderrCount > 0 ? "danger" : "default"}>stderr {stderrCount}</Chip>
             <div className="ml-auto">
-            <Button variant="secondary" onPress={() => setExpanded(true)} isDisabled={lines.length === 0} data-testid="terminal-expand">
-                Expand
+              <Button variant="secondary" onPress={() => setExpanded(true)} isDisabled={lines.length === 0} data-testid="terminal-expand">
+                展开
               </Button>
             </div>
           </div>
@@ -76,7 +76,7 @@ export function TerminalCard({ artifactId, title, lines, exitCode = null }: Term
         <Modal.Backdrop isOpen={expanded} onOpenChange={setExpanded}>
           <Modal.Container size="lg">
             <Modal.Dialog data-testid="terminal-modal">
-              <Modal.CloseTrigger aria-label="Close terminal" />
+              <Modal.CloseTrigger aria-label="关闭终端" />
               <Modal.Header>
                 <Modal.Heading>{title}</Modal.Heading>
               </Modal.Header>
@@ -84,7 +84,7 @@ export function TerminalCard({ artifactId, title, lines, exitCode = null }: Term
                 <ExpandedTerminal lines={lines} />
               </Modal.Body>
               <Modal.Footer>
-                <Button slot="close" variant="secondary">Close</Button>
+                <Button slot="close" variant="secondary">关闭</Button>
               </Modal.Footer>
             </Modal.Dialog>
           </Modal.Container>
@@ -129,11 +129,11 @@ function ExpandedTerminal({ lines }: { lines: TerminalCardProps["lines"] }) {
   return (
     <div className="flex h-[60vh] flex-col gap-2">
       <div className="flex items-center gap-2">
-        <SearchField className="flex-1" aria-label="Search lines" value={search} onChange={setSearch}>
-          <Input placeholder="Filter (regex)" data-testid="terminal-search" />
+        <SearchField className="flex-1" aria-label="搜索日志行" value={search} onChange={setSearch}>
+          <Input placeholder="筛选（正则）" data-testid="terminal-search" />
         </SearchField>
-        <Switch isSelected={autoScroll} onChange={setAutoScroll}>Auto-scroll</Switch>
-        <Button size="sm" variant="secondary" onPress={copyAll} data-testid="terminal-copy">Copy all</Button>
+        <Switch isSelected={autoScroll} onChange={setAutoScroll}>自动滚动</Switch>
+        <Button size="sm" variant="secondary" onPress={copyAll} data-testid="terminal-copy">复制全部</Button>
       </div>
       <div ref={parentRef} className="ah-mono flex-1 overflow-auto rounded bg-surface-secondary p-2 text-xs leading-tight">
         <div style={{ height: `${virtualizer.getTotalSize()}px`, position: "relative" }}>

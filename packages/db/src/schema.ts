@@ -343,6 +343,12 @@ export const permissionProfiles = sqliteTable("permission_profiles", {
   updatedAt: integer("updated_at").notNull()
 });
 
+export const permissionSettings = sqliteTable("permission_settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: integer("updated_at").notNull()
+});
+
 export const permissionRules = sqliteTable("permission_rules", {
   id: text("id").primaryKey(),
   workspaceId: text("workspace_id").notNull(),
@@ -591,6 +597,183 @@ export const mailboxDeliveries = sqliteTable(
     deliveredAt: integer("delivered_at").notNull()
   },
   (table) => [primaryKey({ columns: [table.deliveryBatchId, table.runId] })]
+);
+
+export const agentWorkflows = sqliteTable(
+  "agent_workflows",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    roomId: text("room_id"),
+    name: text("name").notNull(),
+    description: text("description"),
+    draftVersionId: text("draft_version_id"),
+    activeVersionId: text("active_version_id"),
+    createdBy: text("created_by"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    deletedAt: integer("deleted_at")
+  },
+  (table) => [
+    index("idx_agent_workflows_workspace_name").on(table.workspaceId, table.name),
+    index("idx_agent_workflows_updated").on(table.workspaceId, table.updatedAt)
+  ]
+);
+
+export const agentWorkflowVersions = sqliteTable(
+  "agent_workflow_versions",
+  {
+    id: text("id").primaryKey(),
+    workflowId: text("workflow_id").notNull(),
+    versionNumber: integer("version_number").notNull(),
+    state: text("state").notNull(),
+    valid: integer("valid").notNull().default(0),
+    validationErrors: text("validation_errors").notNull().default("[]"),
+    viewportJson: text("viewport_json").notNull().default("{}"),
+    createdFromVersionId: text("created_from_version_id"),
+    lockedFromVersionId: text("locked_from_version_id"),
+    lockedAt: integer("locked_at"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull()
+  },
+  (table) => [
+    uniqueIndex("agent_workflow_versions_workflow_version_unique").on(table.workflowId, table.versionNumber),
+    index("idx_agent_workflow_versions_workflow_state").on(table.workflowId, table.state),
+    index("idx_agent_workflow_versions_workflow_updated").on(table.workflowId, table.updatedAt)
+  ]
+);
+
+export const agentWorkflowNodes = sqliteTable(
+  "agent_workflow_nodes",
+  {
+    id: text("id").primaryKey(),
+    workflowVersionId: text("workflow_version_id").notNull(),
+    nodeId: text("node_id").notNull(),
+    kind: text("kind").notNull(),
+    displayName: text("display_name").notNull(),
+    agentBindingId: text("agent_binding_id"),
+    roleLabel: text("role_label"),
+    prompt: text("prompt").notNull().default(""),
+    positionX: real("position_x").notNull(),
+    positionY: real("position_y").notNull(),
+    width: real("width"),
+    height: real("height"),
+    enabled: integer("enabled").notNull().default(1),
+    locked: integer("locked").notNull().default(0),
+    configJson: text("config_json").notNull().default("{}"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull()
+  },
+  (table) => [
+    uniqueIndex("agent_workflow_nodes_version_node_unique").on(table.workflowVersionId, table.nodeId),
+    index("idx_agent_workflow_nodes_version").on(table.workflowVersionId),
+    index("idx_agent_workflow_nodes_agent_binding").on(table.agentBindingId)
+  ]
+);
+
+export const agentWorkflowEdges = sqliteTable(
+  "agent_workflow_edges",
+  {
+    id: text("id").primaryKey(),
+    workflowVersionId: text("workflow_version_id").notNull(),
+    edgeId: text("edge_id").notNull(),
+    sourceNodeId: text("source_node_id").notNull(),
+    targetNodeId: text("target_node_id").notNull(),
+    label: text("label"),
+    enabled: integer("enabled").notNull().default(1),
+    configJson: text("config_json").notNull().default("{}"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull()
+  },
+  (table) => [
+    uniqueIndex("agent_workflow_edges_version_edge_unique").on(table.workflowVersionId, table.edgeId),
+    uniqueIndex("agent_workflow_edges_version_pair_unique").on(table.workflowVersionId, table.sourceNodeId, table.targetNodeId),
+    index("idx_agent_workflow_edges_version").on(table.workflowVersionId),
+    index("idx_agent_workflow_edges_source").on(table.workflowVersionId, table.sourceNodeId),
+    index("idx_agent_workflow_edges_target").on(table.workflowVersionId, table.targetNodeId)
+  ]
+);
+
+export const agentWorkflowRuns = sqliteTable(
+  "agent_workflow_runs",
+  {
+    id: text("id").primaryKey(),
+    workflowId: text("workflow_id").notNull(),
+    workflowVersionId: text("workflow_version_id").notNull(),
+    workspaceId: text("workspace_id").notNull(),
+    roomId: text("room_id"),
+    status: text("status").notNull(),
+    seedContext: text("seed_context"),
+    startedBy: text("started_by"),
+    startedAt: integer("started_at"),
+    endedAt: integer("ended_at"),
+    failureReason: text("failure_reason"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull()
+  },
+  (table) => [
+    index("idx_agent_workflow_runs_workflow_status").on(table.workflowId, table.status, table.createdAt),
+    index("idx_agent_workflow_runs_version").on(table.workflowVersionId, table.createdAt),
+    index("idx_agent_workflow_runs_workspace").on(table.workspaceId, table.createdAt),
+    index("idx_agent_workflow_runs_room").on(table.roomId, table.createdAt)
+  ]
+);
+
+export const agentWorkflowNodeRuns = sqliteTable(
+  "agent_workflow_node_runs",
+  {
+    id: text("id").primaryKey(),
+    workflowRunId: text("workflow_run_id").notNull(),
+    workflowNodeId: text("workflow_node_id").notNull(),
+    nodeId: text("node_id").notNull(),
+    agentRunId: text("agent_run_id"),
+    agentBindingId: text("agent_binding_id"),
+    status: text("status").notNull(),
+    inputContextJson: text("input_context_json").notNull().default("[]"),
+    outputContextJson: text("output_context_json"),
+    error: text("error"),
+    queuedAt: integer("queued_at"),
+    startedAt: integer("started_at"),
+    completedAt: integer("completed_at"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull()
+  },
+  (table) => [
+    uniqueIndex("agent_workflow_node_runs_run_node_unique").on(table.workflowRunId, table.nodeId),
+    index("idx_agent_workflow_node_runs_run_status").on(table.workflowRunId, table.status),
+    index("idx_agent_workflow_node_runs_workflow_node").on(table.workflowNodeId),
+    index("idx_agent_workflow_node_runs_agent_run").on(table.agentRunId)
+  ]
+);
+
+export const agentWorkflowEdgeDeliveries = sqliteTable(
+  "agent_workflow_edge_deliveries",
+  {
+    id: text("id").primaryKey(),
+    workflowRunId: text("workflow_run_id").notNull(),
+    workflowEdgeId: text("workflow_edge_id").notNull(),
+    edgeId: text("edge_id").notNull(),
+    sourceNodeId: text("source_node_id").notNull(),
+    targetNodeId: text("target_node_id").notNull(),
+    sourceNodeRunId: text("source_node_run_id"),
+    targetNodeRunId: text("target_node_run_id"),
+    mailboxMessageId: text("mailbox_message_id"),
+    status: text("status").notNull(),
+    contextJson: text("context_json").notNull().default("{}"),
+    idempotencyKey: text("idempotency_key"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    error: text("error"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    deliveredAt: integer("delivered_at")
+  },
+  (table) => [
+    index("idx_agent_workflow_edge_deliveries_run_status").on(table.workflowRunId, table.status),
+    index("idx_agent_workflow_edge_deliveries_edge").on(table.workflowEdgeId),
+    index("idx_agent_workflow_edge_deliveries_source").on(table.workflowRunId, table.sourceNodeId),
+    index("idx_agent_workflow_edge_deliveries_target").on(table.workflowRunId, table.targetNodeId),
+    index("idx_agent_workflow_edge_deliveries_mailbox").on(table.mailboxMessageId)
+  ]
 );
 
 export const authTokens = sqliteTable("auth_tokens", {

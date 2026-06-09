@@ -18,7 +18,7 @@ export function PreviewCard({ card }: { card: PreviewCardData }) {
       <Card.Content>
         {open ? (
           <iframe
-            title="Artifact preview"
+            title="产物预览"
             src={card.url}
             sandbox="allow-scripts"
             className="h-72 w-full rounded-lg border border-border"

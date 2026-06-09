@@ -615,6 +615,45 @@ describe("V1.2 artifact backend routes", () => {
     expect(contacts.contacts).toContainEqual(expect.objectContaining({ agentBindingId: busy.agentBindingId, status: "busy" }));
   });
 
+  it("persists successful runtime tests so contact status refreshes to available", async () => {
+    const runtimeId = seedRuntime("runtime_contacts_tested", "native", "unavailable");
+    const contact = await createCustomAgent("Runtime Tested Expert", runtimeId);
+
+    const before = await (await fetch(`${baseUrl}/agents/contacts`)).json() as { readonly contacts: readonly { readonly agentBindingId: string; readonly status: string }[] };
+    expect(before.contacts).toContainEqual(expect.objectContaining({ agentBindingId: contact.agentBindingId, status: "offline" }));
+
+    const tested = await fetch(`${baseUrl}/runtimes/${runtimeId}/test`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({})
+    });
+    expect(tested.status).toBe(200);
+    await expect(tested.json()).resolves.toMatchObject({ ok: true, version: "native" });
+
+    const after = await (await fetch(`${baseUrl}/agents/contacts`)).json() as { readonly contacts: readonly { readonly agentBindingId: string; readonly status: string }[] };
+    expect(after.contacts).toContainEqual(expect.objectContaining({ agentBindingId: contact.agentBindingId, status: "available" }));
+    expect(currentDaemon().database.sqlite.prepare("SELECT status, detected_version FROM runtimes WHERE id = ?").get(runtimeId)).toMatchObject({
+      status: "connected",
+      detected_version: "native"
+    });
+    expect(currentDaemon().database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'runtime.updated' AND json_extract(payload, '$.runtimeId') = ?").get(runtimeId)).toMatchObject({ count: 1 });
+  });
+
+  it("treats legacy default contact runtimes as available when the canonical runtime is connected", async () => {
+    const db = currentDaemon().database.sqlite;
+    db.prepare("INSERT INTO runtimes (id, workspace_id, kind, name, command, args, env, detected_at, detected_path, detected_version, supported_caps, version, status, manifest_json, created_at, updated_at) VALUES ('runtime_canonical_claude_contact', 'default-workspace', 'claude-code', 'Claude Code', NULL, NULL, NULL, 1, 'claude', 'claude 1.0.0', '[]', 'claude 1.0.0', 'connected', '{}', 1, 2)").run();
+    db.prepare("INSERT INTO runtimes (id, workspace_id, kind, name, command, args, env, detected_at, detected_path, detected_version, supported_caps, version, status, manifest_json, created_at, updated_at) VALUES ('runtime_legacy_claude_contact', 'default-workspace', 'claude-code-default', 'claude-code-default', NULL, NULL, NULL, NULL, NULL, NULL, '[]', NULL, NULL, '{}', 1, 1)").run();
+    const contact = await createCustomAgent("Legacy Claude Runtime Expert", "runtime_legacy_claude_contact");
+
+    const contacts = await (await fetch(`${baseUrl}/agents/contacts`)).json() as { readonly contacts: readonly { readonly agentBindingId: string; readonly status: string; readonly runtimeKind: string }[] };
+
+    expect(contacts.contacts).toContainEqual(expect.objectContaining({
+      agentBindingId: contact.agentBindingId,
+      runtimeKind: "claude-code-default",
+      status: "available"
+    }));
+  });
+
   it("parses /create-agent prefill hints", async () => {
     seedRuntime("runtime_create_agent", "opencode");
     currentDaemon().database.sqlite.prepare("INSERT OR IGNORE INTO skills (id, workspace_id, name, description, content, origin, source_url, created_at, updated_at) VALUES ('skill_web_page', 'default-workspace', 'web-page-builder', 'Web pages', '---', 'builtin', NULL, 1, 1)").run();

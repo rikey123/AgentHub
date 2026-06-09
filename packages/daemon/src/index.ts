@@ -13,11 +13,12 @@ import { createDatabase, type AgentHubDatabase } from "@agenthub/db";
 import { MockAdapterManager } from "@agenthub/adapter-mock";
 import { createInterventionCommandHandlers, InterventionEngine } from "@agenthub/interventions";
 import { ActiveWakesRegistry, AssistedSelectorGroupChatManager, checkTaskTimeouts, createCancelRunHandler, createCompleteTaskHandler, createConsumePendingTurnHandler, createCreateTaskHandler, createUpdateTaskHandler, createWakeAgentHandler, createWakeOutboxDispatcher, handleTeamDispatchReviewTerminal, MailboxService, maybePublishTeamDispatchCompleted, PendingTurnService, ReclaimStaleClaimedRun, reconcileTerminalDelegatedTaskRuns, RoomMcpServer, RunLifecycleService, RunQueue, StartupRecovery, TaskModeGroupChatPresenter, TaskService, WELL_KNOWN_CAPABILITY_TOKENS, type BriefResolver, type WakeOutboxDispatcher } from "@agenthub/orchestrator";
-import { createPermissionCommandHandlers, PermissionEngine, seedBuiltInPermissionProfiles } from "@agenthub/permissions";
+import { createPermissionCommandHandlers, permissionSettings, PermissionEngine, seedBuiltInPermissionProfiles, setAllowAllPermissions } from "@agenthub/permissions";
 import type { EventEnvelope } from "@agenthub/protocol/events";
 import { artifactContentTypeFor as protocolArtifactContentTypeFor } from "@agenthub/protocol/preview";
+import type { AgentWorkflow, AgentWorkflowEdge, AgentWorkflowEdgeDelivery, AgentWorkflowNode, AgentWorkflowNodeRun, AgentWorkflowRun, AgentWorkflowVersion, WorkflowNodeKind, WorkflowValidationIssue, WorkflowValidationResult } from "@agenthub/protocol/workflows";
 import { SkillRegistry, listRuntimeLocalSkills, loadRuntimeLocalSkillBundle } from "@agenthub/skills";
-import { attachmentMaxBytes, authenticateBrowserRequest, createKeychain, createKeychainAccount, issueBrowserSession, redactAndTruncate, storeAttachment, type BrowserAuthResult, type KeychainBridge } from "@agenthub/security";
+import { attachmentMaxBytes, authenticateBrowserRequest, createKeychain, createKeychainAccount, issueBrowserSession, redactAndTruncate, resolveSafeUri, storeAttachment, type BrowserAuthResult, type KeychainBridge } from "@agenthub/security";
 import { Effect } from "effect";
 import { generateRoleDraftWithModelConfig, selectAssistedSpeakerWithModelConfig, type AssistedSpeakerSelectionInput, type ModelConfigRow, type RoleDraft, type RoleDraftGenerationInput } from "@agenthub/native-agent-runtime";
 
@@ -121,7 +122,7 @@ export type DaemonStartupPhase =
   | "HTTP server bind + SSE accept";
 export type RoleDraftGenerator = (input: RoleDraftGenerationInput) => Promise<RoleDraft>;
 export type AssistedSpeakerSelector = (input: AssistedSpeakerSelectionInput) => Promise<string | undefined>;
-export type DaemonOptions = { readonly databasePath: string; readonly workspaceRoot?: string; readonly webAssetsRoot?: string; readonly host?: string; readonly port?: number; readonly token?: string; readonly allowRemote?: boolean; readonly allowedOrigins?: readonly string[]; readonly adapterCommands?: { readonly claude?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv }; readonly opencode?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv } }; readonly now?: () => number; readonly modelTestFetch?: typeof fetch; readonly roleDraftGenerator?: RoleDraftGenerator; readonly assistedSpeakerSelector?: AssistedSpeakerSelector; readonly deploymentCommandProbe?: (command: "nixpacks" | "docker") => boolean | Promise<boolean>; readonly pptPreviewBridge?: PptPreviewBridge; readonly onLifecyclePhase?: (event: { readonly direction: "startup" | "shutdown"; readonly phase: DaemonStartupPhase }) => void };
+export type DaemonOptions = { readonly databasePath: string; readonly workspaceRoot?: string; readonly webAssetsRoot?: string; readonly migrationsDir?: string; readonly agentTemplatesDir?: string; readonly roomMcpBridgeDir?: string; readonly host?: string; readonly port?: number; readonly token?: string; readonly allowRemote?: boolean; readonly allowedOrigins?: readonly string[]; readonly adapterCommands?: { readonly claude?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv }; readonly opencode?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv } }; readonly now?: () => number; readonly modelTestFetch?: typeof fetch; readonly roleDraftGenerator?: RoleDraftGenerator; readonly assistedSpeakerSelector?: AssistedSpeakerSelector; readonly deploymentCommandProbe?: (command: "nixpacks" | "docker") => boolean | Promise<boolean>; readonly pptPreviewBridge?: PptPreviewBridge; readonly onLifecyclePhase?: (event: { readonly direction: "startup" | "shutdown"; readonly phase: DaemonStartupPhase }) => void };
 export type DaemonCloseOptions = { readonly forceCancelAfterMs?: number };
 export type DaemonCloseResult = { readonly forced: boolean; readonly cancelledRunIds: readonly string[] };
 export type DaemonApp = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly lifecycle: RunLifecycleService; readonly roomMcpServer: RoomMcpServer; readonly adapterRegistry: AdapterRegistry; readonly mockAdapter: MockAdapterManager; readonly deploymentService: DeploymentService; readonly handle: (req: IncomingMessage, res: ServerResponse) => void; readonly inFlightRunIds: () => readonly string[]; start(): Promise<Server>; close(options?: DaemonCloseOptions): Promise<DaemonCloseResult> };
@@ -206,9 +207,9 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     if (req.method === "GET" && url.pathname === "/healthz") return json(res, 200, stopping ? { status: "shutting_down" } : { ok: true });
     if (stopping) return json(res, 503, { error: "service_stopping" });
     if (!ready) return json(res, 503, { error: "service_starting", retryAfterMs: 500 });
-    if (serveWebAsset({ req, res, url, ...(webAssetsRoot !== undefined ? { webAssetsRoot } : {}) })) return;
     const app = requireRuntime();
-    void route({ req, res, database: app.database, eventBus: app.eventBus, commandBus: app.commandBus, artifactService: app.artifactService, deploymentService: app.deploymentService, taskService: app.taskService, skillRegistry: app.skillRegistry, pptPreviewBridge: app.pptPreviewBridge, outbox: app.outbox, stopAssistedDiscussion: (roomId) => stopAssistedRoomDiscussion(app, roomId), modelConfigSecrets, settingsJobs, modelTestFetch: options.modelTestFetch ?? globalThis.fetch.bind(globalThis), roleDraftGenerator: options.roleDraftGenerator ?? generateRoleDraftWithModelConfig, registerSseClient: (client) => { sseClients.add(client); return () => sseClients.delete(client); }, serveWebAsset: () => serveWebAsset({ req, res, url, ...(webAssetsRoot !== undefined ? { webAssetsRoot } : {}) }), ...(options.token !== undefined ? { token: options.token } : {}), ...(options.allowedOrigins !== undefined ? { allowedOrigins: options.allowedOrigins } : {}), host: `${options.host ?? "127.0.0.1"}:${options.port ?? 6677}`, ...(options.now !== undefined ? { now: options.now } : {}) });
+    if (!isApiPath(url.pathname) && serveWebAsset({ req, res, url, ...(webAssetsRoot !== undefined ? { webAssetsRoot } : {}) })) return;
+    void route({ req, res, database: app.database, eventBus: app.eventBus, commandBus: app.commandBus, artifactService: app.artifactService, deploymentService: app.deploymentService, taskService: app.taskService, skillRegistry: app.skillRegistry, pptPreviewBridge: app.pptPreviewBridge, outbox: app.outbox, stopAssistedDiscussion: (roomId) => stopAssistedRoomDiscussion(app, roomId), modelConfigSecrets, settingsJobs, modelTestFetch: options.modelTestFetch ?? globalThis.fetch.bind(globalThis), roleDraftGenerator: options.roleDraftGenerator ?? generateRoleDraftWithModelConfig, registerSseClient: (client) => { sseClients.add(client); return () => sseClients.delete(client); }, activeSseClientCount: () => sseClients.size, serveWebAsset: () => serveWebAsset({ req, res, url, ...(webAssetsRoot !== undefined ? { webAssetsRoot } : {}) }), ...(options.token !== undefined ? { token: options.token } : {}), ...(options.allowedOrigins !== undefined ? { allowedOrigins: options.allowedOrigins } : {}), host: `${options.host ?? "127.0.0.1"}:${options.port ?? 6677}`, ...(options.now !== undefined ? { now: options.now } : {}) });
   };
 
   const start = async (): Promise<Server> => {
@@ -226,13 +227,13 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
       throw new Error("Remote binding requires token and allowRemote=true");
     }
     emitPhase("startup", PHASE_SQLITE);
-    const database = createDatabase({ path: options.databasePath, applyMigrations: true });
+    const database = createDatabase({ path: options.databasePath, applyMigrations: true, ...(options.migrationsDir !== undefined ? { migrationsDir: options.migrationsDir } : {}) });
     migrateAgentProfilesToV10(database, options.now?.() ?? Date.now());
     const workspaceRoot = resolvePath(options.workspaceRoot ?? process.cwd());
     seedDefaultData(database, options.now?.() ?? Date.now(), workspaceRoot);
     seedBuiltInPermissionProfiles(database, options.now?.() ?? Date.now());
     cleanExpiredRoleDrafts(database, options.now?.() ?? Date.now());
-    bootstrapBuiltInAgents();
+    bootstrapBuiltInAgents({ ...(options.agentTemplatesDir !== undefined ? { templatesDir: options.agentTemplatesDir } : {}) });
 
     emitPhase("startup", PHASE_EVENT_STORE);
     database.sqlite.prepare("SELECT COALESCE(MAX(seq), 0) AS maxSeq FROM events").get();
@@ -644,7 +645,12 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     wakeOutbox.start();
     const artifactVersioningService = createArtifactVersioningService({ database, eventBus, ...(options.now !== undefined ? { now: options.now } : {}) });
     const pptPreviewBridge = options.pptPreviewBridge ?? createPptPreviewBridge();
-    const roomMcpServer = new RoomMcpServer({ commandBus, taskService, database, eventBus, taskModeGroupChatPresenter, permissionEngine, artifactFs, artifactService, artifactVersioningService, ...(options.now !== undefined ? { now: options.now } : {}) });
+    handlers.register({
+      name: "workflow-runtime",
+      subscribes: ["agent.run.started", "agent.run.completed", "agent.run.failed", "agent.run.cancelled"],
+      handle: (event) => handleWorkflowRuntimeEvent({ database, eventBus, getCommandBus: () => commandBusRef.current, ...(options.now !== undefined ? { now: options.now } : {}) }, event)
+    });
+    const roomMcpServer = new RoomMcpServer({ commandBus, taskService, database, eventBus, taskModeGroupChatPresenter, permissionEngine, artifactFs, artifactService, artifactVersioningService, ...(options.roomMcpBridgeDir !== undefined ? { bridgeDir: options.roomMcpBridgeDir } : {}), ...(options.now !== undefined ? { now: options.now } : {}) });
     // Start the TCP server so agents can reach room.* MCP tools via the stdio bridge.
     await roomMcpServer.startTcp();
     roomMcpServerRef.current = roomMcpServer;
@@ -837,7 +843,8 @@ function wakeReasonForCommand(reason: string): "primary_turn" | "user_mention" |
   return "delegated_task";
 }
 
-type RouteContext = { readonly req: IncomingMessage; readonly res: ServerResponse; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly artifactService: ArtifactService; readonly deploymentService: DeploymentService; readonly taskService: TaskService; readonly skillRegistry: SkillRegistry; readonly pptPreviewBridge: PptPreviewBridge; readonly outbox: { drainPending(): Promise<void> }; readonly stopAssistedDiscussion: (roomId: string) => Promise<{ readonly ok: boolean; readonly roomId: string; readonly cancelledRunIds: readonly string[] }>; readonly modelConfigSecrets: KeychainBridge; readonly settingsJobs: Map<string, SettingsJobRecord>; readonly modelTestFetch: typeof fetch; readonly roleDraftGenerator: RoleDraftGenerator; readonly registerSseClient: (client: SseClient) => () => void; readonly serveWebAsset: () => boolean; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly host: string; readonly now?: () => number };
+type RouteContext = { readonly req: IncomingMessage; readonly res: ServerResponse; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly artifactService: ArtifactService; readonly deploymentService: DeploymentService; readonly taskService: TaskService; readonly skillRegistry: SkillRegistry; readonly pptPreviewBridge: PptPreviewBridge; readonly outbox: { drainPending(): Promise<void> }; readonly stopAssistedDiscussion: (roomId: string) => Promise<{ readonly ok: boolean; readonly roomId: string; readonly cancelledRunIds: readonly string[] }>; readonly modelConfigSecrets: KeychainBridge; readonly settingsJobs: Map<string, SettingsJobRecord>; readonly modelTestFetch: typeof fetch; readonly roleDraftGenerator: RoleDraftGenerator; readonly registerSseClient: (client: SseClient) => () => void; readonly activeSseClientCount: () => number; readonly serveWebAsset: () => boolean; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly host: string; readonly now?: () => number };
+type AuthenticatedRequest = Extract<BrowserAuthResult, { readonly ok: true }>;
 
 async function route(ctx: RouteContext): Promise<void> {
   const url = new URL(ctx.req.url ?? "/", "http://127.0.0.1");
@@ -1097,6 +1104,8 @@ async function route(ctx: RouteContext): Promise<void> {
   }
   if (ctx.req.method === "GET" && url.pathname === "/event") return sse(ctx, url, auth.scopes);
   if (ctx.req.method === "GET" && url.pathname === "/rooms") return roomsList(ctx, url);
+  if (ctx.req.method === "GET" && url.pathname === "/sync/events") return syncEvents(ctx, url, auth);
+  if (ctx.req.method === "GET" && url.pathname === "/sync/snapshot") return syncSnapshot(ctx, url, auth);
   if (ctx.req.method === "GET" && parts[0] === "api" && parts[1] === "ppt-proxy" && parts[2]) return pptProxy(ctx, Number(parts[2]), parts.slice(3).join("/"));
   if (ctx.req.method === "POST" && url.pathname === "/rooms") {
     const requestBody = await body(ctx);
@@ -1168,13 +1177,14 @@ async function route(ctx: RouteContext): Promise<void> {
   if (ctx.req.method === "POST" && parts[0] === "context" && parts[2] === "confirm") return dispatch(ctx, { ...(await body(ctx)), contextId: parts[1] }, "ConfirmContextItem");
   if (ctx.req.method === "POST" && parts[0] === "context" && parts[2] === "deprecate") return dispatch(ctx, { ...(await body(ctx)), contextId: parts[1] }, "DeprecateContextItem");
   if (ctx.req.method === "POST" && parts[0] === "context" && parts[2] === "pin") return dispatch(ctx, { ...(await body(ctx)), contextId: parts[1] }, "PinContextItem");
-  if (ctx.req.method === "GET" && url.pathname === "/permissions/profiles") return json(ctx.res, 200, { profiles: (all(ctx.database, "SELECT * FROM permission_profiles ORDER BY name ASC") as Array<Record<string, unknown>>).map(decodeProfilePayload) });
+  if (ctx.req.method === "GET" && url.pathname === "/permissions/profiles") return json(ctx.res, 200, permissionProfilesResponse(ctx.database));
   if (ctx.req.method === "GET" && parts[0] === "permissions" && parts[1] === "profiles" && parts[2]) {
     const row = get(ctx.database, "SELECT * FROM permission_profiles WHERE id = ?", parts[2]) as Record<string, unknown> | undefined;
     return json(ctx.res, 200, { profile: row !== undefined ? decodeProfilePayload(row) : undefined });
   }
   if (ctx.req.method === "POST" && url.pathname === "/permissions/profiles") return dispatch(ctx, await body(ctx), "CreatePermissionProfile");
   if (ctx.req.method === "PATCH" && parts[0] === "permissions" && parts[1] === "profiles" && parts[2]) return dispatch(ctx, { ...(await body(ctx)), profileId: parts[2] }, "PatchPermissionProfile");
+  if (ctx.req.method === "PATCH" && url.pathname === "/permissions/default-profile") return updateDefaultPermissionProfile(ctx, await body(ctx));
   if (ctx.req.method === "GET" && url.pathname === "/permissions/requests") return permissionRequests(ctx, url);
   if (ctx.req.method === "POST" && parts[0] === "permissions" && parts[2] === "resolve") return dispatch(ctx, { ...(await body(ctx)), requestId: parts[1] }, "ResolvePermission");
   if (ctx.req.method === "GET" && url.pathname === "/permissions/rules") return permissionRules(ctx, url);
@@ -1227,6 +1237,7 @@ async function route(ctx: RouteContext): Promise<void> {
   if (ctx.req.method === "PATCH" && parts[0] === "artifacts" && parts[2] === "reviews" && parts.length === 4) return updateArtifactReview(ctx, parts[1] as string, parts[3] as string, await body(ctx));
   if (ctx.req.method === "POST" && parts[0] === "artifacts" && parts[2] === "reviews" && parts[4] === "resolve") return resolveArtifactReview(ctx, parts[1] as string, parts[3] as string);
   if (ctx.req.method === "DELETE" && parts[0] === "artifacts" && parts[2] === "reviews" && parts.length === 4) return deleteArtifactReview(ctx, parts[1] as string, parts[3] as string);
+  if (ctx.req.method === "GET" && parts[0] === "mobile" && parts[1] === "artifacts" && parts[2] && parts[3] === "files" && parts.length >= 5) return mobileArtifactPreview(ctx, auth, parts[2], decodeURIComponent(parts.slice(4).join("/")));
   if (ctx.req.method === "POST" && parts[0] === "artifacts" && parts[2] === "review") return dispatch(ctx, { artifactId: parts[1] }, "ReviewArtifact");
   if (ctx.req.method === "POST" && parts[0] === "artifacts" && parts[2] === "apply") return dispatch(ctx, { ...(await body(ctx)), artifactId: parts[1] }, "ApplyDiff");
   if (ctx.req.method === "POST" && parts[0] === "artifacts" && parts[2] === "reject") return dispatch(ctx, { ...(await body(ctx)), artifactId: parts[1] }, "RejectDiff");
@@ -1241,6 +1252,15 @@ async function route(ctx: RouteContext): Promise<void> {
   if (ctx.req.method === "GET" && parts[0] === "workspaces" && parts[2] === "cost-summary") { if (!requireScope(auth, "read", ctx.res)) return; return costSummary(ctx, parts[1] as string, url); }
   if (ctx.req.method === "POST" && parts[0] === "workspaces" && parts[2] === "cost-budget") return json(ctx.res, 501, { error: "budget alerts are V1.5 (permission-dsl)" });
   if (ctx.req.method === "GET" && parts[0] === "workspaces" && parts[1]) return workspace(ctx, parts[1] as string);
+  if (parts[0] === "workflows") {
+    if (ctx.req.method === "GET" && parts.length === 1) { if (!requireScope(auth, "read", ctx.res)) return; return workflows(ctx, url); }
+    if (ctx.req.method === "POST" && parts.length === 1) { if (!requireScope(auth, "write", ctx.res)) return; return createWorkflow(ctx, await body(ctx)); }
+    if (ctx.req.method === "GET" && parts[1] && parts.length === 2) { if (!requireScope(auth, "read", ctx.res)) return; return workflow(ctx, parts[1]); }
+    if (ctx.req.method === "POST" && parts[1] && parts[2] === "runs" && parts.length === 3) { if (!requireScope(auth, "write", ctx.res)) return; return startWorkflowRun(ctx, parts[1], await body(ctx)); }
+    if (ctx.req.method === "POST" && parts[1] && parts[2] === "runs" && parts[3] && parts[4] === "cancel" && parts.length === 5) { if (!requireScope(auth, "write", ctx.res)) return; return cancelWorkflowRun(ctx, parts[1], parts[3]); }
+    if ((ctx.req.method === "PUT" || ctx.req.method === "PATCH") && parts[1] && parts[2] === "draft" && parts.length === 3) { if (!requireScope(auth, "write", ctx.res)) return; return updateWorkflowDraft(ctx, parts[1], await body(ctx)); }
+    if (ctx.req.method === "DELETE" && parts[1] && parts.length === 2) { if (!requireScope(auth, "write", ctx.res)) return; return deleteWorkflow(ctx, parts[1]); }
+  }
   if (ctx.req.method === "GET" && (url.pathname === "/board" || url.pathname === "/timeline")) return json(ctx.res, 404, { error: "not_found", capability: "v1-roadmap" });
   // ---------------------------------------------------------------------------
   // V1.1 REST endpoint stubs (contract week — implementations land in feature branches)
@@ -1553,13 +1573,43 @@ async function testRuntime(ctx: RouteContext, runtimeId: string, input: Record<s
     const jobId = randomUUID();
     runtimeTestJobs.set(jobId, { status: "pending" });
     void runRuntimeTest(runtime).then(
-      (result) => runtimeTestJobs.set(jobId, { status: result.ok ? "completed" : "failed", result }),
+      (result) => {
+        persistRuntimeTestResult(ctx, runtimeId, runtime, result);
+        runtimeTestJobs.set(jobId, { status: result.ok ? "completed" : "failed", result });
+      },
       (error: unknown) => runtimeTestJobs.set(jobId, { status: "failed", result: { ok: false, error: error instanceof Error ? error.message : "runtime test failed", latencyMs: 0 } })
     );
     return json(ctx.res, 202, { jobId });
   }
   const result = await runRuntimeTest(runtime);
+  persistRuntimeTestResult(ctx, runtimeId, runtime, result);
   return json(ctx.res, 200, result);
+}
+
+function persistRuntimeTestResult(ctx: RouteContext, runtimeId: string, runtime: Record<string, unknown>, result: RuntimeTestResult): void {
+  const now = ctx.now?.() ?? Date.now();
+  const workspaceId = stringOrNull(runtime.workspace_id) ?? "default-workspace";
+  const status = result.ok ? "connected" : "error";
+  const version = result.ok ? result.version ?? stringOrNull(runtime.detected_version) ?? stringOrNull(runtime.version) : stringOrNull(runtime.version);
+  const detectedVersion = result.ok ? result.version ?? stringOrNull(runtime.detected_version) : stringOrNull(runtime.detected_version);
+  ctx.database.sqlite.transaction(() => {
+    ctx.database.sqlite.prepare("UPDATE runtimes SET detected_version = ?, version = ?, status = ?, updated_at = ? WHERE id = ?").run(detectedVersion, version, status, now, runtimeId);
+    ctx.eventBus.publish({
+      id: randomUUID(),
+      type: "runtime.updated",
+      schemaVersion: 1,
+      workspaceId,
+      payload: {
+        runtimeId,
+        kind: String(runtime.kind),
+        name: String(runtime.name),
+        status,
+        ...(detectedVersion !== null ? { detectedVersion } : {}),
+        ...(result.error !== undefined ? { error: result.error } : {})
+      },
+      createdAt: now
+    });
+  })();
 }
 
 function runtimeHealth(ctx: RouteContext, runtimeId: string): void {
@@ -1796,7 +1846,7 @@ function issueAuthToken(ctx: RouteContext, input: Record<string, unknown>): void
   const fingerprint = tokenFingerprint(token);
   ctx.database.sqlite.prepare("INSERT INTO auth_tokens (id, fingerprint, hash, description, scopes, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(id, fingerprint, sha256(token), typeof input.description === "string" ? input.description : null, JSON.stringify(scopes), now, expiresAt);
   ctx.eventBus.publish({ id: randomUUID(), type: "auth.token.issued", schemaVersion: 1, workspaceId: "default-workspace", payload: { tokenId: id, fingerprint, scopes }, createdAt: now });
-  json(ctx.res, 201, { id, token, fingerprint, scopes, expiresAt });
+  json(ctx.res, 201, { id, token, fingerprint, scopes, expiresAt, connection: connectionConfig(ctx, token, id, scopes, expiresAt) });
 }
 
 function listAuthTokens(ctx: RouteContext): void {
@@ -1814,6 +1864,126 @@ function revokeToken(ctx: RouteContext, tokenId: string): void {
   ctx.database.sqlite.prepare("UPDATE auth_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").run(now, tokenId);
   ctx.eventBus.publish({ id: randomUUID(), type: "auth.token.revoked", schemaVersion: 1, workspaceId: "default-workspace", payload: { tokenId, fingerprint: existing.fingerprint }, createdAt: now });
   json(ctx.res, 200, { ok: true });
+}
+
+function connectionConfig(ctx: RouteContext, token: string, tokenId: string, scopes: readonly string[], expiresAt: number | null): Record<string, unknown> {
+  const publicHost = header(ctx, "host") ?? ctx.host;
+  const [hostPart, portPart] = splitHostPort(publicHost);
+  const url = `http://${publicHost}`;
+  return {
+    version: 1,
+    url,
+    host: hostPart,
+    port: portPart,
+    token,
+    tokenId,
+    scopes,
+    expiresAt,
+    qrPayload: JSON.stringify({ version: 1, url, host: hostPart, port: portPart, token, tokenId, scopes, expiresAt })
+  };
+}
+
+function splitHostPort(host: string): readonly [string, number | null] {
+  if (host.startsWith("[") && host.includes("]")) {
+    const close = host.indexOf("]");
+    const port = Number(host.slice(close + 2));
+    return [host.slice(1, close), Number.isFinite(port) ? port : null];
+  }
+  const index = host.lastIndexOf(":");
+  if (index === -1) return [host, null];
+  const port = Number(host.slice(index + 1));
+  return [host.slice(0, index), Number.isFinite(port) ? port : null];
+}
+
+function requireMobileRead(auth: AuthenticatedRequest, res: ServerResponse): boolean {
+  if (auth.authKind !== "bearer") {
+    json(res, 401, { error: "mobile_token_required" });
+    return false;
+  }
+  if (!auth.scopes.includes("read") && !auth.scopes.includes("admin")) {
+    json(res, 403, { error: "requires_read_scope" });
+    return false;
+  }
+  return true;
+}
+
+function syncEvents(ctx: RouteContext, url: URL, auth: AuthenticatedRequest): void {
+  if (!requireMobileRead(auth, ctx.res)) return;
+  const view = mobileViewParam(url.searchParams.get("view"));
+  if (view !== "mobile") return json(ctx.res, 400, { error: "mobile_view_required" });
+  const sinceSeq = numberQuery(url, "sinceSeq") ?? 0;
+  if (sinceSeq < 0) return json(ctx.res, 400, { error: "invalid_since_seq" });
+  const roomId = url.searchParams.get("roomId") ?? undefined;
+  const runId = url.searchParams.get("runId") ?? undefined;
+  const events = ctx.eventBus.replayDurableSinceSeq(sinceSeq, { view, ...(roomId !== undefined ? { roomId } : {}), ...(runId !== undefined ? { runId } : {}) });
+  const nextCursor = events.reduce((cursor, event) => typeof event.seq === "number" && event.seq > cursor ? event.seq : cursor, sinceSeq);
+  json(ctx.res, 200, { events, nextCursor });
+}
+
+function syncSnapshot(ctx: RouteContext, url: URL, auth: AuthenticatedRequest): void {
+  if (!requireMobileRead(auth, ctx.res)) return;
+  const view = mobileViewParam(url.searchParams.get("view"));
+  if (view !== "mobile") return json(ctx.res, 400, { error: "mobile_view_required" });
+  const roomId = url.searchParams.get("roomId") ?? undefined;
+  const roomWhere = roomId === undefined ? "archived_at IS NULL" : "id = ? AND archived_at IS NULL";
+  const roomParams = roomId === undefined ? [] : [roomId];
+  const rooms = all(ctx.database, `SELECT id, workspace_id, title, mode, primary_agent_id, updated_at FROM rooms WHERE ${roomWhere} ORDER BY updated_at DESC LIMIT 50`, ...roomParams);
+  const tasks = all(ctx.database, `${mobileTaskSelect()} ${roomId === undefined ? "" : "WHERE room_id = ?"} ORDER BY updated_at DESC LIMIT 100`, ...(roomId === undefined ? [] : [roomId]));
+  const runs = all(ctx.database, `${mobileRunSelect()} ${roomId === undefined ? "" : "WHERE room_id = ?"} ORDER BY updated_at DESC LIMIT 100`, ...(roomId === undefined ? [] : [roomId]));
+  const permissions = all(ctx.database, `${mobilePermissionSelect()} WHERE status = 'pending'${roomId === undefined ? "" : " AND room_id = ?"} ORDER BY created_at ASC LIMIT 100`, ...(roomId === undefined ? [] : [roomId])).map(redactPermissionResource);
+  const artifacts = all(ctx.database, `${mobileArtifactSelect()} ${roomId === undefined ? "" : "WHERE room_id = ?"} ORDER BY updated_at DESC LIMIT 50`, ...(roomId === undefined ? [] : [roomId]));
+  const cursor = scalar(ctx.database, "SELECT COALESCE(MAX(seq), 0) AS count FROM events");
+  json(ctx.res, 200, { view, cursor, rooms, tasks, runs, permissions, artifacts });
+}
+
+function mobileArtifactPreview(ctx: RouteContext, auth: AuthenticatedRequest, artifactId: string, path: string): void {
+  if (!requireMobileRead(auth, ctx.res)) return;
+  const artifact = ctx.artifactService.get(artifactId);
+  if (artifact === undefined) return json(ctx.res, 404, { error: "artifact_not_found" });
+  const content = ctx.artifactService.fileContent(artifactId, path);
+  if (content === undefined) return json(ctx.res, 404, { error: "artifact_file_not_found" });
+  const uri = typeof content.file.contentPath === "string" && content.file.contentPath.length > 0 ? content.file.contentPath : undefined;
+  let previewContent = content.content;
+  if (uri !== undefined) {
+    const checked = resolveSafeUri(uri, { workspaceRoot: workspaceRoot(ctx) });
+    if (!checked.ok) return json(ctx.res, 403, { error: "artifact_preview_uri_rejected", reason: checked.reason });
+    previewContent = checked.kind === "data" ? checked.text : readFileSync(checked.abs, "utf8");
+  }
+  json(ctx.res, 200, { artifact: mobileArtifact(artifact), file: mobileArtifactFile(content.file), content: previewContent ?? null });
+}
+
+function mobileTaskSelect(): string {
+  return "SELECT id, workspace_id, room_id, parent_task_id, title, status, assignee_agent_id, source_run_id, priority, due_at, updated_at FROM tasks";
+}
+
+function mobileRunSelect(): string {
+  return "SELECT id, workspace_id, task_id, room_id, agent_id, adapter_id, status, wake_reason, waiting_reason, started_at, ended_at, updated_at FROM runs";
+}
+
+function mobilePermissionSelect(): string {
+  return "SELECT id, workspace_id, room_id, agent_id, run_id, resource, reason, status, created_at, expires_at FROM permission_requests";
+}
+
+function mobileArtifactSelect(): string {
+  return "SELECT id, workspace_id, room_id, task_id, run_id, type, title, status, updated_at FROM artifacts";
+}
+
+function redactPermissionResource(row: unknown): unknown {
+  const record = row as Record<string, unknown>;
+  return { ...record, resource: redactAndTruncate(String(record.resource ?? ""), 4096) };
+}
+
+function mobileArtifact(artifact: { readonly id: string; readonly workspaceId: string; readonly roomId?: string; readonly taskId?: string; readonly runId?: string; readonly type: string; readonly title: string; readonly status: string; readonly updatedAt: number }): Record<string, unknown> {
+  return { id: artifact.id, workspaceId: artifact.workspaceId, roomId: artifact.roomId, taskId: artifact.taskId, runId: artifact.runId, type: artifact.type, title: artifact.title, status: artifact.status, updatedAt: artifact.updatedAt };
+}
+
+function mobileArtifactFile(file: { readonly artifactId: string; readonly path: string; readonly additions: number; readonly deletions: number; readonly fileStatus: string; readonly createdAt: number }): Record<string, unknown> {
+  return { artifactId: file.artifactId, path: file.path, additions: file.additions, deletions: file.deletions, fileStatus: file.fileStatus, createdAt: file.createdAt };
+}
+
+function workspaceRoot(ctx: RouteContext): string {
+  const row = ctx.database.sqlite.prepare("SELECT root_path FROM workspaces ORDER BY created_at ASC LIMIT 1").get() as { readonly root_path: string } | undefined;
+  return row?.root_path ?? process.cwd();
 }
 
 function costSummary(ctx: RouteContext, workspaceId: string, url: URL): void {
@@ -2795,7 +2965,7 @@ function debugStats(ctx: RouteContext, auth: BrowserAuthResult & { readonly ok: 
       activeRunCount: scalar(ctx.database, "SELECT COUNT(*) AS count FROM runs WHERE status IN ('queued', 'running', 'waiting_permission')"),
       pendingPermissionCount: scalar(ctx.database, "SELECT COUNT(*) AS count FROM permission_requests WHERE status = 'pending'"),
       pendingInterventionCount: scalar(ctx.database, "SELECT COUNT(*) AS count FROM interventions WHERE status = 'pending_user_decision'"),
-      sseClientCount: 0
+      sseClientCount: ctx.activeSseClientCount()
     });
   }
   json(ctx.res, 200, {
@@ -2805,7 +2975,7 @@ function debugStats(ctx: RouteContext, auth: BrowserAuthResult & { readonly ok: 
     pendingPermissionCount: scalar(ctx.database, "SELECT COUNT(*) AS count FROM permission_requests WHERE status = 'pending'"),
     pendingInterventionCount: scalar(ctx.database, "SELECT COUNT(*) AS count FROM interventions WHERE status = 'pending_user_decision'"),
     eventsLast5min: scalar(ctx.database, "SELECT COUNT(*) AS count FROM events WHERE created_at >= ?", now - 5 * 60 * 1000),
-    sseClientCount: 0,
+    sseClientCount: ctx.activeSseClientCount(),
     pubsub: ctx.eventBus.pubSubStats()
   });
 }
@@ -2961,6 +3131,39 @@ function decodeProfilePayload(row: Record<string, unknown>): Record<string, unkn
   } catch {
     return row;
   }
+}
+
+function permissionProfilesResponse(database: AgentHubDatabase): { readonly profiles: readonly Record<string, unknown>[]; readonly settings: ReturnType<typeof permissionSettings> } {
+  return {
+    profiles: (all(database, "SELECT * FROM permission_profiles ORDER BY name ASC") as Array<Record<string, unknown>>).map(decodeProfilePayload),
+    settings: permissionSettings(database)
+  };
+}
+
+function updateDefaultPermissionProfile(ctx: RouteContext, input: Record<string, unknown>): void {
+  const allowAllEnabled = input.allowAllEnabled;
+  if (typeof allowAllEnabled !== "boolean") return json(ctx.res, 400, { error: "validation_failed", message: "allowAllEnabled is required" });
+  const timestamp = ctx.now?.() ?? Date.now();
+  ctx.database.sqlite.transaction(() => {
+    const settings = setAllowAllPermissions(ctx.database, allowAllEnabled, timestamp);
+    ctx.eventBus.publish({
+      id: randomUUID(),
+      type: "permission.resolved",
+      schemaVersion: 1,
+      workspaceId: "default-workspace",
+      payload: {
+        audit: true,
+        actor: { type: "user", id: "local" },
+        action: "update",
+        target: "permission-settings:default-profile",
+        outcome: "saved",
+        defaultProfileId: settings.defaultProfileId,
+        allowAllEnabled: settings.allowAllEnabled
+      },
+      createdAt: timestamp
+    });
+  })();
+  return json(ctx.res, 200, permissionProfilesResponse(ctx.database));
 }
 
 function permissionRules(ctx: RouteContext, url: URL): void {
@@ -3318,6 +3521,15 @@ function agentContacts(ctx: RouteContext): void {
     ctx.database,
     `SELECT ab.id, ab.role_id, ab.runtime_id, ab.model_config_id, ab.contact_name, ab.avatar_url, ab.contact_description, ab.disabled_at, ab.updated_at,
             r.name AS role_name, r.capabilities, rt.kind AS runtime_kind, rt.status AS runtime_status,
+            (SELECT COUNT(*) FROM runtimes canonical
+             WHERE canonical.kind = CASE rt.kind
+               WHEN 'claude-code-default' THEN 'claude-code'
+               WHEN 'opencode-default' THEN 'opencode'
+               ELSE NULL
+             END
+               AND (canonical.workspace_id IS ab.workspace_id OR canonical.workspace_id IS rt.workspace_id OR canonical.workspace_id IS NULL)
+               AND canonical.id != rt.id
+               AND canonical.status IN ('available', 'connected', 'ready')) AS available_runtime_alias_count,
             (SELECT MAX(started_at) FROM runs WHERE runs.agent_id = ab.id OR runs.agent_id = r.id) AS last_used_at,
             (SELECT COUNT(*) FROM runs WHERE (runs.agent_id = ab.id OR runs.agent_id = r.id) AND runs.status IN ('running', 'queued', 'starting')) AS busy_count
      FROM agent_bindings ab
@@ -3396,6 +3608,7 @@ function parseCreateAgent(ctx: RouteContext, input: Record<string, unknown>): vo
 }
 
 function contactRow(row: Record<string, unknown>): Record<string, unknown> {
+  const runtimeAvailable = runtimeStatusAvailable(row.runtime_status) || Number(row.available_runtime_alias_count ?? 0) > 0;
   return {
     agentBindingId: row.id,
     displayName: stringField(row.contact_name) ?? stringField(row.role_name) ?? String(row.id),
@@ -3405,7 +3618,7 @@ function contactRow(row: Record<string, unknown>): Record<string, unknown> {
     ...(stringField(row.model_config_id) !== undefined ? { modelConfigId: stringField(row.model_config_id) } : {}),
     runtimeKind: row.runtime_kind,
     capabilities: parseJsonField(row.capabilities, []),
-    status: Number(row.busy_count ?? 0) > 0 ? "busy" : runtimeStatusAvailable(row.runtime_status) ? "available" : "offline",
+    status: Number(row.busy_count ?? 0) > 0 ? "busy" : runtimeAvailable ? "available" : "offline",
     ...(typeof row.disabled_at === "number" ? { disabledAt: row.disabled_at, isDisabled: true } : {}),
     ...(stringField(row.contact_description) !== undefined ? { description: stringField(row.contact_description) } : {}),
     ...(typeof row.last_used_at === "number" ? { lastUsedAt: row.last_used_at } : {})
@@ -3522,6 +3735,1235 @@ async function stopDiscussion(ctx: RouteContext, roomId: string): Promise<void> 
   if (room === undefined) return json(ctx.res, 404, { error: "room_not_found" });
   const result = await ctx.stopAssistedDiscussion(roomId);
   json(ctx.res, 200, result);
+}
+
+type WorkflowGraphPayload = {
+  readonly workflow: AgentWorkflow;
+  readonly version: AgentWorkflowVersion;
+  readonly nodes: AgentWorkflowNode[];
+  readonly edges: AgentWorkflowEdge[];
+  readonly validation: WorkflowValidationResult;
+};
+
+type WorkflowDraftInput = {
+  readonly workspaceId: string;
+  readonly roomId: string | null;
+  readonly name: string;
+  readonly description: string | null;
+  readonly createdBy: string | null;
+  readonly viewport: Record<string, unknown>;
+  readonly nodes: readonly WorkflowNodeDraftInput[];
+  readonly edges: readonly WorkflowEdgeDraftInput[];
+};
+
+type WorkflowNodeDraftInput = {
+  readonly nodeId: string;
+  readonly kind: WorkflowNodeKind;
+  readonly displayName: string;
+  readonly agentBindingId: string | null;
+  readonly roleLabel: string | null;
+  readonly prompt: string;
+  readonly position: { readonly x: number; readonly y: number };
+  readonly size: { readonly width: number; readonly height: number } | null;
+  readonly enabled: boolean;
+  readonly locked: boolean;
+  readonly config: Record<string, unknown>;
+};
+
+type WorkflowEdgeDraftInput = {
+  readonly edgeId: string;
+  readonly sourceNodeId: string;
+  readonly targetNodeId: string;
+  readonly label: string | null;
+  readonly enabled: boolean;
+  readonly config: Record<string, unknown>;
+};
+
+type WorkflowDraftParseResult = { readonly ok: true; readonly value: WorkflowDraftInput } | { readonly ok: false; readonly error: string };
+
+type WorkflowWakeCommand = {
+  readonly runId: string;
+  readonly workspaceId: string;
+  readonly roomId: string;
+  readonly agentId: string;
+  readonly prompt: string;
+  readonly sourceRunId?: string | undefined;
+  readonly messageId?: string | undefined;
+};
+
+function workflows(ctx: RouteContext, url: URL): void {
+  const workspaceId = url.searchParams.get("workspaceId") ?? defaultWorkspaceId(ctx.database);
+  const roomId = url.searchParams.get("roomId");
+  const rows = all(
+    ctx.database,
+    roomId === null
+      ? "SELECT id FROM agent_workflows WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY updated_at DESC"
+      : "SELECT id FROM agent_workflows WHERE workspace_id = ? AND room_id = ? AND deleted_at IS NULL ORDER BY updated_at DESC",
+    ...(roomId === null ? [workspaceId] : [workspaceId, roomId])
+  ) as Array<{ readonly id: string }>;
+  const items = rows.map((row) => readWorkflowGraph(ctx.database, row.id)).filter((item): item is WorkflowGraphPayload => item !== undefined);
+  json(ctx.res, 200, { workflows: items });
+}
+
+function workflow(ctx: RouteContext, workflowId: string): void {
+  const graph = readWorkflowGraph(ctx.database, workflowId);
+  if (graph === undefined || graph.workflow.deletedAt !== undefined) return json(ctx.res, 404, { error: "workflow_not_found" });
+  json(ctx.res, 200, graph);
+}
+
+function createWorkflow(ctx: RouteContext, input: Record<string, unknown>): void {
+  const parsed = parseWorkflowDraftInput(ctx.database, input);
+  if (!parsed.ok) return json(ctx.res, 400, { error: parsed.error });
+  const now = ctx.now?.() ?? Date.now();
+  const workflowId = inputString(input["id"]) ?? randomUUID();
+  const versionId = inputString(input["draftVersionId"]) ?? randomUUID();
+  let graph: WorkflowGraphPayload | undefined;
+  ctx.database.sqlite.transaction(() => {
+    ctx.database.sqlite.prepare(
+      "INSERT INTO agent_workflows (id, workspace_id, room_id, name, description, draft_version_id, active_version_id, created_by, created_at, updated_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, NULL)"
+    ).run(workflowId, parsed.value.workspaceId, parsed.value.roomId, parsed.value.name, parsed.value.description, versionId, parsed.value.createdBy, now, now);
+    const validation = validateWorkflowDraft(parsed.value.nodes, parsed.value.edges);
+    ctx.database.sqlite.prepare(
+      "INSERT INTO agent_workflow_versions (id, workflow_id, version_number, state, valid, validation_errors, viewport_json, created_from_version_id, locked_from_version_id, locked_at, created_at, updated_at) VALUES (?, ?, 1, 'draft', ?, ?, ?, NULL, NULL, NULL, ?, ?)"
+    ).run(versionId, workflowId, validation.runnable ? 1 : 0, JSON.stringify(validation.issues), JSON.stringify(parsed.value.viewport), now, now);
+    replaceWorkflowDraftRows(ctx.database, versionId, parsed.value.nodes, parsed.value.edges, now);
+    graph = readWorkflowGraph(ctx.database, workflowId);
+    if (graph !== undefined) {
+      ctx.eventBus.publish({
+        id: randomUUID(),
+        type: "workflow.created",
+        schemaVersion: 1,
+        workspaceId: graph.workflow.workspaceId,
+        ...(graph.workflow.roomId !== undefined ? { roomId: graph.workflow.roomId } : {}),
+        payload: graph,
+        createdAt: now
+      });
+    }
+  })();
+  if (graph === undefined) return json(ctx.res, 500, { error: "workflow_create_failed" });
+  json(ctx.res, 201, graph);
+}
+
+function updateWorkflowDraft(ctx: RouteContext, workflowId: string, input: Record<string, unknown>): void {
+  const existing = get(ctx.database, "SELECT * FROM agent_workflows WHERE id = ? AND deleted_at IS NULL", workflowId) as Record<string, unknown> | null;
+  if (existing === null) return json(ctx.res, 404, { error: "workflow_not_found" });
+  const parsed = parseWorkflowDraftInput(ctx.database, input, existing);
+  if (!parsed.ok) return json(ctx.res, 400, { error: parsed.error });
+  const draftVersionId = stringOrNull(existing.draft_version_id);
+  if (draftVersionId === null) return json(ctx.res, 409, { error: "workflow_draft_missing" });
+  const draftVersion = get(ctx.database, "SELECT * FROM agent_workflow_versions WHERE id = ? AND workflow_id = ? AND state = 'draft'", draftVersionId, workflowId) as Record<string, unknown> | null;
+  if (draftVersion === null) return json(ctx.res, 409, { error: "workflow_draft_missing" });
+
+  const now = ctx.now?.() ?? Date.now();
+  let graph: WorkflowGraphPayload | undefined;
+  ctx.database.sqlite.transaction(() => {
+    const validation = validateWorkflowDraft(parsed.value.nodes, parsed.value.edges);
+    ctx.database.sqlite.prepare(
+      "UPDATE agent_workflows SET workspace_id = ?, room_id = ?, name = ?, description = ?, updated_at = ? WHERE id = ?"
+    ).run(parsed.value.workspaceId, parsed.value.roomId, parsed.value.name, parsed.value.description, now, workflowId);
+    ctx.database.sqlite.prepare(
+      "UPDATE agent_workflow_versions SET valid = ?, validation_errors = ?, viewport_json = ?, updated_at = ? WHERE id = ?"
+    ).run(validation.runnable ? 1 : 0, JSON.stringify(validation.issues), JSON.stringify(parsed.value.viewport), now, draftVersionId);
+    ctx.database.sqlite.prepare("DELETE FROM agent_workflow_edges WHERE workflow_version_id = ?").run(draftVersionId);
+    ctx.database.sqlite.prepare("DELETE FROM agent_workflow_nodes WHERE workflow_version_id = ?").run(draftVersionId);
+    replaceWorkflowDraftRows(ctx.database, draftVersionId, parsed.value.nodes, parsed.value.edges, now);
+    graph = readWorkflowGraph(ctx.database, workflowId);
+    if (graph !== undefined) {
+      ctx.eventBus.publish({
+        id: randomUUID(),
+        type: "workflow.version.updated",
+        schemaVersion: 1,
+        workspaceId: graph.workflow.workspaceId,
+        ...(graph.workflow.roomId !== undefined ? { roomId: graph.workflow.roomId } : {}),
+        payload: {
+          workflowId: graph.workflow.id,
+          version: graph.version,
+          nodes: graph.nodes,
+          edges: graph.edges,
+          validation: graph.validation
+        },
+        createdAt: now
+      });
+    }
+  })();
+  if (graph === undefined) return json(ctx.res, 500, { error: "workflow_update_failed" });
+  json(ctx.res, 200, graph);
+}
+
+function startWorkflowRun(ctx: RouteContext, workflowId: string, input: Record<string, unknown>): void {
+  const existing = get(ctx.database, "SELECT * FROM agent_workflows WHERE id = ? AND deleted_at IS NULL", workflowId) as Record<string, unknown> | null;
+  if (existing === null) return json(ctx.res, 404, { error: "workflow_not_found" });
+  const draftVersionId = stringOrNull(existing.draft_version_id);
+  if (draftVersionId === null) return json(ctx.res, 409, { error: "workflow_draft_missing" });
+  const graph = readWorkflowGraph(ctx.database, workflowId);
+  if (graph === undefined) return json(ctx.res, 404, { error: "workflow_not_found" });
+  if (!graph.validation.runnable) return json(ctx.res, 400, { error: "workflow_not_runnable", validation: graph.validation });
+
+  const enabledNodes = graph.nodes.filter((node) => node.enabled && node.kind === "agent_context");
+  const startNode = enabledNodes.find((node) => (graph.validation.upstreamByNodeId[node.nodeId] ?? []).length === 0);
+  if (startNode === undefined) return json(ctx.res, 400, { error: "workflow_start_node_required" });
+
+  const now = ctx.now?.() ?? Date.now();
+  const seedContext = inputString(input["seedContext"]) ?? "A";
+  const startedBy = inputString(input["startedBy"]) ?? "local";
+  const lockedVersionId = inputString(input["workflowVersionId"]) ?? randomUUID();
+  const runId = inputString(input["runId"]) ?? randomUUID();
+  const startNodeRunId = randomUUID();
+  const startAgentRunId = randomUUID();
+  const transportRoomId = workflowTransportRoomId(workflowId, runId);
+  let startedRun: AgentWorkflowRun | undefined;
+  let startNodeRun: AgentWorkflowNodeRun | undefined;
+  let startCommand: WorkflowWakeCommand | undefined;
+
+  ctx.database.sqlite.transaction(() => {
+    lockWorkflowVersion(ctx.database, graph, draftVersionId, lockedVersionId, now);
+    const lockedGraph = readWorkflowGraphVersion(ctx.database, workflowId, lockedVersionId);
+    if (lockedGraph === undefined) throw new Error("workflow_locked_snapshot_failed");
+    const lockedStartNode = lockedGraph.nodes.find((node) => node.nodeId === startNode.nodeId);
+    if (lockedStartNode === undefined) throw new Error("workflow_locked_snapshot_missing_start_node");
+    ensureWorkflowTransportRoom(ctx.database, lockedGraph, transportRoomId, enabledNodes, now);
+    const startBindingId = ensureWorkflowNodeBinding(ctx.database, lockedGraph, lockedStartNode, now);
+    const startAgentId = workflowNodeAgentId(workflowId, lockedStartNode.nodeId);
+
+    ctx.database.sqlite.prepare(
+      "INSERT INTO agent_workflow_runs (id, workflow_id, workflow_version_id, workspace_id, room_id, status, seed_context, started_by, started_at, ended_at, failure_reason, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?, NULL, NULL, ?, ?)"
+    ).run(runId, workflowId, lockedVersionId, graph.workflow.workspaceId, graph.workflow.roomId ?? null, seedContext, startedBy, now, now, now);
+    startedRun = workflowRunFromRow(get(ctx.database, "SELECT * FROM agent_workflow_runs WHERE id = ?", runId) as Record<string, unknown>);
+    if (startedRun === undefined) throw new Error("workflow_run_payload_failed");
+
+    ctx.database.sqlite.prepare(
+      "INSERT INTO agent_workflow_node_runs (id, workflow_run_id, workflow_node_id, node_id, agent_run_id, agent_binding_id, status, input_context_json, output_context_json, error, queued_at, started_at, completed_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, NULL, NULL, ?, NULL, NULL, ?, ?)"
+    ).run(startNodeRunId, runId, lockedStartNode.id, lockedStartNode.nodeId, startAgentRunId, startBindingId, JSON.stringify([{ text: seedContext, source: "seed", toNodeId: lockedStartNode.nodeId }]), now, now, now);
+
+    startNodeRun = workflowNodeRunFromRow(get(ctx.database, "SELECT * FROM agent_workflow_node_runs WHERE id = ?", startNodeRunId) as Record<string, unknown>);
+    if (startNodeRun === undefined) throw new Error("workflow_run_payload_failed");
+
+    ctx.eventBus.publish({
+      id: randomUUID(),
+      type: "workflow.run.started",
+      schemaVersion: 1,
+      workspaceId: graph.workflow.workspaceId,
+      ...(graph.workflow.roomId !== undefined ? { roomId: graph.workflow.roomId } : {}),
+      payload: { workflowId, run: startedRun },
+      createdAt: now
+    });
+    ctx.eventBus.publish({
+      id: randomUUID(),
+      type: "workflow.node.queued",
+      schemaVersion: 1,
+      workspaceId: graph.workflow.workspaceId,
+      ...(graph.workflow.roomId !== undefined ? { roomId: graph.workflow.roomId } : {}),
+      payload: { workflowId, workflowRunId: runId, nodeRun: startNodeRun },
+      createdAt: now
+    });
+    startCommand = {
+      runId: startAgentRunId,
+      workspaceId: graph.workflow.workspaceId,
+      roomId: transportRoomId,
+      agentId: startAgentId,
+      prompt: workflowNodePrompt(lockedGraph, lockedStartNode, [{ text: seedContext, source: "seed" }])
+    };
+  })();
+
+  if (startedRun === undefined || startNodeRun === undefined || startCommand === undefined) return json(ctx.res, 500, { error: "workflow_run_failed" });
+  const wake = dispatchWorkflowWake(ctx.commandBus, startCommand, `workflow-start:${runId}:${startNode.nodeId}`);
+  void wake;
+  json(ctx.res, 201, {
+    run: {
+      ...startedRun,
+      nodeRuns: [startNodeRun],
+      edgeDeliveries: []
+    }
+  });
+}
+
+async function cancelWorkflowRun(ctx: RouteContext, workflowId: string, workflowRunId: string): Promise<void> {
+  const runRow = ctx.database.sqlite.prepare(
+    "SELECT * FROM agent_workflow_runs WHERE id = ? AND workflow_id = ?"
+  ).get(workflowRunId, workflowId) as Record<string, unknown> | undefined;
+  if (runRow === undefined) return json(ctx.res, 404, { error: "workflow_run_not_found" });
+
+  const currentRun = workflowRunFromRow(runRow);
+  const activeAgentRunRows = ctx.database.sqlite.prepare(
+    "SELECT agent_run_id FROM agent_workflow_node_runs WHERE workflow_run_id = ? AND status IN ('queued', 'running') AND agent_run_id IS NOT NULL"
+  ).all(workflowRunId) as Array<{ readonly agent_run_id: string }>;
+  const activeAgentRunIds = activeAgentRunRows.map((row) => row.agent_run_id);
+
+  if (currentRun.status === "cancelled") {
+    return json(ctx.res, 200, { ok: true, run: currentRun, cancelledRunIds: activeAgentRunIds });
+  }
+  if (currentRun.status === "completed" || currentRun.status === "failed") {
+    return json(ctx.res, 409, { error: "workflow_run_terminal", status: currentRun.status });
+  }
+
+  const workflowRow = ctx.database.sqlite.prepare("SELECT room_id FROM agent_workflows WHERE id = ?").get(workflowId) as { readonly room_id: string | null } | undefined;
+  const now = ctx.now?.() ?? Date.now();
+  const cancelledNodeRuns: AgentWorkflowNodeRun[] = [];
+  const cancelledDeliveries: AgentWorkflowEdgeDelivery[] = [];
+  let cancelledRun: AgentWorkflowRun | undefined;
+
+  ctx.database.sqlite.transaction(() => {
+    ctx.database.sqlite.prepare(
+      "UPDATE agent_workflow_runs SET status = 'cancelled', failure_reason = 'user_cancelled', ended_at = ?, updated_at = ? WHERE id = ? AND status IN ('queued', 'running')"
+    ).run(now, now, workflowRunId);
+    ctx.database.sqlite.prepare(
+      "UPDATE agent_workflow_node_runs SET status = 'cancelled', error = COALESCE(error, 'user_cancelled'), completed_at = ?, updated_at = ? WHERE workflow_run_id = ? AND status IN ('waiting', 'queued', 'running')"
+    ).run(now, now, workflowRunId);
+    ctx.database.sqlite.prepare(
+      "UPDATE agent_workflow_edge_deliveries SET status = 'cancelled', error = COALESCE(error, 'user_cancelled'), updated_at = ? WHERE workflow_run_id = ? AND status IN ('queued', 'mailbox_created')"
+    ).run(now, workflowRunId);
+
+    const nodeRows = ctx.database.sqlite.prepare(
+      "SELECT * FROM agent_workflow_node_runs WHERE workflow_run_id = ? AND status = 'cancelled' AND updated_at = ? ORDER BY created_at ASC"
+    ).all(workflowRunId, now) as Array<Record<string, unknown>>;
+    for (const row of nodeRows) cancelledNodeRuns.push(workflowNodeRunFromRow(row));
+
+    const deliveryRows = ctx.database.sqlite.prepare(
+      "SELECT * FROM agent_workflow_edge_deliveries WHERE workflow_run_id = ? AND status = 'cancelled' AND updated_at = ? ORDER BY created_at ASC"
+    ).all(workflowRunId, now) as Array<Record<string, unknown>>;
+    for (const row of deliveryRows) cancelledDeliveries.push(workflowEdgeDeliveryFromRow(row));
+
+    cancelledRun = workflowRunFromRow(get(ctx.database, "SELECT * FROM agent_workflow_runs WHERE id = ?", workflowRunId) as Record<string, unknown>);
+    ctx.eventBus.publish({
+      id: randomUUID(),
+      type: "workflow.run.cancelled",
+      schemaVersion: 1,
+      workspaceId: currentRun.workspaceId,
+      ...(workflowRow?.room_id !== undefined && workflowRow.room_id !== null ? { roomId: workflowRow.room_id } : {}),
+      payload: { workflowId, run: cancelledRun },
+      createdAt: now
+    });
+    for (const nodeRun of cancelledNodeRuns) {
+      ctx.eventBus.publish({
+        id: randomUUID(),
+        type: "workflow.node.cancelled",
+        schemaVersion: 1,
+        workspaceId: currentRun.workspaceId,
+        ...(workflowRow?.room_id !== undefined && workflowRow.room_id !== null ? { roomId: workflowRow.room_id } : {}),
+        ...(nodeRun.agentRunId !== undefined ? { runId: nodeRun.agentRunId } : {}),
+        payload: { workflowId, workflowRunId, nodeRun },
+        createdAt: now
+      });
+    }
+    for (const delivery of cancelledDeliveries) {
+      ctx.eventBus.publish({
+        id: randomUUID(),
+        type: "workflow.edge.delivery.cancelled",
+        schemaVersion: 1,
+        workspaceId: currentRun.workspaceId,
+        ...(workflowRow?.room_id !== undefined && workflowRow.room_id !== null ? { roomId: workflowRow.room_id } : {}),
+        payload: { workflowId, workflowRunId, delivery },
+        createdAt: now
+      });
+    }
+  })();
+
+  for (const runId of activeAgentRunIds) {
+    void ctx.commandBus.dispatch(
+      { type: "CancelRun", runId, idempotencyKey: `workflow-cancel:${workflowRunId}:${runId}` },
+      { actor: { type: "user", id: "local" }, traceId: `workflow-cancel:${workflowRunId}`, idempotencyKey: `workflow-cancel:${workflowRunId}:${runId}`, origin: "http" }
+    );
+  }
+
+  return json(ctx.res, 200, { ok: true, run: cancelledRun, cancelledRunIds: activeAgentRunIds });
+}
+
+function lockWorkflowVersion(database: AgentHubDatabase, graph: WorkflowGraphPayload, draftVersionId: string, lockedVersionId: string, now: number): void {
+  const latestVersion = get(database, "SELECT COALESCE(MAX(version_number), 0) AS versionNumber FROM agent_workflow_versions WHERE workflow_id = ?", graph.workflow.id) as { readonly versionNumber?: number | null } | null;
+  const lockedVersionNumber = Number(latestVersion?.versionNumber ?? 0) + 1;
+  database.sqlite.prepare(
+    "INSERT INTO agent_workflow_versions (id, workflow_id, version_number, state, valid, validation_errors, viewport_json, created_from_version_id, locked_from_version_id, locked_at, created_at, updated_at) VALUES (?, ?, ?, 'locked', 1, ?, ?, ?, ?, ?, ?, ?)"
+  ).run(lockedVersionId, graph.workflow.id, lockedVersionNumber, JSON.stringify(graph.validation.issues), JSON.stringify(graph.version.viewport), draftVersionId, draftVersionId, now, now, now);
+  copyWorkflowVersionRows(database, draftVersionId, lockedVersionId, now);
+  database.sqlite.prepare("UPDATE agent_workflows SET active_version_id = ?, updated_at = ? WHERE id = ?").run(lockedVersionId, now, graph.workflow.id);
+}
+
+function ensureWorkflowTransportRoom(database: AgentHubDatabase, graph: WorkflowGraphPayload, roomId: string, nodes: readonly AgentWorkflowNode[], now: number): void {
+  const existing = database.sqlite.prepare("SELECT id FROM rooms WHERE id = ?").get(roomId) as { readonly id: string } | undefined;
+  const primaryNode = nodes[0];
+  const primaryAgentId = primaryNode !== undefined ? workflowNodeAgentId(graph.workflow.id, primaryNode.nodeId) : null;
+  if (existing === undefined) {
+    database.sqlite.prepare(
+      "INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, leader_role_id, archived_at, created_at, updated_at) VALUES (?, ?, ?, 'solo', 'conversation', ?, NULL, NULL, ?, ?)"
+    ).run(roomId, graph.workflow.workspaceId, `Workflow transport: ${graph.workflow.name}`, primaryAgentId, now, now);
+  }
+
+  for (const node of nodes) {
+    const bindingId = ensureWorkflowNodeBinding(database, graph, node, now);
+    const agentId = workflowNodeAgentId(graph.workflow.id, node.nodeId);
+    const role = agentId === primaryAgentId ? "primary" : "teammate";
+    database.sqlite.prepare(
+      "INSERT OR IGNORE INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES (?, ?, 'agent', ?, 'native', NULL, ?, 'active', ?)"
+    ).run(roomId, agentId, role, bindingId, now);
+    database.sqlite.prepare("INSERT OR REPLACE INTO agent_presence (room_id, agent_id, state, reason, status_line, updated_at) VALUES (?, ?, 'active', NULL, NULL, ?)").run(roomId, agentId, now);
+  }
+}
+
+function ensureWorkflowNodeBinding(database: AgentHubDatabase, graph: WorkflowGraphPayload, node: AgentWorkflowNode, now: number): string {
+  const existingBindingId = node.agentBindingId ?? inputString(node.config["agentBindingId"]);
+  if (existingBindingId !== undefined) {
+    const binding = database.sqlite.prepare("SELECT id FROM agent_bindings WHERE id = ?").get(existingBindingId) as { readonly id: string } | undefined;
+    if (binding !== undefined) return binding.id;
+  }
+
+  const runtimeId = inputString(node.config["runtimeId"]) ?? "native-default";
+  const runtime = database.sqlite.prepare("SELECT id, kind FROM runtimes WHERE id = ?").get(runtimeId) as { readonly id: string; readonly kind: string } | undefined;
+  if (runtime === undefined || runtime.kind !== "native") throw new Error("workflow_native_runtime_required");
+  const modelConfig = workflowModelConfig(database, graph.workflow.workspaceId);
+  if (modelConfig === undefined) throw new Error("workflow_native_model_config_required");
+
+  const roleId = `workflow:${graph.workflow.id}:${node.nodeId}:role`;
+  const bindingId = `workflow:${graph.workflow.id}:${node.nodeId}:binding`;
+  database.sqlite.prepare(
+    "INSERT INTO roles (id, workspace_id, name, avatar, description, prompt, capabilities, default_permission_profile_id, tags, is_builtin, source_path, version, created_at, updated_at) VALUES (?, ?, ?, NULL, ?, ?, '[]', NULL, ?, 0, NULL, NULL, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, description = excluded.description, prompt = excluded.prompt, updated_at = excluded.updated_at"
+  ).run(roleId, graph.workflow.workspaceId, node.displayName, node.roleLabel ?? "Workflow agent context node", workflowRolePrompt(graph, node), JSON.stringify(["workflow"]), now, now);
+  database.sqlite.prepare(
+    "INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NULL, ?, ?) ON CONFLICT(id) DO UPDATE SET role_id = excluded.role_id, runtime_id = excluded.runtime_id, model_config_id = excluded.model_config_id, updated_at = excluded.updated_at"
+  ).run(bindingId, graph.workflow.workspaceId, roleId, runtime.id, modelConfig.id, now, now);
+  return bindingId;
+}
+
+function workflowModelConfig(database: AgentHubDatabase, workspaceId: string): { readonly id: string } | undefined {
+  return database.sqlite
+    .prepare("SELECT id FROM model_configs WHERE workspace_id = ? OR workspace_id IS NULL ORDER BY workspace_id IS NULL ASC, created_at ASC LIMIT 1")
+    .get(workspaceId) as { readonly id: string } | undefined;
+}
+
+function workflowRolePrompt(graph: WorkflowGraphPayload, node: AgentWorkflowNode): string {
+  return [
+    `You are ${node.displayName}, an AgentHub workflow node.`,
+    node.roleLabel !== undefined ? `Role: ${node.roleLabel}` : undefined,
+    node.prompt.length > 0 ? `Node prompt: ${node.prompt}` : undefined,
+    "Your job is to transform the provided workflow context into a clear output for downstream workflow nodes.",
+    "Do not call mailbox tools yourself; AgentHub will deliver your final model output to declared downstream nodes."
+  ].filter((line): line is string => line !== undefined && line.trim().length > 0).join("\n");
+}
+
+function workflowNodePrompt(graph: WorkflowGraphPayload, node: AgentWorkflowNode, inputContexts: readonly Record<string, unknown>[]): string {
+  const upstream = graph.validation.upstreamByNodeId[node.nodeId] ?? [];
+  const downstream = graph.validation.downstreamByNodeId[node.nodeId] ?? [];
+  const renderedInputs = inputContexts.map((context, index) => {
+    const text = contextText(context) ?? JSON.stringify(context);
+    const source = inputString(context["fromNodeName"]) ?? inputString(context["fromNodeId"]) ?? inputString(context["source"]) ?? `input-${index + 1}`;
+    return `- From ${source}: ${text}`;
+  }).join("\n");
+  return [
+    `Workflow: ${graph.workflow.name}`,
+    `Current node: ${node.displayName} (${node.nodeId})`,
+    `Node prompt: ${node.prompt || "Receive upstream context and produce downstream context."}`,
+    `Upstream nodes: ${upstream.length > 0 ? upstream.join(", ") : "none"}`,
+    `Downstream nodes: ${downstream.length > 0 ? downstream.join(", ") : "none"}`,
+    "Incoming context:",
+    renderedInputs.length > 0 ? renderedInputs : "- No incoming context",
+    "Use the Node prompt above as the task instruction for transforming the incoming context.",
+    "Return only this node's useful output. AgentHub will record it and deliver it through mailbox to downstream nodes."
+  ].join("\n");
+}
+
+function workflowTransportRoomId(workflowId: string, runId: string): string {
+  return `workflow:${workflowId}:${runId}`;
+}
+
+function workflowNodeAgentId(workflowId: string, nodeId: string): string {
+  return `workflow:${workflowId}:${nodeId}`;
+}
+
+function dispatchWorkflowWake(commandBus: CommandBus | undefined, command: WorkflowWakeCommand, idempotencyKey: string): boolean {
+  if (commandBus === undefined) return false;
+  void commandBus.dispatch(
+    {
+      type: "WakeAgent",
+      runId: command.runId,
+      workspaceId: command.workspaceId,
+      roomId: command.roomId,
+      agentId: command.agentId,
+      reason: "mailbox_message",
+      promptDelta: { kind: "delta_only", instructions: command.prompt },
+      ...(command.sourceRunId !== undefined ? { sourceRunId: command.sourceRunId } : {}),
+      ...(command.messageId !== undefined ? { messageId: command.messageId } : {}),
+      idempotencyKey
+    },
+    { actor: { type: "system" }, traceId: idempotencyKey, idempotencyKey, origin: "internal" }
+  );
+  return true;
+}
+
+function handleWorkflowRuntimeEvent(options: { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly getCommandBus: () => CommandBus | undefined; readonly now?: () => number }, event: EventEnvelope): void {
+  if (event.runId === undefined) return;
+  const nodeRun = options.database.sqlite.prepare("SELECT * FROM agent_workflow_node_runs WHERE agent_run_id = ?").get(event.runId) as Record<string, unknown> | undefined;
+  if (nodeRun === undefined) return;
+  if (event.type === "agent.run.started") {
+    markWorkflowNodeStarted(options, nodeRun, event.runId);
+    return;
+  }
+  if (event.type === "agent.run.completed") {
+    completeWorkflowNodeAndAdvance(options, nodeRun, event.runId);
+    return;
+  }
+  if (event.type === "agent.run.failed" || event.type === "agent.run.cancelled") {
+    failWorkflowNodeAndRun(options, nodeRun, event);
+  }
+}
+
+function markWorkflowNodeStarted(options: { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly now?: () => number }, nodeRunRow: Record<string, unknown>, agentRunId: string): void {
+  const current = workflowNodeRunFromRow(nodeRunRow);
+  if (current.status !== "queued") return;
+  const workflow = workflowForNodeRun(options.database, current.id);
+  if (workflow === undefined) return;
+  const now = options.now?.() ?? Date.now();
+  options.database.sqlite.transaction(() => {
+    options.database.sqlite.prepare("UPDATE agent_workflow_node_runs SET status = 'running', started_at = ?, updated_at = ? WHERE id = ? AND status = 'queued'").run(now, now, current.id);
+    const nodeRun = workflowNodeRunFromRow(get(options.database, "SELECT * FROM agent_workflow_node_runs WHERE id = ?", current.id) as Record<string, unknown>);
+    options.database.sqlite.prepare(
+      "UPDATE agent_workflow_edge_deliveries SET status = 'delivered', delivered_at = COALESCE(delivered_at, ?), updated_at = ? WHERE workflow_run_id = ? AND target_node_run_id = ? AND status IN ('queued', 'mailbox_created')"
+    ).run(now, now, workflow.workflowRunId, current.id);
+    const deliveryRows = options.database.sqlite.prepare(
+      "SELECT * FROM agent_workflow_edge_deliveries WHERE workflow_run_id = ? AND target_node_run_id = ? AND status = 'delivered' AND updated_at = ? ORDER BY created_at ASC"
+    ).all(workflow.workflowRunId, current.id, now) as Array<Record<string, unknown>>;
+    options.eventBus.publish({
+      id: randomUUID(),
+      type: "workflow.node.started",
+      schemaVersion: 1,
+      workspaceId: workflow.workspaceId,
+      ...(workflow.publicRoomId !== null ? { roomId: workflow.publicRoomId } : {}),
+      runId: agentRunId,
+      payload: { workflowId: workflow.workflowId, workflowRunId: workflow.workflowRunId, nodeRun },
+      createdAt: now
+    });
+    for (const row of deliveryRows) {
+      options.eventBus.publish({
+        id: randomUUID(),
+        type: "workflow.edge.delivery.delivered",
+        schemaVersion: 1,
+        workspaceId: workflow.workspaceId,
+        ...(workflow.publicRoomId !== null ? { roomId: workflow.publicRoomId } : {}),
+        payload: { workflowId: workflow.workflowId, workflowRunId: workflow.workflowRunId, delivery: workflowEdgeDeliveryFromRow(row) },
+        createdAt: now
+      });
+    }
+  })();
+}
+
+function completeWorkflowNodeAndAdvance(options: { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly getCommandBus: () => CommandBus | undefined; readonly now?: () => number }, nodeRunRow: Record<string, unknown>, agentRunId: string): void {
+  const current = workflowNodeRunFromRow(nodeRunRow);
+  if (current.status !== "queued" && current.status !== "running") return;
+  const workflow = workflowForNodeRun(options.database, current.id);
+  if (workflow === undefined) return;
+  const workflowRunRow = get(options.database, "SELECT status FROM agent_workflow_runs WHERE id = ?", workflow.workflowRunId) as { readonly status: string } | null;
+  if (workflowRunRow?.status !== "running") return;
+  const graph = readWorkflowGraphVersion(options.database, workflow.workflowId, workflow.workflowVersionId);
+  if (graph === undefined) return;
+  const sourceNode = graph.nodes.find((node) => node.nodeId === current.nodeId);
+  if (sourceNode === undefined) return;
+
+  const now = options.now?.() ?? Date.now();
+  const wakeCommands: WorkflowWakeCommand[] = [];
+  let completedRun: AgentWorkflowRun | undefined;
+
+  options.database.sqlite.transaction(() => {
+    const refreshed = workflowNodeRunFromRow(get(options.database, "SELECT * FROM agent_workflow_node_runs WHERE id = ?", current.id) as Record<string, unknown>);
+    const outputText = contextText(refreshed.outputContext) ?? workflowAssistantMessageText(options.database, agentRunId);
+    const outputContext = { ...(refreshed.outputContext ?? {}), text: outputText, fromNodeId: sourceNode.nodeId, fromNodeName: sourceNode.displayName };
+    options.database.sqlite.prepare("UPDATE agent_workflow_node_runs SET status = 'completed', output_context_json = ?, completed_at = COALESCE(completed_at, ?), updated_at = ? WHERE id = ?").run(JSON.stringify(outputContext), now, now, current.id);
+    const completedNodeRun = workflowNodeRunFromRow(get(options.database, "SELECT * FROM agent_workflow_node_runs WHERE id = ?", current.id) as Record<string, unknown>);
+    options.eventBus.publish({
+      id: randomUUID(),
+      type: "workflow.node.completed",
+      schemaVersion: 1,
+      workspaceId: workflow.workspaceId,
+      ...(workflow.publicRoomId !== null ? { roomId: workflow.publicRoomId } : {}),
+      runId: agentRunId,
+      payload: { workflowId: workflow.workflowId, workflowRunId: workflow.workflowRunId, nodeRun: completedNodeRun },
+      createdAt: now
+    });
+
+    for (const edge of enabledDownstreamEdges(graph, sourceNode.nodeId)) {
+      const targetNode = graph.nodes.find((node) => node.nodeId === edge.targetNodeId);
+      if (targetNode === undefined) continue;
+      const targetBindingId = ensureWorkflowNodeBinding(options.database, graph, targetNode, now);
+      const targetNodeRunId = randomUUID();
+      const targetAgentRunId = randomUUID();
+      const deliveryId = randomUUID();
+      const mailboxMessageId = randomUUID();
+      const deliveryContext = {
+        ...outputContext,
+        toNodeId: targetNode.nodeId,
+        toNodeName: targetNode.displayName,
+        edgeId: edge.edgeId
+      };
+      options.database.sqlite.prepare(
+        "INSERT INTO agent_workflow_node_runs (id, workflow_run_id, workflow_node_id, node_id, agent_run_id, agent_binding_id, status, input_context_json, output_context_json, error, queued_at, started_at, completed_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, NULL, NULL, ?, NULL, NULL, ?, ?) ON CONFLICT(workflow_run_id, node_id) DO NOTHING"
+      ).run(targetNodeRunId, workflow.workflowRunId, targetNode.id, targetNode.nodeId, targetAgentRunId, targetBindingId, JSON.stringify([deliveryContext]), now, now, now);
+      const targetNodeRunRow = get(options.database, "SELECT * FROM agent_workflow_node_runs WHERE workflow_run_id = ? AND node_id = ?", workflow.workflowRunId, targetNode.nodeId) as Record<string, unknown>;
+      const targetNodeRun = workflowNodeRunFromRow(targetNodeRunRow);
+      if (targetNodeRun.agentRunId !== targetAgentRunId) continue;
+
+      options.database.sqlite.prepare(
+        "INSERT INTO agent_workflow_edge_deliveries (id, workflow_run_id, workflow_edge_id, edge_id, source_node_id, target_node_id, source_node_run_id, target_node_run_id, mailbox_message_id, status, context_json, idempotency_key, attempt_count, error, created_at, updated_at, delivered_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 'queued', ?, ?, 0, NULL, ?, ?, NULL)"
+      ).run(deliveryId, workflow.workflowRunId, edge.id, edge.edgeId, edge.sourceNodeId, edge.targetNodeId, current.id, targetNodeRun.id, JSON.stringify(deliveryContext), `workflow:${workflow.workflowRunId}:${edge.edgeId}:1`, now, now);
+      let delivery = workflowEdgeDeliveryFromRow(get(options.database, "SELECT * FROM agent_workflow_edge_deliveries WHERE id = ?", deliveryId) as Record<string, unknown>);
+      options.eventBus.publish({
+        id: randomUUID(),
+        type: "workflow.edge.delivery.created",
+        schemaVersion: 1,
+        workspaceId: workflow.workspaceId,
+        ...(workflow.publicRoomId !== null ? { roomId: workflow.publicRoomId } : {}),
+        payload: { workflowId: workflow.workflowId, workflowRunId: workflow.workflowRunId, delivery },
+        createdAt: now
+      });
+      options.database.sqlite.prepare(
+        "INSERT INTO mailbox_messages (id, workspace_id, room_id, from_type, from_id, to_agent_id, kind, content, files, read, claimed_run_id, claimed_at, delivery_batch_id, delivery_failure_reason, attempt_count, created_at, consumed_at) VALUES (?, ?, ?, 'workflow', ?, ?, 'message', ?, '[]', 0, NULL, NULL, NULL, NULL, 0, ?, NULL)"
+      ).run(mailboxMessageId, workflow.workspaceId, workflow.transportRoomId, workflowNodeAgentId(workflow.workflowId, sourceNode.nodeId), workflowNodeAgentId(workflow.workflowId, targetNode.nodeId), JSON.stringify(deliveryContext), now);
+      options.database.sqlite.prepare("UPDATE agent_workflow_edge_deliveries SET mailbox_message_id = ?, status = 'mailbox_created', attempt_count = attempt_count + 1, delivered_at = ?, updated_at = ? WHERE id = ?").run(mailboxMessageId, now, now, deliveryId);
+      delivery = workflowEdgeDeliveryFromRow(get(options.database, "SELECT * FROM agent_workflow_edge_deliveries WHERE id = ?", deliveryId) as Record<string, unknown>);
+      options.eventBus.publish({
+        id: randomUUID(),
+        type: "mailbox.message.created",
+        schemaVersion: 1,
+        workspaceId: workflow.workspaceId,
+        roomId: workflow.transportRoomId,
+        agentId: workflowNodeAgentId(workflow.workflowId, targetNode.nodeId),
+        payload: { mailboxMessageId, roomId: workflow.transportRoomId, fromAgentId: workflowNodeAgentId(workflow.workflowId, sourceNode.nodeId), targetAgentId: workflowNodeAgentId(workflow.workflowId, targetNode.nodeId), reason: "workflow_edge_delivery", workflowId: workflow.workflowId, workflowRunId: workflow.workflowRunId, edgeId: edge.edgeId, text: outputText },
+        createdAt: now
+      });
+      options.eventBus.publish({
+        id: randomUUID(),
+        type: "workflow.edge.delivery.mailbox_created",
+        schemaVersion: 1,
+        workspaceId: workflow.workspaceId,
+        ...(workflow.publicRoomId !== null ? { roomId: workflow.publicRoomId } : {}),
+        payload: { workflowId: workflow.workflowId, workflowRunId: workflow.workflowRunId, delivery },
+        createdAt: now
+      });
+      options.eventBus.publish({
+        id: randomUUID(),
+        type: "workflow.node.queued",
+        schemaVersion: 1,
+        workspaceId: workflow.workspaceId,
+        ...(workflow.publicRoomId !== null ? { roomId: workflow.publicRoomId } : {}),
+        payload: { workflowId: workflow.workflowId, workflowRunId: workflow.workflowRunId, nodeRun: targetNodeRun },
+        createdAt: now
+      });
+      wakeCommands.push({
+        runId: targetAgentRunId,
+        workspaceId: workflow.workspaceId,
+        roomId: workflow.transportRoomId,
+        agentId: workflowNodeAgentId(workflow.workflowId, targetNode.nodeId),
+        sourceRunId: agentRunId,
+        messageId: mailboxMessageId,
+        prompt: workflowNodePrompt(graph, targetNode, [deliveryContext])
+      });
+    }
+
+    if (workflowHasNoPendingRuntime(options.database, workflow.workflowRunId)) {
+      options.database.sqlite.prepare("UPDATE agent_workflow_runs SET status = 'completed', ended_at = ?, updated_at = ? WHERE id = ? AND status = 'running'").run(now, now, workflow.workflowRunId);
+      completedRun = workflowRunFromRow(get(options.database, "SELECT * FROM agent_workflow_runs WHERE id = ?", workflow.workflowRunId) as Record<string, unknown>);
+      options.eventBus.publish({
+        id: randomUUID(),
+        type: "workflow.run.completed",
+        schemaVersion: 1,
+        workspaceId: workflow.workspaceId,
+        ...(workflow.publicRoomId !== null ? { roomId: workflow.publicRoomId } : {}),
+        payload: { workflowId: workflow.workflowId, run: completedRun },
+        createdAt: now
+      });
+    }
+  })();
+
+  for (const command of wakeCommands) {
+    dispatchWorkflowWake(options.getCommandBus(), command, `workflow-edge:${workflow.workflowRunId}:${command.runId}`);
+  }
+  void completedRun;
+}
+
+function failWorkflowNodeAndRun(options: { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly now?: () => number }, nodeRunRow: Record<string, unknown>, event: EventEnvelope): void {
+  const current = workflowNodeRunFromRow(nodeRunRow);
+  if (current.status === "completed" || current.status === "failed" || current.status === "cancelled") return;
+  const workflow = workflowForNodeRun(options.database, current.id);
+  if (workflow === undefined) return;
+  const now = options.now?.() ?? Date.now();
+  const payload = event.payload as Record<string, unknown> | undefined;
+  const error = typeof payload?.error === "string" ? payload.error : event.type === "agent.run.cancelled" ? "cancelled" : "agent_run_failed";
+  const nodeStatus = event.type === "agent.run.cancelled" ? "cancelled" : "failed";
+  const runStatus = event.type === "agent.run.cancelled" ? "cancelled" : "failed";
+  const eventType = event.type === "agent.run.cancelled" ? "workflow.run.cancelled" : "workflow.run.failed";
+  const nodeEventType = event.type === "agent.run.cancelled" ? "workflow.node.failed" : "workflow.node.failed";
+  options.database.sqlite.transaction(() => {
+    options.database.sqlite.prepare("UPDATE agent_workflow_node_runs SET status = ?, error = ?, completed_at = ?, updated_at = ? WHERE id = ?").run(nodeStatus, error, now, now, current.id);
+    const failedNodeRun = workflowNodeRunFromRow(get(options.database, "SELECT * FROM agent_workflow_node_runs WHERE id = ?", current.id) as Record<string, unknown>);
+    options.eventBus.publish({
+      id: randomUUID(),
+      type: nodeEventType,
+      schemaVersion: 1,
+      workspaceId: workflow.workspaceId,
+      ...(workflow.publicRoomId !== null ? { roomId: workflow.publicRoomId } : {}),
+      runId: event.runId,
+      payload: { workflowId: workflow.workflowId, workflowRunId: workflow.workflowRunId, nodeRun: failedNodeRun },
+      createdAt: now
+    });
+    options.database.sqlite.prepare("UPDATE agent_workflow_runs SET status = ?, failure_reason = ?, ended_at = ?, updated_at = ? WHERE id = ? AND status = 'running'").run(runStatus, error, now, now, workflow.workflowRunId);
+    const failedRun = workflowRunFromRow(get(options.database, "SELECT * FROM agent_workflow_runs WHERE id = ?", workflow.workflowRunId) as Record<string, unknown>);
+    options.eventBus.publish({
+      id: randomUUID(),
+      type: eventType,
+      schemaVersion: 1,
+      workspaceId: workflow.workspaceId,
+      ...(workflow.publicRoomId !== null ? { roomId: workflow.publicRoomId } : {}),
+      payload: { workflowId: workflow.workflowId, run: failedRun },
+      createdAt: now
+    });
+  })();
+}
+
+function workflowForNodeRun(database: AgentHubDatabase, nodeRunId: string): { readonly workflowId: string; readonly workflowRunId: string; readonly workflowVersionId: string; readonly workspaceId: string; readonly publicRoomId: string | null; readonly transportRoomId: string } | undefined {
+  const row = database.sqlite.prepare(
+    `SELECT wr.id AS workflow_run_id, wr.workflow_id, wr.workflow_version_id, wr.workspace_id, wr.room_id
+     FROM agent_workflow_node_runs nr
+     JOIN agent_workflow_runs wr ON wr.id = nr.workflow_run_id
+     WHERE nr.id = ?`
+  ).get(nodeRunId) as { readonly workflow_run_id: string; readonly workflow_id: string; readonly workflow_version_id: string; readonly workspace_id: string; readonly room_id: string | null } | undefined;
+  if (row === undefined) return undefined;
+  return {
+    workflowId: row.workflow_id,
+    workflowRunId: row.workflow_run_id,
+    workflowVersionId: row.workflow_version_id,
+    workspaceId: row.workspace_id,
+    publicRoomId: row.room_id,
+    transportRoomId: workflowTransportRoomId(row.workflow_id, row.workflow_run_id)
+  };
+}
+
+function enabledDownstreamEdges(graph: WorkflowGraphPayload, nodeId: string): AgentWorkflowEdge[] {
+  const nodesById = new Map(graph.nodes.map((node) => [node.nodeId, node]));
+  return graph.edges.filter((edge) => {
+    const source = nodesById.get(edge.sourceNodeId);
+    const target = nodesById.get(edge.targetNodeId);
+    return edge.enabled && edge.sourceNodeId === nodeId && source?.enabled === true && target?.enabled === true && source.kind === "agent_context" && target.kind === "agent_context";
+  });
+}
+
+function workflowHasNoPendingRuntime(database: AgentHubDatabase, workflowRunId: string): boolean {
+  const pending = database.sqlite.prepare("SELECT COUNT(*) AS count FROM agent_workflow_node_runs WHERE workflow_run_id = ? AND status IN ('waiting', 'queued', 'running')").get(workflowRunId) as { readonly count: number };
+  return pending.count === 0;
+}
+
+function workflowAssistantMessageText(database: AgentHubDatabase, runId: string): string {
+  const rows = database.sqlite.prepare(
+    `SELECT mp.payload
+     FROM messages m
+     JOIN message_parts mp ON mp.message_id = m.id
+     WHERE m.run_id = ? AND m.role = 'assistant' AND mp.part_type IN ('text', 'code')
+     ORDER BY m.created_at DESC, mp.seq ASC`
+  ).all(runId) as { readonly payload: string }[];
+  return rows.map((row) => {
+    try {
+      const parsed = JSON.parse(row.payload) as { readonly text?: unknown };
+      return typeof parsed.text === "string" ? parsed.text : "";
+    } catch {
+      return "";
+    }
+  }).filter((text) => text.length > 0).join("\n").trim();
+}
+
+function contextText(context: Record<string, unknown> | undefined): string | undefined {
+  const text = context?.text;
+  return typeof text === "string" && text.trim().length > 0 ? text : undefined;
+}
+
+function deleteWorkflow(ctx: RouteContext, workflowId: string): void {
+  const existing = get(ctx.database, "SELECT * FROM agent_workflows WHERE id = ? AND deleted_at IS NULL", workflowId) as Record<string, unknown> | null;
+  if (existing === null) return json(ctx.res, 404, { error: "workflow_not_found" });
+  const now = ctx.now?.() ?? Date.now();
+  const workspaceId = String(existing.workspace_id);
+  const roomId = stringOrNull(existing.room_id);
+  ctx.database.sqlite.transaction(() => {
+    ctx.database.sqlite.prepare("UPDATE agent_workflows SET deleted_at = ?, updated_at = ? WHERE id = ?").run(now, now, workflowId);
+    ctx.eventBus.publish({
+      id: randomUUID(),
+      type: "workflow.deleted",
+      schemaVersion: 1,
+      workspaceId,
+      ...(roomId !== null ? { roomId } : {}),
+      payload: { workflowId, workspaceId, ...(roomId !== null ? { roomId } : {}), deletedAt: now },
+      createdAt: now
+    });
+  })();
+  json(ctx.res, 200, { ok: true, workflowId, deletedAt: now });
+}
+
+function parseWorkflowDraftInput(database: AgentHubDatabase, input: Record<string, unknown>, existing?: Record<string, unknown>): WorkflowDraftParseResult {
+  const workspaceId = inputString(input["workspaceId"]) ?? stringOrNull(existing?.workspace_id) ?? defaultWorkspaceId(database);
+  const roomId = input["roomId"] === null ? null : inputString(input["roomId"]) ?? stringOrNull(existing?.room_id);
+  const name = inputString(input["name"]) ?? (typeof existing?.name === "string" && existing.name.length > 0 ? existing.name : "Agent context handoff");
+  const description = input["description"] === null ? null : inputString(input["description"]) ?? stringOrNull(existing?.description);
+  const createdBy = input["createdBy"] === null ? null : inputString(input["createdBy"]) ?? stringOrNull(existing?.created_by) ?? "local";
+  const viewport = workflowRecord(input["viewport"]);
+
+  const rawNodes = Array.isArray(input["nodes"]) ? input["nodes"] : [];
+  const rawEdges = Array.isArray(input["edges"]) ? input["edges"] : [];
+  const nodeIds = new Set<string>();
+  const nodes: WorkflowNodeDraftInput[] = [];
+  for (const rawNode of rawNodes) {
+    if (!workflowIsRecord(rawNode)) return { ok: false, error: "workflow_node_invalid" };
+    const nodeId = inputString(rawNode["nodeId"] ?? rawNode["id"]);
+    if (nodeId === undefined) return { ok: false, error: "workflow_node_id_required" };
+    if (nodeIds.has(nodeId)) return { ok: false, error: "workflow_duplicate_node_id" };
+    nodeIds.add(nodeId);
+    const kindInput = inputString(rawNode["kind"]) ?? "agent_context";
+    if (kindInput !== "agent_context" && kindInput !== "note") return { ok: false, error: "workflow_unsupported_node_kind" };
+    const position = workflowRecord(rawNode["position"]);
+    const size = workflowRecord(rawNode["size"]);
+    const width = workflowNumber(size["width"]);
+    const height = workflowNumber(size["height"]);
+    nodes.push({
+      nodeId,
+      kind: kindInput,
+      displayName: inputString(rawNode["displayName"] ?? rawNode["label"]) ?? (kindInput === "note" ? "Note" : "Agent"),
+      agentBindingId: inputString(rawNode["agentBindingId"]) ?? null,
+      roleLabel: inputString(rawNode["roleLabel"]) ?? null,
+      prompt: typeof rawNode["prompt"] === "string" ? rawNode["prompt"] : "",
+      position: {
+        x: workflowNumber(position["x"]) ?? 0,
+        y: workflowNumber(position["y"]) ?? 0
+      },
+      size: width !== undefined && height !== undefined ? { width, height } : null,
+      enabled: rawNode["enabled"] !== false,
+      locked: rawNode["locked"] === true,
+      config: workflowRecord(rawNode["config"])
+    });
+  }
+
+  const edgeIds = new Set<string>();
+  const edgePairs = new Set<string>();
+  const edges: WorkflowEdgeDraftInput[] = [];
+  for (const rawEdge of rawEdges) {
+    if (!workflowIsRecord(rawEdge)) return { ok: false, error: "workflow_edge_invalid" };
+    const sourceNodeId = inputString(rawEdge["sourceNodeId"] ?? rawEdge["source"]);
+    const targetNodeId = inputString(rawEdge["targetNodeId"] ?? rawEdge["target"]);
+    if (sourceNodeId === undefined || targetNodeId === undefined) return { ok: false, error: "workflow_edge_endpoint_required" };
+    const edgeId = inputString(rawEdge["edgeId"] ?? rawEdge["id"]) ?? `edge-${sourceNodeId}-${targetNodeId}`;
+    if (edgeIds.has(edgeId)) return { ok: false, error: "workflow_duplicate_edge_id" };
+    edgeIds.add(edgeId);
+    const pair = `${sourceNodeId}\u0000${targetNodeId}`;
+    if (edgePairs.has(pair)) return { ok: false, error: "workflow_duplicate_edge_pair" };
+    edgePairs.add(pair);
+    edges.push({
+      edgeId,
+      sourceNodeId,
+      targetNodeId,
+      label: inputString(rawEdge["label"]) ?? null,
+      enabled: rawEdge["enabled"] !== false,
+      config: workflowRecord(rawEdge["config"])
+    });
+  }
+
+  return { ok: true, value: { workspaceId, roomId, name, description, createdBy, viewport, nodes, edges } };
+}
+
+function replaceWorkflowDraftRows(database: AgentHubDatabase, workflowVersionId: string, nodes: readonly WorkflowNodeDraftInput[], edges: readonly WorkflowEdgeDraftInput[], now: number): void {
+  const insertNode = database.sqlite.prepare(
+    "INSERT INTO agent_workflow_nodes (id, workflow_version_id, node_id, kind, display_name, agent_binding_id, role_label, prompt, position_x, position_y, width, height, enabled, locked, config_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  );
+  for (const node of nodes) {
+    insertNode.run(
+      randomUUID(),
+      workflowVersionId,
+      node.nodeId,
+      node.kind,
+      node.displayName,
+      node.agentBindingId,
+      node.roleLabel,
+      node.prompt,
+      node.position.x,
+      node.position.y,
+      node.size?.width ?? null,
+      node.size?.height ?? null,
+      node.enabled ? 1 : 0,
+      node.locked ? 1 : 0,
+      JSON.stringify(node.config),
+      now,
+      now
+    );
+  }
+  const insertEdge = database.sqlite.prepare(
+    "INSERT INTO agent_workflow_edges (id, workflow_version_id, edge_id, source_node_id, target_node_id, label, enabled, config_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  );
+  for (const edge of edges) {
+    insertEdge.run(
+      randomUUID(),
+      workflowVersionId,
+      edge.edgeId,
+      edge.sourceNodeId,
+      edge.targetNodeId,
+      edge.label,
+      edge.enabled ? 1 : 0,
+      JSON.stringify(edge.config),
+      now,
+      now
+    );
+  }
+}
+
+function copyWorkflowVersionRows(database: AgentHubDatabase, sourceVersionId: string, targetVersionId: string, now: number): void {
+  const sourceNodes = (all(database, "SELECT * FROM agent_workflow_nodes WHERE workflow_version_id = ? ORDER BY created_at ASC, node_id ASC", sourceVersionId) as Record<string, unknown>[]).map(workflowNodeFromRow);
+  const sourceEdges = (all(database, "SELECT * FROM agent_workflow_edges WHERE workflow_version_id = ? ORDER BY created_at ASC, edge_id ASC", sourceVersionId) as Record<string, unknown>[]).map(workflowEdgeFromRow);
+  replaceWorkflowDraftRows(
+    database,
+    targetVersionId,
+    sourceNodes.map((node) => ({
+      nodeId: node.nodeId,
+      kind: node.kind,
+      displayName: node.displayName,
+      agentBindingId: node.agentBindingId ?? null,
+      roleLabel: node.roleLabel ?? null,
+      prompt: node.prompt,
+      position: node.position,
+      size: node.size ?? null,
+      enabled: node.enabled,
+      locked: node.locked,
+      config: node.config
+    })),
+    sourceEdges.map((edge) => ({
+      edgeId: edge.edgeId,
+      sourceNodeId: edge.sourceNodeId,
+      targetNodeId: edge.targetNodeId,
+      label: edge.label ?? null,
+      enabled: edge.enabled,
+      config: edge.config
+    })),
+    now
+  );
+}
+
+function readWorkflowGraph(database: AgentHubDatabase, workflowId: string): WorkflowGraphPayload | undefined {
+  const workflowRow = get(database, "SELECT * FROM agent_workflows WHERE id = ?", workflowId) as Record<string, unknown> | null;
+  if (workflowRow === null) return undefined;
+  const versionId = stringOrNull(workflowRow.draft_version_id) ?? stringOrNull(workflowRow.active_version_id);
+  if (versionId === null) return undefined;
+  return readWorkflowGraphVersion(database, workflowId, versionId);
+}
+
+function readWorkflowGraphVersion(database: AgentHubDatabase, workflowId: string, versionId: string): WorkflowGraphPayload | undefined {
+  const workflowRow = get(database, "SELECT * FROM agent_workflows WHERE id = ?", workflowId) as Record<string, unknown> | null;
+  if (workflowRow === null) return undefined;
+  const versionRow = get(database, "SELECT * FROM agent_workflow_versions WHERE id = ? AND workflow_id = ?", versionId, workflowId) as Record<string, unknown> | null;
+  if (versionRow === null) return undefined;
+  const nodes = (all(database, "SELECT * FROM agent_workflow_nodes WHERE workflow_version_id = ? ORDER BY created_at ASC, node_id ASC", versionId) as Record<string, unknown>[]).map(workflowNodeFromRow);
+  const edges = (all(database, "SELECT * FROM agent_workflow_edges WHERE workflow_version_id = ? ORDER BY created_at ASC, edge_id ASC", versionId) as Record<string, unknown>[]).map(workflowEdgeFromRow);
+  return {
+    workflow: workflowFromRow(workflowRow),
+    version: workflowVersionFromRow(versionRow),
+    nodes,
+    edges,
+    validation: validateWorkflowGraph(nodes, edges)
+  };
+}
+
+function workflowFromRow(row: Record<string, unknown>): AgentWorkflow {
+  const roomId = stringOrNull(row.room_id);
+  const description = stringOrNull(row.description);
+  const draftVersionId = stringOrNull(row.draft_version_id);
+  const activeVersionId = stringOrNull(row.active_version_id);
+  const createdBy = stringOrNull(row.created_by);
+  const deletedAt = workflowNumber(row.deleted_at);
+  return {
+    id: String(row.id),
+    workspaceId: String(row.workspace_id),
+    ...(roomId !== null ? { roomId } : {}),
+    name: String(row.name),
+    ...(description !== null ? { description } : {}),
+    ...(draftVersionId !== null ? { draftVersionId } : {}),
+    ...(activeVersionId !== null ? { activeVersionId } : {}),
+    ...(createdBy !== null ? { createdBy } : {}),
+    createdAt: workflowNumber(row.created_at) ?? 0,
+    updatedAt: workflowNumber(row.updated_at) ?? 0,
+    ...(deletedAt !== undefined ? { deletedAt } : {})
+  };
+}
+
+function workflowVersionFromRow(row: Record<string, unknown>): AgentWorkflowVersion {
+  const createdFromVersionId = stringOrNull(row.created_from_version_id);
+  const lockedFromVersionId = stringOrNull(row.locked_from_version_id);
+  const lockedAt = workflowNumber(row.locked_at);
+  return {
+    id: String(row.id),
+    workflowId: String(row.workflow_id),
+    versionNumber: workflowNumber(row.version_number) ?? 1,
+    state: row.state === "locked" ? "locked" : "draft",
+    valid: row.valid === 1 || row.valid === true,
+    validationErrors: workflowIssuesFromUnknown(parseJsonField(row.validation_errors, [])),
+    viewport: workflowRecord(parseJsonField(row.viewport_json, {})),
+    ...(createdFromVersionId !== null ? { createdFromVersionId } : {}),
+    ...(lockedFromVersionId !== null ? { lockedFromVersionId } : {}),
+    ...(lockedAt !== undefined ? { lockedAt } : {}),
+    createdAt: workflowNumber(row.created_at) ?? 0,
+    updatedAt: workflowNumber(row.updated_at) ?? 0
+  };
+}
+
+function workflowNodeFromRow(row: Record<string, unknown>): AgentWorkflowNode {
+  const agentBindingId = stringOrNull(row.agent_binding_id);
+  const roleLabel = stringOrNull(row.role_label);
+  const width = workflowNumber(row.width);
+  const height = workflowNumber(row.height);
+  return {
+    id: String(row.id),
+    workflowVersionId: String(row.workflow_version_id),
+    nodeId: String(row.node_id),
+    kind: row.kind === "note" ? "note" : "agent_context",
+    displayName: String(row.display_name),
+    ...(agentBindingId !== null ? { agentBindingId } : {}),
+    ...(roleLabel !== null ? { roleLabel } : {}),
+    prompt: String(row.prompt ?? ""),
+    position: { x: workflowNumber(row.position_x) ?? 0, y: workflowNumber(row.position_y) ?? 0 },
+    ...(width !== undefined && height !== undefined ? { size: { width, height } } : {}),
+    enabled: row.enabled !== 0,
+    locked: row.locked === 1 || row.locked === true,
+    config: workflowRecord(parseJsonField(row.config_json, {})),
+    createdAt: workflowNumber(row.created_at) ?? 0,
+    updatedAt: workflowNumber(row.updated_at) ?? 0
+  };
+}
+
+function workflowEdgeFromRow(row: Record<string, unknown>): AgentWorkflowEdge {
+  const label = stringOrNull(row.label);
+  return {
+    id: String(row.id),
+    workflowVersionId: String(row.workflow_version_id),
+    edgeId: String(row.edge_id),
+    sourceNodeId: String(row.source_node_id),
+    targetNodeId: String(row.target_node_id),
+    ...(label !== null ? { label } : {}),
+    enabled: row.enabled !== 0,
+    config: workflowRecord(parseJsonField(row.config_json, {})),
+    createdAt: workflowNumber(row.created_at) ?? 0,
+    updatedAt: workflowNumber(row.updated_at) ?? 0
+  };
+}
+
+function workflowRunFromRow(row: Record<string, unknown>): AgentWorkflowRun {
+  const roomId = stringOrNull(row.room_id);
+  const seedContext = stringOrNull(row.seed_context);
+  const startedBy = stringOrNull(row.started_by);
+  const startedAt = workflowNumber(row.started_at);
+  const endedAt = workflowNumber(row.ended_at);
+  const failureReason = stringOrNull(row.failure_reason);
+  const statusInput = String(row.status);
+  const status = statusInput === "queued" || statusInput === "completed" || statusInput === "failed" || statusInput === "cancelled" ? statusInput : "running";
+  return {
+    id: String(row.id),
+    workflowId: String(row.workflow_id),
+    workflowVersionId: String(row.workflow_version_id),
+    workspaceId: String(row.workspace_id),
+    ...(roomId !== null ? { roomId } : {}),
+    status,
+    ...(seedContext !== null ? { seedContext } : {}),
+    ...(startedBy !== null ? { startedBy } : {}),
+    ...(startedAt !== undefined ? { startedAt } : {}),
+    ...(endedAt !== undefined ? { endedAt } : {}),
+    ...(failureReason !== null ? { failureReason } : {}),
+    createdAt: workflowNumber(row.created_at) ?? 0,
+    updatedAt: workflowNumber(row.updated_at) ?? 0
+  };
+}
+
+function workflowNodeRunFromRow(row: Record<string, unknown>): AgentWorkflowNodeRun {
+  const agentRunId = stringOrNull(row.agent_run_id);
+  const agentBindingId = stringOrNull(row.agent_binding_id);
+  const outputContext = workflowRecordOrUndefined(parseJsonField(row.output_context_json, undefined));
+  const error = stringOrNull(row.error);
+  const queuedAt = workflowNumber(row.queued_at);
+  const startedAt = workflowNumber(row.started_at);
+  const completedAt = workflowNumber(row.completed_at);
+  const statusInput = String(row.status);
+  const status = statusInput === "waiting" || statusInput === "running" || statusInput === "completed" || statusInput === "failed" || statusInput === "skipped" || statusInput === "cancelled" ? statusInput : "queued";
+  return {
+    id: String(row.id),
+    workflowRunId: String(row.workflow_run_id),
+    workflowNodeId: String(row.workflow_node_id),
+    nodeId: String(row.node_id),
+    ...(agentRunId !== null ? { agentRunId } : {}),
+    ...(agentBindingId !== null ? { agentBindingId } : {}),
+    status,
+    inputContexts: workflowRecordArray(parseJsonField(row.input_context_json, [])),
+    ...(outputContext !== undefined ? { outputContext } : {}),
+    ...(error !== null ? { error } : {}),
+    ...(queuedAt !== undefined ? { queuedAt } : {}),
+    ...(startedAt !== undefined ? { startedAt } : {}),
+    ...(completedAt !== undefined ? { completedAt } : {}),
+    createdAt: workflowNumber(row.created_at) ?? 0,
+    updatedAt: workflowNumber(row.updated_at) ?? 0
+  };
+}
+
+function workflowEdgeDeliveryFromRow(row: Record<string, unknown>): AgentWorkflowEdgeDelivery {
+  const sourceNodeRunId = stringOrNull(row.source_node_run_id);
+  const targetNodeRunId = stringOrNull(row.target_node_run_id);
+  const mailboxMessageId = stringOrNull(row.mailbox_message_id);
+  const idempotencyKey = stringOrNull(row.idempotency_key);
+  const error = stringOrNull(row.error);
+  const deliveredAt = workflowNumber(row.delivered_at);
+  const statusInput = String(row.status);
+  const status = statusInput === "mailbox_created" || statusInput === "delivered" || statusInput === "failed" || statusInput === "skipped" || statusInput === "cancelled" ? statusInput : "queued";
+  return {
+    id: String(row.id),
+    workflowRunId: String(row.workflow_run_id),
+    workflowEdgeId: String(row.workflow_edge_id),
+    edgeId: String(row.edge_id),
+    sourceNodeId: String(row.source_node_id),
+    targetNodeId: String(row.target_node_id),
+    ...(sourceNodeRunId !== null ? { sourceNodeRunId } : {}),
+    ...(targetNodeRunId !== null ? { targetNodeRunId } : {}),
+    ...(mailboxMessageId !== null ? { mailboxMessageId } : {}),
+    status,
+    context: workflowRecord(parseJsonField(row.context_json, {})),
+    ...(idempotencyKey !== null ? { idempotencyKey } : {}),
+    attemptCount: workflowNumber(row.attempt_count) ?? 0,
+    ...(error !== null ? { error } : {}),
+    createdAt: workflowNumber(row.created_at) ?? 0,
+    updatedAt: workflowNumber(row.updated_at) ?? 0,
+    ...(deliveredAt !== undefined ? { deliveredAt } : {})
+  };
+}
+
+function validateWorkflowGraph(nodes: readonly AgentWorkflowNode[], edges: readonly AgentWorkflowEdge[]): WorkflowValidationResult {
+  return validateWorkflowDraft(
+    nodes.map((node) => ({
+      nodeId: node.nodeId,
+      kind: node.kind,
+      displayName: node.displayName,
+      agentBindingId: node.agentBindingId ?? null,
+      roleLabel: node.roleLabel ?? null,
+      prompt: node.prompt,
+      position: node.position,
+      size: node.size ?? null,
+      enabled: node.enabled,
+      locked: node.locked,
+      config: node.config
+    })),
+    edges.map((edge) => ({
+      edgeId: edge.edgeId,
+      sourceNodeId: edge.sourceNodeId,
+      targetNodeId: edge.targetNodeId,
+      label: edge.label ?? null,
+      enabled: edge.enabled,
+      config: edge.config
+    }))
+  );
+}
+
+function validateWorkflowDraft(nodes: readonly WorkflowNodeDraftInput[], edges: readonly WorkflowEdgeDraftInput[]): WorkflowValidationResult {
+  const issues: WorkflowValidationIssue[] = [];
+  const upstreamByNodeId: Record<string, string[]> = {};
+  const downstreamByNodeId: Record<string, string[]> = {};
+  const nodesById = new Map(nodes.map((node) => [node.nodeId, node]));
+  const executableNodeIds = new Set(nodes.filter((node) => node.enabled && node.kind === "agent_context").map((node) => node.nodeId));
+  for (const node of nodes) {
+    upstreamByNodeId[node.nodeId] = [];
+    downstreamByNodeId[node.nodeId] = [];
+    if (node.kind !== "agent_context" && node.kind !== "note") {
+      issues.push({ code: "unsupported_node_kind", message: "The MVP supports agent context and note nodes only.", nodeId: node.nodeId, severity: "error" });
+    }
+  }
+
+  const edgeIds = new Set<string>();
+  const edgePairs = new Set<string>();
+  for (const edge of edges) {
+    if (edgeIds.has(edge.edgeId)) issues.push({ code: "duplicate_edge_id", message: "Each workflow edge needs a unique id.", edgeId: edge.edgeId, severity: "error" });
+    edgeIds.add(edge.edgeId);
+    const pair = `${edge.sourceNodeId}\u0000${edge.targetNodeId}`;
+    if (edgePairs.has(pair)) issues.push({ code: "duplicate_edge", message: "Duplicate edges between the same nodes are not supported.", edgeId: edge.edgeId, severity: "error" });
+    edgePairs.add(pair);
+    const source = nodesById.get(edge.sourceNodeId);
+    const target = nodesById.get(edge.targetNodeId);
+    if (source === undefined || target === undefined) {
+      issues.push({ code: "invalid_edge_endpoint", message: "This edge points to a node that no longer exists.", edgeId: edge.edgeId, severity: "error" });
+      continue;
+    }
+    if (!edge.enabled || !source.enabled || !target.enabled) continue;
+    if (source.kind !== "agent_context" || target.kind !== "agent_context") {
+      issues.push({ code: "note_edge_unsupported", message: "Note nodes are saved on the canvas but do not participate in workflow execution.", edgeId: edge.edgeId, severity: "error" });
+      continue;
+    }
+    downstreamByNodeId[source.nodeId] = [...(downstreamByNodeId[source.nodeId] ?? []), target.nodeId];
+    upstreamByNodeId[target.nodeId] = [...(upstreamByNodeId[target.nodeId] ?? []), source.nodeId];
+  }
+
+  if (executableNodeIds.size === 0) {
+    issues.push({ code: "no_start_node", message: "Add at least one enabled agent context node before running this workflow.", severity: "error" });
+  } else {
+    const startNodes = [...executableNodeIds].filter((nodeId) => (upstreamByNodeId[nodeId] ?? []).length === 0);
+    if (startNodes.length === 0) issues.push({ code: "no_start_node", message: "The executable graph needs at least one start node with no upstream edge.", severity: "error" });
+  }
+
+  for (const nodeId of detectWorkflowCycles(executableNodeIds, downstreamByNodeId)) {
+    issues.push({ code: "cycle_detected", message: "Cycles are not supported in context-passing workflows.", nodeId, severity: "error" });
+  }
+
+  return {
+    runnable: !issues.some((issue) => issue.severity === "error"),
+    issues,
+    upstreamByNodeId,
+    downstreamByNodeId
+  };
+}
+
+function detectWorkflowCycles(nodeIds: ReadonlySet<string>, downstreamByNodeId: Readonly<Record<string, readonly string[]>>): string[] {
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const cycleNodes = new Set<string>();
+  const visit = (nodeId: string): void => {
+    if (visiting.has(nodeId)) {
+      cycleNodes.add(nodeId);
+      return;
+    }
+    if (visited.has(nodeId)) return;
+    visiting.add(nodeId);
+    for (const childId of downstreamByNodeId[nodeId] ?? []) {
+      if (nodeIds.has(childId)) visit(childId);
+    }
+    visiting.delete(nodeId);
+    visited.add(nodeId);
+  };
+  for (const nodeId of nodeIds) visit(nodeId);
+  return [...cycleNodes].sort();
+}
+
+function workflowIssuesFromUnknown(value: unknown): WorkflowValidationIssue[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(workflowIsRecord).map((item) => ({
+    code: inputString(item["code"]) ?? "workflow_issue",
+    message: inputString(item["message"]) ?? "Workflow validation issue",
+    ...(inputString(item["nodeId"]) !== undefined ? { nodeId: inputString(item["nodeId"]) as string } : {}),
+    ...(inputString(item["edgeId"]) !== undefined ? { edgeId: inputString(item["edgeId"]) as string } : {}),
+    severity: item["severity"] === "warning" ? "warning" : "error"
+  }));
+}
+
+function inputString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function workflowNumber(value: unknown): number | undefined {
+  if (value === null || value === undefined) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function workflowRecordArray(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value.filter(workflowIsRecord) : [];
+}
+
+function workflowRecord(value: unknown): Record<string, unknown> {
+  return workflowIsRecord(value) ? value : {};
+}
+
+function workflowRecordOrUndefined(value: unknown): Record<string, unknown> | undefined {
+  return workflowIsRecord(value) ? value : undefined;
+}
+
+function workflowIsRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function statusForError(code: string): number { return code === "rate_limited" ? 429 : code === "conflict" ? 409 : code === "not_found" ? 404 : code === "permission_denied" ? 403 : 400; }
@@ -3650,12 +5092,13 @@ function sse(ctx: RouteContext, url: URL, scopes: readonly string[]): void {
 function visible(event: EventEnvelope, view: ReplayView, roomId?: string, runId?: string): boolean {
   if (roomId && event.roomId !== roomId) return false;
   if (runId && event.runId !== runId) return false;
-  if (view === "main") return event.visibility === "main" || event.visibility === "both";
+  if (view === "main" || view === "mobile") return event.visibility === "main" || event.visibility === "both";
   if (view === "detail") return event.visibility === "detail" || event.visibility === "both";
   return event.type === "adapter.raw.stdout" || event.type === "adapter.raw.stderr";
 }
 
-function viewParam(value: string | null): ReplayView { return value === "main" || value === "raw" ? value : "detail"; }
+function viewParam(value: string | null): ReplayView { return value === "main" || value === "raw" || value === "mobile" ? value : "detail"; }
+function mobileViewParam(value: string | null): ReplayView { return value === "main" || value === "detail" || value === "raw" ? value : "mobile"; }
 function numberQuery(url: URL, key: string): number | undefined { const value = url.searchParams.get(key); if (value === null) return undefined; const parsed = Number(value); return Number.isFinite(parsed) ? parsed : undefined; }
 function isLoopbackHost(host: string): boolean { return host === "127.0.0.1" || host === "::1" || host === "localhost"; }
 function authenticate(ctx: RouteContext, url: URL) {
@@ -3970,8 +5413,11 @@ function resolveWebAssetsRoot(explicitRoot?: string): string | undefined {
 const WEB_API_PREFIXES = [
   "/auth",
   "/workspaces",
+  "/workflows",
   "/attachments",
   "/event",
+  "/sync",
+  "/mobile",
   "/rooms",
   "/roles",
   "/runtimes",

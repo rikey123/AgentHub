@@ -203,13 +203,17 @@ function mergeConfig(...parts: readonly PartialAgentHubConfig[]): AgentHubConfig
 }
 
 function validateRemoteConfig(config: AgentHubConfig): void {
-  if (config.server.bind !== "0.0.0.0") return;
+  if (isLoopbackHost(config.server.bind)) return;
   if (config.auth.token === undefined || config.auth.token.length === 0) {
-    throw new Error('Refusing to bind 0.0.0.0 without auth.token. Set [auth] token = "..." or use bind = "127.0.0.1".');
+    throw new Error(`Refusing to bind ${config.server.bind} without auth.token. Set [auth] token = "..." or use bind = "127.0.0.1".`);
   }
   if (config.server.remote.enabled !== true) {
-    throw new Error("Refusing to bind 0.0.0.0 without [server.remote] enabled = true. Set enabled = true to allow remote access.");
+    throw new Error(`Refusing to bind ${config.server.bind} without [server.remote] enabled = true. Set enabled = true to allow remote access.`);
   }
+}
+
+function isLoopbackHost(host: string): boolean {
+  return host === "127.0.0.1" || host === "::1" || host === "localhost";
 }
 
 function adapterConfig(value: TomlObject): Record<string, { readonly binary?: string }> {

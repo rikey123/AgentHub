@@ -53,6 +53,7 @@ export type DiscardWorktreeCommand = Command & {
 
 export type WakeAgentCommand = Command & {
   readonly type: "WakeAgent";
+  readonly runId?: string;
   readonly roomId: string;
   readonly agentId: string;
   readonly workspaceId: string;
@@ -127,7 +128,9 @@ function handleWakeAgent(
         return { appendedToRunId: existing.id };
       }
 
-      const runId = randomUUID();
+      const runId = command.runId ?? randomUUID();
+      const existingRunId = options.database.sqlite.prepare("SELECT id FROM runs WHERE id = ?").get(runId) as { readonly id: string } | undefined;
+      if (existingRunId !== undefined) return { rejected: "wake_rejected_duplicate_run" };
       const claimedIds = options.mailbox.claimUnread(options.database.sqlite, {
         roomId: command.roomId,
         toAgentId: command.agentId,

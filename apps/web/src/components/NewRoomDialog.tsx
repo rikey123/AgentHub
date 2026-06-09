@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
+  Avatar,
   Button,
   Checkbox,
   Chip,
@@ -16,6 +17,7 @@ import {
 import { useRoomCreationOptions, type AgentBindingSummary } from "../hooks/useRoomCreationOptions.ts";
 import type { AgentContactViewModel } from "../types.ts";
 import { normalizeAgentContacts } from "./rail/RailViews.tsx";
+import { initials } from "../lib/format.ts";
 import { roleDisplayText } from "../lib/roles.ts";
 import { skillDisplayDescription, skillDisplayName, skillOriginColor, skillOriginLabel } from "../lib/skills.ts";
 
@@ -413,68 +415,102 @@ export function ContactFirstPicker({
   selectedIds,
   loading,
   error,
-  onToggle
+  onToggle,
+  onSelectionChange
 }: {
   readonly contacts: readonly AgentContactViewModel[];
   readonly selectedIds: ReadonlySet<string>;
   readonly loading: boolean;
   readonly error?: string | undefined;
   readonly onToggle: (agentBindingId: string) => void;
+  readonly onSelectionChange?: ((agentBindingIds: Set<string>) => void) | undefined;
 }) {
   const sorted = [...contacts].sort((a, b) => contactStatusRank(a.status) - contactStatusRank(b.status) || a.displayName.localeCompare(b.displayName));
+  const handleSelectionChange = (keys: unknown) => {
+    if (keys === "all") return;
+    const next = new Set(Array.from(keys as Iterable<unknown>, String));
+    if (onSelectionChange) {
+      onSelectionChange(next);
+      return;
+    }
+    const added = Array.from(next).find((id) => !selectedIds.has(id));
+    const removed = Array.from(selectedIds).find((id) => !next.has(id));
+    const changed = added ?? removed;
+    if (changed) onToggle(changed);
+  };
   return (
-    <section className="rounded-2xl border border-border bg-overlay p-4 shadow-sm">
+    <section className="ah-new-room-panel ah-new-room-contacts">
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
-          <h3 className="text-sm font-semibold">Contacts</h3>
-          <p className="text-xs text-muted">Pick one or more agent contacts first, then adjust mode or advanced configuration.</p>
+          <h3 className="text-sm font-semibold">联系人</h3>
+          <p className="text-xs text-muted">选择要加入 Room 的 agent 联系人。</p>
         </div>
         <Chip size="sm" variant="soft" color={selectedIds.size > 0 ? "accent" : "default"}>
-          {selectedIds.size} selected
+          已选择 {selectedIds.size} 个
         </Chip>
       </div>
       {error ? <p className="mb-2 text-xs text-danger">{error}</p> : null}
-      {loading ? <p className="mb-2 text-xs text-muted">Loading contacts...</p> : null}
+      {loading ? <p className="mb-2 text-xs text-muted">正在加载联系人...</p> : null}
       {sorted.length === 0 && !loading ? (
         <div className="rounded-xl border border-dashed border-border bg-surface p-3 text-sm text-muted">
-          No contacts are available yet. Use Advanced Configuration below to create a room from roles and runtimes.
+          暂无可用联系人。可在右侧高级配置中使用角色和 Runtime 创建 Room。
         </div>
       ) : (
-        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+        <ListBox
+          aria-label="联系人"
+          selectionMode="multiple"
+          selectedKeys={selectedIds}
+          className="ah-contact-list"
+          onSelectionChange={handleSelectionChange}
+          {...(onSelectionChange ? {} : { onAction: (key: unknown) => onToggle(String(key)) })}
+        >
           {sorted.map((contact) => {
             const selected = selectedIds.has(contact.agentBindingId);
+            const subtitle = [
+              contact.roleName ?? contact.roleId,
+              contact.runtimeName ?? contact.runtimeKind,
+              contact.modelName
+            ].filter(Boolean).join(" / ");
             return (
-              <button
+              <ListBox.Item
                 key={contact.agentBindingId}
-                type="button"
-                className={[
-                  "min-w-0 rounded-2xl border bg-surface p-3 text-left transition-colors",
-                  selected ? "border-accent bg-accent-soft" : "border-border hover:bg-surface-secondary"
-                ].join(" ")}
-                aria-pressed={selected}
-                onClick={() => onToggle(contact.agentBindingId)}
+                id={contact.agentBindingId}
+                textValue={contact.displayName}
+                className="ah-contact-list-item"
               >
-                <span className="flex min-w-0 items-start justify-between gap-3">
-                  <span className="min-w-0">
-                    <span className="block truncate text-sm font-semibold">{contact.displayName}</span>
-                    <span className="mt-1 block truncate text-xs text-muted">{contact.roleId} / {contact.runtimeKind}</span>
+                <Avatar className="ah-contact-avatar" size="sm">
+                  {contact.avatarUrl ? <Avatar.Image alt={contact.displayName} src={contact.avatarUrl} /> : null}
+                  <Avatar.Fallback>{initials(contact.displayName)}</Avatar.Fallback>
+                </Avatar>
+                <span className="min-w-0 flex-1">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="min-w-0 flex-1 truncate text-sm font-semibold">{contact.displayName}</span>
+                    <span className={`ah-contact-presence is-${contact.status}`} aria-hidden="true" />
                   </span>
-                  <span className="flex shrink-0 flex-col items-end gap-1">
-                    <Chip size="sm" variant="soft" color={contactStatusColor(contact.status)}>{contact.status}</Chip>
-                    {selected ? <Chip size="sm" variant="soft" color="accent">selected</Chip> : null}
+                  <span className="mt-0.5 block truncate text-xs text-muted">{subtitle}</span>
+                  {contact.capabilities.length > 0 ? (
+                    <span className="mt-1.5 flex min-w-0 gap-1.5 overflow-hidden">
+                      {contact.capabilities.slice(0, 3).map((capability) => (
+                        <Chip key={capability} size="sm" variant="soft" color="default">{capability}</Chip>
+                      ))}
+                      {contact.capabilities.length > 3 ? (
+                        <span className="text-xs text-muted">+{contact.capabilities.length - 3}</span>
+                      ) : null}
+                    </span>
+                  ) : null}
+                </span>
+                <span className="flex shrink-0 items-center gap-2">
+                  <Chip size="sm" variant="soft" color={contactStatusColor(contact.status)}>
+                    {contactStatusLabel(contact.status)}
+                  </Chip>
+                  <span className={selected ? "ah-contact-check is-selected" : "ah-contact-check"}>
+                    {selected ? "✓" : ""}
                   </span>
                 </span>
-                {contact.capabilities.length > 0 ? (
-                  <span className="mt-3 flex flex-wrap gap-1.5">
-                    {contact.capabilities.slice(0, 4).map((capability) => (
-                      <Chip key={capability} size="sm" variant="soft" color="default">{capability}</Chip>
-                    ))}
-                  </span>
-                ) : null}
-              </button>
+              </ListBox.Item>
             );
           })}
-        </div>
+        </ListBox>
       )}
     </section>
   );
@@ -484,6 +520,12 @@ function contactStatusColor(status: AgentContactViewModel["status"]): "success" 
   if (status === "available") return "success";
   if (status === "busy") return "warning";
   return "default";
+}
+
+function contactStatusLabel(status: AgentContactViewModel["status"]): string {
+  if (status === "available") return "在线";
+  if (status === "busy") return "忙碌";
+  return "离线";
 }
 
 function contactStatusRank(status: AgentContactViewModel["status"]): number {
@@ -527,7 +569,7 @@ export function RoleBindingRow({
           {runtime ? <Chip size="sm" variant="soft" color={runtime.kind === "native" ? "success" : "default"}>{runtime.kind}</Chip> : null}
         </div>
       ) : null}
-      <div className="grid gap-3 lg:grid-cols-[minmax(180px,1fr)_minmax(190px,1fr)_minmax(190px,1fr)_minmax(170px,0.8fr)_auto]">
+      <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))]">
         <RoleSelect
           label="角色"
           value={roleId}
@@ -928,6 +970,11 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
     });
   };
 
+  const setContactSelection = (agentBindingIds: Set<string>) => {
+    setSelectedContactIds(agentBindingIds);
+    setMode(defaultRoomModeForSelectedContacts(agentBindingIds.size, mode));
+  };
+
   const updateContactParticipant = (agentBindingId: string, patch: Partial<V1ParticipantDraft>) => {
     setContactParticipantDrafts((current) => {
       const contact = contacts.find((candidate) => candidate.agentBindingId === agentBindingId);
@@ -1132,250 +1179,268 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
           <Modal.Body className="min-h-0 flex-1 gap-0 overflow-hidden p-0">
             <ScrollShadow className="h-full min-h-0 overflow-auto pb-8" orientation="vertical">
               <div className="grid gap-4 p-5 pb-8">
-                <ContactFirstPicker
-                  contacts={contacts}
-                  selectedIds={selectedContactIds}
-                  loading={contactsLoading}
-                  error={contactsError}
-                  onToggle={toggleContact}
-                />
+                <section className="ah-new-room-panel ah-new-room-top">
+                  <TextField value={title} onChange={setTitle}>
+                    <Label className="text-sm font-semibold">标题</Label>
+                    <Input placeholder="例如：重构认证流程" />
+                  </TextField>
 
-                <section className="rounded-2xl border border-border bg-overlay p-4 shadow-sm">
-                  <div className="grid gap-4">
-                    <TextField value={title} onChange={setTitle}>
-                      <Label className="text-sm font-semibold">标题</Label>
-                      <Input placeholder="例如：重构认证流程" />
-                    </TextField>
-
-                    <div className="grid gap-2">
+                  <div className="grid gap-2">
+                    <div className="flex items-center justify-between gap-3">
                       <h3 className="text-sm font-semibold">模式</h3>
-                      <RadioGroup
-                        className="gap-0"
-                        value={mode}
-                        onChange={(v: unknown) => setMode(v as RoomMode)}
-                        aria-label="Room 模式"
-                      >
-                        <div className="-mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-                          {ROOM_MODE_OPTIONS.map((option) => (
-                            <RoomModeOption
-                              key={option.value}
-                              value={option.value}
-                              title={option.title}
-                              description={option.description}
-                            />
-                          ))}
-                        </div>
-                      </RadioGroup>
+                      <Chip size="sm" variant="soft" color={selectedContacts.length > 0 ? "accent" : "default"}>
+                        {selectedContacts.length > 0 ? `已选择 ${selectedContacts.length} 个联系人` : "未选择联系人"}
+                      </Chip>
                     </div>
+                    <RadioGroup
+                      className="gap-0"
+                      value={mode}
+                      onChange={(v: unknown) => setMode(v as RoomMode)}
+                      aria-label="Room 模式"
+                    >
+                      <div className="ah-room-mode-grid">
+                        {ROOM_MODE_OPTIONS.map((option) => (
+                          <RoomModeOption
+                            key={option.value}
+                            value={option.value}
+                            title={option.title}
+                            description={option.description}
+                          />
+                        ))}
+                      </div>
+                    </RadioGroup>
                   </div>
                 </section>
 
-                {selectedContacts.length > 0 ? (
-                  <section className="rounded-2xl border border-border bg-overlay p-4 shadow-sm">
-                    <div className="mb-3 flex items-start justify-between gap-3">
-                      <div>
-                        <h3 className="text-sm font-semibold">联系人高级配置</h3>
-                        <p className="text-xs text-muted">
-                          可逐个覆盖 role/runtime/model/presence，并为特定联系人追加 skills。
-                        </p>
-                      </div>
-                      <Chip size="sm" variant="soft" color={selectedLeader ? "accent" : "default"}>
-                        {selectedLeader ? roleDisplayText(selectedLeader).title : "未选择主角色"}
-                      </Chip>
-                    </div>
+                <div className="ah-new-room-layout">
+                  <ContactFirstPicker
+                    contacts={contacts}
+                    selectedIds={selectedContactIds}
+                    loading={contactsLoading}
+                    error={contactsError}
+                    onToggle={toggleContact}
+                    onSelectionChange={setContactSelection}
+                  />
 
-                    {optionsError ? <p className="mb-2 text-xs text-danger">{optionsError}</p> : null}
-                    {optionsLoading ? <p className="mb-2 text-xs text-muted">正在加载角色、Runtime 和模型...</p> : null}
-
-                    <div className="grid gap-3">
-                      {selectedContacts.map((contact, index) => {
-                        const draft = selectedContactDrafts[index] ?? newContactParticipantDraft(contact, runtimes, modelConfigs);
-                        return (
-                          <div key={contact.agentBindingId} className="grid gap-3 rounded-xl border border-border bg-surface p-3">
-                            <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
-                              <div className="min-w-0">
-                                <h4 className="truncate text-sm font-semibold">{contact.displayName}</h4>
-                                <p className="truncate text-xs text-muted">{contact.agentBindingId}</p>
-                              </div>
-                              <div className="flex flex-wrap justify-end gap-1.5">
-                                <Chip size="sm" variant="soft" color={index === 0 ? "accent" : "default"}>{index === 0 ? "primary" : "teammate"}</Chip>
-                                <Chip size="sm" variant="soft" color={contactStatusColor(contact.status)}>{contact.status}</Chip>
-                              </div>
-                            </div>
-
-                            <RoleBindingRow
-                              roleId={draft.roleId}
-                              runtimeId={draft.runtimeId}
-                              modelConfigId={draft.modelConfigId}
-                              presence={draft.defaultPresence}
-                              roles={roles}
-                              runtimes={runtimes}
-                              modelConfigs={modelConfigs}
-                              onChange={(patch) => updateContactParticipant(contact.agentBindingId, patch)}
-                              testIdPrefix={`new-room-contact-${index}`}
-                            />
-
-                            <div className="grid gap-2">
-                              <div className="flex items-center justify-between gap-3">
-                                <h5 className="text-xs font-semibold uppercase text-muted">Contact skills</h5>
-                                <Chip size="sm" variant="soft" color={draft.skillIds.length > 0 ? "accent" : "default"}>
-                                  {draft.skillIds.length} selected
-                                </Chip>
-                              </div>
-                              {skills.length === 0 && !skillsLoading ? (
-                                <div className="rounded-xl border border-dashed border-border bg-overlay p-3 text-sm text-muted">
-                                  未找到可追加到此联系人的 skills。
-                                </div>
-                              ) : (
-                                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                                  {skills.map((skill) => {
-                                    const selected = draft.skillIds.includes(skill.id);
-                                    return (
-                                      <Checkbox
-                                        key={skill.id}
-                                        isSelected={selected}
-                                        onChange={(selected) => setContactSkillSelected(contact.agentBindingId, skill.id, selected)}
-                                        className={[
-                                          "rounded-2xl border bg-overlay px-3 py-2 transition-colors",
-                                          selected ? "border-accent bg-accent-soft" : "border-border hover:bg-surface-secondary"
-                                        ].join(" ")}
-                                      >
-                                        <span className="block truncate text-sm font-medium">{skill.name}</span>
-                                      </Checkbox>
-                                    );
-                                  })}
-                                </div>
-                              )}
-                            </div>
+                  <div className="grid min-h-0 gap-4 content-start">
+                    {selectedContacts.length > 0 ? (
+                      <section className="ah-new-room-panel">
+                        <div className="mb-3 flex items-start justify-between gap-3">
+                          <div>
+                            <h3 className="text-sm font-semibold">高级配置</h3>
+                            <p className="text-xs text-muted">
+                              覆盖联系人 role/runtime/model/presence，并为特定联系人追加技能。
+                            </p>
                           </div>
-                        );
-                      })}
-                    </div>
-                  </section>
-                ) : (
-                  <section className="rounded-2xl border border-border bg-overlay p-4 shadow-sm">
-                    <div className="mb-3 flex items-start justify-between gap-3">
-                      <div>
-                        <h3 className="text-sm font-semibold">{teamMode ? "角色团队" : "主角色"}</h3>
-                        <p className="text-xs text-muted">
-                          {teamMode
-                            ? "为 leader 绑定角色、Runtime 和模型，并按需添加队友。"
-                            : "为此 Room 的主 agent 选择角色、Runtime 和模型。"}
-                        </p>
-                      </div>
-                      <Chip size="sm" variant="soft" color={selectedLeader ? "accent" : "default"}>
-                        {selectedLeader ? roleDisplayText(selectedLeader).title : "未选择主角色"}
-                      </Chip>
-                    </div>
+                          <Chip size="sm" variant="soft" color={selectedLeader ? "accent" : "default"}>
+                            {selectedLeader ? roleDisplayText(selectedLeader).title : "未选择主角色"}
+                          </Chip>
+                        </div>
 
-                    {optionsError ? <p className="mb-2 text-xs text-danger">{optionsError}</p> : null}
-                    {optionsLoading ? <p className="mb-2 text-xs text-muted">正在加载角色、Runtime 和模型...</p> : null}
+                        {optionsError ? <p className="mb-2 text-xs text-danger">{optionsError}</p> : null}
+                        {optionsLoading ? <p className="mb-2 text-xs text-muted">正在加载角色、Runtime 和模型...</p> : null}
 
-                    {leaderBinding ? (
-                      <RoleBindingRow
-                        title={teamMode ? "Leader 绑定" : "主绑定"}
-                        roleId={leaderBinding.roleId}
-                        runtimeId={leaderBinding.runtimeId}
-                        modelConfigId={leaderBinding.modelConfigId}
-                        presence={leaderBinding.defaultPresence}
-                        roles={roles}
-                        runtimes={runtimes}
-                        modelConfigs={modelConfigs}
-                        onChange={updateLeaderBinding}
-                        testIdPrefix="new-room-leader"
-                      />
+                        <div className="grid gap-3">
+                          {selectedContacts.map((contact, index) => {
+                            const draft = selectedContactDrafts[index] ?? newContactParticipantDraft(contact, runtimes, modelConfigs);
+                            return (
+                              <div key={contact.agentBindingId} className="grid gap-3 rounded-xl border border-border bg-surface p-3">
+                                <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <h4 className="truncate text-sm font-semibold">{contact.displayName}</h4>
+                                    <p className="truncate text-xs text-muted">{contact.agentBindingId}</p>
+                                  </div>
+                                  <div className="flex flex-wrap justify-end gap-1.5">
+                                    <Chip size="sm" variant="soft" color={index === 0 ? "accent" : "default"}>{index === 0 ? "主 agent" : "协作者"}</Chip>
+                                    <Chip size="sm" variant="soft" color={contactStatusColor(contact.status)}>{contactStatusLabel(contact.status)}</Chip>
+                                  </div>
+                                </div>
+
+                                <RoleBindingRow
+                                  roleId={draft.roleId}
+                                  runtimeId={draft.runtimeId}
+                                  modelConfigId={draft.modelConfigId}
+                                  presence={draft.defaultPresence}
+                                  roles={roles}
+                                  runtimes={runtimes}
+                                  modelConfigs={modelConfigs}
+                                  onChange={(patch) => updateContactParticipant(contact.agentBindingId, patch)}
+                                  testIdPrefix={`new-room-contact-${index}`}
+                                />
+
+                                <div className="grid gap-2">
+                                  <div className="flex items-center justify-between gap-3">
+                                    <h5 className="text-xs font-semibold uppercase text-muted">联系人技能</h5>
+                                    <Chip size="sm" variant="soft" color={draft.skillIds.length > 0 ? "accent" : "default"}>
+                                      已选择 {draft.skillIds.length} 个
+                                    </Chip>
+                                  </div>
+                                  {skills.length === 0 && !skillsLoading ? (
+                                    <div className="rounded-xl border border-dashed border-border bg-overlay p-3 text-sm text-muted">
+                                      未找到可追加到此联系人的技能。
+                                    </div>
+                                  ) : (
+                                    <div className="grid gap-2 sm:grid-cols-2">
+                                      {skills.map((skill) => {
+                                        const selected = draft.skillIds.includes(skill.id);
+                                        return (
+                                          <Checkbox
+                                            key={skill.id}
+                                            isSelected={selected}
+                                            onChange={(selected) => setContactSkillSelected(contact.agentBindingId, skill.id, selected)}
+                                            className={[
+                                              "rounded-xl border bg-overlay px-3 py-2 transition-colors",
+                                              selected ? "border-accent bg-accent-soft" : "border-border hover:bg-surface-secondary"
+                                            ].join(" ")}
+                                          >
+                                            <Checkbox.Control>
+                                              <Checkbox.Indicator />
+                                            </Checkbox.Control>
+                                            <Checkbox.Content>
+                                              <Label className="block truncate text-sm font-medium">{skill.name}</Label>
+                                            </Checkbox.Content>
+                                          </Checkbox>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </section>
                     ) : (
-                      <div className="rounded-xl border border-dashed border-border bg-surface p-3 text-sm text-muted">
-                        正在加载 role 绑定选项...
-                      </div>
+                      <section className="ah-new-room-panel">
+                        <div className="mb-3 flex items-start justify-between gap-3">
+                          <div>
+                            <h3 className="text-sm font-semibold">高级配置</h3>
+                            <p className="text-xs text-muted">
+                              {teamMode
+                                ? "未选择联系人时，可手动配置 leader、队友、Runtime 和模型。"
+                                : "未选择联系人时，可手动配置主 agent 的角色、Runtime 和模型。"}
+                            </p>
+                          </div>
+                          <Chip size="sm" variant="soft" color={selectedLeader ? "accent" : "default"}>
+                            {selectedLeader ? roleDisplayText(selectedLeader).title : "未选择主角色"}
+                          </Chip>
+                        </div>
+
+                        {optionsError ? <p className="mb-2 text-xs text-danger">{optionsError}</p> : null}
+                        {optionsLoading ? <p className="mb-2 text-xs text-muted">正在加载角色、Runtime 和模型...</p> : null}
+
+                        {leaderBinding ? (
+                          <RoleBindingRow
+                            title={teamMode ? "Leader 绑定" : "主绑定"}
+                            roleId={leaderBinding.roleId}
+                            runtimeId={leaderBinding.runtimeId}
+                            modelConfigId={leaderBinding.modelConfigId}
+                            presence={leaderBinding.defaultPresence}
+                            roles={roles}
+                            runtimes={runtimes}
+                            modelConfigs={modelConfigs}
+                            onChange={updateLeaderBinding}
+                            testIdPrefix="new-room-leader"
+                          />
+                        ) : (
+                          <div className="rounded-xl border border-dashed border-border bg-surface p-3 text-sm text-muted">
+                            正在加载 role 绑定选项...
+                          </div>
+                        )}
+
+                        {mode !== "solo" ? (
+                          <div className="mt-4 grid gap-3">
+                            <div className="flex items-center justify-between gap-3">
+                              <h4 className="text-sm font-semibold">{teamMode ? "队友" : "协作者"}</h4>
+                              <Button size="sm" variant="secondary" onPress={addV1Participant} isDisabled={roles.length === 0 || runtimes.length === 0}>
+                                {teamMode ? "添加队友" : "添加协作者"}
+                              </Button>
+                            </div>
+
+                            {v1Participants.length === 0 ? (
+                              <div className="rounded-xl border border-dashed border-border bg-surface p-3 text-sm text-muted">
+                                {teamMode
+                                  ? "在此添加队友角色。上方的 leader 绑定始终会包含在内。"
+                                  : "在此添加协作者角色。上方的主绑定始终会包含在内。"}
+                              </div>
+                            ) : v1Participants.map((participant, index) => {
+                              return (
+                                <RoleBindingRow
+                                  key={participant.id}
+                                  roleId={participant.roleId}
+                                  runtimeId={participant.runtimeId}
+                                  modelConfigId={participant.modelConfigId}
+                                  presence={participant.defaultPresence}
+                                  roles={roles}
+                                  runtimes={runtimes}
+                                  modelConfigs={modelConfigs}
+                                  onChange={(patch) => updateV1Participant(participant.id, patch)}
+                                  testIdPrefix={`new-room-participant-${index}`}
+                                  action={
+                                    <Button size="sm" variant="tertiary" onPress={() => removeV1Participant(participant.id)} isDisabled={v1Participants.length === 1}>
+                                      移除
+                                    </Button>
+                                  }
+                                />
+                              );
+                            })}
+                          </div>
+                        ) : null}
+                      </section>
                     )}
 
-                    {mode !== "solo" ? (
-                      <div className="mt-4 grid gap-3">
-                        <div className="flex items-center justify-between gap-3">
-                          <h4 className="text-sm font-semibold">{teamMode ? "队友" : "协作者"}</h4>
-                          <Button size="sm" variant="secondary" onPress={addV1Participant} isDisabled={roles.length === 0 || runtimes.length === 0}>
-                            {teamMode ? "添加队友" : "添加协作者"}
-                          </Button>
+                    <section className="ah-new-room-panel">
+                      <div className="mb-3 flex items-start justify-between gap-3">
+                        <div>
+                          <h3 className="text-sm font-semibold">Room 技能</h3>
+                          <p className="text-xs text-muted">选中的 SKILL.md 包会在下一次运行时对该 Room 可用。</p>
                         </div>
-
-                        {v1Participants.length === 0 ? (
-                          <div className="rounded-xl border border-dashed border-border bg-surface p-3 text-sm text-muted">
-                            {teamMode
-                              ? "在此添加队友角色。上方的 leader 绑定始终会包含在内。"
-                              : "在此添加协作者角色。上方的主绑定始终会包含在内。"}
-                          </div>
-                        ) : v1Participants.map((participant, index) => {
-                          return (
-                            <RoleBindingRow
-                              key={participant.id}
-                              roleId={participant.roleId}
-                              runtimeId={participant.runtimeId}
-                              modelConfigId={participant.modelConfigId}
-                              presence={participant.defaultPresence}
-                              roles={roles}
-                              runtimes={runtimes}
-                              modelConfigs={modelConfigs}
-                              onChange={(patch) => updateV1Participant(participant.id, patch)}
-                              testIdPrefix={`new-room-participant-${index}`}
-                              action={
-                                <Button size="sm" variant="tertiary" onPress={() => removeV1Participant(participant.id)} isDisabled={v1Participants.length === 1}>
-                                  移除
-                                </Button>
-                              }
-                            />
-                          );
-                        })}
+                        <Chip size="sm" variant="soft" color={selectedSkillIds.size > 0 ? "accent" : "default"}>
+                          已选择 {selectedSkillIds.size} 个
+                        </Chip>
                       </div>
-                    ) : null}
-                  </section>
-                )}
 
-                <section className="rounded-2xl border border-border bg-overlay p-4 shadow-sm">
-                  <div className="mb-3 flex items-start justify-between gap-3">
-                    <div>
-                      <h3 className="text-sm font-semibold">Skills</h3>
-                      <p className="text-xs text-muted">选中的 SKILL.md 包会在下一次运行时对该 Room 可用。</p>
-                    </div>
-                    <Chip size="sm" variant="soft" color={selectedSkillIds.size > 0 ? "accent" : "default"}>
-                      已选择 {selectedSkillIds.size} 个
-                    </Chip>
+                      {skillsError ? <p className="mb-2 text-xs text-danger">{skillsError}</p> : null}
+                      {skillsLoading ? <p className="mb-2 text-xs text-muted">正在加载技能...</p> : null}
+
+                      {skills.length === 0 && !skillsLoading ? (
+                        <div className="rounded-xl border border-dashed border-border bg-surface p-3 text-sm text-muted">
+                          未找到工作区技能。可在设置中创建或导入技能。
+                        </div>
+                      ) : (
+                        <div className="ah-new-room-skill-grid">
+                          {skills.map((skill) => {
+                            const selected = selectedSkillIds.has(skill.id);
+                            return (
+                              <Checkbox
+                                key={skill.id}
+                                isSelected={selected}
+                                onChange={(selected) => setSkillSelected(skill.id, selected)}
+                                className={[
+                                  "ah-new-room-skill-option rounded-xl border bg-surface px-3 py-2 transition-colors",
+                                  selected ? "border-accent bg-accent-soft" : "border-border hover:bg-surface-secondary"
+                                ].join(" ")}
+                              >
+                                <Checkbox.Control>
+                                  <Checkbox.Indicator />
+                                </Checkbox.Control>
+                                <Checkbox.Content className="min-w-0 flex-1">
+                                  <span className="flex min-w-0 max-w-full items-center gap-2 text-sm">
+                                    <span className="min-w-0 flex-1 overflow-hidden">
+                                      <span className="block truncate font-medium">{skillDisplayName(skill)}</span>
+                                      <span className="block truncate text-xs text-muted">{skillDisplayDescription(skill) || "无描述"}</span>
+                                    </span>
+                                    <Chip className="shrink-0" size="sm" variant="soft" color={skillOriginColor(skill.origin)}>{skillOriginLabel(skill.origin)}</Chip>
+                                  </span>
+                                </Checkbox.Content>
+                              </Checkbox>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </section>
                   </div>
-
-                  {skillsError ? <p className="mb-2 text-xs text-danger">{skillsError}</p> : null}
-                  {skillsLoading ? <p className="mb-2 text-xs text-muted">正在加载 skills...</p> : null}
-
-                  {skills.length === 0 && !skillsLoading ? (
-                    <div className="rounded-xl border border-dashed border-border bg-surface p-3 text-sm text-muted">
-                      未找到工作区 skills。可在设置中创建或导入 skills。
-                    </div>
-                  ) : (
-                    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                      {skills.map((skill) => {
-                        const selected = selectedSkillIds.has(skill.id);
-                        return (
-                          <Checkbox
-                            key={skill.id}
-                            isSelected={selected}
-                            onChange={(selected) => setSkillSelected(skill.id, selected)}
-                            className={[
-                              "rounded-2xl border bg-surface px-3 py-2 transition-colors",
-                              selected ? "border-accent bg-accent-soft" : "border-border hover:bg-surface-secondary"
-                            ].join(" ")}
-                          >
-                            <span className="flex min-w-0 items-center gap-2 text-sm">
-                              <span className="min-w-0 flex-1">
-                                <span className="block truncate font-medium">{skillDisplayName(skill)}</span>
-                                <span className="block truncate text-xs text-muted">{skillDisplayDescription(skill) || "无描述"}</span>
-                              </span>
-                              <Chip size="sm" variant="soft" color={skillOriginColor(skill.origin)}>{skillOriginLabel(skill.origin)}</Chip>
-                            </span>
-                          </Checkbox>
-                        );
-                      })}
-                    </div>
-                  )}
-                </section>
+                </div>
 
                 {error ? <p className="text-xs text-danger" role="alert">{error}</p> : null}
               </div>

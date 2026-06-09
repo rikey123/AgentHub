@@ -98,8 +98,8 @@ export function ArtifactPreviewModal(props: ArtifactPreviewModalProps) {
   return (
     <Modal.Backdrop isOpen={props.isOpen} onOpenChange={props.onOpenChange}>
       <Modal.Container size="cover" className="items-center justify-center p-3">
-        <Modal.Dialog aria-label="Artifact Studio" className="flex h-[min(92vh,920px)] w-[min(96vw,1180px)] max-w-[1180px] overflow-hidden p-0">
-          <Modal.CloseTrigger aria-label="Close file preview" />
+        <Modal.Dialog aria-label="产物工作台" className="flex h-[min(92vh,920px)] w-[min(96vw,1180px)] max-w-[1180px] overflow-hidden p-0">
+          <Modal.CloseTrigger aria-label="关闭文件预览" />
           <ArtifactStudioContent {...props} isOpen={props.isOpen} />
         </Modal.Dialog>
       </Modal.Container>
@@ -237,7 +237,7 @@ export function ArtifactStudioContent(props: ArtifactStudioContentProps) {
       <Modal.Header className="border-b border-border px-4 py-3">
         <div className="flex w-full min-w-0 flex-wrap items-start justify-between gap-3 pr-8">
           <div className="min-w-0">
-            <Modal.Heading>Artifact Studio</Modal.Heading>
+            <Modal.Heading>产物工作台</Modal.Heading>
             <p className="mt-1 truncate text-sm font-semibold text-foreground">{props.name}</p>
             <p className="mt-1 text-xs text-muted">
               {labelForKind(kind)}
@@ -247,16 +247,16 @@ export function ArtifactStudioContent(props: ArtifactStudioContentProps) {
             </p>
           </div>
           <div className="flex gap-2">
-            {canToggleSource ? <Button size="sm" variant="secondary" onPress={() => setSourceMode((current) => !current)}>{sourceMode ? "Preview" : "Source"}</Button> : null}
-            {props.downloadUrl ? <a className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-semibold text-foreground hover:bg-surface-secondary" href={props.downloadUrl} target="_blank" rel="noreferrer">Open</a> : null}
-            {props.downloadUrl ? <a className="inline-flex h-8 items-center rounded-md bg-accent px-3 text-xs font-semibold text-accent-foreground hover:opacity-90" href={downloadUrlForRawArtifact(props.downloadUrl)} download={props.name}>Download</a> : null}
+            {canToggleSource ? <Button size="sm" variant="secondary" onPress={() => setSourceMode((current) => !current)}>{sourceMode ? "预览" : "源码"}</Button> : null}
+            {props.downloadUrl ? <a className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-semibold text-foreground hover:bg-surface-secondary" href={props.downloadUrl} target="_blank" rel="noreferrer">打开</a> : null}
+            {props.downloadUrl ? <a className="inline-flex h-8 items-center rounded-md bg-accent px-3 text-xs font-semibold text-accent-foreground hover:opacity-90" href={downloadUrlForRawArtifact(props.downloadUrl)} download={props.name}>下载</a> : null}
           </div>
         </div>
       </Modal.Header>
       <Modal.Body className="min-h-0 overflow-hidden bg-surface-secondary p-0">
         <Tabs selectedKey={activeTab} onSelectionChange={(key) => setSelectedTab(String(key) as ArtifactPreviewTab)} className="flex h-full min-h-0 flex-col">
           <Tabs.ListContainer className="border-b border-border bg-surface px-4">
-            <Tabs.List aria-label="Artifact Studio tabs">
+            <Tabs.List aria-label="产物工作台标签页">
               {tabs.map((tab, index) => (
                 <Tabs.Tab key={tab} id={tab} data-testid={`artifact-studio-tab-${tab}`}>
                   {index > 0 ? <Tabs.Separator /> : null}
@@ -324,7 +324,7 @@ export function ArtifactPreviewError({ message, onRetry }: { readonly message: s
   return (
     <div className="rounded-lg border border-danger/40 bg-danger/10 p-4 text-sm text-danger">
       <p>{message}</p>
-      {onRetry ? <Button size="sm" variant="secondary" className="mt-3" onPress={onRetry}>Retry</Button> : null}
+      {onRetry ? <Button size="sm" variant="secondary" className="mt-3" onPress={onRetry}>重试</Button> : null}
     </div>
   );
 }
@@ -388,8 +388,8 @@ export function ArtifactPreviewContent({ previewKind, content, name, downloadUrl
   }
   return (
     <div className="rounded-lg border border-border bg-surface p-4">
-      <p className="text-sm font-semibold">Preview is not available</p>
-      <p className="mt-1 text-sm text-muted">{name} can still be downloaded or opened externally when a file URL is available.</p>
+      <p className="text-sm font-semibold">暂时无法预览</p>
+      <p className="mt-1 text-sm text-muted">如果文件 URL 可用，仍可下载或在外部打开 {name}。</p>
     </div>
   );
 }
@@ -411,7 +411,7 @@ export function artifactPreviewTabsFor(input: { readonly type?: string | undefin
 
 function ArtifactStudioPreviewPanel(props: ArtifactStudioContentProps & { readonly previewKind: ArtifactPreviewKind }) {
   if (props.loading) {
-    return <div className="rounded-lg border border-border bg-surface p-4 text-sm text-muted">Loading preview...</div>;
+    return <div className="rounded-lg border border-border bg-surface p-4 text-sm text-muted">正在加载预览...</div>;
   }
   if (props.error) {
     return <ArtifactPreviewError message={props.error} onRetry={props.onRetry} />;
@@ -419,8 +419,8 @@ function ArtifactStudioPreviewPanel(props: ArtifactStudioContentProps & { readon
   if (props.content !== undefined && props.content.length > previewTextLimit) {
     return (
       <div className="rounded-lg border border-warning/40 bg-warning/10 p-4">
-        <p className="text-sm font-semibold">Preview is too large</p>
-        <p className="mt-1 text-sm text-muted">This artifact is {formatBytes(props.content.length)}. Use Open or Download to inspect the full file.</p>
+        <p className="text-sm font-semibold">预览内容过大</p>
+        <p className="mt-1 text-sm text-muted">此产物大小为 {formatBytes(props.content.length)}。可使用“打开”或“下载”查看完整文件。</p>
       </div>
     );
   }
@@ -470,8 +470,8 @@ function ArtifactStudioEditorPanel(props: {
     <div className="grid gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <p className="text-sm font-semibold">Monaco editor</p>
-          <p className="text-xs text-muted">Language: {language}</p>
+          <p className="text-sm font-semibold">Monaco 编辑器</p>
+          <p className="text-xs text-muted">语言：{language}</p>
         </div>
         <div className="flex gap-2">
           <Button
@@ -481,9 +481,9 @@ function ArtifactStudioEditorPanel(props: {
             onPress={() => { if (reference !== undefined) void props.onReferenceInChat?.(reference); }}
             data-reference-token={reference?.token}
           >
-            Reference in Chat
+            引用到聊天
           </Button>
-          <Button size="sm" variant="primary" isPending={props.isSaving} isDisabled={props.artifactId === undefined || !props.isDirty || props.isSaving} onPress={props.onSave}>Save</Button>
+          <Button size="sm" variant="primary" isPending={props.isSaving} isDisabled={props.artifactId === undefined || !props.isDirty || props.isSaving} onPress={props.onSave}>保存</Button>
         </div>
       </div>
       <div data-testid="artifact-monaco-editor" className="min-h-[52vh] overflow-hidden rounded-lg border border-border bg-surface" onKeyDown={handleKeyDown}>
@@ -503,19 +503,19 @@ function ArtifactStudioEditorPanel(props: {
             }}
           />
         ) : (
-          <div className="flex h-[52vh] items-center justify-center text-sm text-muted">Loading...</div>
+          <div className="flex h-[52vh] items-center justify-center text-sm text-muted">正在加载...</div>
         )}
       </div>
       <label className="grid gap-1 text-xs font-semibold text-muted">
-        Save message
+        保存说明
         <input
           className="min-h-9 rounded-md border border-border bg-surface px-2 text-sm font-normal text-foreground"
           value={props.message}
           onChange={(event) => props.onMessageChange(event.currentTarget.value)}
-          placeholder="Describe this version"
+          placeholder="描述这个版本"
         />
       </label>
-      {props.artifactId === undefined ? <p className="text-xs text-warning-700 dark:text-warning-200">This preview does not expose an artifact id, so saving is unavailable.</p> : null}
+      {props.artifactId === undefined ? <p className="text-xs text-warning-700 dark:text-warning-200">此预览没有暴露 artifact id，暂时无法保存。</p> : null}
       {props.error ? <p className="text-xs text-danger">{props.error}</p> : null}
     </div>
   );
@@ -536,20 +536,20 @@ export function ArtifactHistoryList(props: {
   readonly onRestore: (version: number) => void;
 }) {
   if (props.artifactId === undefined) {
-    return <div className="rounded-lg border border-border bg-surface p-4 text-sm text-muted">Version history is unavailable for this preview.</div>;
+    return <div className="rounded-lg border border-border bg-surface p-4 text-sm text-muted">此预览暂时没有版本历史。</div>;
   }
   return (
     <section className="grid gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <p className="text-sm font-semibold">History</p>
-          <p className="text-xs text-muted">{props.isBinary ? "Binary metadata versions" : "Text artifact versions"}</p>
+          <p className="text-sm font-semibold">历史版本</p>
+          <p className="text-xs text-muted">{props.isBinary ? "二进制元数据版本" : "文本产物版本"}</p>
         </div>
-        {props.loading ? <span className="text-xs text-muted">Loading versions...</span> : null}
+        {props.loading ? <span className="text-xs text-muted">正在加载版本...</span> : null}
       </div>
       {props.error ? <p className="rounded border border-danger/40 bg-danger/10 p-2 text-xs text-danger">{props.error}</p> : null}
       {props.versions.length === 0 && !props.loading ? (
-        <div className="rounded-lg border border-border bg-surface p-4 text-sm text-muted">No versions have been recorded yet.</div>
+        <div className="rounded-lg border border-border bg-surface p-4 text-sm text-muted">还没有记录版本。</div>
       ) : null}
       <ol className="grid gap-2">
         {props.versions.map((version) => {
@@ -563,15 +563,15 @@ export function ArtifactHistoryList(props: {
                     {version.contentEncoding ? <span className="rounded bg-surface-secondary px-2 py-0.5 text-xs text-muted">{version.contentEncoding}</span> : null}
                   </div>
                   <p className="mt-1 text-xs text-muted">
-                    {version.createdBy ?? "unknown"}
+                    {version.createdBy ?? "未知"}
                     {version.createdAt !== undefined ? ` / ${new Date(version.createdAt).toLocaleString()}` : ""}
                   </p>
                   {version.message ? <p className="mt-1 text-sm text-foreground">{version.message}</p> : null}
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {props.isBinary && props.downloadUrl ? <a className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-semibold text-foreground hover:bg-surface-secondary" href={downloadUrlForRawArtifact(metadata?.downloadUrl ?? props.downloadUrl)} download={metadata?.filename}>Download</a> : null}
-                  {!props.isBinary ? <Button size="sm" variant="tertiary" isPending={props.comparingVersion === version.version} isDisabled={props.comparingVersion !== undefined || props.restoringVersion !== undefined} onPress={() => props.onCompare(version.version)}>Compare</Button> : null}
-                  <Button size="sm" variant="secondary" isPending={props.restoringVersion === version.version} isDisabled={props.restoringVersion !== undefined} onPress={() => props.onRestore(version.version)}>Restore</Button>
+                  {props.isBinary && props.downloadUrl ? <a className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs font-semibold text-foreground hover:bg-surface-secondary" href={downloadUrlForRawArtifact(metadata?.downloadUrl ?? props.downloadUrl)} download={metadata?.filename}>下载</a> : null}
+                  {!props.isBinary ? <Button size="sm" variant="tertiary" isPending={props.comparingVersion === version.version} isDisabled={props.comparingVersion !== undefined || props.restoringVersion !== undefined} onPress={() => props.onCompare(version.version)}>对比</Button> : null}
+                  <Button size="sm" variant="secondary" isPending={props.restoringVersion === version.version} isDisabled={props.restoringVersion !== undefined} onPress={() => props.onRestore(version.version)}>恢复</Button>
                 </div>
               </div>
               {props.isBinary && metadata !== undefined ? <BinaryMetadataGrid metadata={metadata} /> : null}
@@ -580,9 +580,9 @@ export function ArtifactHistoryList(props: {
         })}
       </ol>
       {!props.isBinary && props.diffPreview !== undefined ? (
-        <section aria-label="Version diff" className="grid gap-2 rounded-lg border border-border bg-surface p-3">
+        <section aria-label="版本差异" className="grid gap-2 rounded-lg border border-border bg-surface p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm font-semibold">Diff v{props.diffPreview.fromVersion} {"->"} v{props.diffPreview.toVersion}</p>
+            <p className="text-sm font-semibold">差异 v{props.diffPreview.fromVersion} {"->"} v{props.diffPreview.toVersion}</p>
           </div>
           <pre className="max-h-72 overflow-auto rounded-md bg-surface-secondary p-3 text-xs text-foreground">{props.diffPreview.text}</pre>
         </section>
@@ -609,10 +609,10 @@ export function ArtifactRawView(props: {
       <section className="grid gap-3 rounded-lg border border-border bg-surface p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <p className="text-sm font-semibold">Binary metadata</p>
-            <p className="text-xs text-muted">Raw view shows metadata because binary content is not text-editable.</p>
+            <p className="text-sm font-semibold">二进制元数据</p>
+            <p className="text-xs text-muted">二进制内容不可作为文本编辑，原始视图仅展示元数据。</p>
           </div>
-          {props.downloadUrl ? <a className="inline-flex h-8 items-center rounded-md bg-accent px-3 text-xs font-semibold text-accent-foreground hover:opacity-90" href={downloadUrlForRawArtifact(props.downloadUrl)} download={metadata.filename}>Download</a> : null}
+          {props.downloadUrl ? <a className="inline-flex h-8 items-center rounded-md bg-accent px-3 text-xs font-semibold text-accent-foreground hover:opacity-90" href={downloadUrlForRawArtifact(props.downloadUrl)} download={metadata.filename}>下载</a> : null}
         </div>
         <BinaryMetadataGrid metadata={metadata} />
       </section>
@@ -627,8 +627,8 @@ export function ArtifactRawView(props: {
   }
   return (
     <div className="rounded-lg border border-border bg-surface p-4">
-      <p className="text-sm font-semibold">Raw content is not available</p>
-      {props.downloadUrl ? <a className="mt-3 inline-flex h-8 items-center rounded-md bg-accent px-3 text-xs font-semibold text-accent-foreground hover:opacity-90" href={downloadUrlForRawArtifact(props.downloadUrl)} download={props.name}>Download</a> : null}
+      <p className="text-sm font-semibold">原始内容不可用</p>
+      {props.downloadUrl ? <a className="mt-3 inline-flex h-8 items-center rounded-md bg-accent px-3 text-xs font-semibold text-accent-foreground hover:opacity-90" href={downloadUrlForRawArtifact(props.downloadUrl)} download={props.name}>下载</a> : null}
     </div>
   );
 }
@@ -637,10 +637,10 @@ function BinaryMetadataGrid({ metadata }: { readonly metadata: ArtifactVersionMe
   const hash = metadata.newSha256 ?? metadata.sha256 ?? metadata.hash;
   return (
     <dl className="mt-3 grid gap-2 rounded border border-border bg-surface-secondary p-3 text-xs sm:grid-cols-2">
-      <MetadataItem label="Filename" value={metadata.filename} />
-      <MetadataItem label="Mime type" value={metadata.mimeType} />
-      <MetadataItem label="Size" value={metadata.sizeBytes !== undefined ? formatBinarySize(metadata.sizeBytes) : undefined} />
-      <MetadataItem label="Hash" value={hash} />
+      <MetadataItem label="文件名" value={metadata.filename} />
+      <MetadataItem label="MIME 类型" value={metadata.mimeType} />
+      <MetadataItem label="大小" value={metadata.sizeBytes !== undefined ? formatBinarySize(metadata.sizeBytes) : undefined} />
+      <MetadataItem label="哈希" value={hash} />
     </dl>
   );
 }
@@ -656,10 +656,10 @@ function MetadataItem({ label, value }: { readonly label: string; readonly value
 }
 
 function artifactTabLabel(tab: ArtifactPreviewTab): string {
-  if (tab === "preview") return "Preview";
-  if (tab === "editor") return "Editor";
-  if (tab === "history") return "History";
-  return "Raw";
+  if (tab === "preview") return "预览";
+  if (tab === "editor") return "编辑器";
+  if (tab === "history") return "历史";
+  return "原始";
 }
 
 export function artifactVersionListPath(artifactId: string): string {
@@ -861,12 +861,12 @@ function formatBinarySize(bytes: number): string {
 
 function labelForKind(kind: ArtifactPreviewKind): string {
   if (kind === "markdown") return "Markdown";
-  if (kind === "code") return "Code";
+  if (kind === "code") return "代码";
   if (kind === "html") return "HTML";
-  if (kind === "image") return "Image";
+  if (kind === "image") return "图片";
   if (kind === "pdf") return "PDF";
-  if (kind === "audio") return "Audio";
-  if (kind === "video") return "Video";
-  if (kind === "text") return "Text";
-  return "File";
+  if (kind === "audio") return "音频";
+  if (kind === "video") return "视频";
+  if (kind === "text") return "文本";
+  return "文件";
 }

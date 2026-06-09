@@ -8,5 +8,8 @@
   },
   "scripts": {
     "test": "node scripts/run-tests.mjs"
+  },
+  "dependencies": {
+    "@agenthub/protocol": "workspace:*"
   }
 }

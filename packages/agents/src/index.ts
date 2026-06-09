@@ -45,6 +45,7 @@ export type AgentProfile = {
 
 export type BootstrapBuiltInAgentsOptions = {
   readonly agentsDir?: string;
+  readonly templatesDir?: string;
   readonly stderr?: Pick<NodeJS.WriteStream, "write">;
 };
 
@@ -63,7 +64,7 @@ type WatchSource = { readonly dir: string; readonly workspaceId?: string };
 type AgentProfileRow = { readonly id: string; readonly workspace_id: string | null; readonly source_path: string | null };
 
 const sourceDir = dirname(fileURLToPath(import.meta.url));
-const templatesDir = resolve(sourceDir, "..", "templates");
+const defaultTemplatesDir = resolve(sourceDir, "..", "templates");
 const builtInTemplateIds = ["mock-builder", "mock-reviewer", "claude-code-builder", "claude-code-reviewer", "builder-opencode", "reviewer", "archivist"] as const;
 const agentProviders = new Set<AgentProvider>(["native", "claude-code", "opencode", "codex", "langgraph", "a2a"]);
 const agentPresences = new Set<AgentPresence>(["offline", "observing", "active"]);
@@ -73,7 +74,7 @@ export function defaultUserAgentsDir(home = homedir()): string {
   return join(home, ".agenthub", "agents");
 }
 
-export function builtInAgentTemplates(): readonly BuiltInTemplate[] {
+export function builtInAgentTemplates(templatesDir = defaultTemplatesDir): readonly BuiltInTemplate[] {
   return builtInTemplateIds.map((id) => {
     const path = join(templatesDir, `${id}.md`);
     const content = readFileSync(path, "utf8");
@@ -86,7 +87,7 @@ export function bootstrapBuiltInAgents(options: BootstrapBuiltInAgentsOptions = 
   const agentsDir = options.agentsDir ?? defaultUserAgentsDir();
   const stderr = options.stderr ?? process.stderr;
   mkdirSync(agentsDir, { recursive: true });
-  for (const template of builtInAgentTemplates()) {
+  for (const template of builtInAgentTemplates(options.templatesDir)) {
     const targetPath = join(agentsDir, template.fileName);
     if (!existsSync(targetPath)) {
       writeFileSync(targetPath, template.content, { encoding: "utf8", flag: "wx" });

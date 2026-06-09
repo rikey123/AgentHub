@@ -154,7 +154,7 @@ export function RuntimesTab({ data, fetchImpl = fetch, onChange }: RuntimesTabPr
       <div className="rounded-2xl border border-border bg-overlay p-4 shadow-sm">
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
-            <h3 className="text-sm font-semibold">runtimes</h3>
+            <h3 className="text-sm font-semibold">运行时</h3>
             <p className="mt-1 text-xs text-muted">本地 runtime 检测和自定义 ACP 命令配置。</p>
           </div>
           <Button variant="primary" size="sm" onPress={addCustomRuntime} data-testid="runtime-add-custom">
@@ -164,7 +164,7 @@ export function RuntimesTab({ data, fetchImpl = fetch, onChange }: RuntimesTabPr
 
         {runtimes.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-border bg-surface p-4 text-sm text-muted">
-            暂无已注册的 runtimes。添加自定义 ACP runtime，或重启 daemon 初始化 native runtime 检测。
+            暂无已注册的运行时。添加自定义 ACP runtime，或重启 daemon 初始化 native runtime 检测。
           </div>
         ) : (
           <div className="grid gap-3 md:grid-cols-2">
@@ -189,17 +189,17 @@ export function RuntimesTab({ data, fetchImpl = fetch, onChange }: RuntimesTabPr
                           <Card.Title className="truncate">{runtime.name}</Card.Title>
                           <Chip size="sm" variant="soft" color="default">{runtime.kind}</Chip>
                           {isExperimentalRuntime(runtime) ? (
-                            <Chip size="sm" variant="soft" color="warning" aria-label="Runtime maturity: experimental">
-                              experimental
+                            <Chip size="sm" variant="soft" color="warning" aria-label="运行时成熟度：实验性">
+                              实验性
                             </Chip>
                           ) : null}
                         </div>
                         <Card.Description>
-                          <span className="ah-mono">{runtime.detectedPath ?? "No detected path"}</span>
+                          <span className="ah-mono">{runtime.detectedPath ?? "未检测到路径"}</span>
                         </Card.Description>
                       </div>
                       <div className="flex shrink-0 flex-col items-end gap-1">
-                        <Chip size="sm" variant="soft" color={runtimeStatusColor(status)} aria-label={`Runtime status: ${status}`}>
+                        <Chip size="sm" variant="soft" color={runtimeStatusColor(status)} aria-label={`运行时状态：${runtimeStatusLabel(status, version, testResult)}`}>
                           {runtimeStatusLabel(status, version, testResult)}
                         </Chip>
                         <span className="ah-mono text-xs text-muted">v{version}</span>
@@ -211,24 +211,24 @@ export function RuntimesTab({ data, fetchImpl = fetch, onChange }: RuntimesTabPr
                     <Card.Content className="grid gap-3 border-t border-border pt-3">
                       {!editable ? (
                         <div className="rounded-2xl border border-dashed border-border bg-surface p-3 text-xs text-muted">
-                          Native runtimes are read-only in Settings. Detection and test results are shown here, but command configuration lives in the daemon.
+                          Native runtime 在设置中为只读。此处仅展示检测和测试结果，命令配置由 daemon 管理。
                         </div>
                       ) : (
                         <>
                           <TextField value={draft.name} onChange={(value) => updateDraft(runtime.id, { name: value })}>
-                            <Label className="text-xs font-semibold uppercase tracking-wide text-muted">Name</Label>
-                            <Input placeholder="Custom ACP Runtime" />
+                            <Label className="text-xs font-semibold uppercase tracking-wide text-muted">名称</Label>
+                            <Input placeholder="自定义 ACP 运行时" />
                           </TextField>
                           <TextField value={draft.command} onChange={(value) => updateDraft(runtime.id, { command: value })}>
-                            <Label className="text-xs font-semibold uppercase tracking-wide text-muted">Command</Label>
+                            <Label className="text-xs font-semibold uppercase tracking-wide text-muted">命令</Label>
                             <Input className="ah-mono" placeholder="custom-acp" />
                           </TextField>
                           <TextField value={draft.argsText} onChange={(value) => updateDraft(runtime.id, { argsText: value })}>
-                            <Label className="text-xs font-semibold uppercase tracking-wide text-muted">Args JSON</Label>
+                            <Label className="text-xs font-semibold uppercase tracking-wide text-muted">参数 JSON</Label>
                             <Input className="ah-mono" placeholder='["--stdio"]' />
                           </TextField>
                           <TextField value={draft.envText} onChange={(value) => updateDraft(runtime.id, { envText: value })}>
-                            <Label className="text-xs font-semibold uppercase tracking-wide text-muted">Env JSON</Label>
+                            <Label className="text-xs font-semibold uppercase tracking-wide text-muted">环境变量 JSON</Label>
                             <Input className="ah-mono" placeholder='{"ACP_TOKEN":"..."}' />
                           </TextField>
                         </>
@@ -251,10 +251,10 @@ export function RuntimesTab({ data, fetchImpl = fetch, onChange }: RuntimesTabPr
                     {editable ? (
                       <>
                         <Button size="sm" variant="primary" onPress={() => saveRuntime(runtime)} isPending={savingId === runtime.id}>
-                          {runtime.status === "draft" ? "Create" : "Save"}
+                          {runtime.status === "draft" ? "创建" : "保存"}
                         </Button>
                         <Button size="sm" variant="danger" onPress={() => deleteRuntime(runtime)} isPending={deletingId === runtime.id}>
-                          Delete
+                          删除
                         </Button>
                       </>
                     ) : null}
@@ -270,8 +270,8 @@ export function RuntimesTab({ data, fetchImpl = fetch, onChange }: RuntimesTabPr
 }
 
 export async function persistCustomRuntime(fetchImpl: typeof fetch, runtime: RuntimeConfig, draft: RuntimeDraft): Promise<RuntimeConfig> {
-  const args = parseJsonArray(draft.argsText, "Args JSON");
-  const env = parseJsonObject(draft.envText, "Env JSON");
+  const args = parseJsonArray(draft.argsText, "参数 JSON");
+  const env = parseJsonObject(draft.envText, "环境变量 JSON");
   const isNew = runtime.status === "draft";
   const response = await fetchImpl(isNew ? "/runtimes" : `/runtimes/${encodeURIComponent(runtime.id)}`, {
     method: isNew ? "POST" : "PATCH",
@@ -280,7 +280,7 @@ export async function persistCustomRuntime(fetchImpl: typeof fetch, runtime: Run
     body: JSON.stringify({
       id: runtime.id,
       workspaceId: runtime.workspaceId,
-      name: draft.name.trim() || "Custom ACP Runtime",
+      name: draft.name.trim() || "自定义 ACP 运行时",
       command: draft.command.trim(),
       args,
       env,
@@ -288,7 +288,7 @@ export async function persistCustomRuntime(fetchImpl: typeof fetch, runtime: Run
       manifestJson: JSON.stringify({ runtimeKind: "custom-acp" })
     })
   });
-  if (!response.ok) throw new Error(await responseError(response, "runtime save failed"));
+  if (!response.ok) throw new Error(await responseError(response, "保存运行时失败"));
   const payload = await response.json() as { runtime?: unknown };
   return normalizeRuntime(payload.runtime ?? payload);
 }
@@ -299,8 +299,8 @@ export async function deleteRuntimeConfig(fetchImpl: typeof fetch, runtimeId: st
     credentials: "same-origin",
     headers: { accept: "application/json" }
   });
-  if (response.status === 409) throw new Error("Runtime is still used by agent bindings");
-  if (!response.ok) throw new Error(await responseError(response, "runtime delete failed"));
+  if (response.status === 409) throw new Error("该运行时仍被 agent bindings 使用");
+  if (!response.ok) throw new Error(await responseError(response, "删除运行时失败"));
 }
 
 export async function testRuntimeConnection(fetchImpl: typeof fetch, runtimeId: string, pollMs = 500): Promise<RuntimeTestResult> {
@@ -312,10 +312,10 @@ export async function testRuntimeConnection(fetchImpl: typeof fetch, runtimeId: 
   });
   const payload = await response.json().catch(() => ({})) as RuntimeTestResult & { jobId?: string };
   if (response.status === 202) {
-    if (!payload.jobId) throw new Error("runtime test job missing id");
+    if (!payload.jobId) throw new Error("运行时测试任务缺少 ID");
     return pollRuntimeTestJob(fetchImpl, payload.jobId, pollMs);
   }
-  if (!response.ok) throw new Error(payload.error ?? await responseError(response, "runtime test failed"));
+  if (!response.ok) throw new Error(payload.error ?? await responseError(response, "运行时测试失败"));
   return payload;
 }
 
@@ -325,12 +325,12 @@ export async function pollRuntimeTestJob(fetchImpl: typeof fetch, jobId: string,
       credentials: "same-origin",
       headers: { accept: "application/json" }
     });
-    if (!response.ok) throw new Error(await responseError(response, "runtime test job failed"));
+    if (!response.ok) throw new Error(await responseError(response, "运行时测试任务失败"));
     const payload = await response.json() as SettingsJob;
     const job = payload.job ?? payload;
     if (job.status && terminalStatuses.has(job.status)) {
       const result = job.result ?? { ok: job.status === "completed" };
-      return result.ok ? result : { ok: false, error: result.error ?? "runtime test failed", latencyMs: result.latencyMs };
+      return result.ok ? result : { ok: false, error: result.error ?? "运行时测试失败", latencyMs: result.latencyMs };
     }
     await delay(pollMs);
   }
@@ -347,7 +347,7 @@ export function normalizeRuntime(value: unknown): RuntimeConfig {
     id: stringValue(row.id, `runtime-${Date.now()}`),
     workspaceId: nullableString(row.workspaceId ?? row.workspace_id),
     kind: stringValue(row.kind, "custom-acp"),
-    name: stringValue(row.name, "Runtime"),
+    name: stringValue(row.name, "运行时"),
     command: nullableString(row.command) ?? "",
     args: parseStringArray(row.args),
     env: parseEnv(row.env),
@@ -387,6 +387,7 @@ function runtimeErrorLabel(error: string | undefined): string | undefined {
   if (normalized === "binary not found") return "未找到可执行文件";
   if (normalized === "detection failed") return "检测失败";
   if (normalized === "runtime test failed") return "runtime 测试失败";
+  if (normalized === "运行时测试失败") return "运行时测试失败";
   return error;
 }
 
@@ -404,7 +405,7 @@ function draftFromRuntime(runtime: RuntimeConfig): RuntimeDraft {
 }
 
 function emptyDraft(): RuntimeDraft {
-  return { name: "Custom ACP Runtime", command: "", argsText: "[]", envText: "{}" };
+  return { name: "自定义 ACP 运行时", command: "", argsText: "[]", envText: "{}" };
 }
 
 function upsertRuntime(runtimes: RuntimeConfig[], runtime: RuntimeConfig): RuntimeConfig[] {
@@ -421,15 +422,15 @@ function omitKey<T>(record: Record<string, T>, key: string): Record<string, T> {
 
 function parseJsonArray(value: string, label: string): string[] {
   const parsed = JSON.parse(value || "[]") as unknown;
-  if (!Array.isArray(parsed) || !parsed.every((item) => typeof item === "string")) throw new Error(`${label} must be a JSON string array`);
+  if (!Array.isArray(parsed) || !parsed.every((item) => typeof item === "string")) throw new Error(`${label} 必须是 JSON 字符串数组`);
   return parsed;
 }
 
 function parseJsonObject(value: string, label: string): Record<string, string> {
   const parsed = JSON.parse(value || "{}") as unknown;
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(`${label} must be a JSON object`);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(`${label} 必须是 JSON 对象`);
   const entries = Object.entries(parsed as Record<string, unknown>);
-  if (!entries.every(([, item]) => typeof item === "string")) throw new Error(`${label} values must be strings`);
+  if (!entries.every(([, item]) => typeof item === "string")) throw new Error(`${label} 的值必须是字符串`);
   return Object.fromEntries(entries) as Record<string, string>;
 }
 

@@ -27,7 +27,7 @@ export type PublishResult =
 export type EventBusSubscriber = (event: EventEnvelope) => void | Promise<void>;
 export type Unsubscribe = () => void;
 
-export type ReplayView = "main" | "detail" | "raw";
+export type ReplayView = "main" | "detail" | "raw" | "mobile";
 
 export type ReplayFilters = {
   readonly workspaceId?: string;
@@ -807,6 +807,7 @@ export class DurableHandlerRegistry {
       return;
     }
     this.draining.add(handler.name);
+    let completed = true;
     try {
       const cursor = this.cursorFor(handler.name);
       const events = this.options.database.sqlite
@@ -816,11 +817,15 @@ export class DurableHandlerRegistry {
         const event = this.eventFromRow(row);
         const ok = await this.processHandler(handler, event);
         if (!ok) {
+          completed = false;
           break;
         }
       }
     } finally {
       this.draining.delete(handler.name);
+      if (completed && (this.pendingDrains.delete(handler.name) || this.hasUndrainedEvents(handler.name))) {
+        await this.drainHandler(handler);
+      }
     }
   }
 
@@ -875,7 +880,8 @@ export class DurableHandlerRegistry {
       this.inHandle.delete(handler.name);
       // If notify() was called for this handler while we were awaiting handle(),
       // drain the deferred events now (in order, via the persisted event log).
-      if (this.pendingDrains.delete(handler.name)) {
+      if (this.pendingDrains.has(handler.name) && !this.draining.has(handler.name)) {
+        this.pendingDrains.delete(handler.name);
         await this.drainHandler(handler);
       }
     }
@@ -898,6 +904,13 @@ export class DurableHandlerRegistry {
     this.options.database.sqlite
       .prepare("UPDATE handler_cursors SET last_seq = ?, updated_at = ? WHERE handler_name = ?")
       .run(seq, this.now(), handlerName);
+  }
+
+  private hasUndrainedEvents(handlerName: string): boolean {
+    const row = this.options.database.sqlite
+      .prepare("SELECT COALESCE(MAX(seq), 0) AS maxSeq FROM events")
+      .get() as { readonly maxSeq: number } | undefined;
+    return (row?.maxSeq ?? 0) > this.cursorFor(handlerName);
   }
 
   private writeDeadLetter(handlerName: string, event: EventEnvelope, attempts: number, error: unknown): void {
@@ -1004,7 +1017,7 @@ function visibilityValuesFor(filters: ReplayFilters): readonly EventVisibility[]
   if (filters.visibility !== undefined) {
     return typeof filters.visibility === "string" ? [filters.visibility] : filters.visibility;
   }
-  if (filters.view === "main") {
+  if (filters.view === "main" || filters.view === "mobile") {
     return ["main", "both"];
   }
   if (filters.view === "detail") {

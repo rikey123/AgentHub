@@ -7,22 +7,22 @@ export function RawStreamTab({ roomId, runId }: { roomId: string; runId: string 
   if (state.status === "forbidden") {
     return (
       <div className="p-6 text-center text-sm text-muted" data-testid="raw-stream-content">
-        Raw stream content requires admin scope or debug mode.
+        查看原始流需要 admin scope 或 Debug 模式。
       </div>
     );
   }
   if (state.status === "error") {
     return (
       <div className="p-6 text-center text-sm text-danger" data-testid="raw-stream-content">
-        Could not connect to raw stream.
+        无法连接到原始流。
       </div>
     );
   }
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-        <Chip size="sm" variant="soft" color={state.status === "connected" ? "success" : "warning"}>{state.status}</Chip>
-        <span className="text-xs text-muted">{state.lines.length} lines</span>
+        <Chip size="sm" variant="soft" color={state.status === "connected" ? "success" : "warning"}>{rawStreamStatusLabel(state.status)}</Chip>
+        <span className="text-xs text-muted">{state.lines.length} 行</span>
       </div>
       <ScrollShadow className="flex-1 overflow-auto" orientation="vertical">
         <pre className="ah-mono p-3 text-xs" data-testid="raw-stream-content">
@@ -33,4 +33,19 @@ export function RawStreamTab({ roomId, runId }: { roomId: string; runId: string 
       </ScrollShadow>
     </div>
   );
+}
+
+function rawStreamStatusLabel(status: string): string {
+  switch (status) {
+    case "connected":
+      return "已连接";
+    case "connecting":
+      return "连接中";
+    case "forbidden":
+      return "无权限";
+    case "error":
+      return "连接失败";
+    default:
+      return status;
+  }
 }

@@ -79,19 +79,19 @@ describe("rail views", () => {
       onTestConnection: () => undefined
     }));
 
-    expect(html).toContain("Agent Contacts");
+    expect(html).toContain("Agent 联系人");
     expect(html).toContain("Frontend Builder");
     expect(html).toContain("UI Builder");
     expect(html).toContain("OpenCode");
     expect(html).toContain("gpt-5");
     expect(html).toContain("available");
     expect(html).toContain("code.edit");
-    expect(html).toContain("+1 more");
+    expect(html).toContain("+1 更多");
     expect(html).toContain("Build useful interfaces.");
-    expect(html).toContain("Start Chat");
-    expect(html).toContain("New Agent");
-    expect(html).toContain("Edit / Configure");
-    expect(html).toContain("Test Connection");
+    expect(html).toContain("开始聊天");
+    expect(html).toContain("新建 Agent");
+    expect(html).toContain("编辑 / 配置");
+    expect(html).toContain("测试连接");
     expect(html).toContain("runtime_opencode");
   });
 
@@ -294,13 +294,13 @@ describe("rail views", () => {
       loading: false
     }));
 
-    expect(html).toContain("Artifact Library");
+    expect(html).toContain("产物库");
     expect(html).toContain("Landing page");
     expect(html).toContain("web_page");
     expect(html).toContain("index.html");
     expect(html).toContain("v3");
     expect(html).toContain("4 KB");
-    expect(html).toContain("Open Preview");
+    expect(html).toContain("打开预览");
     expect(html).toContain("data-artifact-id=\"artifact_home\"");
   });
 
@@ -321,19 +321,19 @@ describe("rail views", () => {
       loading: false
     }));
 
-    expect(html).toContain("Search artifacts");
-    expect(html).toContain("Kind filter");
-    expect(html).toContain("Recent Artifacts");
+    expect(html).toContain("搜索产物");
+    expect(html).toContain("类型筛选");
+    expect(html).toContain("最近产物");
   });
 
   it("renders primary rail views for runs and tasks", () => {
     const runs = renderToStaticMarkup(createElement(RunsRailView));
     const tasks = renderToStaticMarkup(createElement(TasksRailView));
 
-    expect(runs).toContain("Runs");
-    expect(runs).toContain("Run Activity");
-    expect(tasks).toContain("Tasks");
-    expect(tasks).toContain("Task Workbench");
+    expect(runs).toContain("运行");
+    expect(runs).toContain("运行活动");
+    expect(tasks).toContain("任务");
+    expect(tasks).toContain("任务工作台");
   });
 });
 

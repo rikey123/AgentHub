@@ -378,6 +378,21 @@ describe("ArtifactService", () => {
       { path: "src/b.ts", status: "added", newContent: "final b" }
     ]);
   });
+
+  it("ignores git metadata when diffing isolated worktrees", () => {
+    const isolatedRoot = join(currentDir(), "isolated-run-git");
+    mkdirSync(join(currentRoot(), ".git"), { recursive: true });
+    mkdirSync(join(isolatedRoot, "src"), { recursive: true });
+    writeFileSync(join(isolatedRoot, ".git"), "gitdir: ../../.git/worktrees/run\n", "utf8");
+    writeWorkspace("src/a.ts", "old a");
+    writeFileSync(join(isolatedRoot, "src", "a.ts"), "new a", "utf8");
+    const artifactFs = new ArtifactFS(baseArtifactFsOptions({ mode: "isolated_worktree", runId: "run_git_metadata", isolatedRoot }));
+
+    const artifact = artifactFs.buildRunArtifact("ignore git metadata");
+
+    expect(artifact).toMatchObject({ type: "diff", status: "draft", runId: "run_git_metadata" });
+    expect(artifact ? currentService().files(artifact.id).map((file) => file.path) : []).toEqual(["src/a.ts"]);
+  });
 });
 
 function currentDb(): AgentHubDatabase { expect(database).toBeDefined(); return database as AgentHubDatabase; }

@@ -99,7 +99,7 @@ export class RoomMcpServer {
   private readonly authToken = randomUUID();
   private readonly sessionRegistrations = new Map<string, RoomMcpSessionRegistration>();
 
-  constructor(private readonly options: { readonly commandBus: CommandBus; readonly taskService: TaskService; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly taskModeGroupChatPresenter?: TaskModeGroupChatPresenter; readonly permissionEngine?: PermissionEngine; readonly artifactFs?: { readonly readTextFile?: (input: { readonly runId: string; readonly path: string }) => string | undefined; readonly writeTextFile: (input: { readonly runId: string; readonly path: string; readonly content: string }) => void }; readonly artifactService?: RoomMcpArtifactService; readonly artifactVersioningService?: ArtifactVersioningService; readonly now?: () => number }) {}
+  constructor(private readonly options: { readonly commandBus: CommandBus; readonly taskService: TaskService; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly taskModeGroupChatPresenter?: TaskModeGroupChatPresenter; readonly permissionEngine?: PermissionEngine; readonly artifactFs?: { readonly readTextFile?: (input: { readonly runId: string; readonly path: string }) => string | undefined; readonly writeTextFile: (input: { readonly runId: string; readonly path: string; readonly content: string }) => void }; readonly artifactService?: RoomMcpArtifactService; readonly artifactVersioningService?: ArtifactVersioningService; readonly bridgeDir?: string; readonly now?: () => number }) {}
 
   /**
    * Start the TCP server. Must be called once before getStdioConfig().
@@ -123,7 +123,7 @@ export class RoomMcpServer {
    * Warm sessions may omit runId; the daemon resolves the active run when a tool is called.
    */
   getStdioConfig(session: RoomMcpSessionContext): RoomMcpStdioConfig {
-    const scriptPath = resolveBridgeScript();
+    const scriptPath = resolveBridgeScript(this.options.bridgeDir);
     return {
       name: "agenthub-room",
       command: "node",
@@ -1729,7 +1729,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function resolveBridgeScript(): string {
+function resolveBridgeScript(bridgeDir?: string): string {
+  if (bridgeDir !== undefined) return join(bridgeDir, "room-mcp-stdio.mjs");
   // Try import.meta.url first (ESM)
   try {
     const here = dirname(fileURLToPath(import.meta.url));

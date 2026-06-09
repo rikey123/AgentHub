@@ -18,6 +18,29 @@ export function runStatusColor(status: string): ChipColor {
   }
 }
 
+export function runStatusLabel(status: string): string {
+  switch (status) {
+    case "queued":
+      return "排队中";
+    case "starting":
+      return "启动中";
+    case "running":
+      return "运行中";
+    case "waiting_permission":
+      return "等待许可";
+    case "completed":
+      return "已完成";
+    case "failed":
+      return "失败";
+    case "cancelled":
+      return "已取消";
+    case "cancelling":
+      return "取消中";
+    default:
+      return status;
+  }
+}
+
 export function permissionStatusColor(status: string): ChipColor {
   switch (status) {
     case "allowed":
@@ -29,6 +52,21 @@ export function permissionStatusColor(status: string): ChipColor {
     case "pending":
     default:
       return "warning";
+  }
+}
+
+export function permissionStatusLabel(status: string): string {
+  switch (status) {
+    case "allowed":
+      return "已允许";
+    case "denied":
+      return "已拒绝";
+    case "expired":
+      return "已过期";
+    case "pending":
+      return "待处理";
+    default:
+      return status;
   }
 }
 
@@ -100,6 +138,33 @@ export function taskStatusColor(status: string): ChipColor {
     case "todo":
     default:
       return "default";
+  }
+}
+
+export function taskStatusLabel(status: string): string {
+  switch (status) {
+    case "pending":
+    case "queued":
+    case "todo":
+      return "待处理";
+    case "in_progress":
+    case "running":
+      return "进行中";
+    case "waiting_approval":
+      return "等待许可";
+    case "review":
+      return "待评审";
+    case "blocked":
+      return "阻塞";
+    case "completed":
+    case "done":
+      return "已完成";
+    case "failed":
+      return "失败";
+    case "cancelled":
+      return "已取消";
+    default:
+      return status;
   }
 }
 

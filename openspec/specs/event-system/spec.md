@@ -227,6 +227,29 @@ The canonical event registry SHALL be extended with the following V1.0 event typ
 | `task.unblocked` | task | durable | both | task-workflow-core | 需要 projector handler（blocked 指示器清除） |
 | `wake_outbox.dispatched` | orchestrator | durable | detail | local-daemon | 内部唤醒审计；不要求 main projector handler |
 
+**Workflow canvas durable events**:
+
+| 事件类型 | category | durability | visibility | 来源 capability | 备注 |
+|---|---|---|---|---|---|
+| `workflow.created` | workflow | durable | both | agent-context-workflow-canvas | Workflow canvas projector |
+| `workflow.version.updated` | workflow | durable | both | agent-context-workflow-canvas | Workflow canvas projector |
+| `workflow.deleted` | workflow | durable | both | agent-context-workflow-canvas | Workflow canvas projector |
+| `workflow.run.started` | workflow | durable | both | agent-context-workflow-canvas | Workflow canvas projector |
+| `workflow.run.completed` | workflow | durable | both | agent-context-workflow-canvas | Workflow canvas projector |
+| `workflow.run.failed` | workflow | durable | both | agent-context-workflow-canvas | Workflow canvas projector |
+| `workflow.run.cancelled` | workflow | durable | both | agent-context-workflow-canvas | Workflow canvas projector |
+| `workflow.node.queued` | workflow | durable | both | agent-context-workflow-canvas | Workflow canvas projector |
+| `workflow.node.started` | workflow | durable | both | agent-context-workflow-canvas | Workflow canvas projector |
+| `workflow.node.completed` | workflow | durable | both | agent-context-workflow-canvas | Workflow canvas projector |
+| `workflow.node.failed` | workflow | durable | both | agent-context-workflow-canvas | Workflow canvas projector |
+| `workflow.node.skipped` | workflow | durable | both | agent-context-workflow-canvas | Workflow canvas projector |
+| `workflow.node.cancelled` | workflow | durable | both | agent-context-workflow-canvas | Workflow canvas projector |
+| `workflow.edge.delivery.created` | workflow | durable | both | agent-context-workflow-canvas | Workflow canvas projector |
+| `workflow.edge.delivery.mailbox_created` | workflow | durable | both | agent-context-workflow-canvas | Workflow canvas projector |
+| `workflow.edge.delivery.delivered` | workflow | durable | both | agent-context-workflow-canvas | Workflow canvas projector |
+| `workflow.edge.delivery.cancelled` | workflow | durable | both | agent-context-workflow-canvas | Workflow canvas projector |
+| `workflow.edge.delivery.failed` | workflow | durable | both | agent-context-workflow-canvas | Workflow canvas projector |
+
 **V1.0 明确不引入的事件类型**（防止 spec agent 误加）：
 
 - `task.updated`：状态变化走 `task.status.changed`（V0 已注册），非状态型活动走 `task.activity.added`
@@ -240,6 +263,7 @@ The canonical event registry SHALL be extended with the following V1.0 event typ
 - visibility=detail 的 V1.0 新事件（role / runtime / model_config / agent_binding / permission.run_summary）：**不要求** projector handler；Settings UI 通过 REST 消费；Debug Panel 通过 `/debug/events` 查询
 - V1.2 的 main/both 新事件（`artifact.version.created` / `deployment.*` / `room.pinned` / `room.unpinned` / `message.pinned` / `message.unpinned` / `agent.contact.updated` / `task.unblocked`）：对应 capability 落地时**必须**在 `apps/web/src/hooks/useProjector.ts` 加 handler
 - V1.2 的 detail 新事件（`wake_outbox.dispatched`）：**不要求** main projector handler；用于内部调度审计与 Debug/Event 查询
+- Workflow canvas 的 both-visible durable 事件（`workflow.*`）：**必须**在 `apps/web/src/hooks/useProjector.ts` 加 handler
 
 #### Scenario: events:check 校验 18 个新事件类型
 

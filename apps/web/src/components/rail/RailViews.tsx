@@ -196,17 +196,17 @@ export function ArtifactsRailContainer({ fetchImpl, onReferenceArtifact }: { rea
 export function ContactsRailView({ contacts, loading, error, onStartChat, onCreateAgent, onEditContact, onTestConnection, testingContactId }: { readonly contacts: readonly AgentContactViewModel[]; readonly loading: boolean; readonly error?: string | undefined; readonly onStartChat?: ((contact: AgentContactViewModel) => void) | undefined; readonly onCreateAgent?: (() => void) | undefined; readonly onEditContact?: ((contact: AgentContactViewModel) => void) | undefined; readonly onConfigureContact?: ((contact: AgentContactViewModel) => void) | undefined; readonly onTestConnection?: ((contact: AgentContactViewModel) => void) | undefined; readonly testingContactId?: string | undefined }) {
   const sorted = useMemo(() => [...contacts].sort((a, b) => statusRank(a.status) - statusRank(b.status) || a.displayName.localeCompare(b.displayName)), [contacts]);
   return (
-    <RailSurface title="Agent Contacts" subtitle={`${sorted.length} contact${sorted.length === 1 ? "" : "s"}`} loading={loading} error={error}>
+    <RailSurface title="Agent 联系人" subtitle={`${sorted.length} 个联系人`} loading={loading} error={error}>
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface px-3 py-3">
         <div>
-          <h2 className="text-sm font-semibold">Contact Directory</h2>
-          <p className="mt-1 text-xs text-muted">Create or start chats from runnable agent contacts.</p>
+          <h2 className="text-sm font-semibold">联系人目录</h2>
+          <p className="mt-1 text-xs text-muted">从可运行的 agent 联系人创建或开始聊天。</p>
         </div>
         <Button size="sm" variant="primary" onPress={() => onCreateAgent?.()} data-testid="contacts-new-agent">
-          New Agent
+          新建 Agent
         </Button>
       </div>
-      {sorted.length === 0 && !loading ? <p className="text-sm text-muted">No contacts are available.</p> : null}
+      {sorted.length === 0 && !loading ? <p className="text-sm text-muted">暂无可用联系人。</p> : null}
       <div className="grid gap-3">
         {sorted.map((contact) => (
           <Card key={contact.agentBindingId} variant="default" className="border border-border">
@@ -239,13 +239,13 @@ export function ContactsRailView({ contacts, loading, error, onStartChat, onCrea
                       {contact.capabilities.slice(0, 3).map((capability) => (
                         <Chip key={capability} size="sm" variant="soft" color="default">{capability}</Chip>
                       ))}
-                      {contact.capabilities.length > 3 ? <Chip size="sm" variant="soft" color="default">+{contact.capabilities.length - 3} more</Chip> : null}
+                      {contact.capabilities.length > 3 ? <Chip size="sm" variant="soft" color="default">+{contact.capabilities.length - 3} 更多</Chip> : null}
                     </div>
                   ) : null}
                   <div className="mt-4 flex flex-wrap gap-2">
-                    <Button size="sm" variant="primary" onPress={() => onStartChat?.(contact)}>Start Chat</Button>
-                    <Button size="sm" variant="secondary" onPress={() => onEditContact?.(contact)}>Edit / Configure</Button>
-                    <Button size="sm" variant="tertiary" isPending={testingContactId === contact.agentBindingId} isDisabled={testingContactId !== undefined} onPress={() => onTestConnection?.(contact)}>Test Connection</Button>
+                    <Button size="sm" variant="primary" onPress={() => onStartChat?.(contact)}>开始聊天</Button>
+                    <Button size="sm" variant="secondary" onPress={() => onEditContact?.(contact)}>编辑 / 配置</Button>
+                    <Button size="sm" variant="tertiary" isPending={testingContactId === contact.agentBindingId} isDisabled={testingContactId !== undefined} onPress={() => onTestConnection?.(contact)}>测试连接</Button>
                   </div>
                 </div>
               </div>
@@ -273,32 +273,32 @@ export function ArtifactsRailView({ artifacts, loading, error, onOpenArtifact }:
       .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0) || a.title.localeCompare(b.title));
   }, [artifacts, kind, query]);
   return (
-    <RailSurface title="Artifact Library" subtitle={`${sorted.length} artifact${sorted.length === 1 ? "" : "s"}`} loading={loading} error={error}>
+    <RailSurface title="产物库" subtitle={`${sorted.length} 个产物`} loading={loading} error={error}>
       <div className="grid gap-3 rounded-lg border border-border bg-surface px-3 py-3 md:grid-cols-[minmax(0,1fr)_220px]">
         <TextField value={query} onChange={setQuery}>
-          <Label className="text-xs font-semibold uppercase text-muted">Search artifacts</Label>
-          <Input placeholder="Search by title, filename, room, or author" />
+          <Label className="text-xs font-semibold uppercase text-muted">搜索产物</Label>
+          <Input placeholder="按标题、文件名、房间或作者搜索" />
         </TextField>
         <Select
-          aria-label="Kind filter"
+          aria-label="类型筛选"
           selectedKey={kind}
-          placeholder="All kinds"
+          placeholder="全部类型"
           variant="secondary"
           onSelectionChange={(key: unknown) => setKind(selectValue(key) || "all")}
         >
-          <Label className="text-xs font-semibold uppercase text-muted">Kind filter</Label>
+          <Label className="text-xs font-semibold uppercase text-muted">类型筛选</Label>
           <Select.Trigger className="min-h-10 bg-field-background">
             <Select.Value>
-              <span className="truncate font-semibold">{kind === "all" ? "All kinds" : kind}</span>
+              <span className="truncate font-semibold">{kind === "all" ? "全部类型" : kind}</span>
             </Select.Value>
             <Select.Indicator />
           </Select.Trigger>
           <Select.Popover className="max-h-72">
-            <ListBox aria-label="Artifact kind filter">
+            <ListBox aria-label="产物类型筛选">
               {kindOptions.map((option) => (
                 <ListBox.Item key={option} id={option} textValue={option}>
                   <div className="flex min-w-0 items-center justify-between gap-3 py-1">
-                    <span className="truncate">{option === "all" ? "All kinds" : option}</span>
+                    <span className="truncate">{option === "all" ? "全部类型" : option}</span>
                     <ListBox.ItemIndicator />
                   </div>
                 </ListBox.Item>
@@ -308,10 +308,10 @@ export function ArtifactsRailView({ artifacts, loading, error, onOpenArtifact }:
         </Select>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-sm font-semibold">Recent Artifacts</h2>
-        <Chip size="sm" variant="soft" color="default">{sorted.length} shown</Chip>
+        <h2 className="text-sm font-semibold">最近产物</h2>
+        <Chip size="sm" variant="soft" color="default">显示 {sorted.length} 个</Chip>
       </div>
-      {sorted.length === 0 && !loading ? <p className="text-sm text-muted">No artifacts have been published yet.</p> : null}
+      {sorted.length === 0 && !loading ? <p className="text-sm text-muted">尚未发布任何产物。</p> : null}
       <div className="grid gap-3">
         {sorted.map((artifact) => (
           <Card key={artifact.id} variant="default" className="border border-border">
@@ -331,7 +331,7 @@ export function ArtifactsRailView({ artifacts, loading, error, onOpenArtifact }:
               </div>
               {artifact.roomId ? <span className="ah-mono truncate">{artifact.roomId}</span> : null}
               <div className="flex flex-wrap gap-2 pt-1">
-                <Button size="sm" variant="secondary" onPress={() => onOpenArtifact?.(artifact)} data-artifact-id={artifact.id}>Open Preview</Button>
+                <Button size="sm" variant="secondary" onPress={() => onOpenArtifact?.(artifact)} data-artifact-id={artifact.id}>打开预览</Button>
               </div>
             </Card.Content>
           </Card>
@@ -343,18 +343,18 @@ export function ArtifactsRailView({ artifacts, loading, error, onOpenArtifact }:
 
 export function RunsRailView() {
   return (
-    <RailSurface title="Runs" subtitle="Live and recent agent activity" loading={false}>
+    <RailSurface title="运行" subtitle="实时和最近的 agent 活动" loading={false}>
       <Card variant="default" className="border border-border">
         <Card.Header>
           <div className="flex flex-wrap items-center gap-2">
-            <Card.Title className="text-sm">Run Activity</Card.Title>
-            <Chip size="sm" variant="soft" color="warning">Live</Chip>
+            <Card.Title className="text-sm">运行活动</Card.Title>
+            <Chip size="sm" variant="soft" color="warning">实时</Chip>
           </div>
-          <Card.Description className="text-xs">Open a run from chat to inspect transcript, tools, artifacts, and cost.</Card.Description>
+          <Card.Description className="text-xs">从聊天中打开运行，可查看转录、工具、产物和成本。</Card.Description>
         </Card.Header>
         <Card.Content className="grid gap-2 text-sm text-muted">
-          <p>Recent runs appear here as daemon run lifecycle events arrive.</p>
-          <p className="text-xs">RunDetailDrawer remains available for detailed inspection.</p>
+          <p>daemon 运行生命周期事件到达后，最近运行会显示在这里。</p>
+          <p className="text-xs">仍可使用运行详情抽屉进行细查。</p>
         </Card.Content>
       </Card>
     </RailSurface>
@@ -363,18 +363,18 @@ export function RunsRailView() {
 
 export function TasksRailView() {
   return (
-    <RailSurface title="Tasks" subtitle="Focused task workbench" loading={false}>
+    <RailSurface title="任务" subtitle="聚焦的任务工作台" loading={false}>
       <Card variant="default" className="border border-border">
         <Card.Header>
           <div className="flex flex-wrap items-center gap-2">
-            <Card.Title className="text-sm">Task Workbench</Card.Title>
-            <Chip size="sm" variant="soft" color="accent">Board</Chip>
+            <Card.Title className="text-sm">任务工作台</Card.Title>
+            <Chip size="sm" variant="soft" color="accent">看板</Chip>
           </div>
-          <Card.Description className="text-xs">Review blockers, delegated work, proof-of-work, and ready-for-review changes.</Card.Description>
+          <Card.Description className="text-xs">查看阻塞、委托工作、交付证明和待审查变更。</Card.Description>
         </Card.Header>
         <Card.Content className="grid gap-2 text-sm text-muted">
-          <p>Open a room to see its task board in the side panel; this rail keeps tasks reachable from primary navigation.</p>
-          <p className="text-xs">Unblocked tasks update from task.unblocked events without a refresh.</p>
+          <p>打开房间后可在侧栏查看任务看板；此入口让任务始终可从主导航访问。</p>
+          <p className="text-xs">解除阻塞的任务会通过 task.unblocked 事件实时更新，无需刷新。</p>
         </Card.Content>
       </Card>
     </RailSurface>
@@ -554,15 +554,15 @@ function RuntimeHealthBadge({ contact }: { readonly contact: AgentContactViewMod
 function RuntimeHealthMessage({ contact }: { readonly contact: AgentContactViewModel }) {
   const health = runtimeHealthBadgeForContact(contact);
   if (health === undefined) return null;
-  if (health.status === "success") return <p className="mt-2 text-xs text-success">Connection ready{health.version ? ` (${health.version})` : ""}</p>;
-  if (health.status === "experimental") return <p className="mt-2 text-xs text-warning">experimental{health.version ? ` (${health.version})` : ""}</p>;
-  return <p className="mt-2 text-xs text-danger">Connection failed{health.error ? `: ${health.error}` : ""}</p>;
+  if (health.status === "success") return <p className="mt-2 text-xs text-success">连接可用{health.version ? ` (${health.version})` : ""}</p>;
+  if (health.status === "experimental") return <p className="mt-2 text-xs text-warning">实验性{health.version ? ` (${health.version})` : ""}</p>;
+  return <p className="mt-2 text-xs text-danger">连接失败{health.error ? `: ${health.error}` : ""}</p>;
 }
 
 function runtimeHealthLabel(health: ContactRuntimeHealth): string {
-  if (health.status === "success") return health.version ? `green ${health.version}` : "green";
-  if (health.status === "experimental") return health.version ? `experimental ${health.version}` : "experimental";
-  return "red";
+  if (health.status === "success") return health.version ? `可用 ${health.version}` : "可用";
+  if (health.status === "experimental") return health.version ? `实验性 ${health.version}` : "实验性";
+  return "失败";
 }
 
 function NewAgentEditorModal({ fetchImpl, isOpen, onOpenChange, onSaved }: { readonly fetchImpl: typeof fetch; readonly isOpen: boolean; readonly onOpenChange: (open: boolean) => void; readonly onSaved: (contact: AgentContactViewModel) => void }) {
@@ -637,31 +637,31 @@ function NewAgentEditorModal({ fetchImpl, isOpen, onOpenChange, onSaved }: { rea
   return (
     <Modal.Backdrop isOpen={isOpen} onOpenChange={onOpenChange}>
       <Modal.Container size="lg" className="items-center justify-center p-4">
-        <Modal.Dialog aria-label="New agent" className="max-h-[88vh] overflow-hidden p-0">
-          <Modal.CloseTrigger aria-label="Close new agent editor" />
+        <Modal.Dialog aria-label="新建 agent" className="max-h-[88vh] overflow-hidden p-0">
+          <Modal.CloseTrigger aria-label="关闭新建 agent 编辑器" />
           <Modal.Header className="border-b border-border px-5 py-4">
             <div>
-              <Modal.Heading>New Agent</Modal.Heading>
-              <p className="mt-1 text-sm text-muted">Create a contact-backed custom agent for chats.</p>
+              <Modal.Heading>新建 Agent</Modal.Heading>
+              <p className="mt-1 text-sm text-muted">创建一个由联系人驱动的自定义 agent，用于聊天。</p>
             </div>
           </Modal.Header>
           <Modal.Body className="grid gap-4 overflow-auto p-5">
             <TextField value={name} onChange={setName}>
-              <Label className="text-sm font-semibold">Display name</Label>
+              <Label className="text-sm font-semibold">显示名称</Label>
               <Input placeholder="Launch Builder" />
             </TextField>
             <Select
               aria-label="Runtime"
               selectedKey={runtimeId}
-              placeholder={loadingRuntimes ? "Loading runtimes" : "Select runtime"}
+              placeholder={loadingRuntimes ? "正在加载运行时" : "选择运行时"}
               variant="secondary"
               isDisabled={loadingRuntimes || runtimes.length === 0}
               onSelectionChange={(key: unknown) => setRuntimeId(selectValue(key))}
             >
-              <Label className="text-sm font-semibold">Runtime</Label>
+              <Label className="text-sm font-semibold">运行时</Label>
               <Select.Trigger className="min-h-10 bg-field-background" data-testid="new-agent-runtime">
                 <Select.Value>
-                  <span className="truncate font-semibold">{selectedRuntime?.name ?? (loadingRuntimes ? "Loading runtimes" : "Select runtime")}</span>
+                  <span className="truncate font-semibold">{selectedRuntime?.name ?? (loadingRuntimes ? "正在加载运行时" : "选择运行时")}</span>
                 </Select.Value>
                 <Select.Indicator />
               </Select.Trigger>
@@ -682,18 +682,18 @@ function NewAgentEditorModal({ fetchImpl, isOpen, onOpenChange, onSaved }: { rea
               </Select.Popover>
             </Select>
             <TextField value={description} onChange={setDescription}>
-              <Label className="text-sm font-semibold">Description</Label>
-              <TextArea className="min-h-24" placeholder="What this agent is good at" />
+              <Label className="text-sm font-semibold">描述</Label>
+              <TextArea className="min-h-24" placeholder="这个 agent 擅长什么" />
             </TextField>
             <TextField value={systemPrompt} onChange={setSystemPrompt}>
-              <Label className="text-sm font-semibold">System prompt</Label>
-              <TextArea className="min-h-32 ah-mono" placeholder="Agent behavior and boundaries" />
+              <Label className="text-sm font-semibold">系统提示词</Label>
+              <TextArea className="min-h-32 ah-mono" placeholder="Agent 行为和边界" />
             </TextField>
             {error ? <p className="text-sm text-danger" role="alert">{error}</p> : null}
           </Modal.Body>
           <Modal.Footer className="border-t border-border px-5 py-4">
-            <Button size="sm" variant="secondary" onPress={() => onOpenChange(false)}>Cancel</Button>
-            <Button size="sm" variant="primary" isPending={saving} isDisabled={!canSave} onPress={() => void save()}>Save</Button>
+            <Button size="sm" variant="secondary" onPress={() => onOpenChange(false)}>取消</Button>
+            <Button size="sm" variant="primary" isPending={saving} isDisabled={!canSave} onPress={() => void save()}>保存</Button>
           </Modal.Footer>
         </Modal.Dialog>
       </Modal.Container>
@@ -735,38 +735,38 @@ function InlineAgentEditorModal({ contact, fetchImpl, isOpen, onOpenChange, onSa
   return (
     <Modal.Backdrop isOpen={isOpen} onOpenChange={onOpenChange}>
       <Modal.Container size="lg" className="items-center justify-center p-4">
-        <Modal.Dialog aria-label="Edit agent contact" className="max-h-[88vh] overflow-hidden p-0">
-          <Modal.CloseTrigger aria-label="Close agent editor" />
+        <Modal.Dialog aria-label="编辑 agent 联系人" className="max-h-[88vh] overflow-hidden p-0">
+          <Modal.CloseTrigger aria-label="关闭 agent 编辑器" />
           <Modal.Header className="border-b border-border px-5 py-4">
             <div>
-              <Modal.Heading>InlineAgentEditor</Modal.Heading>
-              <p className="mt-1 text-sm text-muted">Edit / Configure {contact?.displayName ?? "agent contact"}</p>
+              <Modal.Heading>Agent 联系人编辑器</Modal.Heading>
+              <p className="mt-1 text-sm text-muted">编辑 / 配置 {contact?.displayName ?? "agent 联系人"}</p>
             </div>
           </Modal.Header>
           <Modal.Body className="grid gap-4 overflow-auto p-5">
             <TextField value={name} onChange={setName}>
-              <Label className="text-sm font-semibold">Display name</Label>
-              <Input placeholder="Agent display name" />
+              <Label className="text-sm font-semibold">显示名称</Label>
+              <Input placeholder="Agent 显示名称" />
             </TextField>
             <TextField value={description} onChange={setDescription}>
-              <Label className="text-sm font-semibold">Description</Label>
-              <TextArea className="min-h-24" placeholder="What this contact is good at" />
+              <Label className="text-sm font-semibold">描述</Label>
+              <TextArea className="min-h-24" placeholder="这个联系人擅长什么" />
             </TextField>
             <TextField value={systemPrompt} onChange={setSystemPrompt}>
-              <Label className="text-sm font-semibold">System prompt</Label>
-              <TextArea className="min-h-32 ah-mono" placeholder="Agent behavior and boundaries" />
+              <Label className="text-sm font-semibold">系统提示词</Label>
+              <TextArea className="min-h-32 ah-mono" placeholder="Agent 行为和边界" />
             </TextField>
             <div className="grid gap-2 rounded-lg border border-border bg-surface-secondary p-3 text-xs text-muted">
-              <span>Role: {contact?.roleName ?? contact?.roleId ?? "Role"}</span>
-              <span>Runtime: {contact?.runtimeName ?? contact?.runtimeKind ?? "Runtime"}</span>
-              {contact?.modelName ? <span>Model: {contact.modelName}</span> : null}
+              <span>角色：{contact?.roleName ?? contact?.roleId ?? "角色"}</span>
+              <span>运行时：{contact?.runtimeName ?? contact?.runtimeKind ?? "运行时"}</span>
+              {contact?.modelName ? <span>模型：{contact.modelName}</span> : null}
               {contact?.runtimeId ? <span className="ah-mono">{contact.runtimeId}</span> : null}
             </div>
             {error ? <p className="text-sm text-danger" role="alert">{error}</p> : null}
           </Modal.Body>
           <Modal.Footer className="border-t border-border px-5 py-4">
-            <Button size="sm" variant="secondary" onPress={() => onOpenChange(false)}>Cancel</Button>
-            <Button size="sm" variant="primary" isPending={saving} isDisabled={name.trim().length === 0} onPress={() => void save()}>Save</Button>
+            <Button size="sm" variant="secondary" onPress={() => onOpenChange(false)}>取消</Button>
+            <Button size="sm" variant="primary" isPending={saving} isDisabled={name.trim().length === 0} onPress={() => void save()}>保存</Button>
           </Modal.Footer>
         </Modal.Dialog>
       </Modal.Container>

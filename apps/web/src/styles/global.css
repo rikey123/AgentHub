@@ -36,12 +36,10 @@
   --field-border: oklch(0.86 0.025 250);
   --field-border-width: 1px;
   --surface-shadow:
-    0 14px 34px rgba(39, 67, 105, 0.12),
-    0 3px 10px rgba(39, 67, 105, 0.07),
+    0 14px 34px rgba(39, 67, 105, 0.12), 0 3px 10px rgba(39, 67, 105, 0.07),
     0 0 0 1px rgba(44, 89, 140, 0.04);
   --overlay-shadow:
-    0 20px 48px rgba(25, 54, 96, 0.16),
-    0 6px 18px rgba(25, 54, 96, 0.10),
+    0 20px 48px rgba(25, 54, 96, 0.16), 0 6px 18px rgba(25, 54, 96, 0.1),
     0 0 0 1px rgba(44, 89, 140, 0.05);
 }
 
@@ -77,12 +75,10 @@
   --field-border-width: 1px;
   --scrollbar: oklch(0.44 0.04 252);
   --surface-shadow:
-    0 18px 40px rgba(0, 0, 0, 0.28),
-    0 4px 14px rgba(0, 0, 0, 0.22),
+    0 18px 40px rgba(0, 0, 0, 0.28), 0 4px 14px rgba(0, 0, 0, 0.22),
     0 0 0 1px rgba(155, 184, 220, 0.05);
   --overlay-shadow:
-    0 24px 58px rgba(0, 0, 0, 0.36),
-    0 7px 22px rgba(0, 0, 0, 0.26),
+    0 24px 58px rgba(0, 0, 0, 0.36), 0 7px 22px rgba(0, 0, 0, 0.26),
     0 0 0 1px rgba(155, 184, 220, 0.07);
 }
 
@@ -100,17 +96,30 @@
 }
 
 /* Base resets */
-html, body, #root {
+html,
+body,
+#root {
   margin: 0;
   padding: 0;
   width: 100%;
   height: 100%;
   overflow: hidden;
   background:
-    radial-gradient(circle at 16% 10%, color-mix(in oklab, var(--accent) 10%, transparent), transparent 28%),
+    radial-gradient(
+      circle at 16% 10%,
+      color-mix(in oklab, var(--accent) 10%, transparent),
+      transparent 28%
+    ),
     linear-gradient(135deg, var(--background), var(--background-secondary));
   color: var(--foreground);
-  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
 }
 
 * {
@@ -132,7 +141,8 @@ html, body, #root {
 
 /* Mono font utility used by code/terminal blocks */
 .ah-mono {
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+  font-family:
+    ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
 }
 
 /* Streaming text caret (used while message status === "streaming") */
@@ -148,10 +158,245 @@ html, body, #root {
   animation: ah-blink 1s steps(2) infinite;
 }
 
+.ah-long-message-preview {
+  overflow: hidden;
+}
+
+.ah-long-message-fade {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 3.2rem;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--surface) 0%, transparent) 0%,
+    color-mix(in oklab, var(--surface) 88%, transparent) 68%,
+    var(--surface) 100%
+  );
+}
+
+.ah-long-message-disclosure {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.85rem;
+  padding: 0.38rem 0.45rem 0.38rem 0.75rem;
+  border: 1px solid color-mix(in oklab, var(--border) 76%, var(--accent) 24%);
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--surface-secondary) 82%, var(--overlay) 18%);
+  box-shadow: inset 0 1px 0 color-mix(in oklab, #fff 70%, transparent);
+}
+
+.ah-long-message-status {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ah-long-message-toggle,
+.ah-long-message-run-action {
+  min-height: 1.8rem !important;
+  height: 1.8rem !important;
+  padding: 0 0.58rem !important;
+  border-radius: 7px !important;
+  color: var(--foreground) !important;
+  font-size: 0.78rem !important;
+  font-weight: 750 !important;
+}
+
+.ah-long-message-toggle:hover,
+.ah-long-message-toggle:focus-visible,
+.ah-long-message-run-action:hover,
+.ah-long-message-run-action:focus-visible {
+  background: color-mix(in oklab, var(--accent-soft) 78%, var(--overlay) 22%) !important;
+  color: var(--accent) !important;
+}
+
+.ah-long-message-chevron {
+  display: inline-flex;
+  width: 0.42rem;
+  height: 0.42rem;
+  align-items: center;
+  justify-content: center;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: translateY(-1px) rotate(45deg);
+  transition: transform 160ms ease;
+}
+
+.ah-long-message-chevron.is-expanded {
+  transform: translateY(1px) rotate(225deg);
+}
+
 .ah-artifact-file-highlight {
   border-radius: 6px;
   background: var(--accent-soft);
   box-shadow: 0 0 0 2px var(--accent-soft-hover);
+}
+
+.ah-run-detail-drawer {
+  --ah-run-panel-border: color-mix(in oklab, var(--border) 84%, transparent);
+  --ah-run-panel-bg: color-mix(in oklab, var(--surface) 88%, transparent);
+}
+
+.ah-run-detail-drawer [data-slot="header"] {
+  padding: 1.25rem 1.5rem 0.95rem;
+}
+
+.ah-run-detail-drawer [data-slot="heading"] {
+  max-width: calc(100% - 2.75rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 1.08rem;
+  font-weight: 720;
+  letter-spacing: 0;
+}
+
+.ah-run-detail-drawer [data-slot="body"] {
+  min-height: 0;
+}
+
+.ah-run-detail-tabs-wrap {
+  margin: 0 1.25rem 0.75rem;
+  overflow-x: auto;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--surface-secondary) 88%, transparent);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--border) 64%, transparent),
+    0 10px 24px rgba(22, 45, 74, 0.08);
+}
+
+.ah-run-detail-tabs-wrap::-webkit-scrollbar {
+  display: none;
+}
+
+.ah-run-detail-tabs {
+  display: flex;
+  min-width: max-content;
+  gap: 0.2rem;
+  padding: 0.28rem;
+}
+
+.ah-run-detail-tab {
+  min-width: max-content;
+  height: 2.15rem;
+  padding: 0 0.9rem;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 680;
+  letter-spacing: 0;
+  white-space: nowrap;
+  transition:
+    background-color 160ms ease,
+    color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.ah-run-detail-tab:hover,
+.ah-run-detail-tab:focus-visible {
+  color: var(--foreground);
+  background: color-mix(in oklab, var(--surface-tertiary) 72%, transparent);
+}
+
+.ah-run-detail-tab[aria-selected="true"],
+.ah-run-detail-tab[data-selected="true"] {
+  color: var(--foreground);
+  background: color-mix(in oklab, var(--overlay) 86%, var(--accent-soft));
+  box-shadow:
+    0 8px 18px rgba(19, 40, 68, 0.12),
+    inset 0 0 0 1px color-mix(in oklab, var(--border) 72%, transparent);
+}
+
+.ah-run-detail-tab [data-slot="separator"] {
+  display: none;
+}
+
+.ah-run-tools-tab {
+  color: var(--foreground);
+}
+
+.ah-run-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: 0.9rem;
+  border: 1px solid var(--ah-run-panel-border);
+  border-radius: 10px;
+  background: var(--ah-run-panel-bg);
+  box-shadow:
+    0 10px 22px rgba(22, 45, 74, 0.055),
+    inset 0 1px 0 rgba(255, 255, 255, 0.38);
+}
+
+.ah-run-section-title {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 760;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ah-run-empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.65;
+}
+
+.ah-run-collab-card,
+.ah-run-tool-card {
+  background: color-mix(in oklab, var(--surface) 76%, transparent);
+  box-shadow: none;
+}
+
+.ah-run-link {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.28rem 0.55rem;
+  width: 100%;
+  align-items: center;
+  border: 1px solid color-mix(in oklab, var(--border) 80%, transparent);
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--surface-secondary) 72%, transparent);
+  padding: 0.55rem 0.65rem;
+  color: var(--foreground);
+  text-align: left;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    transform 160ms ease;
+}
+
+.ah-run-link:hover,
+.ah-run-link:focus-visible {
+  border-color: color-mix(in oklab, var(--accent) 38%, var(--border));
+  background: color-mix(in oklab, var(--surface-tertiary) 76%, transparent);
+  transform: translateY(-1px);
+}
+
+.ah-run-link .ah-mono {
+  grid-column: 1 / -1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 0.76rem;
 }
 
 .ah-topbar {
@@ -352,12 +597,20 @@ html, body, #root {
 }
 
 @keyframes ah-blink {
-  0%, 50% { opacity: 1; }
-  51%, 100% { opacity: 0; }
+  0%,
+  50% {
+    opacity: 1;
+  }
+  51%,
+  100% {
+    opacity: 0;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ah-streaming-caret::after { animation: none; }
+  .ah-streaming-caret::after {
+    animation: none;
+  }
 }
 
 [data-slot="toast-region"] {
@@ -383,7 +636,11 @@ html, body, #root {
   --ah-dashboard-card-low: #f6fbff;
   --ah-dashboard-control: #edf6ff;
   border-left: 1px solid var(--ah-dashboard-border);
-  background: linear-gradient(180deg, var(--ah-dashboard-panel) 0%, var(--ah-dashboard-panel-low) 100%);
+  background: linear-gradient(
+    180deg,
+    var(--ah-dashboard-panel) 0%,
+    var(--ah-dashboard-panel-low) 100%
+  );
   box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.86);
   backdrop-filter: blur(18px);
 }
@@ -408,8 +665,7 @@ html, body, #root {
   padding: 0;
   border-radius: 999px;
   background: transparent;
-  box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.78);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.78);
   isolation: isolate;
 }
 
@@ -421,8 +677,7 @@ html, body, #root {
   left: 1.1rem;
   height: 0.42rem;
   border-radius: 999px;
-  background:
-    linear-gradient(180deg, rgba(151, 184, 217, 0.34), rgba(255, 255, 255, 0.72));
+  background: linear-gradient(180deg, rgba(151, 184, 217, 0.34), rgba(255, 255, 255, 0.72));
   box-shadow:
     inset 0 1px 1px rgba(71, 111, 153, 0.12),
     0 1px 0 rgba(255, 255, 255, 0.92);
@@ -535,8 +790,7 @@ html, body, #root {
 .ah-settings-tabs-wrap {
   position: relative;
   padding: 0.88rem 1rem 0.72rem;
-  background:
-    linear-gradient(180deg, rgba(245, 250, 255, 0.96) 0%, rgba(239, 247, 255, 0.86) 100%);
+  background: linear-gradient(180deg, rgba(245, 250, 255, 0.96) 0%, rgba(239, 247, 255, 0.86) 100%);
   border-bottom: 1px solid rgba(190, 211, 231, 0.7);
 }
 
@@ -549,6 +803,7 @@ html, body, #root {
     minmax(7.75rem, 1.08fr)
     minmax(7.25rem, 1.05fr)
     minmax(6.8rem, 0.98fr)
+    minmax(8.4rem, 1.14fr)
     minmax(5.8rem, 0.82fr);
   align-items: stretch;
   gap: 0;
@@ -661,6 +916,23 @@ html, body, #root {
   background: var(--overlay) !important;
 }
 
+.ah-roles-settings {
+  height: 100%;
+  min-height: 0;
+}
+
+.ah-roles-layout {
+  min-height: 0;
+}
+
+.ah-role-editor-card {
+  min-height: 0;
+}
+
+.ah-role-editor-content {
+  min-height: 0;
+}
+
 .ah-roles-list {
   display: flex;
   max-height: 52vh;
@@ -709,6 +981,33 @@ html, body, #root {
   font-size: 0.86rem;
 }
 
+@media (min-width: 1024px) {
+  .ah-roles-layout {
+    height: 100%;
+    align-items: stretch;
+  }
+
+  .ah-role-editor-card {
+    max-height: 100%;
+  }
+
+  .ah-role-editor-card .card__header,
+  .ah-role-editor-card .card__footer {
+    flex-shrink: 0;
+  }
+
+  .ah-role-editor-content {
+    overflow: auto;
+    padding-right: 1.1rem;
+  }
+}
+
+@media (max-width: 1023px) {
+  .ah-roles-settings {
+    height: auto;
+  }
+}
+
 .ah-members-panel {
   color: var(--ah-dashboard-ink);
 }
@@ -736,15 +1035,15 @@ html, body, #root {
 
 .ah-pill-action {
   position: relative;
-  width: auto;
-  min-width: 6.15rem;
+  width: 1.85rem;
+  min-width: 1.85rem;
   height: 1.7rem;
   overflow: hidden;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.36rem;
-  padding: 0 0.72rem;
+  gap: 0;
+  padding: 0;
   border-radius: 999px;
   border: 1px solid #bcd7f4;
   background: #eef7ff;
@@ -753,6 +1052,10 @@ html, body, #root {
     0 4px 10px rgba(47, 91, 145, 0.045),
     inset 0 1px 0 rgba(255, 255, 255, 0.75);
   transition:
+    width 220ms ease,
+    min-width 220ms ease,
+    gap 220ms ease,
+    padding 220ms ease,
     border-color 180ms ease,
     background-color 180ms ease,
     box-shadow 180ms ease;
@@ -790,18 +1093,27 @@ html, body, #root {
 }
 
 .ah-pill-action-label {
-  max-width: 4.2rem;
+  max-width: 0;
   overflow: hidden;
   white-space: nowrap;
-  opacity: 1;
+  opacity: 0;
   text-align: center;
   font-size: 0.78rem;
   font-weight: 700;
   line-height: 1;
+  transform: translateX(-0.18rem);
+  transition:
+    max-width 220ms ease,
+    opacity 160ms ease,
+    transform 220ms ease;
 }
 
 .ah-pill-action:hover,
 .ah-pill-action:focus-visible {
+  width: 6.15rem;
+  min-width: 6.15rem;
+  gap: 0.36rem;
+  padding: 0 0.72rem;
   border-color: #9fc6ef;
   background: #f5fbff;
   box-shadow:
@@ -810,8 +1122,16 @@ html, body, #root {
     0 7px 16px rgba(47, 91, 145, 0.08);
 }
 
+.ah-pill-action:hover .ah-pill-action-label,
+.ah-pill-action:focus-visible .ah-pill-action-label {
+  max-width: 4.2rem;
+  opacity: 1;
+  transform: translateX(0);
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .ah-pill-action {
+  .ah-pill-action,
+  .ah-pill-action-label {
     transition-duration: 0ms;
   }
 }
@@ -905,7 +1225,11 @@ html, body, #root {
 .ah-skill-override-row {
   border: 1px solid var(--ah-dashboard-border);
   border-radius: 8px;
-  background: linear-gradient(180deg, var(--ah-dashboard-card) 0%, var(--ah-dashboard-card-low) 100%);
+  background: linear-gradient(
+    180deg,
+    var(--ah-dashboard-card) 0%,
+    var(--ah-dashboard-card-low) 100%
+  );
   box-shadow:
     0 9px 20px rgba(48, 86, 134, 0.06),
     inset 0 1px 0 rgba(255, 255, 255, 0.9);
@@ -946,6 +1270,17 @@ html, body, #root {
   padding: 0.72rem;
 }
 
+.ah-skill-row-active {
+  border-color: color-mix(in oklab, var(--ah-dashboard-blue) 44%, var(--ah-dashboard-border));
+  background:
+    linear-gradient(90deg, rgba(0, 104, 232, 0.085) 0 0.2rem, transparent 0.2rem),
+    linear-gradient(180deg, #f5fbff 0%, #edf7ff 100%);
+  box-shadow:
+    0 0 0 1px rgba(0, 104, 232, 0.16),
+    0 10px 24px rgba(0, 104, 232, 0.11),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92);
+}
+
 .ah-skill-icon {
   display: inline-grid;
   place-items: center;
@@ -981,6 +1316,220 @@ html, body, #root {
   box-shadow:
     0 9px 18px rgba(0, 104, 232, 0.2),
     inset 0 1px 0 rgba(255, 255, 255, 0.32);
+}
+
+.ah-skill-row-action {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.55rem;
+  min-width: 6.75rem;
+}
+
+.ah-skill-state {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--ah-dashboard-border);
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--ah-dashboard-card-low) 82%, #ffffff 18%);
+  color: var(--ah-dashboard-muted);
+  padding: 0.18rem 0.48rem;
+  font-size: 0.68rem;
+  font-weight: 750;
+  letter-spacing: 0;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.ah-skill-state.is-enabled {
+  border-color: color-mix(in oklab, var(--ah-dashboard-blue) 46%, var(--ah-dashboard-border));
+  background: color-mix(in oklab, var(--ah-dashboard-blue) 14%, #ffffff 86%);
+  color: var(--ah-dashboard-blue-dark);
+}
+
+.ah-room-skill-switch {
+  flex: 0 0 auto;
+}
+
+.ah-room-skill-switch .switch__control {
+  border: 1px solid #bfd8f4;
+  background: #dfeaf6;
+  box-shadow:
+    inset 0 1px 2px rgba(45, 83, 124, 0.16),
+    0 1px 0 rgba(255, 255, 255, 0.82);
+}
+
+.ah-room-skill-switch[data-selected="true"] .switch__control {
+  border-color: color-mix(in oklab, var(--ah-dashboard-blue) 68%, #bfd8f4);
+  background: var(--ah-dashboard-blue);
+  box-shadow:
+    0 0 0 3px rgba(0, 104, 232, 0.12),
+    inset 0 1px 1px rgba(255, 255, 255, 0.22);
+}
+
+.ah-room-skill-switch .switch__thumb {
+  background: #ffffff;
+  box-shadow:
+    0 2px 5px rgba(30, 61, 101, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92);
+}
+
+.ah-new-room-panel {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--overlay);
+  padding: 1rem;
+  box-shadow:
+    0 10px 24px rgba(48, 86, 134, 0.055),
+    inset 0 1px 0 rgba(255, 255, 255, 0.86);
+}
+
+.ah-new-room-top {
+  gap: 1rem;
+}
+
+.ah-new-room-layout {
+  display: grid;
+  min-height: 0;
+  grid-template-columns: minmax(20rem, 0.82fr) minmax(0, 1.18fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.ah-room-mode-grid {
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.ah-new-room-contacts {
+  position: sticky;
+  top: 0.75rem;
+  align-self: start;
+  min-height: 0;
+}
+
+.ah-contact-list {
+  display: grid;
+  max-height: min(58vh, 34rem);
+  gap: 0.15rem;
+  overflow: auto;
+  padding: 0.15rem;
+  border-radius: 8px;
+}
+
+.ah-contact-list-item {
+  display: flex !important;
+  min-width: 0;
+  align-items: center;
+  gap: 0.75rem;
+  border: 1px solid transparent;
+  border-radius: 8px !important;
+  padding: 0.68rem 0.72rem !important;
+  background: transparent;
+}
+
+.ah-contact-list-item:hover,
+.ah-contact-list-item[data-hovered="true"] {
+  border-color: color-mix(in oklab, var(--border) 72%, var(--accent) 28%);
+  background: var(--surface-secondary);
+}
+
+.ah-contact-list-item[data-selected="true"] {
+  border-color: color-mix(in oklab, var(--accent) 62%, var(--border));
+  background: var(--accent-soft);
+}
+
+.ah-contact-avatar {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-weight: 750;
+}
+
+.ah-contact-presence {
+  display: inline-block;
+  width: 0.48rem;
+  height: 0.48rem;
+  flex: 0 0 auto;
+  border: 2px solid var(--overlay);
+  border-radius: 999px;
+  background: var(--muted);
+}
+
+.ah-contact-presence.is-available {
+  background: var(--success);
+}
+
+.ah-contact-presence.is-busy {
+  background: var(--warning);
+}
+
+.ah-contact-check {
+  display: inline-grid;
+  width: 1.28rem;
+  height: 1.28rem;
+  place-items: center;
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--accent-foreground);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.ah-contact-check.is-selected {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.ah-new-room-skill-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.ah-new-room-skill-option {
+  display: inline-flex !important;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.ah-new-room-skill-option .checkbox__control {
+  flex: 0 0 auto;
+}
+
+.ah-new-room-skill-option .checkbox__content {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+@media (max-width: 1023px) {
+  .ah-new-room-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .ah-new-room-contacts {
+    position: static;
+  }
+
+  .ah-room-mode-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .ah-room-mode-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ah-new-room-skill-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .ah-subsection-label {
@@ -1066,7 +1615,11 @@ html, body, #root {
 .ah-context-item {
   border: 1px solid #c8def5;
   border-radius: 8px;
-  background: linear-gradient(180deg, var(--ah-dashboard-card) 0%, var(--ah-dashboard-card-low) 100%);
+  background: linear-gradient(
+    180deg,
+    var(--ah-dashboard-card) 0%,
+    var(--ah-dashboard-card-low) 100%
+  );
   padding: 0.72rem 0.78rem;
   box-shadow:
     0 8px 18px rgba(57, 101, 163, 0.055),
@@ -1157,7 +1710,11 @@ html[data-theme="dark"],
 [data-theme="dark"] body,
 [data-theme="dark"] #root {
   background:
-    radial-gradient(circle at 16% 8%, color-mix(in oklab, var(--accent) 16%, transparent), transparent 32%),
+    radial-gradient(
+      circle at 16% 8%,
+      color-mix(in oklab, var(--accent) 16%, transparent),
+      transparent 32%
+    ),
     radial-gradient(circle at 86% 0%, rgba(77, 108, 156, 0.16), transparent 30%),
     linear-gradient(135deg, var(--background), var(--background-secondary));
 }
@@ -1218,7 +1775,11 @@ html[data-theme="dark"],
   --ah-dashboard-card-low: oklch(0.215 0.026 252);
   --ah-dashboard-control: oklch(0.285 0.035 252);
   border-left-color: var(--border);
-  background: linear-gradient(180deg, var(--ah-dashboard-panel) 0%, var(--ah-dashboard-panel-low) 100%);
+  background: linear-gradient(
+    180deg,
+    var(--ah-dashboard-panel) 0%,
+    var(--ah-dashboard-panel-low) 100%
+  );
   box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.04);
 }
 
@@ -1280,7 +1841,11 @@ html[data-theme="dark"],
 [data-theme="dark"] .ah-skill-override-row,
 [data-theme="dark"] .ah-context-item {
   border-color: var(--ah-dashboard-border);
-  background: linear-gradient(180deg, var(--ah-dashboard-card) 0%, var(--ah-dashboard-card-low) 100%);
+  background: linear-gradient(
+    180deg,
+    var(--ah-dashboard-card) 0%,
+    var(--ah-dashboard-card-low) 100%
+  );
   box-shadow:
     0 12px 26px rgba(0, 0, 0, 0.16),
     inset 0 1px 0 rgba(255, 255, 255, 0.05);
@@ -1295,6 +1860,49 @@ html[data-theme="dark"],
   box-shadow:
     0 8px 18px rgba(0, 0, 0, 0.18),
     inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+[data-theme="dark"] .ah-skill-row-active {
+  border-color: color-mix(in oklab, var(--ah-dashboard-blue) 52%, var(--ah-dashboard-border));
+  background:
+    linear-gradient(90deg, rgba(110, 173, 255, 0.18) 0 0.2rem, transparent 0.2rem),
+    linear-gradient(
+      180deg,
+      color-mix(in oklab, var(--ah-dashboard-blue) 18%, var(--ah-dashboard-card)) 0%,
+      color-mix(in oklab, var(--ah-dashboard-blue) 10%, var(--ah-dashboard-card-low)) 100%
+    );
+  box-shadow:
+    0 0 0 1px rgba(110, 173, 255, 0.16),
+    0 12px 26px rgba(0, 104, 232, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="dark"] .ah-skill-state {
+  border-color: var(--ah-dashboard-border-strong);
+  background: color-mix(in oklab, var(--ah-dashboard-control) 82%, transparent);
+  color: var(--ah-dashboard-muted);
+}
+
+[data-theme="dark"] .ah-skill-state.is-enabled {
+  border-color: color-mix(in oklab, var(--ah-dashboard-blue) 58%, var(--ah-dashboard-border));
+  background: color-mix(in oklab, var(--ah-dashboard-blue) 22%, var(--ah-dashboard-control));
+  color: #d8e9ff;
+}
+
+[data-theme="dark"] .ah-room-skill-switch .switch__control {
+  border-color: var(--ah-dashboard-border-strong);
+  background: color-mix(in oklab, var(--ah-dashboard-control) 86%, #000000 14%);
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.34),
+    0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+[data-theme="dark"] .ah-room-skill-switch[data-selected="true"] .switch__control {
+  border-color: color-mix(in oklab, var(--ah-dashboard-blue) 72%, var(--ah-dashboard-border));
+  background: var(--ah-dashboard-blue);
+  box-shadow:
+    0 0 0 3px rgba(110, 173, 255, 0.14),
+    inset 0 1px 1px rgba(255, 255, 255, 0.12);
 }
 
 [data-theme="dark"] .ah-member-skills {
@@ -1356,4 +1964,707 @@ html[data-theme="dark"],
   border-color: var(--border) !important;
   background: var(--overlay) !important;
   box-shadow: var(--surface-shadow);
+}
+
+.ah-workflow-view {
+  --ah-workflow-blue: var(--ah-dashboard-blue, var(--accent));
+  --ah-workflow-blue-dark: var(--ah-dashboard-blue-dark, var(--accent));
+  --ah-workflow-ink: var(--ah-dashboard-ink, var(--foreground));
+  --ah-workflow-muted: var(--ah-dashboard-muted, var(--muted));
+  --ah-workflow-border: var(--ah-dashboard-border, var(--border));
+  --ah-workflow-border-strong: var(--ah-dashboard-border-strong, var(--border));
+  --ah-workflow-panel: var(--ah-dashboard-panel, var(--surface));
+  --ah-workflow-panel-low: var(--ah-dashboard-panel-low, var(--surface-secondary));
+  --ah-workflow-card: var(--ah-dashboard-card, var(--overlay));
+  --ah-workflow-card-low: var(--ah-dashboard-card-low, var(--surface));
+  --ah-workflow-control: var(--ah-dashboard-control, var(--surface-secondary));
+  display: flex;
+  min-height: 0;
+  height: 100%;
+  flex-direction: column;
+  overflow: hidden;
+  background: linear-gradient(180deg, var(--ah-workflow-panel) 0%, var(--ah-workflow-panel-low) 100%);
+  color: var(--ah-workflow-ink);
+}
+
+.ah-workflow-toolbar {
+  display: flex;
+  min-height: 4.4rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--ah-workflow-border);
+  background: color-mix(in oklab, var(--ah-workflow-card) 88%, transparent);
+  padding: 0.85rem 1.1rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.74);
+}
+
+.ah-workflow-kicker {
+  margin: 0;
+  color: var(--ah-workflow-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.ah-workflow-toolbar h2,
+.ah-workflow-inspector h3 {
+  margin: 0;
+  color: var(--ah-workflow-ink);
+  font-size: 1rem;
+  font-weight: 760;
+  letter-spacing: 0;
+}
+
+.ah-workflow-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.ah-workflow-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 5.8rem;
+  height: 2rem;
+  border: 1px solid var(--ah-workflow-border-strong);
+  border-radius: 7px;
+  background: var(--ah-workflow-control);
+  color: var(--ah-workflow-blue-dark);
+  font-size: 0.78rem;
+  font-weight: 650;
+  line-height: 1;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    color 140ms ease;
+}
+
+.ah-workflow-button:hover,
+.ah-workflow-button:focus-visible {
+  border-color: color-mix(in oklab, var(--ah-workflow-blue) 42%, var(--ah-workflow-border));
+  background: color-mix(in oklab, var(--ah-workflow-control) 82%, white 18%);
+  color: var(--ah-workflow-ink);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ah-workflow-blue) 12%, transparent);
+}
+
+.ah-workflow-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  box-shadow: none;
+}
+
+.ah-workflow-button-full {
+  width: 100%;
+}
+
+.ah-workflow-button-primary,
+.ah-workflow-button-run {
+  border-color: var(--ah-workflow-blue);
+  background: var(--ah-workflow-blue);
+  color: white;
+}
+
+.ah-workflow-button-run {
+  border-color: var(--success);
+  background: var(--success);
+  color: var(--success-foreground);
+}
+
+.ah-workflow-button-stop {
+  border-color: var(--danger, oklch(0.58 0.19 28));
+  background: var(--danger, oklch(0.58 0.19 28));
+  color: var(--danger-foreground, white);
+}
+
+.ah-workflow-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--ah-workflow-border);
+  background: color-mix(in oklab, var(--warning-soft, oklch(0.91 0.08 78)) 58%, var(--ah-workflow-card) 42%);
+  color: var(--warning-soft-foreground, oklch(0.35 0.09 74));
+  padding: 0.55rem 1.1rem;
+  font-size: 0.8rem;
+}
+
+.ah-workflow-notice button {
+  border: 0;
+  background: transparent;
+  color: var(--ah-workflow-blue-dark);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.ah-workflow-runbar {
+  display: grid;
+  grid-template-columns: minmax(12rem, 1fr) minmax(11rem, auto) minmax(12rem, 1fr);
+  align-items: stretch;
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--ah-workflow-border);
+  background: color-mix(in oklab, var(--ah-workflow-card-low) 88%, transparent);
+  padding: 0.65rem 1.1rem;
+}
+
+.ah-workflow-run-io {
+  display: grid;
+  grid-template-columns: 1.9rem minmax(0, 1fr);
+  min-width: 0;
+  align-items: stretch;
+  gap: 0.45rem;
+}
+
+.ah-workflow-run-io > span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--ah-workflow-border-strong);
+  border-radius: 8px;
+  background: var(--ah-workflow-control);
+  color: var(--ah-workflow-ink);
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.ah-workflow-run-center {
+  display: grid;
+  min-width: 0;
+  align-content: center;
+  gap: 0.45rem;
+}
+
+.ah-workflow-run-summary {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+  color: var(--ah-workflow-muted);
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.ah-workflow-run-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 4.8rem;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-soft-foreground);
+  padding: 0.26rem 0.55rem;
+  font-size: 0.7rem;
+  font-weight: 760;
+  line-height: 1;
+}
+
+.ah-workflow-runbar textarea,
+.ah-workflow-textarea {
+  width: 100%;
+  min-height: 2.4rem;
+  max-height: 4.8rem;
+  resize: vertical;
+  border: 1px solid var(--field-border);
+  border-radius: 8px;
+  background: var(--field-background);
+  color: var(--ah-workflow-ink);
+  padding: 0.45rem 0.55rem;
+  font-size: 0.78rem;
+  line-height: 1.2rem;
+  outline: none;
+}
+
+.ah-workflow-textarea {
+  min-height: 7rem;
+  max-height: 13rem;
+}
+
+.ah-workflow-runbar textarea[readonly] {
+  resize: none;
+}
+
+.ah-workflow-runbar textarea:focus,
+.ah-workflow-textarea:focus {
+  border-color: color-mix(in oklab, var(--ah-workflow-blue) 42%, var(--field-border));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ah-workflow-blue) 12%, transparent);
+}
+
+.ah-workflow-run-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+}
+
+.ah-workflow-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 20rem;
+  min-height: 0;
+  flex: 1;
+}
+
+.ah-workflow-canvas {
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  border-right: 1px solid var(--ah-workflow-border);
+}
+
+.ah-workflow-canvas .react-flow {
+  background: linear-gradient(135deg, color-mix(in oklab, var(--ah-workflow-card) 90%, transparent), color-mix(in oklab, var(--ah-workflow-panel-low) 92%, transparent));
+}
+
+.ah-workflow-canvas .react-flow__edge-path {
+  stroke: var(--ah-workflow-blue);
+  stroke-width: 2;
+}
+
+.ah-workflow-canvas .ah-workflow-edge-ready .react-flow__edge-path,
+.ah-workflow-canvas .ah-workflow-edge-draft .react-flow__edge-path {
+  stroke: var(--ah-workflow-blue);
+  stroke-dasharray: none;
+  animation: none;
+}
+
+.ah-workflow-canvas .react-flow__edge.selected .react-flow__edge-path {
+  stroke: var(--ah-workflow-blue);
+  stroke-width: 2.5;
+}
+
+.ah-workflow-canvas .ah-workflow-edge-queued .react-flow__edge-path,
+.ah-workflow-canvas .ah-workflow-edge-mailbox-created .react-flow__edge-path,
+.ah-workflow-canvas .ah-workflow-edge-transferring .react-flow__edge-path,
+.ah-workflow-canvas .react-flow__edge.animated .react-flow__edge-path {
+  stroke: var(--ah-workflow-blue);
+  stroke-dasharray: 7 5;
+  animation: ah-workflow-edge-flow 900ms linear infinite;
+}
+
+.ah-workflow-canvas .ah-workflow-edge-delivered .react-flow__edge-path,
+.ah-workflow-canvas .ah-workflow-edge-completed .react-flow__edge-path {
+  stroke: var(--success);
+}
+
+.ah-workflow-canvas .ah-workflow-edge-failed .react-flow__edge-path {
+  stroke: var(--danger, oklch(0.58 0.19 28));
+  stroke-width: 2.5;
+}
+
+.ah-workflow-canvas .ah-workflow-edge-disabled .react-flow__edge-path,
+.ah-workflow-canvas .ah-workflow-edge-skipped .react-flow__edge-path,
+.ah-workflow-canvas .ah-workflow-edge-cancelled .react-flow__edge-path {
+  stroke: var(--ah-workflow-muted);
+  stroke-dasharray: 4 6;
+}
+
+.ah-workflow-canvas .react-flow__edge-text {
+  fill: var(--ah-workflow-muted);
+  font-size: 11px;
+}
+
+@keyframes ah-workflow-edge-flow {
+  to {
+    stroke-dashoffset: -24;
+  }
+}
+
+.ah-workflow-canvas .react-flow__controls {
+  border: 1px solid var(--ah-workflow-border);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: var(--surface-shadow);
+}
+
+.ah-workflow-canvas .react-flow__controls-button {
+  border-bottom: 1px solid var(--ah-workflow-border);
+  background: var(--ah-workflow-card);
+  color: var(--ah-workflow-ink);
+}
+
+.ah-workflow-canvas .react-flow__minimap {
+  border: 1px solid var(--ah-workflow-border);
+  border-radius: 8px;
+  background: var(--ah-workflow-card-low);
+  box-shadow: var(--surface-shadow);
+}
+
+.ah-workflow-node {
+  width: 16.4rem;
+  min-height: 9rem;
+  border: 1px solid var(--ah-workflow-border-strong);
+  border-radius: 8px;
+  background: linear-gradient(180deg, var(--ah-workflow-card) 0%, var(--ah-workflow-card-low) 100%);
+  color: var(--ah-workflow-ink);
+  box-shadow: var(--surface-shadow);
+  padding: 0.78rem;
+}
+
+.ah-workflow-node-selected {
+  border-color: var(--ah-workflow-blue);
+  box-shadow:
+    0 0 0 3px color-mix(in oklab, var(--ah-workflow-blue) 14%, transparent),
+    var(--surface-shadow);
+}
+
+.ah-workflow-node-disabled {
+  opacity: 0.58;
+}
+
+.ah-workflow-node-note {
+  border-color: color-mix(in oklab, var(--warning, oklch(0.78 0.13 78)) 54%, var(--ah-workflow-border));
+  background: color-mix(in oklab, var(--warning-soft, oklch(0.91 0.08 78)) 38%, var(--ah-workflow-card) 62%);
+}
+
+.ah-workflow-node-status-running,
+.ah-workflow-node-status-queued,
+.ah-workflow-node-status-waiting {
+  border-color: color-mix(in oklab, var(--ah-workflow-blue) 48%, var(--ah-workflow-border));
+}
+
+.ah-workflow-node-status-completed {
+  border-color: color-mix(in oklab, var(--success) 48%, var(--ah-workflow-border));
+}
+
+.ah-workflow-node-status-failed {
+  border-color: color-mix(in oklab, var(--danger, oklch(0.58 0.19 28)) 48%, var(--ah-workflow-border));
+}
+
+.ah-workflow-node-top,
+.ah-workflow-node-foot {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.ah-workflow-node-title {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.86rem;
+  font-weight: 760;
+}
+
+.ah-workflow-node-dot {
+  width: 0.58rem;
+  height: 0.58rem;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--ah-workflow-blue);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ah-workflow-blue) 14%, transparent);
+}
+
+.ah-workflow-node-note .ah-workflow-node-dot {
+  background: var(--warning, oklch(0.78 0.13 78));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--warning, oklch(0.78 0.13 78)) 16%, transparent);
+}
+
+.ah-workflow-node-status-running .ah-workflow-node-dot,
+.ah-workflow-status-running {
+  background: var(--ah-workflow-blue);
+  color: white;
+}
+
+.ah-workflow-node-status-queued .ah-workflow-node-dot,
+.ah-workflow-node-status-waiting .ah-workflow-node-dot,
+.ah-workflow-status-queued,
+.ah-workflow-status-waiting,
+.ah-workflow-status-mailbox-created {
+  background: var(--accent-soft);
+  color: var(--accent-soft-foreground);
+}
+
+.ah-workflow-node-status-completed .ah-workflow-node-dot,
+.ah-workflow-status-completed,
+.ah-workflow-status-delivered {
+  background: var(--success-soft);
+  color: var(--success-soft-foreground);
+}
+
+.ah-workflow-node-status-failed .ah-workflow-node-dot,
+.ah-workflow-status-failed {
+  background: var(--danger-soft, color-mix(in oklab, oklch(0.58 0.19 28) 18%, transparent));
+  color: var(--danger-soft-foreground, oklch(0.38 0.13 28));
+}
+
+.ah-workflow-status-cancelled,
+.ah-workflow-status-skipped,
+.ah-workflow-status-disabled {
+  background: var(--default);
+  color: var(--muted);
+}
+
+.ah-workflow-node-status,
+.ah-workflow-node-foot span {
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-soft-foreground);
+  padding: 0.18rem 0.42rem;
+  font-size: 0.66rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.ah-workflow-node-role {
+  margin: 0;
+  color: var(--ah-workflow-muted);
+  letter-spacing: 0;
+}
+
+.ah-workflow-node-role {
+  margin-top: 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.ah-workflow-node-foot {
+  margin-top: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.ah-workflow-node-note .ah-workflow-node-foot {
+  display: none;
+}
+
+.ah-workflow-handle {
+  width: 0.62rem;
+  height: 0.62rem;
+  border: 2px solid var(--ah-workflow-card);
+  background: var(--ah-workflow-blue);
+}
+
+.ah-workflow-inspector {
+  min-width: 0;
+  overflow: auto;
+  background: var(--ah-workflow-panel-low);
+}
+
+.ah-workflow-inspector-content {
+  display: grid;
+  gap: 0.85rem;
+  padding: 1rem;
+}
+
+.ah-workflow-meta {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+}
+
+.ah-workflow-meta div,
+.ah-workflow-neighbors {
+  border: 1px solid var(--ah-workflow-border);
+  border-radius: 8px;
+  background: var(--ah-workflow-card);
+  padding: 0.68rem;
+}
+
+.ah-workflow-meta dt,
+.ah-workflow-neighbors h4 {
+  margin: 0 0 0.28rem;
+  color: var(--ah-workflow-muted);
+  font-size: 0.7rem;
+  font-weight: 760;
+  letter-spacing: 0;
+}
+
+.ah-workflow-meta dd,
+.ah-workflow-neighbors p {
+  margin: 0;
+  color: var(--ah-workflow-ink);
+  font-size: 0.8rem;
+  line-height: 1.25rem;
+}
+
+.ah-workflow-meta-context dd {
+  overflow-wrap: anywhere;
+}
+
+.ah-workflow-neighbor-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.ah-workflow-neighbor-list button {
+  border: 1px solid var(--ah-workflow-border-strong);
+  border-radius: 999px;
+  background: var(--ah-workflow-control);
+  color: var(--ah-workflow-blue-dark);
+  padding: 0.28rem 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.ah-workflow-field {
+  display: grid;
+  gap: 0.38rem;
+  border: 1px solid var(--ah-workflow-border);
+  border-radius: 8px;
+  background: var(--ah-workflow-card);
+  padding: 0.68rem;
+}
+
+.ah-workflow-field label,
+.ah-workflow-field > span {
+  color: var(--ah-workflow-muted);
+  font-size: 0.7rem;
+  font-weight: 760;
+  letter-spacing: 0;
+}
+
+.ah-workflow-select {
+  width: 100%;
+  min-height: 2.1rem;
+  border: 1px solid var(--field-border);
+  border-radius: 7px;
+  background: var(--field-background);
+  color: var(--ah-workflow-ink);
+  padding: 0.35rem 0.55rem;
+  font-size: 0.78rem;
+  font-weight: 650;
+  outline: none;
+}
+
+.ah-workflow-select:focus {
+  border-color: color-mix(in oklab, var(--ah-workflow-blue) 42%, var(--field-border));
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ah-workflow-blue) 12%, transparent);
+}
+
+.ah-workflow-select:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.ah-workflow-field-error {
+  margin: 0;
+  color: var(--danger, oklch(0.58 0.19 28));
+  font-size: 0.72rem;
+  line-height: 1.15rem;
+}
+
+.ah-workflow-empty-help {
+  border: 1px dashed var(--ah-workflow-border-strong);
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--ah-workflow-card) 72%, transparent);
+  color: var(--ah-workflow-muted);
+  padding: 0.85rem;
+  font-size: 0.8rem;
+  line-height: 1.3rem;
+}
+
+.ah-workflow-run-panel {
+  display: grid;
+  gap: 0.75rem;
+  border-top: 1px solid var(--ah-workflow-border);
+  padding: 1rem;
+}
+
+.ah-workflow-run-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.ah-workflow-run-grid div {
+  border: 1px solid var(--ah-workflow-border);
+  border-radius: 8px;
+  background: var(--ah-workflow-card);
+  padding: 0.58rem;
+}
+
+.ah-workflow-run-grid span,
+.ah-workflow-run-list p {
+  display: block;
+  color: var(--ah-workflow-muted);
+  font-size: 0.68rem;
+  font-weight: 720;
+}
+
+.ah-workflow-run-grid strong {
+  display: block;
+  margin-top: 0.18rem;
+  color: var(--ah-workflow-ink);
+  font-size: 0.86rem;
+}
+
+.ah-workflow-run-list {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.ah-workflow-run-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  border: 1px solid var(--ah-workflow-border);
+  border-radius: 8px;
+  background: var(--ah-workflow-card);
+  padding: 0.5rem 0.58rem;
+  color: var(--ah-workflow-ink);
+  font-size: 0.74rem;
+}
+
+.ah-workflow-run-row span {
+  display: grid;
+  gap: 0.14rem;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.ah-workflow-run-row small {
+  display: block;
+  overflow: hidden;
+  color: var(--ah-workflow-muted);
+  font-size: 0.68rem;
+  font-weight: 650;
+  line-height: 1rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ah-workflow-run-row strong {
+  flex: 0 0 auto;
+  font-size: 0.68rem;
+  text-transform: capitalize;
+}
+
+[data-theme="dark"] .ah-workflow-toolbar {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+[data-theme="dark"] .ah-workflow-button:hover,
+[data-theme="dark"] .ah-workflow-button:focus-visible {
+  background: color-mix(in oklab, var(--ah-workflow-control) 86%, white 6%);
+}
+
+@media (max-width: 980px) {
+  .ah-workflow-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ah-workflow-inspector {
+    display: none;
+  }
+
+  .ah-workflow-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .ah-workflow-runbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ah-workflow-run-actions {
+    justify-content: flex-start;
+  }
 }

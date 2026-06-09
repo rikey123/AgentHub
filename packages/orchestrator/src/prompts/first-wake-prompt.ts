@@ -50,12 +50,12 @@ export function buildFirstWakePrompt(
     )
     .all(roomId) as { agentId: string; role: string; name: string | null; adapterId: string | null; presence: string; capabilities: string | null }[];
 
-  const selfPersona = roomMode === "assisted" ? assistedParticipantPersona(db, roomId, agentId) : undefined;
+  const selfPersona = roomMode === "assisted" || roomId.startsWith("workflow:") ? boundParticipantPersona(db, roomId, agentId) : undefined;
   const agentName = selfPersona?.name ?? profile?.name ?? agentId;
   const basePrompt = selfPersona?.prompt?.trim() ?? profile?.role_prompt?.trim() ?? "";
   const others = participants.filter((p) => p.agentId !== agentId);
   const othersFormatted = others.map((p) => {
-    const persona = roomMode === "assisted" ? assistedParticipantPersona(db, roomId, p.agentId) : undefined;
+    const persona = roomMode === "assisted" ? boundParticipantPersona(db, roomId, p.agentId) : undefined;
     return {
       agentId: p.agentId,
       name: persona?.name ?? p.name ?? p.agentId,
@@ -65,6 +65,8 @@ export function buildFirstWakePrompt(
       capabilities: parseCapabilities(persona?.capabilities ?? p.capabilities),
     };
   });
+
+  if (roomId.startsWith("workflow:")) return basePrompt.length > 0 ? basePrompt : undefined;
 
   // In team/squad mode, use structured leader/teammate prompts.
   if (roomMode === "team" || roomMode === "squad") {
@@ -158,7 +160,7 @@ Every \`room.send_message\` wakes the recipient. Replying to non-task messages c
   return [roomMode === "assisted" ? identitySection : basePrompt, teammatesSection].filter((part) => part.trim().length > 0).join("\n\n");
 }
 
-function assistedParticipantPersona(db: DbLike, roomId: string, agentId: string): { readonly name: string; readonly prompt: string; readonly capabilities: string | null } | undefined {
+function boundParticipantPersona(db: DbLike, roomId: string, agentId: string): { readonly name: string; readonly prompt: string; readonly capabilities: string | null } | undefined {
   return db.sqlite
     .prepare(
       `SELECT r.name, r.prompt, r.capabilities

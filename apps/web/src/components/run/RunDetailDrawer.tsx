@@ -8,7 +8,7 @@ import { PermissionsTab } from "./tabs/PermissionsTab.tsx";
 import { ArtifactsTab } from "./tabs/ArtifactsTab.tsx";
 import { RawStreamTab } from "./tabs/RawStreamTab.tsx";
 import { CostTab } from "./tabs/CostTab.tsx";
-import { runStatusColor, taskStatusColor } from "../../lib/status.ts";
+import { runStatusColor, runStatusLabel, taskStatusColor, taskStatusLabel } from "../../lib/status.ts";
 import { formatDuration } from "../../lib/format.ts";
 
 interface RunDetailDrawerProps {
@@ -56,23 +56,23 @@ export function RunDetailDrawer(props: RunDetailDrawerProps) {
     <>
     <Drawer.Backdrop isOpen={props.isOpen} onOpenChange={props.onOpenChange}>
       <Drawer.Content placement="right">
-        <Drawer.Dialog className="w-[640px] max-w-[90vw]">
-          <Drawer.CloseTrigger aria-label="Close run detail" />
+        <Drawer.Dialog className="ah-run-detail-drawer w-[640px] max-w-[90vw]">
+          <Drawer.CloseTrigger aria-label="关闭运行详情" />
           <Drawer.Header>
-            <Drawer.Heading>{run?.agentName ?? "Run"} - {run?.status ?? "unknown"}</Drawer.Heading>
+            <Drawer.Heading>{run?.agentName ?? "运行"} - {run ? runStatusLabel(run.status) : "未知状态"}</Drawer.Heading>
             {run ? (
               <div className="mt-1 flex items-center gap-2 text-xs">
-                <Chip size="sm" variant="soft" color={runStatusColor(run.status)}>{run.status}</Chip>
-                <span className="text-muted">Duration: {duration}</span>
+                <Chip size="sm" variant="soft" color={runStatusColor(run.status)}>{runStatusLabel(run.status)}</Chip>
+                <span className="text-muted">耗时：{duration}</span>
                 <span className="ah-mono text-muted">{run.id.slice(0, 8)}</span>
               </div>
             ) : null}
           </Drawer.Header>
           <Drawer.Body className="p-0">
             {!runId ? (
-              <div className="p-6 text-center text-sm text-muted">No run selected.</div>
+              <div className="p-6 text-center text-sm text-muted">未选择运行。</div>
             ) : !room || !run ? (
-              <div className="flex flex-col gap-3 p-6" aria-label="Loading run">
+              <div className="flex flex-col gap-3 p-6" aria-label="正在加载运行">
                 <Skeleton className="h-4 w-2/3 rounded" />
                 <Skeleton className="h-4 w-1/2 rounded" />
                 <Skeleton className="h-4 w-3/4 rounded" />
@@ -80,15 +80,15 @@ export function RunDetailDrawer(props: RunDetailDrawerProps) {
             ) : (
               <div data-testid="run-detail-tabs" className="flex h-full min-h-0 flex-col">
                 <Tabs selectedKey={selectedTab} onSelectionChange={(key) => setSelectedTab(String(key))} className="flex h-full min-h-0 flex-col">
-                  <Tabs.ListContainer>
-                    <Tabs.List aria-label="Run detail">
-                      <Tabs.Tab id="transcript" data-testid="run-detail-tab-transcript">Transcript<Chip className="ml-1" size="sm" variant="soft" color="default">{transcriptCount}</Chip><Tabs.Indicator /></Tabs.Tab>
-                      <Tabs.Tab id="tools" data-testid="run-detail-tab-tools"><Tabs.Separator />Tools<Tabs.Indicator /></Tabs.Tab>
-                      <Tabs.Tab id="context" data-testid="run-detail-tab-context"><Tabs.Separator />Context<Chip className="ml-1" size="sm" variant="soft" color="default">{contextCount}</Chip><Tabs.Indicator /></Tabs.Tab>
-                      <Tabs.Tab id="perms" data-testid="run-detail-tab-permissions"><Tabs.Separator />Permissions<Chip className="ml-1" size="sm" variant="soft" color="default">{permissionCount}</Chip><Tabs.Indicator /></Tabs.Tab>
-                      <Tabs.Tab id="artifacts" data-testid="run-detail-tab-artifacts"><Tabs.Separator />Artifacts<Tabs.Indicator /></Tabs.Tab>
-                      <Tabs.Tab id="raw" data-testid="run-detail-tab-raw"><Tabs.Separator />Raw<Tabs.Indicator /></Tabs.Tab>
-                      <Tabs.Tab id="cost" data-testid="run-detail-tab-cost"><Tabs.Separator />Cost<Tabs.Indicator /></Tabs.Tab>
+                  <Tabs.ListContainer className="ah-run-detail-tabs-wrap">
+                    <Tabs.List aria-label="运行详情" className="ah-run-detail-tabs">
+                      <Tabs.Tab className="ah-run-detail-tab" id="transcript" data-testid="run-detail-tab-transcript">转录<Chip className="ml-1" size="sm" variant="soft" color="default">{transcriptCount}</Chip><Tabs.Indicator /></Tabs.Tab>
+                      <Tabs.Tab className="ah-run-detail-tab" id="tools" data-testid="run-detail-tab-tools">工具<Tabs.Indicator /></Tabs.Tab>
+                      <Tabs.Tab className="ah-run-detail-tab" id="context" data-testid="run-detail-tab-context">上下文<Chip className="ml-1" size="sm" variant="soft" color="default">{contextCount}</Chip><Tabs.Indicator /></Tabs.Tab>
+                      <Tabs.Tab className="ah-run-detail-tab" id="perms" data-testid="run-detail-tab-permissions">许可<Chip className="ml-1" size="sm" variant="soft" color="default">{permissionCount}</Chip><Tabs.Indicator /></Tabs.Tab>
+                      <Tabs.Tab className="ah-run-detail-tab" id="artifacts" data-testid="run-detail-tab-artifacts">产物<Tabs.Indicator /></Tabs.Tab>
+                      <Tabs.Tab className="ah-run-detail-tab" id="raw" data-testid="run-detail-tab-raw">原始<Tabs.Indicator /></Tabs.Tab>
+                      <Tabs.Tab className="ah-run-detail-tab" id="cost" data-testid="run-detail-tab-cost">成本<Tabs.Indicator /></Tabs.Tab>
                     </Tabs.List>
                   </Tabs.ListContainer>
                   <ScrollShadow className="flex-1 min-h-0 overflow-auto" orientation="vertical">
@@ -171,12 +171,12 @@ function TaskDetailDrawer({ task, isOpen, onOpenChange }: { task?: TaskViewModel
     <Drawer.Backdrop isOpen={isOpen} onOpenChange={onOpenChange}>
       <Drawer.Content placement="right">
         <Drawer.Dialog className="w-[420px] max-w-[88vw]">
-          <Drawer.CloseTrigger aria-label="Close task detail" />
+          <Drawer.CloseTrigger aria-label="关闭任务详情" />
           <Drawer.Header>
-            <Drawer.Heading>{task?.title ?? "Task"}</Drawer.Heading>
+            <Drawer.Heading>{task?.title ?? "任务"}</Drawer.Heading>
             {task ? (
               <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
-                <Chip size="sm" variant="soft" color={taskStatusColor(task.status)}>{task.status}</Chip>
+                <Chip size="sm" variant="soft" color={taskStatusColor(task.status)}>{taskStatusLabel(task.status)}</Chip>
                 {task.priority ? <Chip size="sm" variant="soft" color="default">{task.priority}</Chip> : null}
                 <span className="ah-mono text-muted">{task.id}</span>
               </div>
@@ -185,13 +185,13 @@ function TaskDetailDrawer({ task, isOpen, onOpenChange }: { task?: TaskViewModel
           <Drawer.Body>
             {task ? (
               <div data-testid="task-detail-drawer" className="flex flex-col gap-3 text-sm">
-                {task.description ? <p className="whitespace-pre-wrap text-muted">{task.description}</p> : <p className="text-muted">No description.</p>}
+                {task.description ? <p className="whitespace-pre-wrap text-muted">{task.description}</p> : <p className="text-muted">暂无描述。</p>}
                 <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-xs">
-                  <dt className="font-semibold text-muted">Assignee</dt>
-                  <dd>{task.assigneeAgentId ?? task.assigneeRoleId ?? "Unassigned"}</dd>
-                  <dt className="font-semibold text-muted">Parent task</dt>
+                  <dt className="font-semibold text-muted">负责人</dt>
+                  <dd>{task.assigneeAgentId ?? task.assigneeRoleId ?? "未分配"}</dd>
+                  <dt className="font-semibold text-muted">父任务</dt>
                   <dd className="ah-mono">{task.parentTaskId ?? "-"}</dd>
-                  <dt className="font-semibold text-muted">Source run</dt>
+                  <dt className="font-semibold text-muted">来源运行</dt>
                   <dd className="ah-mono">{task.sourceRunId ?? "-"}</dd>
                 </dl>
               </div>

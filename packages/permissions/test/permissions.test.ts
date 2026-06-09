@@ -6,7 +6,7 @@ import { EventBus } from "@agenthub/bus";
 import { createDatabase, type AgentHubDatabase } from "@agenthub/db";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { PermissionEngine, seedBuiltInPermissionProfiles } from "../src/index.ts";
+import { ALLOW_ALL_LOCAL_PROFILE_ID, PermissionEngine, permissionSettings, seedBuiltInPermissionProfiles } from "../src/index.ts";
 
 let dir: string | undefined;
 let database: AgentHubDatabase | undefined;
@@ -38,10 +38,23 @@ afterEach(() => {
 
 describe("PermissionEngine", () => {
   it("seeds built-in templates and allows read-only reads while denying writes", () => {
-    expect(currentDb().sqlite.prepare("SELECT id FROM permission_profiles ORDER BY id ASC").all().map((row) => (row as { id: string }).id)).toEqual(["builder-loose", "builder-strict", "read-only"]);
+    expect(currentDb().sqlite.prepare("SELECT id FROM permission_profiles ORDER BY id ASC").all().map((row) => (row as { id: string }).id)).toEqual(["allow-all-local", "builder-loose", "builder-strict", "read-only"]);
 
     expect(currentEngine().check({ workspaceId: "ws_1", profileId: "read-only", resource: { type: "file", path: "README.md", operation: "read" } })).toMatchObject({ status: "allow" });
     expect(currentEngine().check({ workspaceId: "ws_1", profileId: "read-only", resource: { type: "file", path: "src/a.ts", operation: "write" } })).toMatchObject({ status: "deny", reason: "file.write" });
+  });
+
+  it("uses the globally selected allow-all profile for checks without an explicit profile id", () => {
+    expect(permissionSettings(currentDb())).toEqual({ defaultProfileId: "builder-strict", allowAllEnabled: false });
+    expect(currentEngine().check({ workspaceId: "ws_1", resource: { type: "shell", command: "npm install" } })).toMatchObject({ status: "ask" });
+
+    currentDb().sqlite.prepare("UPDATE permission_settings SET value = ? WHERE key = 'default_profile_id'").run(ALLOW_ALL_LOCAL_PROFILE_ID);
+
+    expect(permissionSettings(currentDb())).toEqual({ defaultProfileId: ALLOW_ALL_LOCAL_PROFILE_ID, allowAllEnabled: true });
+    expect(currentEngine().check({ workspaceId: "ws_1", resource: { type: "file", path: "src/a.ts", operation: "write" } })).toMatchObject({ status: "allow", reason: "file.write" });
+    expect(currentEngine().check({ workspaceId: "ws_1", resource: { type: "shell", command: "rm -rf dist" } })).toMatchObject({ status: "allow", reason: "shell.*" });
+    expect(currentEngine().check({ workspaceId: "ws_1", resource: { type: "context", operation: "memoryWrite" } })).toMatchObject({ status: "allow", reason: "context.memoryWrite" });
+    expect(currentEngine().check({ workspaceId: "ws_1", resource: { type: "tool", toolName: "WebFetch" } })).toMatchObject({ status: "allow", reason: "tool.WebFetch" });
   });
 
   it("denies sensitive files before ask and asks for external directories", () => {

@@ -26,8 +26,11 @@ describe("MessageItem public chat rendering", () => {
       csrfFetch: vi.fn<typeof fetch>()
     }));
 
-    expect(html).toContain("展开全文");
-    expect(html).toContain("长回复");
+    expect(html).toContain("data-testid=\"long-message-disclosure\"");
+    expect(html).toContain("aria-expanded=\"false\"");
+    expect(html).toContain("长回复 · 已折叠");
+    expect(html).toContain(">展开<");
+    expect(html).not.toContain("展开全文");
     expect(html).toContain("Here is the full platform architecture review.");
     expect(html).not.toContain("Section five explains roadmap and implementation sequencing in detail.");
   });
@@ -52,6 +55,32 @@ describe("MessageItem public chat rendering", () => {
 
     expect(html).not.toContain("展开全文");
     expect(html).toContain("The final sentence should still render.");
+  });
+
+  it("keeps run details as a secondary action in the long reply disclosure", () => {
+    const longText = [
+      "Here is the full platform architecture review.",
+      "Section one explains the control plane in detail.",
+      "Section two explains the execution plane in detail.",
+      "Section three explains the data plane in detail.",
+      "Section four explains governance and observability in detail."
+    ].join("\n\n");
+
+    const html = renderToStaticMarkup(createElement(MessageItem, {
+      message: messageFixture({
+        senderType: "agent",
+        senderName: "Builder",
+        text: longText,
+        status: "completed",
+        runId: "run_1"
+      }),
+      onOpenRun: vi.fn(),
+      csrfFetch: vi.fn<typeof fetch>()
+    }));
+
+    expect(html).toContain("data-testid=\"long-message-run-details\"");
+    expect(html).toContain(">运行详情<");
+    expect(html).not.toContain(">打开运行详情<");
   });
 
   it("renders agent messages with a visible group-chat speaker badge", () => {
@@ -93,7 +122,8 @@ describe("MessageItem public chat rendering", () => {
     expect(html).toContain("multi-agent-platform-architecture.md");
     expect(html).toContain("Markdown");
     expect(html).toContain("4.0 KB");
-    expect(html).toContain("Open file preview");
+    expect(html).toContain("打开文件预览");
+    expect(html).toContain(">打开<");
   });
 
   it("renders a Copy Code action for code parts", () => {
@@ -106,13 +136,13 @@ describe("MessageItem public chat rendering", () => {
     }));
 
     expect(html).toContain("const apiBase = &#x27;/api/v2&#x27;;");
-    expect(html).toContain("Copy Code");
-    expect(html).toContain("Copy code block");
+    expect(html).toContain("复制代码");
+    expect(html).toContain("复制代码块");
   });
 
   it("matches the spec label while a code block copy is confirmed", () => {
-    expect(copyCodeButtonLabel(true)).toBe("Copied ✓");
-    expect(copyCodeButtonLabel(false)).toBe("Copy Code");
+    expect(copyCodeButtonLabel(true)).toBe("已复制");
+    expect(copyCodeButtonLabel(false)).toBe("复制代码");
   });
 
   it("renders Markdown fenced code blocks with Copy Code actions", () => {
@@ -133,8 +163,8 @@ describe("MessageItem public chat rendering", () => {
 
     expect(html).toContain("Use this endpoint:");
     expect(html).toContain("const apiBase = &#x27;/api/v2&#x27;;");
-    expect(html).toContain("Copy Code");
-    expect(html).toContain("Copy code block");
+    expect(html).toContain("复制代码");
+    expect(html).toContain("复制代码块");
     expect(html).not.toContain("```ts");
   });
 
@@ -157,7 +187,7 @@ describe("MessageItem public chat rendering", () => {
       csrfFetch: vi.fn<typeof fetch>()
     }));
 
-    expect(html).toContain("Copy Code");
+    expect(html).toContain("复制代码");
     expect(html).not.toContain("role=\"button\"");
   });
 
