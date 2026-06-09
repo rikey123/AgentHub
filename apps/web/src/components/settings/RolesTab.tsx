@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Button, Card, Checkbox, Chip, Input, Label, Modal, TextArea, TextField } from "@heroui/react";
 import { RoleGeneratorModal } from "./RoleGeneratorModal.tsx";
+import { roleDisplayDescription, roleDisplayName } from "../../lib/roles.ts";
 
 export interface RoleConfig {
   id: string;
@@ -97,7 +98,7 @@ export function RolesTab({ roles: initialRoles, modelConfigs, fetchImpl = fetch,
   const saveRole = async () => {
     const input = inputFromDraft(draft);
     if (!input.name) {
-      setError("Role name is required.");
+      setError("角色名称不能为空。");
       return;
     }
 
@@ -112,7 +113,7 @@ export function RolesTab({ roles: initialRoles, modelConfigs, fetchImpl = fetch,
       setMode("edit");
       setSelectedId(saved.id);
       setDraft(draftFromRole(saved));
-      setMessage(mode === "edit" ? "Role saved." : "Role created.");
+      setMessage(mode === "edit" ? "角色已保存。" : "角色已创建。");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -133,7 +134,7 @@ export function RolesTab({ roles: initialRoles, modelConfigs, fetchImpl = fetch,
       setSelectedId(nextRoles[0]?.id);
       setMode("create");
       setDraft(emptyDraft());
-      setMessage("Role deleted.");
+      setMessage("角色已删除。");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setDeleteTarget(undefined);
@@ -143,48 +144,54 @@ export function RolesTab({ roles: initialRoles, modelConfigs, fetchImpl = fetch,
   };
 
   return (
-    <section className="grid gap-4 p-5" data-testid="settings-panel-roles">
+    <section className="grid gap-4 p-5 ah-roles-settings" data-testid="settings-panel-roles">
       <div className="grid gap-4 lg:grid-cols-[minmax(280px,0.9fr)_minmax(360px,1.2fr)]">
-        <Card variant="default" className="border border-border bg-overlay">
-          <Card.Header>
+        <Card variant="default" className="ah-roles-list-panel">
+          <Card.Header className="ah-roles-list-header">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <Card.Title>Roles</Card.Title>
-                <Card.Description>Role templates and editable agent responsibilities.</Card.Description>
+                <Card.Title>角色</Card.Title>
+                <Card.Description>角色模板和可编辑的 agent 职责。</Card.Description>
               </div>
               <div className="flex flex-wrap justify-end gap-2">
                 <Button size="sm" variant="secondary" onPress={() => setGeneratorOpen(true)} data-testid="roles-generate-ai">
-                  Generate with AI
+                  用 AI 生成
                 </Button>
                 <Button size="sm" variant="primary" onPress={startCreate} data-testid="roles-new-role">
-                  New Role
+                  新建角色
                 </Button>
               </div>
             </div>
           </Card.Header>
           <Card.Content>
             {roles.length === 0 ? (
-              <div className="rounded-2xl border border-dashed border-border bg-surface p-4 text-sm text-muted">
-                No roles returned from <code className="ah-mono">/roles</code> yet.
+              <div className="ah-roles-empty">
+                尚未从 <code className="ah-mono">/roles</code> 返回角色。
               </div>
             ) : (
-              <ul className="flex max-h-[52vh] flex-col gap-2 overflow-auto pr-1" aria-label="Roles">
+              <ul className="ah-roles-list" aria-label="角色">
                 {roles.map((role) => (
                   <li key={role.id}>
-                    <Card variant={mode === "edit" && selectedId === role.id ? "secondary" : "transparent"} className="border border-border">
+                    <Card
+                      variant={mode === "edit" && selectedId === role.id ? "secondary" : "transparent"}
+                      className={[
+                        "ah-role-list-card",
+                        mode === "edit" && selectedId === role.id ? "ah-role-list-card-selected" : ""
+                      ].join(" ")}
+                    >
                       <Card.Header>
                         <div className="min-w-0">
                           <div className="flex min-w-0 items-center gap-2">
-                            <Card.Title className="truncate text-sm">{role.name}</Card.Title>
-                            {role.is_builtin ? <Chip size="sm" variant="soft" color="accent">builtin</Chip> : null}
+                            <Card.Title className="truncate text-sm">{roleDisplayName(role.name)}</Card.Title>
+                            {role.is_builtin ? <Chip size="sm" variant="soft" color="accent">内置</Chip> : null}
                           </div>
                           <Card.Description className="line-clamp-2 text-xs">
-                            {role.description || "No description."}
+                            {roleDisplayDescription(role) || "暂无描述。"}
                           </Card.Description>
                         </div>
                       </Card.Header>
-                      <Card.Footer className="gap-2">
-                        <Button size="sm" variant="secondary" onPress={() => startEdit(role)} data-testid={`roles-edit-${role.id}`}>Edit</Button>
+                      <Card.Footer className="ah-role-list-actions">
+                        <Button size="sm" variant="secondary" onPress={() => startEdit(role)} data-testid={`roles-edit-${role.id}`}>编辑</Button>
                         <Button
                           size="sm"
                           variant="danger"
@@ -192,7 +199,7 @@ export function RolesTab({ roles: initialRoles, modelConfigs, fetchImpl = fetch,
                           onPress={() => setDeleteTarget(role)}
                           data-testid={`roles-delete-${role.id}`}
                         >
-                          Delete
+                          删除
                         </Button>
                       </Card.Footer>
                     </Card>
@@ -207,8 +214,8 @@ export function RolesTab({ roles: initialRoles, modelConfigs, fetchImpl = fetch,
           <Card.Header>
             <div className="flex items-start justify-between gap-3">
               <div>
-                <Card.Title>{mode === "edit" && selectedRole ? `Edit ${selectedRole.name}` : "Create role"}</Card.Title>
-                <Card.Description>Save with REST; no SSE subscription is attached.</Card.Description>
+                <Card.Title>{mode === "edit" && selectedRole ? `编辑 ${roleDisplayName(selectedRole.name)}` : "创建角色"}</Card.Title>
+                <Card.Description>通过 REST 保存；不附加 SSE 订阅。</Card.Description>
               </div>
               <Chip size="sm" variant="soft" color={mode === "edit" ? "accent" : "success"}>{mode === "edit" ? "PATCH" : "POST"}</Chip>
             </div>
@@ -221,22 +228,22 @@ export function RolesTab({ roles: initialRoles, modelConfigs, fetchImpl = fetch,
             ) : null}
 
             <TextField value={draft.name} onChange={(value) => setDraft((current) => ({ ...current, name: value }))}>
-              <Label className="text-sm font-semibold">Name</Label>
-              <Input placeholder="e.g. Release reviewer" data-testid="roles-name-input" />
+              <Label className="text-sm font-semibold">名称</Label>
+              <Input placeholder="例如：发布评审员" data-testid="roles-name-input" />
             </TextField>
 
             <TextField value={draft.description} onChange={(value) => setDraft((current) => ({ ...current, description: value }))}>
-              <Label className="text-sm font-semibold">Description</Label>
-              <Input placeholder="Short summary for the role list" data-testid="roles-description-input" />
+              <Label className="text-sm font-semibold">描述</Label>
+              <Input placeholder="角色列表中的简短说明" data-testid="roles-description-input" />
             </TextField>
 
             <TextField value={draft.prompt} onChange={(value) => setDraft((current) => ({ ...current, prompt: value }))}>
               <Label className="text-sm font-semibold">Prompt</Label>
-              <TextArea className="min-h-44" placeholder="Describe the role behavior and responsibilities" data-testid="roles-prompt-input" />
+              <TextArea className="min-h-44" placeholder="描述这个角色的行为方式和职责" data-testid="roles-prompt-input" />
             </TextField>
 
             <div className="grid gap-2">
-              <Label className="text-sm font-semibold">Capabilities</Label>
+              <Label className="text-sm font-semibold">能力</Label>
               <div className="grid gap-2 rounded-2xl border border-border bg-surface p-3 sm:grid-cols-2" data-testid="roles-capabilities-input">
                 {WELL_KNOWN_CAPABILITY_TOKENS.map((token) => {
                   const selected = parseCapabilities(draft.capabilitiesText).includes(token);
@@ -264,15 +271,15 @@ export function RolesTab({ roles: initialRoles, modelConfigs, fetchImpl = fetch,
 
             <div className="flex flex-wrap gap-1">
               {parseCapabilities(draft.capabilitiesText).length === 0 ? (
-                <Chip size="sm" variant="soft" color="default">no capabilities</Chip>
+                <Chip size="sm" variant="soft" color="default">暂无能力</Chip>
               ) : parseCapabilities(draft.capabilitiesText).map((capability) => (
                 <Chip key={capability} size="sm" variant="soft" color="default">{capability}</Chip>
               ))}
             </div>
           </Card.Content>
           <Card.Footer className="flex-wrap gap-2">
-            <Button variant="primary" isPending={saving} onPress={saveRole} data-testid="roles-save">Save</Button>
-            {mode === "edit" ? <Button variant="secondary" onPress={startCreate} data-testid="roles-new-draft">New draft</Button> : null}
+            <Button variant="primary" isPending={saving} onPress={saveRole} data-testid="roles-save">保存</Button>
+            {mode === "edit" ? <Button variant="secondary" onPress={startCreate} data-testid="roles-new-draft">新建草稿</Button> : null}
             {message ? <span className="text-xs text-success" role="status">{message}</span> : null}
             {error ? <span className="text-xs text-danger" role="alert">{error}</span> : null}
           </Card.Footer>
@@ -281,19 +288,19 @@ export function RolesTab({ roles: initialRoles, modelConfigs, fetchImpl = fetch,
 
       <Modal.Backdrop isOpen={Boolean(deleteTarget)} onOpenChange={(open) => { if (!open) setDeleteTarget(undefined); }}>
         <Modal.Container size="md">
-          <Modal.Dialog aria-label="Delete role confirmation" data-testid="roles-delete-confirmation">
-            <Modal.CloseTrigger aria-label="Close delete role confirmation" />
+          <Modal.Dialog aria-label="删除角色确认" data-testid="roles-delete-confirmation">
+            <Modal.CloseTrigger aria-label="关闭删除角色确认" />
             <Modal.Header>
-              <Modal.Heading>Delete role</Modal.Heading>
+              <Modal.Heading>删除角色</Modal.Heading>
             </Modal.Header>
             <Modal.Body>
               <p className="text-sm text-muted">
-                Delete <span className="font-semibold text-foreground">{deleteTarget?.name}</span>? The daemon rejects this when agent bindings still reference the role.
+                确认删除 <span className="font-semibold text-foreground">{deleteTarget?.name}</span>？如果仍有 agent bindings 引用该角色，daemon 会拒绝删除。
               </p>
             </Modal.Body>
             <Modal.Footer className="gap-2">
-              <Button variant="secondary" onPress={() => setDeleteTarget(undefined)}>Cancel</Button>
-              <Button variant="danger" isPending={deleting} onPress={confirmDelete} data-testid="roles-confirm-delete">Delete</Button>
+              <Button variant="secondary" onPress={() => setDeleteTarget(undefined)}>取消</Button>
+              <Button variant="danger" isPending={deleting} onPress={confirmDelete} data-testid="roles-confirm-delete">删除</Button>
             </Modal.Footer>
           </Modal.Dialog>
         </Modal.Container>
@@ -313,7 +320,7 @@ export function RolesTab({ roles: initialRoles, modelConfigs, fetchImpl = fetch,
             setSelectedId(saved.id);
             setDraft(draftFromRole(saved));
           }
-          setMessage("Role created.");
+          setMessage("角色已创建。");
         }}
       />
     </section>
@@ -343,7 +350,7 @@ export async function deleteRole(fetchImpl: typeof fetch, id: string): Promise<v
     credentials: "same-origin",
     headers: { accept: "application/json" }
   });
-  if (!response.ok) throw await roleApiError(response, "Delete role failed");
+  if (!response.ok) throw await roleApiError(response, "删除角色失败");
 }
 
 export function upsertRole(roles: ReadonlyArray<RoleConfig>, role: RoleConfig): RoleConfig[] {
@@ -394,9 +401,9 @@ async function writeRole(fetchImpl: typeof fetch, path: string, method: "POST" |
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify(input)
   });
-  if (!response.ok) throw await roleApiError(response, `${method} role failed`);
+  if (!response.ok) throw await roleApiError(response, "保存角色失败");
   const role = normalizeRole(await response.json());
-  if (!role) throw new RoleApiError("Role response did not include a role.", response.status, undefined);
+  if (!role) throw new RoleApiError("角色响应中没有包含角色。", response.status, undefined);
   return role;
 }
 
@@ -406,8 +413,8 @@ async function roleApiError(response: Response, fallback: string): Promise<RoleA
     const bindingCount = typeof payload.bindingCount === "number" ? payload.bindingCount : undefined;
     return new RoleApiError(
       bindingCount === undefined
-        ? "Role has agent bindings; remove bindings before deleting."
-        : `Role has ${bindingCount} agent binding${bindingCount === 1 ? "" : "s"}; remove bindings before deleting.`,
+        ? "该角色仍有关联的 agent bindings；请先移除 bindings 再删除。"
+        : `该角色仍有关联的 ${bindingCount} 个 agent bindings；请先移除 bindings 再删除。`,
       response.status,
       payload
     );

@@ -89,7 +89,7 @@ vi.mock("./components/CommandPalette.tsx", () => ({ CommandPalette: mocks.comman
 vi.mock("./components/KeymapModal.tsx", () => ({ KeymapModal: () => null }));
 vi.mock("./components/NewRoomDialog.tsx", () => ({ NewRoomDialog: mocks.newRoomDialog }));
 
-import App, { ChatRoomLayout, createRoomInputForContactStartChat, draftWithArtifactReference, draftWithQuotedMessage, draftWithQuotedText, messagePayloadForSendInput, messagePinRequestFor, replyPreviewForMessage, roomPinRequestFor, workbenchCenterModeForRail, workbenchNavigationForRoomOpen } from "./App.tsx";
+import App, { ChatRoomLayout, createRoomInputForContactStartChat, draftWithArtifactReference, draftWithQuotedMessage, draftWithQuotedText, mergeContextItemsWithOverlay, messagePayloadForSendInput, messagePinRequestFor, replyPreviewForMessage, roomPinRequestFor, workbenchCenterModeForRail, workbenchNavigationForRoomOpen } from "./App.tsx";
 
 function renderApp() {
   mocks.stateIndex = 0;
@@ -309,6 +309,37 @@ describe("App integration wiring", () => {
       text: "Please inspect @artifact:artifact_1#L2-L3",
       composerRef: { type: "artifact", artifactId: "artifact_1", lineStart: 2, lineEnd: 3 }
     });
+  });
+
+  it("merges loaded context overlay without hiding live projector updates", () => {
+    const overlayDraft = {
+      id: "ctx_1",
+      title: "旧草稿",
+      content: "from rest",
+      status: "draft" as const,
+      scope: "conversation",
+      pinned: false
+    };
+    const liveConfirmed = {
+      ...overlayDraft,
+      title: "已确认事实",
+      content: "from live event",
+      status: "confirmed" as const,
+      pinned: true
+    };
+    const liveOnly = {
+      id: "ctx_2",
+      title: "实时新增",
+      content: "added by SSE",
+      status: "draft" as const,
+      scope: "conversation",
+      pinned: false
+    };
+
+    expect(mergeContextItemsWithOverlay([liveConfirmed, liveOnly], [overlayDraft])).toEqual([
+      liveConfirmed,
+      liveOnly
+    ]);
   });
 
   it("maps contacts and artifacts rail selection to dedicated center views", () => {

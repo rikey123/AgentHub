@@ -154,17 +154,17 @@ export function RuntimesTab({ data, fetchImpl = fetch, onChange }: RuntimesTabPr
       <div className="rounded-2xl border border-border bg-overlay p-4 shadow-sm">
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
-            <h3 className="text-sm font-semibold">Runtimes</h3>
-            <p className="mt-1 text-xs text-muted">Local runtime detection and custom ACP command configuration.</p>
+            <h3 className="text-sm font-semibold">runtimes</h3>
+            <p className="mt-1 text-xs text-muted">本地 runtime 检测和自定义 ACP 命令配置。</p>
           </div>
           <Button variant="primary" size="sm" onPress={addCustomRuntime} data-testid="runtime-add-custom">
-            Add Custom ACP
+            添加自定义 ACP
           </Button>
         </div>
 
         {runtimes.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-border bg-surface p-4 text-sm text-muted">
-            No runtimes are registered yet. Add a custom ACP runtime or restart the daemon to seed native runtime detection.
+            暂无已注册的 runtimes。添加自定义 ACP runtime，或重启 daemon 初始化 native runtime 检测。
           </div>
         ) : (
           <div className="grid gap-3 md:grid-cols-2">
@@ -236,17 +236,17 @@ export function RuntimesTab({ data, fetchImpl = fetch, onChange }: RuntimesTabPr
 
                       {testResult ? (
                         <div className={`rounded-2xl border p-3 text-xs ${testResult.ok ? "border-success/40 bg-success-soft text-success-soft-foreground" : "border-danger/40 bg-surface text-danger"}`} data-testid={`runtime-test-result-${runtime.id}`}>
-                          {testResult.ok ? `Connected${testResult.version ? ` (v${testResult.version})` : ""}` : testResult.error ?? "Runtime test failed"}
+                          {testResult.ok ? `已连接${testResult.version ? ` (v${testResult.version})` : ""}` : runtimeErrorLabel(testResult.error) ?? "runtime 测试失败"}
                         </div>
                       ) : null}
-                      {errors[runtime.id] ? <p className="text-xs text-danger" role="alert">{errors[runtime.id]}</p> : null}
+                      {errors[runtime.id] ? <p className="text-xs text-danger" role="alert">{runtimeErrorLabel(errors[runtime.id])}</p> : null}
                     </Card.Content>
                   ) : null}
 
                   <Card.Footer className="flex flex-wrap gap-2">
                     <Button size="sm" variant="secondary" onPress={() => testRuntime(runtime)} isPending={testingId === runtime.id}>
                       {testingId === runtime.id ? <Spinner size="sm" /> : null}
-                      Test Connection
+                      测试连接
                     </Button>
                     {editable ? (
                       <>
@@ -376,9 +376,18 @@ function runtimeStatusColor(status: RuntimeStatus): ChipColor {
 }
 
 function runtimeStatusLabel(status: RuntimeStatus, version: string, result: RuntimeTestResult | undefined): string {
-  if (status === "connected") return `Connected (v${result?.version ?? version})`;
-  if (status === "error") return result?.error ?? "Detection failed";
-  return "Ready to test";
+  if (status === "connected") return `已连接 (v${result?.version ?? version})`;
+  if (status === "error") return runtimeErrorLabel(result?.error) ?? "检测失败";
+  return "待测试";
+}
+
+function runtimeErrorLabel(error: string | undefined): string | undefined {
+  if (error === undefined || error.length === 0) return undefined;
+  const normalized = error.trim().toLowerCase();
+  if (normalized === "binary not found") return "未找到可执行文件";
+  if (normalized === "detection failed") return "检测失败";
+  if (normalized === "runtime test failed") return "runtime 测试失败";
+  return error;
 }
 
 function isExperimentalRuntime(runtime: RuntimeConfig): boolean {

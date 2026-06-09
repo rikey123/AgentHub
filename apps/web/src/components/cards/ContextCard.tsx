@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Button, Card, Chip } from "@heroui/react";
 import type { Card as ProtocolCard } from "@agenthub/protocol/domains";
 import { contextStatusColor } from "../../lib/status.ts";
+import { contextStatusLabel } from "../../lib/contextLabels.ts";
 
 type ContextCardData = Extract<ProtocolCard, { type: "context" }>;
 
@@ -38,7 +39,7 @@ export function ContextCard({ card, csrfFetch }: ContextCardProps) {
         <div className="flex items-center gap-2">
           <Card.Title className="flex-1 truncate">{card.title}</Card.Title>
           <Chip size="sm" variant="soft" color={contextStatusColor(String(card.status))}>
-            {String(card.status)}
+            {contextStatusLabel(String(card.status))}
           </Chip>
         </div>
         <Card.Description>{card.summary}</Card.Description>
@@ -46,8 +47,8 @@ export function ContextCard({ card, csrfFetch }: ContextCardProps) {
       {error ? <Card.Content><p className="text-xs text-danger">{error}</p></Card.Content> : null}
       {isDraft ? (
         <Card.Footer className="gap-2">
-          <Button variant="primary" isPending={pending === "confirm"} onPress={() => act("confirm")}>Confirm</Button>
-          <Button variant="tertiary" isPending={pending === "discard"} onPress={() => act("deprecate")}>Discard</Button>
+          <Button variant="primary" isPending={pending === "confirm"} onPress={() => act("confirm")}>确认</Button>
+          <Button variant="tertiary" isPending={pending === "discard"} onPress={() => act("deprecate")}>作废</Button>
         </Card.Footer>
       ) : null}
     </Card>

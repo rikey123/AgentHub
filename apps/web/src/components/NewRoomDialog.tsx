@@ -16,6 +16,8 @@ import {
 import { useRoomCreationOptions, type AgentBindingSummary } from "../hooks/useRoomCreationOptions.ts";
 import type { AgentContactViewModel } from "../types.ts";
 import { normalizeAgentContacts } from "./rail/RailViews.tsx";
+import { roleDisplayText } from "../lib/roles.ts";
+import { skillDisplayDescription, skillDisplayName, skillOriginColor, skillOriginLabel } from "../lib/skills.ts";
 
 export type RoomMode = "solo" | "assisted" | "squad" | "team";
 export type RoomParticipantRole = "observer" | "reviewer" | "specialist";
@@ -277,35 +279,6 @@ function roleBadge(capabilities: readonly string[]): string {
   if (capabilities.includes("code.review")) return "review";
   if (capabilities.includes("code.edit")) return "builder";
   return "role";
-}
-
-const ROLE_DISPLAY_TEXT: Record<string, { title: string; description: string }> = {
-  Archivist: {
-    title: "归档员",
-    description: "归档上下文，并产出已确认的摘要。"
-  },
-  Builder: {
-    title: "构建者",
-    description: "通用代码构建者。"
-  },
-  Generalist: {
-    title: "通用助手",
-    description: "没有特定专长方向的通用助手。"
-  },
-  "Project Manager": {
-    title: "项目经理",
-    description: "将工作拆分为任务，并把执行路由给合适的 agents。"
-  },
-  Reviewer: {
-    title: "评审员",
-    description: "审查代码，并可通过干预反馈发起提醒。"
-  }
-};
-
-function roleDisplayText(role: { name: string; description?: string | undefined }): { title: string; description?: string | undefined } {
-  const mapped = ROLE_DISPLAY_TEXT[role.name];
-  if (mapped) return mapped;
-  return { title: role.name, description: role.description };
 }
 
 function roleOptions(roles: readonly { id: string; name: string; description?: string; capabilities: string[] }[]): SelectOption[] {
@@ -785,22 +758,6 @@ function normalizeWorkspaceSkills(payload: unknown): WorkspaceSkillSummary[] {
       origin: typeof record.origin === "string" ? record.origin : "workspace"
     }];
   }).sort((a, b) => a.name.localeCompare(b.name));
-}
-
-function skillOriginColor(origin: string): "default" | "accent" | "success" | "warning" | "danger" {
-  if (origin === "builtin") return "accent";
-  if (origin === "workspace") return "success";
-  if (origin === "imported") return "warning";
-  return "default";
-}
-
-const SKILL_DESCRIPTION_TEXT: Record<string, string> = {
-  "skill-creator": "帮助用户按标准 SKILL.md 格式创建新的 skills。",
-  "task-planner": "帮助 agents 将复杂工作拆解为边界清晰、依赖明确、可分配的任务。"
-};
-
-function skillDescription(skill: WorkspaceSkillSummary): string {
-  return SKILL_DESCRIPTION_TEXT[skill.name] ?? skill.description;
 }
 
 export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetch }: NewRoomDialogProps) {
@@ -1408,10 +1365,10 @@ export function NewRoomDialog({ isOpen, onOpenChange, onCreate, csrfFetch = fetc
                           >
                             <span className="flex min-w-0 items-center gap-2 text-sm">
                               <span className="min-w-0 flex-1">
-                                <span className="block truncate font-medium">{skill.name}</span>
-                                <span className="block truncate text-xs text-muted">{skillDescription(skill) || "无描述"}</span>
+                                <span className="block truncate font-medium">{skillDisplayName(skill)}</span>
+                                <span className="block truncate text-xs text-muted">{skillDisplayDescription(skill) || "无描述"}</span>
                               </span>
-                              <Chip size="sm" variant="soft" color={skillOriginColor(skill.origin)}>{skill.origin}</Chip>
+                              <Chip size="sm" variant="soft" color={skillOriginColor(skill.origin)}>{skillOriginLabel(skill.origin)}</Chip>
                             </span>
                           </Checkbox>
                         );

@@ -149,7 +149,7 @@ test.describe("V1.2 Phase 5 IM, group-chat, and runtime acceptance surface", () 
     await expect(page.getByRole("textbox", { name: "Message" })).toBeEnabled();
 
     await selectRail(page, "Settings");
-    await expect(page.getByRole("dialog")).toContainText("Settings");
+    await expect(page.getByRole("dialog")).toContainText("设置");
   });
 
   test("projects a mock group-chat orchestration transcript with dispatch, separated artifact card, failure downgrade, and summary", async ({ page }) => {

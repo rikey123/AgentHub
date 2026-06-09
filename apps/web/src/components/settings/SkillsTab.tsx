@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button, Card, Checkbox, Chip, Input, Label, ListBox, Modal, Select, TextArea, TextField } from "@heroui/react";
+import { skillDisplayDescription, skillDisplayName, skillOriginColor, skillOriginLabel } from "../../lib/skills.ts";
 import { normalizeRuntimeList, type RuntimeConfig } from "./RuntimesTab.tsx";
 
 export type SkillOrigin = "builtin" | "workspace" | "imported" | string;
@@ -140,7 +141,7 @@ export function SkillsTab({ skills: initialSkills, runtimes: runtimeData, fetchI
         : await createSkill(fetchImpl, input);
       updateSkills(upsertSkill(skills, saved));
       setDraft(draftFromSkill(saved, saved.origin === "builtin" ? "view" : "edit"));
-      setMessage(draft.mode === "edit" ? "Skill saved." : "Skill created.");
+      setMessage(draft.mode === "edit" ? "Skill 已保存。" : "Skill 已创建。");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -157,7 +158,7 @@ export function SkillsTab({ skills: initialSkills, runtimes: runtimeData, fetchI
       const imported = await importSkill(fetchImpl, importUrl.trim());
       updateSkills(upsertSkill(skills, imported));
       setImportUrl("");
-      setMessage("Skill imported.");
+      setMessage("Skill 已导入。");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -175,7 +176,7 @@ export function SkillsTab({ skills: initialSkills, runtimes: runtimeData, fetchI
     try {
       const response = await fetchRuntimeLocalSkills(fetchImpl, selectedRuntimeId);
       setLocalResponse(response);
-      if (!response.supported) setMessage(`Runtime ${selectedRuntime?.name ?? selectedRuntimeId} does not expose a local skill directory.`);
+      if (!response.supported) setMessage(`Runtime ${selectedRuntime?.name ?? selectedRuntimeId} 未暴露本地 skill 目录。`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -233,7 +234,7 @@ export function SkillsTab({ skills: initialSkills, runtimes: runtimeData, fetchI
       }
       updateSkills(imported.reduce((current, skill) => upsertSkill(current, skill), skills));
       setSelectedLocalKeys(new Set());
-      setMessage(`${imported.length} local skill${imported.length === 1 ? "" : "s"} imported.`);
+      setMessage(`已导入 ${imported.length} 个本地 skill。`);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -250,7 +251,7 @@ export function SkillsTab({ skills: initialSkills, runtimes: runtimeData, fetchI
       await deleteSkill(fetchImpl, skill.id);
       updateSkills(skills.filter((candidate) => candidate.id !== skill.id));
       if (draft?.id === skill.id) setDraft(undefined);
-      setMessage("Skill deleted.");
+      setMessage("Skill 已删除。");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -264,22 +265,22 @@ export function SkillsTab({ skills: initialSkills, runtimes: runtimeData, fetchI
         <Card.Header>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <Card.Title>Skills</Card.Title>
-              <Card.Description>Manage standard SKILL.md packages available to rooms and agents.</Card.Description>
+              <Card.Title>skills</Card.Title>
+              <Card.Description>管理可供 rooms 和 agents 使用的标准 SKILL.md 包。</Card.Description>
             </div>
             <div className="flex flex-wrap justify-end gap-2">
               <Button size="sm" variant="secondary" onPress={() => void importFromUrl()} isPending={importing} isDisabled={importUrl.trim().length === 0}>
-                Import
+                导入
               </Button>
               <Button size="sm" variant="primary" onPress={openNewSkill}>
-                New Skill
+                新建 Skill
               </Button>
             </div>
           </div>
         </Card.Header>
         <Card.Content className="grid gap-4">
           <TextField value={importUrl} onChange={setImportUrl}>
-            <Label className="text-sm font-semibold">Import URL</Label>
+            <Label className="text-sm font-semibold">导入 URL</Label>
             <Input placeholder="https://example.com/SKILL.md" data-testid="skills-import-url" />
           </TextField>
 
@@ -296,20 +297,20 @@ export function SkillsTab({ skills: initialSkills, runtimes: runtimeData, fetchI
                 <div key={skill.id} className="grid gap-3 rounded-2xl border border-border bg-surface px-3 py-3 sm:grid-cols-[1fr_auto] sm:items-center" data-testid={`skill-row-${skill.id}`}>
                   <div className="min-w-0">
                     <div className="flex min-w-0 flex-wrap items-center gap-2">
-                      <span className="truncate text-sm font-semibold">{skill.name}</span>
-                      <Chip size="sm" variant="soft" color={originColor(skill.origin)}>{originLabel(skill.origin)}</Chip>
+                      <span className="truncate text-sm font-semibold">{skillDisplayName(skill)}</span>
+                      <Chip size="sm" variant="soft" color={skillOriginColor(skill.origin)}>{skillOriginLabel(skill.origin)}</Chip>
                     </div>
-                    <p className="mt-1 line-clamp-2 text-xs text-muted">{skill.description || "No description."}</p>
+                    <p className="mt-1 line-clamp-2 text-xs text-muted">{skillDisplayDescription(skill) || "无描述。"}</p>
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                       <Chip size="sm" variant="soft">{skillFileCountLabel(skill)}</Chip>
                       {skill.source_url || skill.sourceUrl ? <span className="max-w-full truncate text-xs text-muted ah-mono">{skill.source_url ?? skill.sourceUrl}</span> : null}
                     </div>
                   </div>
                   <div className="flex flex-wrap justify-end gap-2">
-                    <Button size="sm" variant="secondary" onPress={() => void openSkill(skill, "view")}>View</Button>
-                    {skill.origin !== "builtin" ? <Button size="sm" variant="tertiary" onPress={() => void openSkill(skill, "edit")}>Edit</Button> : null}
+                    <Button size="sm" variant="secondary" onPress={() => void openSkill(skill, "view")}>查看</Button>
+                    {skill.origin !== "builtin" ? <Button size="sm" variant="tertiary" onPress={() => void openSkill(skill, "edit")}>编辑</Button> : null}
                     {skill.origin !== "builtin" ? (
-                      <Button size="sm" variant="danger" isPending={deletingId === skill.id} onPress={() => void deleteWorkspaceSkill(skill)}>Delete</Button>
+                      <Button size="sm" variant="danger" isPending={deletingId === skill.id} onPress={() => void deleteWorkspaceSkill(skill)}>删除</Button>
                     ) : null}
                   </div>
                 </div>
@@ -323,11 +324,11 @@ export function SkillsTab({ skills: initialSkills, runtimes: runtimeData, fetchI
         <Card.Header>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <Card.Title>Import from local runtime</Card.Title>
-              <Card.Description>Browse standard SKILL.md packages already installed for Claude Code, Codex, OpenCode, and other local runtimes.</Card.Description>
+              <Card.Title>从本地 Runtime 导入</Card.Title>
+              <Card.Description>浏览 Claude Code、Codex、OpenCode 和其他本地 Runtime 中已安装的标准 SKILL.md 包。</Card.Description>
             </div>
             <Button size="sm" variant="secondary" onPress={() => void loadLocalSkills()} isPending={loadingLocal} isDisabled={!selectedRuntimeId}>
-              Load local skills
+              加载本地 skills
             </Button>
           </div>
         </Card.Header>
@@ -342,7 +343,7 @@ export function SkillsTab({ skills: initialSkills, runtimes: runtimeData, fetchI
             <div className="grid gap-3">
               <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
                 <Chip size="sm" variant="soft" color={localResponse.supported ? "success" : "warning"}>{localResponse.provider}</Chip>
-                <span>{localResponse.supported ? `${localSkills.length} package${localSkills.length === 1 ? "" : "s"} found` : "Local skill discovery is not supported"}</span>
+                <span>{localResponse.supported ? `找到 ${localSkills.length} 个包` : "不支持本地 skill 发现"}</span>
                 {localResponse.roots.length > 0 ? <span className="truncate ah-mono">{localResponse.roots.join(" · ")}</span> : null}
               </div>
 
@@ -355,13 +356,13 @@ export function SkillsTab({ skills: initialSkills, runtimes: runtimeData, fetchI
                   <Checkbox.Indicator />
                 </Checkbox.Control>
                 <Checkbox.Content>
-                  <Label className="text-sm font-semibold">Select all</Label>
+                  <Label className="text-sm font-semibold">全选</Label>
                 </Checkbox.Content>
               </Checkbox>
 
               {localSkills.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-border bg-surface p-4 text-sm text-muted">
-                  No local skill packages were found for this runtime.
+                  此 Runtime 未找到本地 skill 包。
                 </div>
               ) : (
                 <div className="grid gap-2">
@@ -378,11 +379,11 @@ export function SkillsTab({ skills: initialSkills, runtimes: runtimeData, fetchI
                       <Checkbox.Content>
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className="truncate text-sm font-semibold">{skill.name}</span>
-                            <Chip size="sm" variant="soft">{skill.fileCount} {skill.fileCount === 1 ? "file" : "files"}</Chip>
+                            <span className="truncate text-sm font-semibold">{skillDisplayName(skill)}</span>
+                            <Chip size="sm" variant="soft">{skill.fileCount} 个文件</Chip>
                             <span className="ah-mono text-xs text-muted">{skill.key}</span>
                           </div>
-                          <p className="mt-1 line-clamp-2 text-xs text-muted">{skill.description ?? "No description."}</p>
+                          <p className="mt-1 line-clamp-2 text-xs text-muted">{skillDisplayDescription(skill) || "无描述。"}</p>
                           <p className="mt-1 truncate text-xs text-muted ah-mono">{skill.sourcePath}</p>
                         </div>
                       </Checkbox.Content>
@@ -394,11 +395,11 @@ export function SkillsTab({ skills: initialSkills, runtimes: runtimeData, fetchI
               {selectedLocalSkill ? (
                 <div className="grid gap-3 rounded-2xl border border-border bg-surface p-3 sm:grid-cols-2">
                   <TextField value={localEdits[selectedLocalSkill.key]?.name ?? selectedLocalSkill.name} onChange={(value) => patchLocalEdit(selectedLocalSkill.key, { name: value })}>
-                    <Label className="text-sm font-semibold">Imported name</Label>
+                    <Label className="text-sm font-semibold">导入名称</Label>
                     <Input placeholder={selectedLocalSkill.name} />
                   </TextField>
                   <TextField value={localEdits[selectedLocalSkill.key]?.description ?? selectedLocalSkill.description ?? ""} onChange={(value) => patchLocalEdit(selectedLocalSkill.key, { description: value })}>
-                    <Label className="text-sm font-semibold">Imported description</Label>
+                    <Label className="text-sm font-semibold">导入描述</Label>
                     <Input placeholder={selectedLocalSkill.description ?? "Describe this skill"} />
                   </TextField>
                 </div>
@@ -406,7 +407,7 @@ export function SkillsTab({ skills: initialSkills, runtimes: runtimeData, fetchI
 
               <div className="flex justify-end">
                 <Button size="sm" variant="primary" isPending={importingLocal} isDisabled={selectedLocalKeys.size === 0 || importingLocal} onPress={() => void importSelectedLocalSkills()}>
-                  Import selected
+                  导入所选
                 </Button>
               </div>
             </div>
@@ -422,11 +423,11 @@ export function SkillsTab({ skills: initialSkills, runtimes: runtimeData, fetchI
                   <Checkbox.Indicator />
                 </Checkbox.Control>
                 <Checkbox.Content>
-                  <Label className="text-sm font-semibold">Select all</Label>
+                  <Label className="text-sm font-semibold">全选</Label>
                 </Checkbox.Content>
               </Checkbox>
               <div className="rounded-2xl border border-dashed border-border bg-surface p-4 text-sm text-muted">
-                Choose a runtime and load local skills to import existing packages with their supporting files.
+                选择 Runtime 并加载本地 skills，以导入现有包及其支持文件。
               </div>
             </div>
           )}
@@ -449,7 +450,7 @@ function RuntimeSelect({ runtimes, value, onChange }: { runtimes: readonly Runti
   const selectedRuntime = runtimes.find((runtime) => runtime.id === value);
   return (
     <Select
-      aria-label="Runtime for local skill import"
+      aria-label="用于本地 skill 导入的 Runtime"
       className="w-full"
       fullWidth
       selectedKey={value}
@@ -466,7 +467,7 @@ function RuntimeSelect({ runtimes, value, onChange }: { runtimes: readonly Runti
         <Select.Indicator />
       </Select.Trigger>
       <Select.Popover className="max-h-72">
-        <ListBox aria-label="Runtime for local skill import">
+        <ListBox aria-label="用于本地 skill 导入的 Runtime">
           {runtimes.map((runtime) => (
             <ListBox.Item key={runtime.id} id={runtime.id} textValue={runtime.name}>
               <div className="flex min-w-0 items-center gap-2 py-1">
@@ -660,8 +661,8 @@ function SkillEditorModal({
           <Modal.CloseTrigger aria-label="Close skill editor" />
           <Modal.Header>
             <div className="min-w-0">
-              <Modal.Heading>{draft?.mode === "create" ? "New Skill" : draft?.mode === "edit" ? "Edit Skill" : "View Skill"}</Modal.Heading>
-              {draft?.origin ? <p className="mt-1 text-xs text-muted">{originLabel(draft.origin)} skill</p> : null}
+              <Modal.Heading>{draft?.mode === "create" ? "新建 Skill" : draft?.mode === "edit" ? "编辑 Skill" : "查看 Skill"}</Modal.Heading>
+              {draft?.origin ? <p className="mt-1 text-xs text-muted">{skillOriginLabel(draft.origin)} skill</p> : null}
             </div>
           </Modal.Header>
           <Modal.Body>
@@ -681,8 +682,8 @@ function SkillEditorModal({
                 <div className="grid min-h-[420px] gap-4 lg:grid-cols-[260px_1fr]">
                   <div className="grid content-start gap-3 rounded-xl border border-border bg-surface p-3">
                     <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-semibold">Package files</p>
-                      <Chip size="sm" variant="soft">{draft.files.length + 1} files</Chip>
+                      <p className="text-sm font-semibold">包文件</p>
+                      <Chip size="sm" variant="soft">{draft.files.length + 1} 个文件</Chip>
                     </div>
                     <div className="grid gap-1">
                       <Button size="sm" variant={selectedPath === SKILL_MD_PATH ? "secondary" : "ghost"} className="justify-start ah-mono" onPress={() => selectPath(SKILL_MD_PATH)}>
@@ -697,11 +698,11 @@ function SkillEditorModal({
                     {!readOnly ? (
                       <div className="grid gap-2 border-t border-border pt-3">
                         <TextField value={draft.newFilePath} onChange={(value) => onChange({ ...draft, newFilePath: value })}>
-                          <Label className="text-xs font-semibold">Add file</Label>
+                          <Label className="text-xs font-semibold">添加文件</Label>
                           <Input placeholder="scripts/run.sh" data-testid="skills-new-file-input" />
                         </TextField>
                         <Button size="sm" variant="secondary" onPress={addSupportingFile} isDisabled={draft.newFilePath.trim().length === 0}>
-                          Add file
+                          添加文件
                         </Button>
                       </div>
                     ) : null}
@@ -714,7 +715,7 @@ function SkillEditorModal({
                           <Label className="text-sm font-semibold">File path</Label>
                           <Input className="ah-mono" placeholder="references/example.md" data-testid="skills-file-path-input" />
                         </TextField>
-                        {!readOnly ? <Button variant="danger" onPress={deleteSelectedFile}>Delete file</Button> : null}
+                        {!readOnly ? <Button variant="danger" onPress={deleteSelectedFile}>删除文件</Button> : null}
                       </div>
                     ) : null}
                     <TextField value={selectedContent} onChange={updateSelectedContent} isReadOnly={readOnly}>
@@ -820,7 +821,7 @@ function draftFromSkill(skill: SkillConfig, mode: SkillEditorMode): SkillDraft {
 
 function skillFileCountLabel(skill: SkillConfig): string {
   const count = skill.fileCount ?? skill.file_count ?? skill.files?.length ?? 0;
-  return `${count} ${count === 1 ? "file" : "files"}`;
+  return `${count} 个文件`;
 }
 
 function numberField(value: unknown): number | undefined {
@@ -842,20 +843,6 @@ function originRank(origin: SkillOrigin): number {
   if (origin === "builtin") return 0;
   if (origin === "workspace") return 1;
   return 2;
-}
-
-function originLabel(origin: SkillOrigin): string {
-  if (origin === "builtin") return "Built-in";
-  if (origin === "workspace") return "Workspace";
-  if (origin === "imported") return "Imported";
-  return origin;
-}
-
-function originColor(origin: SkillOrigin): "default" | "accent" | "success" | "warning" | "danger" {
-  if (origin === "builtin") return "accent";
-  if (origin === "workspace") return "success";
-  if (origin === "imported") return "warning";
-  return "default";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

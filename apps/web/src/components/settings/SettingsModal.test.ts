@@ -25,12 +25,12 @@ import { SkillsTab, createSkill, fetchRuntimeLocalSkills, fetchSkillDetail, impo
 describe("SettingsModal integration contract", () => {
   it("defines the V1.2 top-level tabs with deploy providers included", () => {
     expect(SETTINGS_TABS.map((tab) => tab.label)).toEqual([
-      "Roles",
-      "Runtimes",
-      "Models",
-      "Skills",
-      "Permissions",
-      "Workspace",
+      "角色",
+      "runtimes",
+      "模型",
+      "skills",
+      "许可",
+      "工作区",
       "Deploy Providers",
       "MCP"
     ]);
@@ -243,7 +243,7 @@ describe("SettingsModal integration contract", () => {
       onDeploymentProvidersChange: vi.fn()
     }));
 
-    expect(html).toContain("Builder");
+    expect(html).toContain("构建者");
     expect(html).not.toContain("Failed to fetch");
   });
 
@@ -257,11 +257,11 @@ describe("SettingsModal integration contract", () => {
     }));
 
     expect(html).toContain("Default Policy");
-    expect(html).toContain("Permission rules");
+    expect(html).toContain("许可 rules");
     expect(html).toContain("src/**");
     expect(html).toContain("allow");
-    expect(html).toContain("Delete Rule");
-    expect(html).toContain("Rule creation is not exposed by the V1.0 daemon API.");
+    expect(html).toContain("删除 Rule");
+    expect(html).toContain("V1.0 daemon API 暂未暴露 rule 创建能力。");
   });
 
   it("renders workspace metadata as read-only when the daemon only exposes GET /workspaces/:id", () => {
@@ -269,9 +269,9 @@ describe("SettingsModal integration contract", () => {
       workspace: { workspace: { id: "ws_1", name: "Workspace", root_path: "C:/project/AgentHub", updated_at: 1234 } }
     }));
 
-    expect(html).toContain("Read-only");
+    expect(html).toContain("只读");
     expect(html).toContain("GET /workspaces/ws_1");
-    expect(html).toContain("No PATCH /workspaces endpoint is exposed in V1.0.");
+    expect(html).toContain("V1.0 未暴露 PATCH /workspaces endpoint。");
     expect(html).toContain("C:/project/AgentHub");
   });
 
@@ -291,7 +291,7 @@ describe("SettingsModal integration contract", () => {
       "room.shell"
     ]);
     for (const tool of ROOM_MCP_TOOLS) expect(html).toContain(tool);
-    expect(html).toContain("Read-only");
+    expect(html).toContain("只读");
   });
 
   it("renders CapRover deployment providers with masked credentials and lifecycle actions", () => {
@@ -481,14 +481,14 @@ describe("Skills settings tab contract", () => {
     }));
 
     expect(html).toContain("task-planner");
-    expect(html).toContain("Built-in");
+    expect(html).toContain("内置");
     expect(html).toContain("review-helper");
-    expect(html).toContain("Workspace");
-    expect(html).toContain("New Skill");
-    expect(html).toContain("Import");
-    expect(html).toContain("View");
-    expect(html).toContain("Edit");
-    expect(html).toContain("Delete");
+    expect(html).toContain("工作区");
+    expect(html).toContain("新建 Skill");
+    expect(html).toContain("导入");
+    expect(html).toContain("查看");
+    expect(html).toContain("编辑");
+    expect(html).toContain("删除");
   });
 
   it("renders skill package file counts from REST data", () => {
@@ -515,7 +515,7 @@ describe("Skills settings tab contract", () => {
       onSkillsChange: vi.fn()
     }));
 
-    expect(html).toContain("2 files");
+    expect(html).toContain("2 个文件");
   });
 
   it("renders runtime-local skill import controls when runtimes are available", () => {
@@ -529,10 +529,10 @@ describe("Skills settings tab contract", () => {
       onSkillsChange: vi.fn()
     }));
 
-    expect(html).toContain("Import from local runtime");
+    expect(html).toContain("从本地 Runtime 导入");
     expect(html).toContain("OpenCode");
-    expect(html).toContain("Load local skills");
-    expect(html).toContain("Select all");
+    expect(html).toContain("加载本地 skills");
+    expect(html).toContain("全选");
   });
 
   it("normalizes and imports runtime-local skill packages through runtime endpoints", async () => {

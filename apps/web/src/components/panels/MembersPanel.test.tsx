@@ -34,13 +34,13 @@ describe("MembersPanel team management contract", () => {
       csrfFetch: vi.fn<typeof fetch>()
     }));
 
-    expect(html).toContain("Add teammate");
-    expect(html).toContain("Room skill pool");
-    expect(html).toContain("Builder");
+    expect(html).toContain("添加队友");
+    expect(html).toContain("Room skill 池");
+    expect(html).toContain("构建者");
     expect(html).toContain("code.edit");
     expect(html).toContain("file.write");
     expect(html).toContain("Build member management UI");
-    expect(html).toContain("Working");
+    expect(html).toContain("进行中");
     expect(html).toContain("Skills");
   });
 });

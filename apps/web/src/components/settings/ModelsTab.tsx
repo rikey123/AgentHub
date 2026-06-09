@@ -147,7 +147,7 @@ export function ModelsTab({ modelConfigs, fetchImpl = fetch, onModelConfigsChang
   };
 
   const runTest = async (config: ModelConfig) => {
-    setTestState((prev) => ({ ...prev, [config.id]: { status: "pending", message: "Testing model call..." } }));
+    setTestState((prev) => ({ ...prev, [config.id]: { status: "pending", message: "正在测试模型调用..." } }));
     try {
       const result = await testModelConfig(fetchImpl, config.id);
       setTestState((prev) => ({
@@ -168,10 +168,10 @@ export function ModelsTab({ modelConfigs, fetchImpl = fetch, onModelConfigsChang
         <Card.Header>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <Card.Title>Models</Card.Title>
-              <Card.Description>Configure provider credentials without exposing saved API keys.</Card.Description>
+              <Card.Title>模型</Card.Title>
+              <Card.Description>配置 provider 凭据，同时不暴露已保存的 api-key。</Card.Description>
             </div>
-            <Button variant="primary" onPress={openAdd} data-testid="models-add-button">Add Model</Button>
+            <Button variant="primary" onPress={openAdd} data-testid="models-add-button">添加模型</Button>
           </div>
         </Card.Header>
         <Card.Content className="grid gap-4">
@@ -183,13 +183,13 @@ export function ModelsTab({ modelConfigs, fetchImpl = fetch, onModelConfigsChang
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <div>
                     <h3 className="text-sm font-semibold">{providerLabels[provider]}</h3>
-                    <p className="text-xs text-muted">{providerConfigs.length} configured</p>
+                    <p className="text-xs text-muted">已配置 {providerConfigs.length} 个</p>
                   </div>
                   <Chip size="sm" variant="soft" color={providerColors[provider]}>{provider}</Chip>
                 </div>
 
                 {providerConfigs.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-border bg-overlay p-3 text-sm text-muted">No models configured for this provider.</div>
+                  <div className="rounded-xl border border-dashed border-border bg-overlay p-3 text-sm text-muted">此 provider 暂未配置模型。</div>
                 ) : (
                   <div className="grid gap-2">
                     {providerConfigs.map((config) => (
@@ -203,16 +203,16 @@ export function ModelsTab({ modelConfigs, fetchImpl = fetch, onModelConfigsChang
                             <p className="mt-1 text-xs text-muted">{config.model}</p>
                           </div>
                           <div className="min-w-[160px] text-xs">
-                            <div className="font-semibold text-muted">Fingerprint</div>
+                            <div className="font-semibold text-muted">api-key</div>
                             <div className="ah-mono text-foreground" data-testid={`model-fingerprint-${config.id}`}>
                               {displayFingerprint(config.api_key_fingerprint)}
                             </div>
                           </div>
                           <div className="ml-auto flex flex-wrap justify-end gap-2">
-                            <Button size="sm" variant="secondary" onPress={() => void runTest(config)}>Test Model Call</Button>
-                            <Button size="sm" variant="tertiary" onPress={() => openEdit(config)}>Edit</Button>
-                            {providerNeedsApiKey(config.provider) ? <Button size="sm" variant="tertiary" onPress={() => openResetKey(config)}>Reset key</Button> : null}
-                            <Button size="sm" variant="tertiary" onPress={() => void deleteConfig(config)}>Delete</Button>
+                            <Button size="sm" variant="secondary" onPress={() => void runTest(config)}>测试模型调用</Button>
+                            <Button size="sm" variant="tertiary" onPress={() => openEdit(config)}>编辑</Button>
+                            {providerNeedsApiKey(config.provider) ? <Button size="sm" variant="tertiary" onPress={() => openResetKey(config)}>重置 api-key</Button> : null}
+                            <Button size="sm" variant="tertiary" onPress={() => void deleteConfig(config)}>删除</Button>
                           </div>
                         </div>
                         {config.base_url ? <p className="mt-2 text-xs text-muted">Base URL: <span className="ah-mono">{config.base_url}</span></p> : null}
@@ -278,14 +278,14 @@ function ModelConfigDialog({
   return (
     <Modal.Backdrop isOpen={dialog !== undefined} onOpenChange={(open) => { if (!open) onClose(); }}>
       <Modal.Container size="md">
-        <Modal.Dialog aria-label="Model config dialog">
+        <Modal.Dialog aria-label="模型配置弹窗">
           <Modal.CloseTrigger />
           <Modal.Header>
-            <Modal.Heading>{dialog?.mode === "reset-key" ? "Reset API key" : dialog?.mode === "edit" ? "Edit model" : "Add model"}</Modal.Heading>
+            <Modal.Heading>{dialog?.mode === "reset-key" ? "重置 api-key" : dialog?.mode === "edit" ? "编辑模型" : "添加模型"}</Modal.Heading>
           </Modal.Header>
           <Modal.Body className="grid gap-4">
             <label className="grid gap-1 text-sm font-semibold">
-              Provider
+              provider
               <select
                 className="rounded-xl border border-field-border bg-field-background px-3 py-2 text-sm text-foreground"
                 value={provider}
@@ -298,19 +298,19 @@ function ModelConfigDialog({
             </label>
 
             <TextField value={dialog?.name ?? ""} onChange={(value) => patchDialog({ name: value })}>
-              <Label className="text-sm font-semibold">Name</Label>
+              <Label className="text-sm font-semibold">名称</Label>
               <Input placeholder="Production GPT-4o" disabled={dialog?.mode === "reset-key"} />
             </TextField>
 
             <TextField value={dialog?.model ?? ""} onChange={(value) => patchDialog({ model: value })}>
-              <Label className="text-sm font-semibold">Model ID</Label>
+              <Label className="text-sm font-semibold">模型 ID</Label>
               <Input placeholder="gpt-4o" disabled={dialog?.mode === "reset-key"} />
             </TextField>
 
             {showApiKey ? (
               <TextField value={dialog?.apiKey ?? ""} onChange={(value) => patchDialog({ apiKey: value })}>
-                <Label className="text-sm font-semibold">API key</Label>
-                <Input type="password" placeholder="Paste API key" autoComplete="off" data-testid="model-api-key-input" />
+                <Label className="text-sm font-semibold">api-key</Label>
+                <Input type="password" placeholder="粘贴 api-key" autoComplete="off" data-testid="model-api-key-input" />
               </TextField>
             ) : null}
 
@@ -321,13 +321,13 @@ function ModelConfigDialog({
               </TextField>
             ) : null}
 
-            {provider === "ollama" ? <p className="text-xs text-muted">Ollama is local and does not use an API key.</p> : null}
+            {provider === "ollama" ? <p className="text-xs text-muted">Ollama 是本地 provider，不使用 api-key。</p> : null}
             {error ? <p className="text-xs text-danger" role="alert">{error}</p> : null}
           </Modal.Body>
           <Modal.Footer>
-            <Button slot="close" variant="tertiary">Cancel</Button>
+            <Button slot="close" variant="tertiary">取消</Button>
             <Button variant="primary" isPending={submitting} isDisabled={!canSave || submitting} onPress={onSave}>
-              {dialog?.mode === "reset-key" ? "Reset key" : "Save model"}
+              {dialog?.mode === "reset-key" ? "重置 api-key" : "保存模型"}
             </Button>
           </Modal.Footer>
         </Modal.Dialog>
@@ -380,7 +380,7 @@ export function providerNeedsApiKey(provider: ModelProvider): boolean {
 }
 
 export function displayFingerprint(fingerprint: string | null): string {
-  if (fingerprint === null || fingerprint.length === 0) return "No API key";
+  if (fingerprint === null || fingerprint.length === 0) return "无 api-key";
   if (fingerprint.includes("...")) return fingerprint;
   if (fingerprint.length <= 4) return fingerprint;
   return fingerprint.slice(-4).padStart(Math.min(8, fingerprint.length), "•");
@@ -432,9 +432,9 @@ export async function deleteModelConfig(fetchImpl: typeof fetch, id: string): Pr
   });
   if (response.status === 409) {
     const payload = await response.json().catch(() => ({})) as { bindingCount?: unknown };
-    throw new Error(`Cannot delete model config while ${Number(payload.bindingCount ?? 0)} binding(s) use it.`);
+    throw new Error(`仍有 ${Number(payload.bindingCount ?? 0)} 个 binding 正在使用此模型配置，无法删除。`);
   }
-  if (!response.ok) throw new Error(`Delete model config failed: ${response.status}`);
+  if (!response.ok) throw new Error(`删除模型配置失败：${response.status}`);
 }
 
 export async function testModelConfig(fetchImpl: typeof fetch, id: string): Promise<ModelTestResult> {
@@ -449,12 +449,12 @@ export async function testModelConfig(fetchImpl: typeof fetch, id: string): Prom
     return pollModelTestJob(fetchImpl, payload.jobId ?? "");
   }
   if (isModelTestResult(payload)) return payload;
-  if (!response.ok) throw new Error(`Test model call failed: ${response.status}`);
+  if (!response.ok) throw new Error(`测试模型调用失败：${response.status}`);
   return { ok: false, error: "model_test_failed" };
 }
 
 async function pollModelTestJob(fetchImpl: typeof fetch, jobId: string): Promise<ModelTestResult> {
-  if (jobId.length === 0) throw new Error("Missing settings job id");
+  if (jobId.length === 0) throw new Error("缺少 settings job id");
   for (let attempt = 0; attempt < 5; attempt++) {
     const response = await fetchImpl(`/settings/jobs/${encodeURIComponent(jobId)}`, {
       credentials: "same-origin",
@@ -471,9 +471,9 @@ async function pollModelTestJob(fetchImpl: typeof fetch, jobId: string): Promise
 
 async function readModelConfigResponse(response: Response): Promise<ModelConfig> {
   const payload = await response.json().catch(() => ({})) as { modelConfig?: unknown };
-  if (!response.ok) throw new Error(`Save model config failed: ${response.status}`);
+  if (!response.ok) throw new Error(`保存模型配置失败：${response.status}`);
   const modelConfig = normalizeModelConfig(payload.modelConfig ?? payload);
-  if (!modelConfig) throw new Error("Model config response was invalid");
+  if (!modelConfig) throw new Error("模型配置响应无效");
   return modelConfig;
 }
 
@@ -483,12 +483,12 @@ function upsertModelConfig(configs: readonly ModelConfig[], saved: ModelConfig):
 }
 
 function formatModelTestResult(result: ModelTestResult): string {
-  if (!result.ok) return result.error ?? "Model test failed";
+  if (!result.ok) return result.error ?? "模型测试失败";
   const latency = typeof result.latencyMs === "number" ? `${result.latencyMs}ms` : "ok";
   const tokens = typeof result.inputTokens === "number" && typeof result.outputTokens === "number"
     ? `, ${result.inputTokens}/${result.outputTokens} tokens`
     : "";
-  return `${result.model ?? "model"} succeeded in ${latency}${tokens}`;
+  return `${result.model ?? "model"} 测试成功，用时 ${latency}${tokens}`;
 }
 
 function isModelTestResult(value: unknown): value is ModelTestResult {
