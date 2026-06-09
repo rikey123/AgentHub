@@ -158,8 +158,105 @@ body,
   animation: ah-blink 1s steps(2) infinite;
 }
 
-.ah-long-message-preview {
+.ah-chat-message {
+  will-change: transform, opacity;
+}
+
+.ah-chat-bubble {
+  transform-origin: 50% 85%;
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease,
+    background-color 180ms ease;
+  will-change: transform;
+}
+
+.ah-chat-message:hover .ah-chat-bubble {
+  transform: translateY(-1px);
+}
+
+.ah-chat-message[data-speaker-type="agent"]:hover .ah-chat-bubble {
+  border-color: color-mix(in oklab, var(--border) 66%, var(--success) 34%);
+  box-shadow:
+    0 16px 34px rgba(36, 63, 96, 0.1),
+    0 3px 12px rgba(36, 63, 96, 0.07),
+    0 0 0 1px color-mix(in oklab, var(--success) 12%, transparent);
+}
+
+.ah-chat-message[data-speaker-type="system"]:hover .ah-chat-bubble {
+  border-color: color-mix(in oklab, var(--border) 68%, var(--accent) 32%);
+  box-shadow:
+    0 12px 26px rgba(36, 63, 96, 0.08),
+    0 0 0 1px color-mix(in oklab, var(--accent) 10%, transparent);
+}
+
+.ah-chat-message[data-speaker-type="user"]:hover .ah-chat-bubble {
+  box-shadow:
+    0 16px 34px color-mix(in oklab, var(--accent) 16%, transparent),
+    0 3px 12px rgba(36, 63, 96, 0.08);
+}
+
+.ah-chat-message [data-testid^="message-menu-"] {
+  transform: translateY(1px) scale(0.94);
+  transition:
+    background-color 160ms ease,
+    opacity 160ms ease,
+    transform 160ms ease;
+}
+
+.ah-chat-message:hover [data-testid^="message-menu-"],
+.ah-chat-message [data-testid^="message-menu-"]:focus-visible {
+  transform: translateY(0) scale(1);
+}
+
+.ah-typing-indicator {
+  min-height: 2.5rem;
+  padding: 0.32rem 0.55rem;
+  border: 1px solid color-mix(in oklab, var(--border) 72%, transparent);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--overlay) 82%, transparent);
+  box-shadow: 0 10px 28px rgba(36, 63, 96, 0.08);
+}
+
+.ah-typing-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.22rem;
+  padding-inline: 0.08rem;
+}
+
+.ah-typing-dots span {
+  width: 0.34rem;
+  height: 0.34rem;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.42;
+  animation: ah-typing-dot 1.15s ease-in-out infinite;
+}
+
+.ah-typing-dots span:nth-child(2) {
+  animation-delay: 0.14s;
+}
+
+.ah-typing-dots span:nth-child(3) {
+  animation-delay: 0.28s;
+}
+
+.ah-long-message-content {
   overflow: hidden;
+}
+
+.ah-long-message-measure {
+  position: absolute;
+  inset: auto 0 0;
+  z-index: -1;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.ah-long-message-preview {
+  max-height: 8.75rem;
 }
 
 .ah-long-message-fade {
@@ -181,13 +278,39 @@ body,
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
-  margin-top: 0.85rem;
-  padding: 0.38rem 0.45rem 0.38rem 0.75rem;
-  border: 1px solid color-mix(in oklab, var(--border) 76%, var(--accent) 24%);
-  border-radius: 8px;
-  background: color-mix(in oklab, var(--surface-secondary) 82%, var(--overlay) 18%);
-  box-shadow: inset 0 1px 0 color-mix(in oklab, #fff 70%, transparent);
+  gap: 0.6rem;
+  margin-top: 0.72rem;
+  padding-top: 0.54rem;
+  border-top: 1px solid color-mix(in oklab, var(--border) 56%, transparent);
+  color: var(--muted);
+}
+
+.ah-long-message-meta {
+  display: inline-flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 0.38rem;
+}
+
+.ah-long-message-mark {
+  display: inline-flex;
+  width: 0.36rem;
+  height: 0.36rem;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--accent) 62%, var(--muted) 38%);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent-soft) 54%, transparent);
+}
+
+.ah-long-message-label {
+  display: inline-flex;
+  min-width: max-content;
+  align-items: center;
+  color: color-mix(in oklab, var(--foreground) 72%, var(--muted) 28%);
+  font-size: 0.73rem;
+  font-weight: 740;
+  line-height: 1;
 }
 
 .ah-long-message-status {
@@ -196,8 +319,8 @@ body,
   max-width: 100%;
   align-items: center;
   color: var(--muted);
-  font-size: 0.74rem;
-  font-weight: 700;
+  font-size: 0.72rem;
+  font-weight: 620;
   letter-spacing: 0;
   line-height: 1.1;
   overflow: hidden;
@@ -205,22 +328,31 @@ body,
   white-space: nowrap;
 }
 
+.ah-long-message-actions {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.35rem;
+}
+
 .ah-long-message-toggle,
 .ah-long-message-run-action {
-  min-height: 1.8rem !important;
-  height: 1.8rem !important;
-  padding: 0 0.58rem !important;
-  border-radius: 7px !important;
-  color: var(--foreground) !important;
-  font-size: 0.78rem !important;
-  font-weight: 750 !important;
+  min-height: 1.68rem !important;
+  height: 1.68rem !important;
+  padding: 0 0.42rem !important;
+  border-radius: 999px !important;
+  color: color-mix(in oklab, var(--foreground) 74%, var(--muted) 26%) !important;
+  font-size: 0.74rem !important;
+  font-weight: 720 !important;
+  background: transparent !important;
+  box-shadow: none !important;
 }
 
 .ah-long-message-toggle:hover,
 .ah-long-message-toggle:focus-visible,
 .ah-long-message-run-action:hover,
 .ah-long-message-run-action:focus-visible {
-  background: color-mix(in oklab, var(--accent-soft) 78%, var(--overlay) 22%) !important;
+  background: color-mix(in oklab, var(--accent-soft) 54%, transparent) !important;
   color: var(--accent) !important;
 }
 
@@ -607,9 +739,35 @@ body,
   }
 }
 
+@keyframes ah-typing-dot {
+  0%,
+  65%,
+  100% {
+    opacity: 0.34;
+    transform: translateY(0) scale(0.92);
+  }
+  30% {
+    opacity: 0.9;
+    transform: translateY(-2px) scale(1);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .ah-chat-message,
+  .ah-chat-bubble,
+  .ah-chat-message [data-testid^="message-menu-"] {
+    transition: none;
+    transform: none !important;
+    will-change: auto;
+  }
+
   .ah-streaming-caret::after {
     animation: none;
+  }
+
+  .ah-typing-dots span {
+    animation: none;
+    transform: none;
   }
 }
 

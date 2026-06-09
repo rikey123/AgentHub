@@ -157,9 +157,9 @@ export function ArtifactsRailContainer({ fetchImpl, onReferenceArtifact }: { rea
     const request = artifactFilePreviewRequestForLibrary(artifact);
     setPreview({ item: artifact, loading: true });
     try {
-      const response = await fetchImpl(request.contentPath, { credentials: "same-origin", headers: { accept: "text/plain" } });
+      const response = await fetchImpl(request.contentPath, { credentials: "same-origin", headers: { accept: "application/json, text/plain;q=0.8" } });
       if (!response.ok) throw new Error(`artifact ${response.status}`);
-      setPreview({ item: artifact, content: await response.text() });
+      setPreview({ item: artifact, content: await readArtifactFilePreviewContent(response) });
     } catch (error) {
       setPreview({ item: artifact, error: error instanceof Error ? error.message : String(error) });
     }
@@ -473,6 +473,28 @@ export function artifactFilePreviewRequestForLibrary(artifact: ArtifactLibraryIt
     rawUrl: `${contentPath}/raw`,
     name: path
   };
+}
+
+export async function readArtifactFilePreviewContent(response: Response): Promise<string> {
+  const text = await response.text();
+  const payload = parseJson(text);
+  if (isRecord(payload)) {
+    const envelopeContent = payload.content;
+    if (typeof envelopeContent === "string") return envelopeContent;
+    if (isRecord(envelopeContent)) {
+      if (typeof envelopeContent.content === "string") return envelopeContent.content;
+      if (typeof envelopeContent.newContent === "string") return envelopeContent.newContent;
+      if (typeof envelopeContent.oldContent === "string") return envelopeContent.oldContent;
+      const file = envelopeContent.file;
+      if (isRecord(file)) {
+        if (typeof file.newContent === "string") return file.newContent;
+        if (typeof file.oldContent === "string") return file.oldContent;
+      }
+    }
+    if (typeof payload.newContent === "string") return payload.newContent;
+    if (typeof payload.oldContent === "string") return payload.oldContent;
+  }
+  return text;
 }
 
 function RailSurface({ title, subtitle, loading, error, children }: { readonly title: string; readonly subtitle: string; readonly loading: boolean; readonly error?: string | undefined; readonly children: ReactNode }) {
@@ -844,6 +866,18 @@ function responseErrorMessage(payload: unknown, fallback: string): string {
   return payload && typeof payload === "object" && typeof (payload as { readonly error?: unknown }).error === "string"
     ? (payload as { readonly error: string }).error
     : fallback;
+}
+
+function parseJson(value: string): unknown {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function stringField(value: unknown): string | undefined {

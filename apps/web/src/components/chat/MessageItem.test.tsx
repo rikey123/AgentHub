@@ -28,7 +28,9 @@ describe("MessageItem public chat rendering", () => {
 
     expect(html).toContain("data-testid=\"long-message-disclosure\"");
     expect(html).toContain("aria-expanded=\"false\"");
-    expect(html).toContain("长回复 · 已折叠");
+    expect(html).toContain("ah-long-message-label");
+    expect(html).toContain(">长回复<");
+    expect(html).toContain(">已折叠<");
     expect(html).toContain(">展开<");
     expect(html).not.toContain("展开全文");
     expect(html).toContain("Here is the full platform architecture review.");

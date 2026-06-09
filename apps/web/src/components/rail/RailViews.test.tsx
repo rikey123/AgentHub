@@ -11,6 +11,7 @@ import {
   normalizeArtifactLibrary,
   normalizeAgentContacts,
   normalizeRuntimeOptions,
+  readArtifactFilePreviewContent,
   runtimeHealthBadgeForContact,
   testContactRuntimeConnection
 } from "./RailViews.tsx";
@@ -274,6 +275,22 @@ describe("rail views", () => {
       rawUrl: "/artifacts/artifact%20home/files/src%2Findex.html/raw",
       name: "src/index.html"
     });
+  });
+
+  it("extracts markdown content from artifact file preview JSON envelopes", async () => {
+    const markdown = "# 多 Agent 协作方案讨论总结\n\n正文内容";
+    const response = jsonResponse(200, {
+      content: {
+        file: {
+          artifactId: "artifact_summary",
+          path: "multi-agent-collaboration-summary.md",
+          newContent: markdown
+        },
+        content: markdown
+      }
+    });
+
+    await expect(readArtifactFilePreviewContent(response)).resolves.toBe(markdown);
   });
 
   it("renders an artifact library surface with version and file metadata", () => {

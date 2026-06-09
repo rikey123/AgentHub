@@ -1,10 +1,14 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import gsap from "gsap";
+import { useGSAP } from "@gsap/react";
 import { Avatar, Button, Card, Chip, Dropdown } from "@heroui/react";
 import type { MessageViewModel } from "../../types.ts";
 import { formatBytes, formatTime, initials } from "../../lib/format.ts";
 import { pendingTurnColor } from "../../lib/status.ts";
 import { CardRenderer } from "../cards/CardRenderer.tsx";
 import { ArtifactPreviewModal, normalizePreviewKind, type ArtifactChatReference } from "../artifacts/ArtifactPreviewModal.tsx";
+
+gsap.registerPlugin(useGSAP);
 
 export type QuotedMessagePreview = {
   readonly id: string;
@@ -33,6 +37,11 @@ interface MessageItemProps {
 export function MessageItem(props: MessageItemProps) {
   const { message, quotedMessage, isSelected, onSelect, onOpenQuotedMessage, onOpenRun, onReply, onQuote, onPin, onRegenerate, onDelete, onCancelPending, onEditPending, onReferenceArtifact, csrfFetch } = props;
   const [expanded, setExpanded] = useState(false);
+  const [longMessageMotion, setLongMessageMotion] = useState<"idle" | "expanding" | "collapsing">("idle");
+  const itemRef = useRef<HTMLDivElement>(null);
+  const longMessageContentRef = useRef<HTMLDivElement>(null);
+  const longMessagePreviewMeasureRef = useRef<HTMLDivElement>(null);
+  const { contextSafe } = useGSAP(() => undefined, { scope: itemRef });
 
   const isUser = message.senderType === "user";
   const isSystem = message.senderType === "system";
@@ -41,18 +50,65 @@ export function MessageItem(props: MessageItemProps) {
   const isPending = !!message.pendingTurnId && (message.pendingTurnStatus === "queued" || message.pendingTurnStatus === "scheduled");
   const testId = `message-bubble-${isUser ? "user" : isSystem ? "system" : "agent"}`;
   const textPreview = publicAgentTextPreview(message.text, message.senderType, isStreaming);
-  const visibleText = textPreview.collapsed && !expanded ? textPreview.preview : message.text;
+  const showFullLongMessage = expanded || longMessageMotion === "collapsing";
+  const showLongMessagePreview = textPreview.collapsed && !showFullLongMessage;
+  const visibleText = showLongMessagePreview ? textPreview.preview : message.text;
   const longMessageContentId = `long-message-content-${message.id}`;
   const selectMessage = () => {
     onSelect?.();
   };
+  const finishLongMessageMotion = contextSafe((target: HTMLElement) => {
+    setLongMessageMotion("idle");
+    requestAnimationFrame(() => {
+      gsap.set(target, { clearProps: "height,opacity,visibility" });
+    });
+  });
+  const toggleLongMessage = contextSafe(() => {
+    const nextExpanded = !expanded;
+    const content = longMessageContentRef.current;
+    if (content === null) {
+      setLongMessageMotion("idle");
+      setExpanded(nextExpanded);
+      return;
+    }
+    if (prefersReducedMotion()) {
+      gsap.killTweensOf(content);
+      setLongMessageMotion("idle");
+      setExpanded(nextExpanded);
+      return;
+    }
+
+    const startHeight = content.getBoundingClientRect().height;
+    const previewHeight = Math.max(1, longMessagePreviewMeasureRef.current?.getBoundingClientRect().height ?? startHeight);
+    gsap.killTweensOf(content);
+    setLongMessageMotion(nextExpanded ? "expanding" : "collapsing");
+    setExpanded(nextExpanded);
+    requestAnimationFrame(() => {
+      const target = longMessageContentRef.current;
+      if (target === null) return;
+      gsap.fromTo(
+        target,
+        { height: startHeight, autoAlpha: nextExpanded ? 0.9 : 1 },
+        {
+          height: nextExpanded ? target.scrollHeight : previewHeight,
+          autoAlpha: nextExpanded ? 1 : 0.96,
+          duration: nextExpanded ? 0.36 : 0.26,
+          ease: nextExpanded ? "power3.out" : "power2.inOut",
+          overwrite: "auto",
+          onComplete: () => finishLongMessageMotion(target)
+        }
+      );
+    });
+  });
 
   return (
     <div
+      ref={itemRef}
       className={[
-        "group mx-auto my-1.5 w-full max-w-[1280px] px-6 py-1 transition-colors",
+        "ah-chat-message group mx-auto my-1.5 w-full max-w-[1280px] px-6 py-1 transition-colors",
         isSelected ? "rounded-2xl bg-accent-soft" : ""
       ].join(" ")}
+      data-chat-motion-target
       data-message-id={message.id}
       data-speaker-type={isUser ? "user" : isSystem ? "system" : "agent"}
       data-testid={testId}
@@ -89,13 +145,14 @@ export function MessageItem(props: MessageItemProps) {
               selectMessage();
             }}
             className={[
-              "relative w-fit rounded-[20px] px-4 py-3 text-sm leading-6 shadow-sm",
+              "ah-chat-bubble relative w-fit rounded-[20px] px-4 py-3 text-sm leading-6 shadow-sm",
               isUser
                 ? "rounded-br-md bg-accent text-accent-foreground"
                 : isSystem
                   ? "rounded-bl-md border border-border bg-surface-tertiary text-foreground"
                   : "rounded-bl-md border border-border bg-surface text-foreground shadow-surface"
             ].join(" ")}
+            data-chat-bubble
           >
             {message.quotedMessageId ? (
               <QuotedMessageBubble
@@ -109,13 +166,23 @@ export function MessageItem(props: MessageItemProps) {
             {message.text ? (
               <div
                 id={longMessageContentId}
+                ref={longMessageContentRef}
                 className={[
-                  "relative",
-                  textPreview.collapsed && !expanded ? "ah-long-message-preview" : ""
+                  "ah-long-message-content relative",
+                  showLongMessagePreview ? "ah-long-message-preview" : ""
                 ].join(" ")}
               >
                 <MessageTextView text={visibleText} isStreaming={isStreaming} />
-                {textPreview.collapsed && !expanded ? <div className="ah-long-message-fade" aria-hidden="true" /> : null}
+                {textPreview.collapsed ? (
+                  <div
+                    ref={longMessagePreviewMeasureRef}
+                    className="ah-long-message-measure ah-long-message-preview"
+                    aria-hidden="true"
+                  >
+                    <MessageTextView text={textPreview.preview} isStreaming={false} />
+                  </div>
+                ) : null}
+                {showLongMessagePreview ? <div className="ah-long-message-fade" aria-hidden="true" /> : null}
               </div>
             ) : null}
 
@@ -123,7 +190,7 @@ export function MessageItem(props: MessageItemProps) {
               <LongMessageDisclosure
                 expanded={expanded}
                 contentId={longMessageContentId}
-                onToggle={() => setExpanded((value) => !value)}
+                onToggle={toggleLongMessage}
                 runId={message.runId}
                 onOpenRun={onOpenRun}
               />
@@ -192,6 +259,10 @@ export function MessageItem(props: MessageItemProps) {
   );
 }
 
+function prefersReducedMotion(): boolean {
+  return globalThis.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+}
+
 function QuotedMessageBubble(props: {
   readonly quotedMessageId: string;
   readonly quotedMessage?: QuotedMessagePreview | undefined;
@@ -240,16 +311,18 @@ function LongMessageDisclosure({
 }) {
   return (
     <div className="ah-long-message-disclosure" data-testid="long-message-disclosure">
-      <div className="min-w-0 flex-1">
+      <div className="ah-long-message-meta">
+        <span className="ah-long-message-mark" aria-hidden="true" />
+        <span className="ah-long-message-label">长回复</span>
         <span className="ah-long-message-status">
-          {expanded ? "全文已展开" : "长回复 · 已折叠"}
+          {expanded ? "全文已展开" : "已折叠"}
         </span>
       </div>
-      <div className="flex shrink-0 items-center gap-1.5">
+      <div className="ah-long-message-actions">
         {runId && onOpenRun ? (
           <Button
             size="sm"
-            variant="tertiary"
+            variant="ghost"
             className="ah-long-message-run-action"
             data-testid="long-message-run-details"
             onPress={() => onOpenRun(runId)}
@@ -259,7 +332,7 @@ function LongMessageDisclosure({
         ) : null}
         <Button
           size="sm"
-          variant="tertiary"
+          variant="ghost"
           className="ah-long-message-toggle"
           aria-expanded={expanded}
           aria-controls={contentId}

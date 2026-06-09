@@ -19,13 +19,18 @@ export function TypingIndicator({ runId, agentName, status, mode, turnIndex, onS
   const chipLabel = isCancelling ? "Stopping discussion" : isAssisted && turnIndex !== undefined ? `Group turn ${turnIndex}` : status;
   const canStop = isAssisted && !isCancelling && runId !== undefined && onStopDiscussion !== undefined;
   return (
-    <div className="px-4 py-2" role="status" aria-live="polite">
-      <div className="mx-auto flex max-w-[920px] items-center gap-2 text-xs text-muted">
+    <div className="px-4 py-2" role="status" aria-live="polite" data-chat-typing-indicator>
+      <div className="ah-typing-indicator mx-auto flex max-w-[920px] items-center gap-2 text-xs text-muted">
         <Avatar size="sm">
           <Avatar.Fallback>{initials(agentName)}</Avatar.Fallback>
         </Avatar>
         <span>{label}</span>
         <Chip size="sm" variant="soft" color="accent">{chipLabel}</Chip>
+        <span className="ah-typing-dots" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </span>
         <Spinner size="sm" color="current" />
         {canStop ? (
           <Button size="sm" variant="danger-soft" onPress={() => onStopDiscussion(runId)}>

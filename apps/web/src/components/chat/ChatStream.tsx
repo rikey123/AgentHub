@@ -10,6 +10,7 @@ import { RunBriefToasts } from "./RunBriefToasts.tsx";
 import { MailboxFailureCard } from "../cards/MailboxFailureCard.tsx";
 import { PermissionCard } from "../cards/PermissionCard.tsx";
 import type { ArtifactChatReference } from "../artifacts/ArtifactPreviewModal.tsx";
+import { useChatMotion } from "./useChatMotion.ts";
 
 interface ChatStreamProps {
   room: RoomViewModel;
@@ -127,6 +128,7 @@ export function ChatStream(props: ChatStreamProps) {
     return buildChatFeedItems(room);
   }, [room.messages, room.pendingPermissions, room.briefs]);
 
+  const motionRootRef = useRef<HTMLDivElement>(null);
   const parentRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
     count: items.length,
@@ -179,9 +181,19 @@ export function ChatStream(props: ChatStreamProps) {
   const showEmptyState =
     items.length === 0 &&
     (props.connectionStatus === "connected" || props.connectionStatus === "disconnected" || props.connectionStatus === "offline" || props.connectionStatus === "reconnecting");
+  const activeIndicatorKey = activeIndicator
+    ? `${activeIndicator.runId}:${activeIndicator.status}:${activeIndicator.turnIndex ?? 0}`
+    : undefined;
+
+  useChatMotion({
+    containerRef: motionRootRef,
+    items,
+    selectedMessageId: props.selectedMessageId,
+    activeIndicatorKey
+  });
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col bg-[radial-gradient(circle_at_top_left,color-mix(in_oklab,var(--accent)_9%,transparent),transparent_34%),linear-gradient(180deg,var(--background),var(--background-secondary))]">
+    <div ref={motionRootRef} className="relative flex h-full min-h-0 flex-col bg-[radial-gradient(circle_at_top_left,color-mix(in_oklab,var(--accent)_9%,transparent),transparent_34%),linear-gradient(180deg,var(--background),var(--background-secondary))]">
       <RunBriefToasts roomId={room.id} briefs={room.briefs} onOpenRun={props.onOpenRun} />
       {props.connectionStatus !== "connected" ? (
         <div className="px-3 pt-2">
@@ -233,6 +245,8 @@ export function ChatStream(props: ChatStreamProps) {
                 return (
                   <div
                     key={item.id}
+                    data-chat-feed-item-id={item.id}
+                    data-chat-feed-item-kind={item.kind}
                     data-index={vi.index}
                     ref={virtualizer.measureElement}
                     style={{ position: "absolute", top: 0, left: 0, right: 0, transform: `translateY(${vi.start}px)` }}
@@ -256,7 +270,7 @@ export function ChatStream(props: ChatStreamProps) {
                         csrfFetch={props.csrfFetch}
                       />
                     ) : item.kind === "permission" ? (
-                      <div className="mx-auto my-2 w-full max-w-[760px] px-4">
+                      <div className="mx-auto my-2 w-full max-w-[760px] px-4" data-chat-motion-target>
                         <PermissionCard
                           card={{
                             type: "permission",
@@ -270,7 +284,9 @@ export function ChatStream(props: ChatStreamProps) {
                         />
                       </div>
                     ) : (
-                      <BriefItem brief={item.data} onOpenRun={props.onOpenRun} />
+                      <div data-chat-motion-target>
+                        <BriefItem brief={item.data} onOpenRun={props.onOpenRun} />
+                      </div>
                     )}
                   </div>
                 );
