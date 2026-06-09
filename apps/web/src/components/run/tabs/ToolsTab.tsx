@@ -1,7 +1,7 @@
 import type { RoomViewModel, RunViewModel, TaskViewModel } from "../../../types.ts";
 import { Card, Chip } from "@heroui/react";
 import { formatDuration, formatTokens, formatUsd } from "../../../lib/format.ts";
-import { runStatusColor, taskStatusColor } from "../../../lib/status.ts";
+import { runStatusColor, runStatusLabel, taskStatusColor, taskStatusLabel } from "../../../lib/status.ts";
 
 export type RunTaskCollaborationView = {
   readonly currentRun?: RunViewModel | undefined;
@@ -30,19 +30,19 @@ export function ToolsTab({ room, runId, onOpenRun, onOpenTask }: ToolsTabProps) 
   const showCollaboration = room.mode === "team" || room.mode === "squad" || collaboration.tasks.length > 0 || collaboration.parentRun || collaboration.siblingRuns.length > 0;
 
   return (
-    <div className="flex flex-col gap-3 p-3">
+    <div className="ah-run-tools-tab flex flex-col gap-3 p-4">
       {showCollaboration ? <CollaborationSection view={collaboration} onOpenRun={onOpenRun} onOpenTask={onOpenTask} /> : null}
-      <section>
-        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Tool calls</h3>
-        {calls.length === 0 ? <p className="text-sm text-muted">No tool calls.</p> : (
+      <section className="ah-run-section">
+        <h3 className="ah-run-section-title">Tool 调用</h3>
+        {calls.length === 0 ? <p className="ah-run-empty">这个 Run 暂无 Tool 调用。</p> : (
           <ul className="flex flex-col gap-2">
             {calls.map(({ messageId, idx, part }) => (
               <li key={`${messageId}-${idx}`}>
-                <Card variant="transparent" className="border border-border">
+                <Card variant="transparent" className="ah-run-tool-card border border-border">
                   <Card.Header>
                     <div className="flex items-center gap-2">
                       <Card.Title className="text-sm">
-                        {part.type === "tool_call" ? `Call · ${part.name}` : "Result"}
+                        {part.type === "tool_call" ? `调用 · ${part.name}` : "结果"}
                       </Card.Title>
                       {part.type === "tool_result" ? (
                         <Chip size="sm" variant="soft" color={part.ok ? "success" : "danger"}>
@@ -63,19 +63,19 @@ export function ToolsTab({ room, runId, onOpenRun, onOpenTask }: ToolsTabProps) 
         )}
       </section>
       {subagents.length > 0 ? (
-        <section>
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Subagent runs</h3>
+        <section className="ah-run-section">
+          <h3 className="ah-run-section-title">子 agent Runs</h3>
           <ul className="flex flex-col gap-2">
             {subagents.map((sub) => {
               const duration = sub.startedAt !== undefined && sub.endedAt !== undefined ? formatDuration(sub.endedAt - sub.startedAt) : undefined;
               const tokens = sub.cost ? sub.cost.inputTokens + sub.cost.outputTokens : undefined;
               return (
                 <li key={sub.id}>
-                  <Card variant="transparent" className="border border-border">
+                  <Card variant="transparent" className="ah-run-tool-card border border-border">
                     <Card.Header>
                       <div className="flex flex-wrap items-center gap-2">
                         <Card.Title className="text-sm">{sub.agentName}</Card.Title>
-                        <Chip size="sm" variant="soft" color="default">{sub.status}</Chip>
+                        <Chip size="sm" variant="soft" color="default">{runStatusLabel(sub.status)}</Chip>
                         {duration ? <Chip size="sm" variant="soft" color="default">⏱ {duration}</Chip> : null}
                         {tokens !== undefined && tokens > 0 ? <Chip size="sm" variant="soft" color="default">{formatTokens(tokens)} tok</Chip> : null}
                         {sub.cost && sub.cost.costUsd > 0 ? <Chip size="sm" variant="soft" color="default">{formatUsd(sub.cost.costUsd)}</Chip> : null}
@@ -149,22 +149,22 @@ function flattenTaskTree(tasks: ReadonlyArray<TaskViewModel>, rootId: string): T
 
 function CollaborationSection({ view, onOpenRun, onOpenTask }: { view: RunTaskCollaborationView; onOpenRun?: ((runId: string) => void) | undefined; onOpenTask?: ((taskId: string) => void) | undefined }) {
   return (
-    <section data-testid="run-task-collaboration">
-      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Multi-agent collaboration</h3>
-      <Card variant="transparent" className="border border-border">
+    <section className="ah-run-section" data-testid="run-task-collaboration">
+      <h3 className="ah-run-section-title">多 agent 协作</h3>
+      <Card variant="transparent" className="ah-run-collab-card border border-border">
         <Card.Header>
           <div className="flex flex-wrap items-center gap-2">
-            <Card.Title className="text-sm">Delegated task context</Card.Title>
-            {view.associatedTask ? <Chip size="sm" variant="soft" color={taskStatusColor(view.associatedTask.status)}>{view.associatedTask.status}</Chip> : null}
+            <Card.Title className="text-sm">委派任务上下文</Card.Title>
+            {view.associatedTask ? <Chip size="sm" variant="soft" color={taskStatusColor(view.associatedTask.status)}>{taskStatusLabel(view.associatedTask.status)}</Chip> : null}
           </div>
-          <Card.Description className="text-xs">Linked runs and task tree for this delegated teammate run.</Card.Description>
+          <Card.Description className="text-xs">这个队友 Run 关联的 runs 和任务树。</Card.Description>
         </Card.Header>
         <Card.Content>
           <div className="flex flex-col gap-3">
-            {view.parentRun ? <RunLink label="Parent Leader Run" run={view.parentRun} onOpenRun={onOpenRun} /> : null}
+            {view.parentRun ? <RunLink label="上级 Leader Run" run={view.parentRun} onOpenRun={onOpenRun} /> : null}
             {view.siblingRuns.length > 0 ? (
               <div>
-                <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">Sibling delegated runs</div>
+                <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">同级委派 Runs</div>
                 <ul className="flex flex-col gap-1.5">
                   {view.siblingRuns.map((run) => <li key={run.id}><RunLink label={run.agentName} run={run} onOpenRun={onOpenRun} /></li>)}
                 </ul>
@@ -172,12 +172,12 @@ function CollaborationSection({ view, onOpenRun, onOpenTask }: { view: RunTaskCo
             ) : null}
             {view.tasks.length > 0 ? (
               <div>
-                <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">Task tree</div>
+                <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">任务树</div>
                 <ul className="flex flex-col gap-1.5" data-testid="run-task-tree">
                   {view.tasks.map((task) => <TaskTreeItem key={task.id} task={task} onOpenTask={onOpenTask} />)}
                 </ul>
               </div>
-            ) : <p className="text-xs text-muted">No task tree is linked to this run yet.</p>}
+            ) : <p className="ah-run-empty text-xs">这个 Run 暂未关联任务树。</p>}
           </div>
         </Card.Content>
       </Card>
@@ -187,9 +187,9 @@ function CollaborationSection({ view, onOpenRun, onOpenTask }: { view: RunTaskCo
 
 function RunLink({ label, run, onOpenRun }: { label: string; run: RunViewModel; onOpenRun?: ((runId: string) => void) | undefined }) {
   return (
-    <button type="button" className="flex w-full items-center gap-2 rounded border border-border bg-surface-secondary px-2 py-1.5 text-left text-xs hover:bg-surface-tertiary" onClick={() => onOpenRun?.(run.id)} data-testid={`run-link-${run.id}`}>
+    <button type="button" className="ah-run-link" onClick={() => onOpenRun?.(run.id)} data-testid={`run-link-${run.id}`}>
       <span className="font-medium">{label}</span>
-      <Chip size="sm" variant="soft" color={runStatusColor(run.status)}>{run.status}</Chip>
+      <Chip size="sm" variant="soft" color={runStatusColor(run.status)}>{runStatusLabel(run.status)}</Chip>
       <span className="ah-mono text-muted">{run.id}</span>
     </button>
   );
@@ -199,9 +199,9 @@ function TaskTreeItem({ task, onOpenTask }: { task: TaskViewModel; onOpenTask?: 
   const depth = task.parentTaskId ? 1 : 0;
   return (
     <li className={depth > 0 ? "ml-4" : undefined}>
-      <button type="button" className="flex w-full items-center gap-2 rounded border border-border bg-surface-secondary px-2 py-1.5 text-left text-xs hover:bg-surface-tertiary" onClick={() => onOpenTask?.(task.id)} data-testid={`task-link-${task.id}`}>
+      <button type="button" className="ah-run-link" onClick={() => onOpenTask?.(task.id)} data-testid={`task-link-${task.id}`}>
         <span className="flex-1 truncate font-medium">{task.title}</span>
-        <Chip size="sm" variant="soft" color={taskStatusColor(task.status)}>{task.status}</Chip>
+        <Chip size="sm" variant="soft" color={taskStatusColor(task.status)}>{taskStatusLabel(task.status)}</Chip>
         <span className="ah-mono text-muted">{task.id}</span>
       </button>
     </li>
