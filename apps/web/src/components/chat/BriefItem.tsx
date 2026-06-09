@@ -40,7 +40,7 @@ export function BriefItem({ brief, onOpenRun }: BriefItemProps) {
       </span>
       <span className="flex items-center gap-1">
         {brief.failureReason ? <Chip size="sm" variant="soft" color="danger">{brief.failureClass ?? "failure"}</Chip> : null}
-        {brief.artifactCount ? <Chip size="sm" variant="soft" color="default">{brief.artifactCount} artifacts</Chip> : null}
+        {brief.artifactCount ? <Chip size="sm" variant="soft" color="default">{brief.artifactCount} 个产物</Chip> : null}
         {brief.cost ? (
           <Chip size="sm" variant="soft" color="default">
             {formatTokens(brief.cost.tokens)} tokens{brief.cost.usd != null ? ` · ${formatUsd(brief.cost.usd)}` : ""}

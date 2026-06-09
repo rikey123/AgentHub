@@ -1,0 +1,11 @@
+refrence/
+node_modules/
+.agenthub/
+.turbo/
+dist/
+build/
+coverage/
+playwright-report/
+test-results/
+tmp/
+temp/

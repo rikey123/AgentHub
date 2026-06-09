@@ -55,6 +55,7 @@ interface TopBarProps {
   onCycleTheme: () => void;
   onOpenCommandPalette: () => void;
   onOpenKeymap: () => void;
+  onOpenMobilePairing: () => void;
   onToggleLeft: () => void;
   onToggleRight: () => void;
   leftCollapsed: boolean;
@@ -134,6 +135,13 @@ export function TopBar(props: TopBarProps) {
           </Tooltip>
 
           <div className="ah-topbar-icon-group">
+            <Tooltip>
+              <Button className="ah-topbar-icon-button" isIconOnly variant="ghost" size="sm" onPress={props.onOpenMobilePairing} aria-label="移动端验证">
+                📱
+              </Button>
+              <Tooltip.Content>移动端验证</Tooltip.Content>
+            </Tooltip>
+
             <Tooltip>
               <Button className="ah-topbar-icon-button" isIconOnly variant="ghost" size="sm" onPress={props.onOpenKeymap} aria-label="显示键盘快捷键">
                 ?

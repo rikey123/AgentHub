@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { RoomViewModel } from "../../../types.ts";
 import { Card, Chip } from "@heroui/react";
-import { permissionStatusColor } from "../../../lib/status.ts";
+import { permissionStatusColor, permissionStatusLabel as sharedPermissionStatusLabel } from "../../../lib/status.ts";
 
 type PermissionDecision = {
   readonly resource: { readonly type: string; readonly provider?: string };
@@ -88,9 +88,5 @@ function permissionDecisionLabel(decision: PermissionDecision["decision"]): stri
 }
 
 function permissionStatusLabel(status: string): string {
-  if (status === "pending") return "待处理";
-  if (status === "allowed") return "已允许";
-  if (status === "denied") return "已拒绝";
-  if (status === "expired") return "已过期";
-  return status;
+  return sharedPermissionStatusLabel(status);
 }

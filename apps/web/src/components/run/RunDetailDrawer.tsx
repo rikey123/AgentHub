@@ -8,7 +8,7 @@ import { PermissionsTab } from "./tabs/PermissionsTab.tsx";
 import { ArtifactsTab } from "./tabs/ArtifactsTab.tsx";
 import { RawStreamTab } from "./tabs/RawStreamTab.tsx";
 import { CostTab } from "./tabs/CostTab.tsx";
-import { runStatusColor, taskStatusColor } from "../../lib/status.ts";
+import { runStatusColor, runStatusLabel, taskStatusColor, taskStatusLabel } from "../../lib/status.ts";
 import { formatDuration } from "../../lib/format.ts";
 
 interface RunDetailDrawerProps {
@@ -56,13 +56,13 @@ export function RunDetailDrawer(props: RunDetailDrawerProps) {
     <>
     <Drawer.Backdrop isOpen={props.isOpen} onOpenChange={props.onOpenChange}>
       <Drawer.Content placement="right">
-        <Drawer.Dialog className="w-[640px] max-w-[90vw]">
+        <Drawer.Dialog className="ah-run-detail-drawer w-[640px] max-w-[90vw]">
           <Drawer.CloseTrigger aria-label="关闭运行详情" />
           <Drawer.Header>
-            <Drawer.Heading>{run?.agentName ?? "运行"} - {run?.status ?? "unknown"}</Drawer.Heading>
+            <Drawer.Heading>{run?.agentName ?? "运行"} - {run ? runStatusLabel(run.status) : "未知状态"}</Drawer.Heading>
             {run ? (
               <div className="mt-1 flex items-center gap-2 text-xs">
-                <Chip size="sm" variant="soft" color={runStatusColor(run.status)}>{run.status}</Chip>
+                <Chip size="sm" variant="soft" color={runStatusColor(run.status)}>{runStatusLabel(run.status)}</Chip>
                 <span className="text-muted">耗时：{duration}</span>
                 <span className="ah-mono text-muted">{run.id.slice(0, 8)}</span>
               </div>
@@ -80,15 +80,15 @@ export function RunDetailDrawer(props: RunDetailDrawerProps) {
             ) : (
               <div data-testid="run-detail-tabs" className="flex h-full min-h-0 flex-col">
                 <Tabs selectedKey={selectedTab} onSelectionChange={(key) => setSelectedTab(String(key))} className="flex h-full min-h-0 flex-col">
-                  <Tabs.ListContainer>
-                    <Tabs.List aria-label="运行详情">
-                      <Tabs.Tab id="transcript" data-testid="run-detail-tab-transcript">转录<Chip className="ml-1" size="sm" variant="soft" color="default">{transcriptCount}</Chip><Tabs.Indicator /></Tabs.Tab>
-                      <Tabs.Tab id="tools" data-testid="run-detail-tab-tools"><Tabs.Separator />工具<Tabs.Indicator /></Tabs.Tab>
-                      <Tabs.Tab id="context" data-testid="run-detail-tab-context"><Tabs.Separator />上下文<Chip className="ml-1" size="sm" variant="soft" color="default">{contextCount}</Chip><Tabs.Indicator /></Tabs.Tab>
-                      <Tabs.Tab id="perms" data-testid="run-detail-tab-permissions"><Tabs.Separator />许可<Chip className="ml-1" size="sm" variant="soft" color="default">{permissionCount}</Chip><Tabs.Indicator /></Tabs.Tab>
-                      <Tabs.Tab id="artifacts" data-testid="run-detail-tab-artifacts"><Tabs.Separator />产物<Tabs.Indicator /></Tabs.Tab>
-                      <Tabs.Tab id="raw" data-testid="run-detail-tab-raw"><Tabs.Separator />原始<Tabs.Indicator /></Tabs.Tab>
-                      <Tabs.Tab id="cost" data-testid="run-detail-tab-cost"><Tabs.Separator />成本<Tabs.Indicator /></Tabs.Tab>
+                  <Tabs.ListContainer className="ah-run-detail-tabs-wrap">
+                    <Tabs.List aria-label="运行详情" className="ah-run-detail-tabs">
+                      <Tabs.Tab className="ah-run-detail-tab" id="transcript" data-testid="run-detail-tab-transcript">转录<Chip className="ml-1" size="sm" variant="soft" color="default">{transcriptCount}</Chip><Tabs.Indicator /></Tabs.Tab>
+                      <Tabs.Tab className="ah-run-detail-tab" id="tools" data-testid="run-detail-tab-tools">工具<Tabs.Indicator /></Tabs.Tab>
+                      <Tabs.Tab className="ah-run-detail-tab" id="context" data-testid="run-detail-tab-context">上下文<Chip className="ml-1" size="sm" variant="soft" color="default">{contextCount}</Chip><Tabs.Indicator /></Tabs.Tab>
+                      <Tabs.Tab className="ah-run-detail-tab" id="perms" data-testid="run-detail-tab-permissions">许可<Chip className="ml-1" size="sm" variant="soft" color="default">{permissionCount}</Chip><Tabs.Indicator /></Tabs.Tab>
+                      <Tabs.Tab className="ah-run-detail-tab" id="artifacts" data-testid="run-detail-tab-artifacts">产物<Tabs.Indicator /></Tabs.Tab>
+                      <Tabs.Tab className="ah-run-detail-tab" id="raw" data-testid="run-detail-tab-raw">原始<Tabs.Indicator /></Tabs.Tab>
+                      <Tabs.Tab className="ah-run-detail-tab" id="cost" data-testid="run-detail-tab-cost">成本<Tabs.Indicator /></Tabs.Tab>
                     </Tabs.List>
                   </Tabs.ListContainer>
                   <ScrollShadow className="flex-1 min-h-0 overflow-auto" orientation="vertical">
@@ -176,7 +176,7 @@ function TaskDetailDrawer({ task, isOpen, onOpenChange }: { task?: TaskViewModel
             <Drawer.Heading>{task?.title ?? "任务"}</Drawer.Heading>
             {task ? (
               <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
-                <Chip size="sm" variant="soft" color={taskStatusColor(task.status)}>{task.status}</Chip>
+                <Chip size="sm" variant="soft" color={taskStatusColor(task.status)}>{taskStatusLabel(task.status)}</Chip>
                 {task.priority ? <Chip size="sm" variant="soft" color="default">{task.priority}</Chip> : null}
                 <span className="ah-mono text-muted">{task.id}</span>
               </div>

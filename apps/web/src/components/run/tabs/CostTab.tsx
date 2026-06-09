@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { RunViewModel } from "../../../types.ts";
 import { Card, Chip } from "@heroui/react";
 import { formatTokens, formatUsd } from "../../../lib/format.ts";
+import { runStatusLabel } from "../../../lib/status.ts";
 
 type CostGroup = {
   key: string;
@@ -54,11 +55,11 @@ export function CostTab({ run, workspaceId = "default-workspace", csrfFetch }: C
   }
   const c = run.cost;
   const rows: Array<[string, string]> = [
-    ["Model", c.modelId],
-    ["Input tokens", formatTokens(c.inputTokens)],
-    ["Output tokens", formatTokens(c.outputTokens)],
-    ["Cached tokens", formatTokens(c.cachedTokens)],
-    ["Cost", formatUsd(c.costUsd)]
+    ["model", c.modelId],
+    ["输入 tokens", formatTokens(c.inputTokens)],
+    ["输出 tokens", formatTokens(c.outputTokens)],
+    ["缓存 tokens", formatTokens(c.cachedTokens)],
+    ["费用", formatUsd(c.costUsd)]
   ];
 
   const showCompare = avgUsd !== null && avgUsd > 0 && c.costUsd > 0;
@@ -74,7 +75,7 @@ export function CostTab({ run, workspaceId = "default-workspace", csrfFetch }: C
       <Card variant="transparent" className="border border-border">
         <Card.Header>
           <Card.Title>运行成本</Card.Title>
-          <Chip size="sm" variant="soft" color="default">{run.status}</Chip>
+          <Chip size="sm" variant="soft" color="default">{runStatusLabel(run.status)}</Chip>
         </Card.Header>
         <Card.Content>
           <table className="w-full text-sm">
@@ -94,14 +95,14 @@ export function CostTab({ run, workspaceId = "default-workspace", csrfFetch }: C
         <Card variant="transparent" className="border border-border">
           <Card.Header>
             <div className="flex items-center gap-2">
-              <Card.Title className="text-sm">7-day comparison</Card.Title>
+              <Card.Title className="text-sm">7 天对比</Card.Title>
               <Chip size="sm" variant="soft" color={deltaColor}>{deltaSign}{delta.toFixed(0)}%</Chip>
             </div>
           </Card.Header>
           <Card.Content>
             <div className="flex flex-col gap-2 text-xs">
-              <CompareRow label="This run" valueLabel={formatUsd(c.costUsd)} pct={thisPct} tone="primary" />
-              <CompareRow label="7-day avg same agent" valueLabel={formatUsd(avgUsd!)} pct={avgPct} tone="muted" />
+              <CompareRow label="当前 Run" valueLabel={formatUsd(c.costUsd)} pct={thisPct} tone="primary" />
+              <CompareRow label="同 agent 7 天均值" valueLabel={formatUsd(avgUsd!)} pct={avgPct} tone="muted" />
             </div>
           </Card.Content>
         </Card>

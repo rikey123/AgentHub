@@ -27,7 +27,7 @@ export type PublishResult =
 export type EventBusSubscriber = (event: EventEnvelope) => void | Promise<void>;
 export type Unsubscribe = () => void;
 
-export type ReplayView = "main" | "detail" | "raw";
+export type ReplayView = "main" | "detail" | "raw" | "mobile";
 
 export type ReplayFilters = {
   readonly workspaceId?: string;
@@ -1004,7 +1004,7 @@ function visibilityValuesFor(filters: ReplayFilters): readonly EventVisibility[]
   if (filters.visibility !== undefined) {
     return typeof filters.visibility === "string" ? [filters.visibility] : filters.visibility;
   }
-  if (filters.view === "main") {
+  if (filters.view === "main" || filters.view === "mobile") {
     return ["main", "both"];
   }
   if (filters.view === "detail") {

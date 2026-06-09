@@ -1,7 +1,7 @@
 import type { RoomViewModel, RunViewModel, TaskViewModel } from "../../../types.ts";
 import { Card, Chip } from "@heroui/react";
 import { formatDuration, formatTokens, formatUsd } from "../../../lib/format.ts";
-import { runStatusColor, taskStatusColor } from "../../../lib/status.ts";
+import { runStatusColor, runStatusLabel, taskStatusColor, taskStatusLabel } from "../../../lib/status.ts";
 
 export type RunTaskCollaborationView = {
   readonly currentRun?: RunViewModel | undefined;
@@ -30,15 +30,15 @@ export function ToolsTab({ room, runId, onOpenRun, onOpenTask }: ToolsTabProps) 
   const showCollaboration = room.mode === "team" || room.mode === "squad" || collaboration.tasks.length > 0 || collaboration.parentRun || collaboration.siblingRuns.length > 0;
 
   return (
-    <div className="flex flex-col gap-3 p-3">
+    <div className="ah-run-tools-tab flex flex-col gap-3 p-4">
       {showCollaboration ? <CollaborationSection view={collaboration} onOpenRun={onOpenRun} onOpenTask={onOpenTask} /> : null}
-      <section>
-        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">工具调用</h3>
-        {calls.length === 0 ? <p className="text-sm text-muted">暂无工具调用。</p> : (
+      <section className="ah-run-section">
+        <h3 className="ah-run-section-title">工具调用</h3>
+        {calls.length === 0 ? <p className="ah-run-empty">暂无工具调用。</p> : (
           <ul className="flex flex-col gap-2">
             {calls.map(({ messageId, idx, part }) => (
               <li key={`${messageId}-${idx}`}>
-                <Card variant="transparent" className="border border-border">
+                <Card variant="transparent" className="ah-run-tool-card border border-border">
                   <Card.Header>
                     <div className="flex items-center gap-2">
                       <Card.Title className="text-sm">
@@ -63,19 +63,19 @@ export function ToolsTab({ room, runId, onOpenRun, onOpenTask }: ToolsTabProps) 
         )}
       </section>
       {subagents.length > 0 ? (
-        <section>
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">子 agent 运行</h3>
+        <section className="ah-run-section">
+          <h3 className="ah-run-section-title">子 agent 运行</h3>
           <ul className="flex flex-col gap-2">
             {subagents.map((sub) => {
               const duration = sub.startedAt !== undefined && sub.endedAt !== undefined ? formatDuration(sub.endedAt - sub.startedAt) : undefined;
               const tokens = sub.cost ? sub.cost.inputTokens + sub.cost.outputTokens : undefined;
               return (
                 <li key={sub.id}>
-                  <Card variant="transparent" className="border border-border">
+                  <Card variant="transparent" className="ah-run-tool-card border border-border">
                     <Card.Header>
                       <div className="flex flex-wrap items-center gap-2">
                         <Card.Title className="text-sm">{sub.agentName}</Card.Title>
-                        <Chip size="sm" variant="soft" color="default">{sub.status}</Chip>
+                        <Chip size="sm" variant="soft" color="default">{runStatusLabel(sub.status)}</Chip>
                         {duration ? <Chip size="sm" variant="soft" color="default">⏱ {duration}</Chip> : null}
                         {tokens !== undefined && tokens > 0 ? <Chip size="sm" variant="soft" color="default">{formatTokens(tokens)} tok</Chip> : null}
                         {sub.cost && sub.cost.costUsd > 0 ? <Chip size="sm" variant="soft" color="default">{formatUsd(sub.cost.costUsd)}</Chip> : null}
@@ -149,13 +149,13 @@ function flattenTaskTree(tasks: ReadonlyArray<TaskViewModel>, rootId: string): T
 
 function CollaborationSection({ view, onOpenRun, onOpenTask }: { view: RunTaskCollaborationView; onOpenRun?: ((runId: string) => void) | undefined; onOpenTask?: ((taskId: string) => void) | undefined }) {
   return (
-    <section data-testid="run-task-collaboration">
-      <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">多 agent 协作</h3>
-      <Card variant="transparent" className="border border-border">
+    <section className="ah-run-section" data-testid="run-task-collaboration">
+      <h3 className="ah-run-section-title">多 agent 协作</h3>
+      <Card variant="transparent" className="ah-run-collab-card border border-border">
         <Card.Header>
           <div className="flex flex-wrap items-center gap-2">
-            <Card.Title className="text-sm">委托任务上下文</Card.Title>
-            {view.associatedTask ? <Chip size="sm" variant="soft" color={taskStatusColor(view.associatedTask.status)}>{view.associatedTask.status}</Chip> : null}
+            <Card.Title className="text-sm">委派任务上下文</Card.Title>
+            {view.associatedTask ? <Chip size="sm" variant="soft" color={taskStatusColor(view.associatedTask.status)}>{taskStatusLabel(view.associatedTask.status)}</Chip> : null}
           </div>
           <Card.Description className="text-xs">展示此委托队友运行关联的运行和任务树。</Card.Description>
         </Card.Header>
@@ -177,7 +177,7 @@ function CollaborationSection({ view, onOpenRun, onOpenTask }: { view: RunTaskCo
                   {view.tasks.map((task) => <TaskTreeItem key={task.id} task={task} onOpenTask={onOpenTask} />)}
                 </ul>
               </div>
-            ) : <p className="text-xs text-muted">此运行尚未关联任务树。</p>}
+            ) : <p className="ah-run-empty text-xs">此运行尚未关联任务树。</p>}
           </div>
         </Card.Content>
       </Card>
@@ -187,9 +187,9 @@ function CollaborationSection({ view, onOpenRun, onOpenTask }: { view: RunTaskCo
 
 function RunLink({ label, run, onOpenRun }: { label: string; run: RunViewModel; onOpenRun?: ((runId: string) => void) | undefined }) {
   return (
-    <button type="button" className="flex w-full items-center gap-2 rounded border border-border bg-surface-secondary px-2 py-1.5 text-left text-xs hover:bg-surface-tertiary" onClick={() => onOpenRun?.(run.id)} data-testid={`run-link-${run.id}`}>
+    <button type="button" className="ah-run-link" onClick={() => onOpenRun?.(run.id)} data-testid={`run-link-${run.id}`}>
       <span className="font-medium">{label}</span>
-      <Chip size="sm" variant="soft" color={runStatusColor(run.status)}>{run.status}</Chip>
+      <Chip size="sm" variant="soft" color={runStatusColor(run.status)}>{runStatusLabel(run.status)}</Chip>
       <span className="ah-mono text-muted">{run.id}</span>
     </button>
   );
@@ -199,9 +199,9 @@ function TaskTreeItem({ task, onOpenTask }: { task: TaskViewModel; onOpenTask?: 
   const depth = task.parentTaskId ? 1 : 0;
   return (
     <li className={depth > 0 ? "ml-4" : undefined}>
-      <button type="button" className="flex w-full items-center gap-2 rounded border border-border bg-surface-secondary px-2 py-1.5 text-left text-xs hover:bg-surface-tertiary" onClick={() => onOpenTask?.(task.id)} data-testid={`task-link-${task.id}`}>
+      <button type="button" className="ah-run-link" onClick={() => onOpenTask?.(task.id)} data-testid={`task-link-${task.id}`}>
         <span className="flex-1 truncate font-medium">{task.title}</span>
-        <Chip size="sm" variant="soft" color={taskStatusColor(task.status)}>{task.status}</Chip>
+        <Chip size="sm" variant="soft" color={taskStatusColor(task.status)}>{taskStatusLabel(task.status)}</Chip>
         <span className="ah-mono text-muted">{task.id}</span>
       </button>
     </li>

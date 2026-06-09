@@ -14,6 +14,7 @@ import { ArtifactsRailContainer, ContactsRailContainer, RunsRailView, TasksRailV
 import { RunDetailDrawer } from "./components/run/RunDetailDrawer.tsx";
 import { CommandPalette, type PaletteCommand } from "./components/CommandPalette.tsx";
 import { KeymapModal } from "./components/KeymapModal.tsx";
+import { MobilePairingModal } from "./components/MobilePairingModal.tsx";
 import { NewRoomDialog, type CreateRoomInput } from "./components/NewRoomDialog.tsx";
 import { SettingsModal } from "./components/settings/index.ts";
 import { getSettingsSearch, getSettingsStateFromSearch } from "./components/settings/settingsUrl.ts";
@@ -172,6 +173,7 @@ export default function App() {
   const [editingTurnId, setEditingTurnId] = useState<string | undefined>();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [keymapOpen, setKeymapOpen] = useState(false);
+  const [mobilePairingOpen, setMobilePairingOpen] = useState(false);
   const [newRoomOpen, setNewRoomOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(initialSettingsState.isOpen);
   const [settingsTab, setSettingsTab] = useState<SettingsTabId>(initialSettingsState.tab);
@@ -588,6 +590,7 @@ export default function App() {
             onCycleTheme={toggleTheme}
             onOpenCommandPalette={() => setPaletteOpen(true)}
             onOpenKeymap={() => setKeymapOpen(true)}
+            onOpenMobilePairing={() => setMobilePairingOpen(true)}
             onToggleLeft={() => setLeftCollapsed((v) => !v)}
             onToggleRight={() => setRightCollapsed((v) => !v)}
             leftCollapsed={leftCollapsed}
@@ -613,6 +616,7 @@ export default function App() {
       />
       <CommandPalette isOpen={paletteOpen} onOpenChange={setPaletteOpen} commands={commands} />
       <KeymapModal isOpen={keymapOpen} onOpenChange={setKeymapOpen} />
+      <MobilePairingModal isOpen={mobilePairingOpen} onOpenChange={setMobilePairingOpen} csrfFetch={csrfFetch} />
       <NewRoomDialog isOpen={newRoomOpen} onOpenChange={setNewRoomOpen} onCreate={handleCreateRoom} csrfFetch={csrfFetch} />
       <SettingsModal
         isOpen={settingsOpen}
