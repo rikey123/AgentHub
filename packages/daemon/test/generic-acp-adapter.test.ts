@@ -70,6 +70,61 @@ describe("GenericACPAdapter", () => {
       fixture.close();
     }
   });
+
+  it("finalizes Codex app-server turn completion notifications", async () => {
+    const fixture = createFixture();
+    try {
+      const adapter = new CapturingGenericACPAdapter({
+        id: "codex",
+        runtimeKind: "codex",
+        name: "Codex",
+        command: "",
+        args: [],
+        services: { database: fixture.database, eventBus: fixture.eventBus },
+        lifecycle: fixture.lifecycle,
+        workspaceId: "ws_1"
+      });
+
+      await adapter.runManaged(fixture.lifecycle.read("run_1"));
+      adapter.feedProviderLine("acp-codex-run_1", JSON.stringify({ jsonrpc: "2.0", method: "turn/completed", params: { usage: { inputTokens: 3, outputTokens: 5 } } }));
+
+      expect(fixture.database.sqlite.prepare("SELECT status, input_tokens, output_tokens, model_id FROM runs WHERE id = 'run_1'").get()).toMatchObject({
+        status: "completed",
+        input_tokens: 3,
+        output_tokens: 5,
+        model_id: "codex"
+      });
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("fails Codex app-server turn failed notifications", async () => {
+    const fixture = createFixture();
+    try {
+      const adapter = new CapturingGenericACPAdapter({
+        id: "codex",
+        runtimeKind: "codex",
+        name: "Codex",
+        command: "",
+        args: [],
+        services: { database: fixture.database, eventBus: fixture.eventBus },
+        lifecycle: fixture.lifecycle,
+        workspaceId: "ws_1"
+      });
+
+      await adapter.runManaged(fixture.lifecycle.read("run_1"));
+      adapter.feedProviderLine("acp-codex-run_1", JSON.stringify({ jsonrpc: "2.0", method: "turn/failed", params: { reason: "model_error" } }));
+
+      expect(fixture.database.sqlite.prepare("SELECT status, failure_class, error FROM runs WHERE id = 'run_1'").get()).toMatchObject({
+        status: "failed",
+        failure_class: "retryable_visible",
+        error: "model_error"
+      });
+    } finally {
+      fixture.close();
+    }
+  });
 });
 
 class CapturingGenericACPAdapter extends GenericACPAdapter {
@@ -78,6 +133,12 @@ class CapturingGenericACPAdapter extends GenericACPAdapter {
   protected override sendPrompt(_sessionId: string, message: AdapterMessage): string {
     this.capturedPrompt = message.content;
     return "captured";
+  }
+
+  feedProviderLine(sessionId: string, line: string): void {
+    const session = this.debugSession(sessionId);
+    if (session === undefined) throw new Error(`missing session '${sessionId}'`);
+    this.handleLine(session, line);
   }
 }
 

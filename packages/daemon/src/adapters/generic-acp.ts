@@ -96,6 +96,13 @@ export class GenericACPAdapter extends ACPAdapter {
 
   protected mapProviderEvent(message: JsonRpcMessage): AcpProviderEvent | undefined {
     if (message.method === undefined) return undefined;
+    if (message.method.startsWith("turn/")) {
+      const record = message as unknown as Record<string, unknown>;
+      const payload: Record<string, unknown> = isRecord(message.params) ? { ...message.params } : {};
+      const usage = isRecord(record.usage) ? record.usage : undefined;
+      if (usage !== undefined) payload.usage = usage;
+      return { type: message.method, payload };
+    }
     return { type: message.method, payload: message.params };
   }
 
@@ -138,15 +145,30 @@ export class GenericACPAdapter extends ACPAdapter {
     if (event.type === "tool/pre_use") bridge.handle({ type: "tool.call.requested", toolCallId: stringField(payload, "toolCallId") ?? randomUUID(), name: stringField(payload, "name") ?? stringField(payload, "title") ?? "unknown", input: payload.input ?? payload.rawInput ?? {} });
     if (event.type === "tool/post_use") bridge.handle({ type: "tool.call.completed", toolCallId: stringField(payload, "toolCallId") ?? randomUUID(), output: payload.output ?? payload.rawOutput ?? {}, ok: payload.ok !== false });
     if (event.type === "context.snapshot") bridge.handle({ type: "context.snapshot", snapshot: payload.snapshot ?? payload });
-    if (event.type === "session/end") {
-      const messageId = `msg_${runId}`;
-      const text = this.assistantTextByRun.get(runId) ?? "";
-      if (this.assistantTextByRun.has(runId)) {
-        this.persistAssistantMessageEnd(runId, messageId, text);
-        this.assistantTextByRun.delete(runId);
-      }
-      bridge.handle({ type: "session.ended", sessionId: stringField(payload, "sessionId") ?? `${this.id}-${runId}`, reason: stringField(payload, "reason") ?? "completed", cost: { inputTokens: 0, outputTokens: 0, cachedTokens: 0, costUsd: 0, modelId: stringField(payload, "modelId") ?? this.options.runtimeKind } });
+    if (event.type === "session/end" || event.type === "turn/completed" || event.type === "turn/cancelled") {
+      this.completeAssistantMessage(runId);
+      bridge.handle({
+        type: "session.ended",
+        sessionId: stringField(payload, "sessionId") ?? stringField(payload, "session_id") ?? `${this.id}-${runId}`,
+        reason: event.type === "turn/cancelled" ? "cancelled" : stringField(payload, "reason") ?? "completed",
+        cost: costFromPayload(payload, stringField(payload, "modelId") ?? this.options.runtimeKind)
+      });
+      return;
     }
+    if (event.type === "turn/failed") {
+      this.completeAssistantMessage(runId);
+      const error = stringField(payload, "error") ?? stringField(payload, "reason") ?? stringField(payload, "message") ?? "Codex turn failed";
+      bridge.handle({ type: "session.crashed", sessionId: stringField(payload, "sessionId") ?? stringField(payload, "session_id") ?? `${this.id}-${runId}`, error });
+      this.health?.update({ adapterId: this.id, workspaceId: this.workspaceByRun.get(runId) ?? "default-workspace", liveness: "crashed", pendingRunIds: [runId], reason: error });
+    }
+  }
+
+  private completeAssistantMessage(runId: string): void {
+    const messageId = `msg_${runId}`;
+    const text = this.assistantTextByRun.get(runId) ?? "";
+    if (!this.assistantTextByRun.has(runId)) return;
+    this.persistAssistantMessageEnd(runId, messageId, text);
+    this.assistantTextByRun.delete(runId);
   }
 
   private drainPendingFailure(runId: string, session: AcpAdapterSession): void {
@@ -234,4 +256,30 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function stringField(value: Record<string, unknown>, key: string): string | undefined {
   const field = value[key];
   return typeof field === "string" && field.length > 0 ? field : undefined;
+}
+
+function costFromPayload(payload: Record<string, unknown>, modelId: string) {
+  const cost = isRecord(payload.cost) ? payload.cost : undefined;
+  if (cost !== undefined) {
+    return {
+      inputTokens: numberField(cost, "inputTokens"),
+      outputTokens: numberField(cost, "outputTokens"),
+      cachedTokens: numberField(cost, "cachedTokens"),
+      costUsd: numberField(cost, "costUsd"),
+      modelId: stringField(cost, "modelId") ?? modelId
+    };
+  }
+  const usage = isRecord(payload.usage) ? payload.usage : undefined;
+  return {
+    inputTokens: usage !== undefined ? numberField(usage, "inputTokens") : 0,
+    outputTokens: usage !== undefined ? numberField(usage, "outputTokens") : 0,
+    cachedTokens: usage !== undefined ? numberField(usage, "cachedTokens") + numberField(usage, "cachedReadTokens") + numberField(usage, "cachedWriteTokens") : 0,
+    costUsd: 0,
+    modelId
+  };
+}
+
+function numberField(value: Record<string, unknown>, key: string): number {
+  const field = value[key];
+  return typeof field === "number" && Number.isFinite(field) ? field : 0;
 }
