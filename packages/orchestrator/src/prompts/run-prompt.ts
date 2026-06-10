@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
 import type { AgentHubDatabase } from "@agenthub/db";
+import { artifactContentTypeFor, normalizePreviewKind } from "@agenthub/protocol/preview";
 
 import { MailboxService, messageText, type MailboxDeliveryBatch, type MailboxMessageDelivery, type NextTurnDelivery } from "../mailbox-service.ts";
 import { nameToSlug } from "../mention-parser.ts";
@@ -39,6 +40,46 @@ const MAX_TASK_RESULT_CHARS = 1_800;
 const MAX_LEADER_CONTEXT_CHARS = 10_000;
 const MAX_ASSISTED_CONTEXT_CHARS = 12_000;
 
+export type RunPromptImageAttachment = {
+  readonly type: "image";
+  readonly name: string;
+  readonly mimeType: string;
+  readonly data: string;
+  readonly uri?: string;
+  readonly sizeBytes?: number;
+};
+
+export type RunPromptAudioAttachment = {
+  readonly type: "audio";
+  readonly name: string;
+  readonly mimeType: string;
+  readonly data: string;
+  readonly uri?: string;
+  readonly sizeBytes?: number;
+};
+
+export type RunPromptFileAttachment = {
+  readonly type: "file";
+  readonly name: string;
+  readonly mimeType: string;
+  readonly data: string;
+  readonly uri: string;
+  readonly localPath?: string;
+  readonly sizeBytes?: number;
+};
+
+export type RunPromptAttachment = RunPromptImageAttachment | RunPromptAudioAttachment | RunPromptFileAttachment;
+export type RunPromptAttachmentOptions = {
+  readonly localPathOnlyBinaryFiles?: boolean;
+};
+
+const UPLOADED_ATTACHMENT_GUIDANCE = [
+  "## Uploaded Attachments",
+  "Uploaded files listed in the current user input are part of this turn. Some are attached as model-readable resources; PDFs and other binary documents may be listed with a local file path instead.",
+  "AgentHub does not parse, OCR, or convert uploaded files. Use attached resources directly when present; when a local path is shown, inspect that file through your runtime tools if needed.",
+  "Do not end your turn after saying you will inspect, read, extract, or parse an attachment. Perform the inspection in this run and answer the user. If your runtime cannot access or process it, report that runtime limitation directly."
+].join("\n");
+
 export function buildRunPrompt(run: RunRow, database: AgentHubDatabase, options: RunPromptOptions = {}): string {
   const room = database.sqlite.prepare("SELECT mode, primary_agent_id FROM rooms WHERE id = ?").get(run.room_id) as { readonly mode: string; readonly primary_agent_id: string | null } | undefined;
   const isTeammate = (room?.mode === "squad" || room?.mode === "team") && room.primary_agent_id !== run.agent_id;
@@ -53,7 +94,7 @@ export function buildRunPrompt(run: RunRow, database: AgentHubDatabase, options:
   // skillsBlock is only present for shared-mode runs (spec D9 fallback injection).
   const priorProgress = run.task_id !== null ? buildPriorProgressBlock(database, run.task_id) : undefined;
   const batch = readCurrentRunMailbox(run, database, options);
-  const batchInput = renderBatch(batch);
+  const batchInput = renderBatch(batch, database);
   const queuedPromptDelta = batchInput !== undefined ? renderQueuedRunPromptDelta(run, database) : undefined;
   const input = batchInput !== undefined
     ? [queuedPromptDelta, batchInput].filter((part): part is string => part !== undefined && part.trim().length > 0).join("\n\n")
@@ -62,7 +103,8 @@ export function buildRunPrompt(run: RunRow, database: AgentHubDatabase, options:
   const pinnedRoomContext = renderPinnedRoomContext(run, database);
   const leaderContext = renderLeaderRunContext(run, database);
   const assistedContext = renderAssistedGroupContext(run, database);
-  return [options.skillsBlock, missionBriefBlock, contextRefs, pinnedRoomContext, priorProgress, rolePrompt, leaderContext, assistedContext, input].filter((part): part is string => part !== undefined && part.trim().length > 0).join("\n\n---\n\n");
+  const attachmentGuidance = input.includes("[Attachment:") ? UPLOADED_ATTACHMENT_GUIDANCE : undefined;
+  return [options.skillsBlock, missionBriefBlock, contextRefs, pinnedRoomContext, priorProgress, rolePrompt, leaderContext, assistedContext, attachmentGuidance, input].filter((part): part is string => part !== undefined && part.trim().length > 0).join("\n\n---\n\n");
 }
 
 function buildLeaderPromptParams(run: RunRow, database: AgentHubDatabase): Parameters<typeof buildPlanPhasePrompt>[0] {
@@ -108,12 +150,35 @@ function readCurrentRunMailbox(run: RunRow, database: AgentHubDatabase, options:
   return new MailboxService(database, options.now ?? Date.now).readForRun(null, { runId: run.id, roomId: run.room_id, agentId: run.agent_id, deliveryBatchId: batchId });
 }
 
-function renderBatch(batch: MailboxDeliveryBatch): string | undefined {
+function renderBatch(batch: MailboxDeliveryBatch, database: AgentHubDatabase): string | undefined {
   const parts = [
     ...batch.mailbox.map(renderMailboxMessage),
-    ...batch.nextTurns.map(renderNextTurn)
+    ...batch.nextTurns.map((turn) => renderNextTurn(turn, database))
   ].filter((part): part is string => part !== undefined && part.trim().length > 0);
   return parts.length > 0 ? parts.join("\n\n") : undefined;
+}
+
+export function buildRunPromptAttachments(run: RunRow, database: AgentHubDatabase, options: RunPromptAttachmentOptions = {}): RunPromptAttachment[] {
+  const messageIds = currentRunInputMessageIds(run, database);
+  const attachments: RunPromptAttachment[] = [];
+  const seenFileIds = new Set<string>();
+  for (const messageId of messageIds) {
+    const rows = database.sqlite.prepare("SELECT payload FROM message_parts WHERE message_id = ? AND part_type = 'attachment' ORDER BY seq ASC").all(messageId) as Array<{ readonly payload: string }>;
+    for (const row of rows) {
+      const payload = parseAttachmentPayload(row.payload);
+      if (payload?.fileId === undefined) continue;
+      if (seenFileIds.has(payload.fileId)) continue;
+      seenFileIds.add(payload.fileId);
+      const attachment = uploadedPromptAttachment(database, payload.fileId, messageId, payload, options);
+      if (attachment === undefined) continue;
+      attachments.push(attachment);
+    }
+  }
+  return attachments;
+}
+
+export function buildRunPromptImageAttachments(run: RunRow, database: AgentHubDatabase): RunPromptImageAttachment[] {
+  return buildRunPromptAttachments(run, database).filter((attachment): attachment is RunPromptImageAttachment => attachment.type === "image");
 }
 
 function renderMailboxMessage(message: MailboxMessageDelivery): string {
@@ -141,9 +206,10 @@ function renderMailboxMessage(message: MailboxMessageDelivery): string {
   return `[From ${sender}] ${message.text}${files}`;
 }
 
-function renderNextTurn(turn: NextTurnDelivery): string | undefined {
+function renderNextTurn(turn: NextTurnDelivery, database: AgentHubDatabase): string | undefined {
   const delta = turn.promptDelta !== undefined ? renderPromptDelta(turn.promptDelta) : undefined;
-  const text = turn.messageText !== undefined ? `[Queued message] ${turn.messageText}` : undefined;
+  const message = turn.messageId !== undefined ? messageContent(database, turn.messageId) : turn.messageText;
+  const text = message !== undefined ? `[Queued message] ${message}` : undefined;
   return [delta, text].filter((part): part is string => part !== undefined && part.trim().length > 0).join("\n");
 }
 
@@ -152,7 +218,7 @@ function renderQueuedRunInput(run: RunRow, database: AgentHubDatabase): string |
   if (payload === undefined) return undefined;
   const parts = [
     payload.promptDelta !== undefined ? renderPromptDelta(payload.promptDelta) : undefined,
-    payload.messageId !== undefined ? messageText(database.sqlite, payload.messageId) : undefined,
+    payload.messageId !== undefined ? messageContent(database, payload.messageId) : undefined,
     payload.pendingTurnId !== undefined ? pendingTurnText(database, payload.pendingTurnId) : undefined
   ].filter((part): part is string => part !== undefined && part.trim().length > 0);
   return parts.length > 0 ? parts.join("\n\n") : undefined;
@@ -178,7 +244,16 @@ function readQueuedRunPayload(run: RunRow, database: AgentHubDatabase): QueuedRu
 
 function pendingTurnText(database: AgentHubDatabase, pendingTurnId: string): string | undefined {
   const messageId = pendingTurnMessageId(database, pendingTurnId);
-  return messageId !== undefined ? messageText(database.sqlite, messageId) : undefined;
+  return messageId !== undefined ? messageContent(database, messageId) : undefined;
+}
+
+function messageContent(database: AgentHubDatabase, messageId: string): string | undefined {
+  const parts = [
+    messageText(database.sqlite, messageId),
+    ...attachmentExcerptsForMessage(messageId, database).map((attachment) => `[File: ${attachment.path}]\n${truncateText(cleanSnippet(attachment.content), MAX_ATTACHMENT_EXCERPT_CHARS)}`),
+    ...attachmentSummariesForMessage(messageId, database)
+  ].filter((part): part is string => part !== undefined && part.trim().length > 0);
+  return parts.length > 0 ? parts.join("\n") : undefined;
 }
 
 function renderPromptDelta(delta: AgentPromptDelta): string {
@@ -286,7 +361,8 @@ function renderAssistedThreadMessage(row: { readonly id: string; readonly sender
   const text = messageText(database.sqlite, row.id);
   const pieces = [
     text !== undefined ? truncateText(cleanSnippet(text), MAX_MESSAGE_SNIPPET_CHARS) : undefined,
-    ...attachmentExcerptsForMessage(row.id, database).map((attachment) => `[File: ${attachment.path}]\n${truncateText(cleanSnippet(attachment.content), MAX_ATTACHMENT_EXCERPT_CHARS)}`)
+    ...attachmentExcerptsForMessage(row.id, database).map((attachment) => `[File: ${attachment.path}]\n${truncateText(cleanSnippet(attachment.content), MAX_ATTACHMENT_EXCERPT_CHARS)}`),
+    ...attachmentSummariesForMessage(row.id, database)
   ].filter((part): part is string => part !== undefined && part.trim().length > 0);
   if (pieces.length === 0) return undefined;
   return `- ${speakerName(row)}: ${pieces.join("\n").replace(/\n/g, "\n  ")}`;
@@ -298,21 +374,42 @@ function attachmentExcerptsForMessage(messageId: string, database: AgentHubDatab
   for (const row of rows) {
     const payload = parseAttachmentPayload(row.payload);
     if (payload === undefined || !isPreviewableAttachment(payload)) continue;
-    const content = artifactFileContent(database, payload.artifactId, payload.path);
+    const content = payload.artifactId !== undefined && payload.path !== undefined ? artifactFileContent(database, payload.artifactId, payload.path) : undefined;
     if (content === undefined || content.trim().length === 0) continue;
-    excerpts.push({ path: payload.path, content });
+    excerpts.push({ path: payload.path ?? payload.name ?? payload.fileId ?? "attachment", content });
   }
   return excerpts;
 }
 
-function parseAttachmentPayload(value: string): { readonly artifactId: string; readonly path: string; readonly mimeType?: string; readonly previewKind?: string } | undefined {
+function attachmentSummariesForMessage(messageId: string, database: AgentHubDatabase): string[] {
+  const rows = database.sqlite.prepare("SELECT payload FROM message_parts WHERE message_id = ? AND part_type = 'attachment' ORDER BY seq ASC LIMIT 3").all(messageId) as Array<{ readonly payload: string }>;
+  const summaries: string[] = [];
+  for (const row of rows) {
+    const payload = parseAttachmentPayload(row.payload);
+    if (payload?.fileId === undefined || payload.artifactId !== undefined) continue;
+    const attachment = uploadedAttachmentRow(database, payload.fileId, messageId);
+    const name = attachment?.fileName ?? payload.name ?? payload.path ?? payload.fileId;
+    const mimeType = payload.mimeType ?? attachment?.mimeType ?? "";
+    const mime = mimeType.length > 0 ? ` (${mimeType})` : "";
+    const localPath = attachment !== undefined && shouldExposeAttachmentLocalPath(name, mimeType, payload.previewKind) ? uploadedAttachmentLocalPath(attachment) : undefined;
+    const location = localPath !== undefined ? `[local path: ${localPath}]` : "[attached model resource]";
+    summaries.push(`[Attachment: ${name}${mime}] ${location}`);
+  }
+  return summaries;
+}
+
+function parseAttachmentPayload(value: string): { readonly fileId?: string; readonly artifactId?: string; readonly path?: string; readonly name?: string; readonly mimeType?: string; readonly previewKind?: string } | undefined {
   try {
-    const parsed = JSON.parse(value) as { readonly artifactId?: unknown; readonly path?: unknown; readonly mimeType?: unknown; readonly previewKind?: unknown };
-    if (typeof parsed.artifactId !== "string" || parsed.artifactId.length === 0) return undefined;
-    if (typeof parsed.path !== "string" || parsed.path.length === 0) return undefined;
+    const parsed = JSON.parse(value) as { readonly fileId?: unknown; readonly artifactId?: unknown; readonly path?: unknown; readonly name?: unknown; readonly mimeType?: unknown; readonly previewKind?: unknown };
+    const fileId = typeof parsed.fileId === "string" && parsed.fileId.length > 0 ? parsed.fileId : undefined;
+    const artifactId = typeof parsed.artifactId === "string" && parsed.artifactId.length > 0 ? parsed.artifactId : undefined;
+    const path = typeof parsed.path === "string" && parsed.path.length > 0 ? parsed.path : undefined;
+    if (fileId === undefined && (artifactId === undefined || path === undefined)) return undefined;
     return {
-      artifactId: parsed.artifactId,
-      path: parsed.path,
+      ...(fileId !== undefined ? { fileId } : {}),
+      ...(artifactId !== undefined ? { artifactId } : {}),
+      ...(path !== undefined ? { path } : {}),
+      ...(typeof parsed.name === "string" ? { name: parsed.name } : {}),
       ...(typeof parsed.mimeType === "string" ? { mimeType: parsed.mimeType } : {}),
       ...(typeof parsed.previewKind === "string" ? { previewKind: parsed.previewKind } : {})
     };
@@ -333,6 +430,72 @@ function artifactFileContent(database: AgentHubDatabase, artifactId: string, pat
   if (exact?.content !== undefined && exact.content !== null) return exact.content;
   const fallback = database.sqlite.prepare("SELECT new_content AS content FROM artifact_files WHERE artifact_id = ? ORDER BY created_at ASC LIMIT 1").get(artifactId) as { readonly content: string | null } | undefined;
   return fallback?.content ?? undefined;
+}
+
+function uploadedPromptAttachment(database: AgentHubDatabase, fileId: string, messageId: string, payload: { readonly name?: string; readonly mimeType?: string; readonly previewKind?: string }, options: RunPromptAttachmentOptions): RunPromptAttachment | undefined {
+  const row = uploadedAttachmentRow(database, fileId, messageId);
+  if (row === undefined || row.workspaceRoot === null) return undefined;
+  const mimeType = row.mimeType.length > 0 ? row.mimeType : payload.mimeType ?? artifactContentTypeFor(row.fileName);
+  const uri = attachmentUri(fileId, row.fileName);
+  const kind = normalizePreviewKind(payload.previewKind === "download" ? undefined : payload.previewKind, mimeType, row.fileName);
+  try {
+    const storagePath = resolveWorkspacePath(row.workspaceRoot, row.storagePath);
+    const localPath = shouldExposeAttachmentLocalPath(row.fileName, mimeType, payload.previewKind) ? storagePath : undefined;
+    if (localPath !== undefined && options.localPathOnlyBinaryFiles === true) {
+      return { type: "file", name: row.fileName, mimeType, data: "", uri, localPath, sizeBytes: row.byteSize };
+    }
+    const data = readFileSync(storagePath).toString("base64");
+    if (kind === "image") return { type: "image", name: row.fileName, mimeType, data, uri, sizeBytes: row.byteSize };
+    if (kind === "audio") return { type: "audio", name: row.fileName, mimeType, data, uri, sizeBytes: row.byteSize };
+    return { type: "file", name: row.fileName, mimeType, data, uri, ...(localPath !== undefined ? { localPath } : {}), sizeBytes: row.byteSize };
+  } catch {
+    return undefined;
+  }
+}
+
+type UploadedAttachmentRow = {
+  readonly fileName: string;
+  readonly mimeType: string;
+  readonly byteSize: number;
+  readonly storagePath: string;
+  readonly workspaceRoot: string | null;
+};
+
+function uploadedAttachmentRow(database: AgentHubDatabase, fileId: string, messageId: string): UploadedAttachmentRow | undefined {
+  return database.sqlite
+    .prepare(
+      `SELECT a.file_name AS fileName, COALESCE(a.mime_type, '') AS mimeType, a.byte_size AS byteSize, a.storage_path AS storagePath, w.root_path AS workspaceRoot
+       FROM attachments a
+       JOIN messages m ON m.id = a.message_id
+       JOIN rooms r ON r.id = m.room_id
+       JOIN workspaces w ON w.id = r.workspace_id
+       WHERE a.file_id = ? AND a.message_id = ?
+       LIMIT 1`
+    )
+    .get(fileId, messageId) as UploadedAttachmentRow | undefined;
+}
+
+function uploadedAttachmentLocalPath(row: UploadedAttachmentRow): string | undefined {
+  if (row.workspaceRoot === null) return undefined;
+  try {
+    return resolveWorkspacePath(row.workspaceRoot, row.storagePath);
+  } catch {
+    return undefined;
+  }
+}
+
+function shouldExposeAttachmentLocalPath(fileName: string, mimeType: string, previewKind?: string): boolean {
+  const mime = mimeType.toLowerCase().split(";")[0]?.trim() ?? "";
+  const name = fileName.toLowerCase();
+  if (previewKind === "pdf" || mime === "application/pdf" || name.endsWith(".pdf")) return true;
+  if (mime.startsWith("text/") || mime.includes("json") || mime.includes("xml") || mime.includes("yaml") || mime.includes("javascript") || mime.includes("typescript")) return false;
+  if (name.endsWith(".md") || name.endsWith(".markdown") || name.endsWith(".txt") || name.endsWith(".csv") || name.endsWith(".json") || name.endsWith(".xml") || name.endsWith(".yaml") || name.endsWith(".yml") || name.endsWith(".js") || name.endsWith(".ts") || name.endsWith(".tsx") || name.endsWith(".jsx") || name.endsWith(".css") || name.endsWith(".html")) return false;
+  if (mime.startsWith("image/") || mime.startsWith("audio/")) return false;
+  return mime.length > 0 || name.includes(".");
+}
+
+function attachmentUri(fileId: string, fileName: string): string {
+  return `agenthub://attachments/${encodeURIComponent(fileId)}/${encodeURIComponent(fileName)}`;
 }
 
 function renderContextRefsBlock(run: RunRow, database: AgentHubDatabase, text: string): string | undefined {
