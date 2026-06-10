@@ -71,6 +71,7 @@ export type AgentContactViewModel = {
 export type ParticipantViewModel = {
   readonly id: string;
   readonly name: string;
+  readonly avatarUrl?: string | undefined;
   readonly role: string;
   readonly presence: string;
   readonly adapterId: string;
@@ -85,6 +86,7 @@ export type MessageViewModel = {
   readonly senderType: "user" | "agent" | "system";
   readonly senderId: string;
   readonly senderName: string;
+  readonly senderAvatarUrl?: string | undefined;
   readonly role: string;
   readonly status: string;
   readonly text: string;
