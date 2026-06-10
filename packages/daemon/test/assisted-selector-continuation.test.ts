@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -136,6 +136,31 @@ describe("continueAssistedSelectorAfterRun", () => {
       history: expect.not.stringContaining("agent_builder:")
     }));
   });
+
+  test("passes uploaded file attachment names to the selector thread without reading file contents", async () => {
+    seedUploadedAttachment("msg_user", "123e4567-e89b-12d3-a456-426614174301", "issue.md", "# Issue\n\nUploaded selector context.");
+    const selector = {
+      continueTurn: vi.fn(async () => ({
+        agentId: "agent_reviewer",
+        reason: "selector" as const,
+        turnIndex: 2,
+        userMessageId: "msg_user"
+      }))
+    };
+
+    await continueAssistedSelectorAfterRun({
+      database: currentDatabase(),
+      getCommandBus: () => currentCommandBus(),
+      assistedSelector: selector
+    }, "run_builder");
+
+    expect(selector.continueTurn).toHaveBeenCalledWith(expect.objectContaining({
+      history: expect.stringContaining("[Attachment: issue.md (text/markdown)]")
+    }));
+    expect(selector.continueTurn).toHaveBeenCalledWith(expect.objectContaining({
+      history: expect.not.stringContaining("Uploaded selector context.")
+    }));
+  });
 });
 
 function currentCommandBus(): CommandBus {
@@ -193,6 +218,23 @@ function seedFileAttachment(messageId: string, artifactId: string, path: string,
     artifactId,
     path,
     name: path.split("/").at(-1) ?? path,
+    mimeType: "text/markdown",
+    sizeBytes: Buffer.byteLength(content, "utf8"),
+    previewKind: "markdown"
+  }));
+}
+
+function seedUploadedAttachment(messageId: string, fileId: string, name: string, content: string): void {
+  if (tempDir === undefined) throw new Error("missing temp dir");
+  currentDatabase().sqlite.prepare("UPDATE workspaces SET root_path = ? WHERE id = 'ws_1'").run(tempDir);
+  const relativeStoragePath = `.agenthub/attachments/2026/06/${fileId}`;
+  const storagePath = join(tempDir, ...relativeStoragePath.split("/"));
+  mkdirSync(join(tempDir, ".agenthub", "attachments", "2026", "06"), { recursive: true });
+  writeFileSync(storagePath, content, "utf8");
+  currentDatabase().sqlite.prepare("INSERT INTO attachments (id, message_id, file_id, file_name, mime_type, byte_size, sha256, storage_path, created_at) VALUES (?, ?, ?, ?, 'text/markdown', ?, 'sha', ?, 4)").run(`att_${fileId}`, messageId, fileId, name, Buffer.byteLength(content, "utf8"), relativeStoragePath);
+  currentDatabase().sqlite.prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, 2, 'attachment', ?, 4)").run(messageId, JSON.stringify({
+    fileId,
+    name,
     mimeType: "text/markdown",
     sizeBytes: Buffer.byteLength(content, "utf8"),
     previewKind: "markdown"
