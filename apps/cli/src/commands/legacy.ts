@@ -6,6 +6,7 @@ import { createDaemon } from "@agenthub/daemon";
 import { AgentHubClient } from "@agenthub/sdk";
 
 import { valueArg } from "../args.ts";
+import { resolveAgentTemplatesDir, resolveMigrationsDir, resolveRoomMcpBridgeDir, resolveWebAssetsRoot } from "../package-resources.ts";
 
 export async function runLegacyCommand(argv: readonly string[]): Promise<number | undefined> {
   const [command, subcommand] = argv;
@@ -17,7 +18,11 @@ export async function runLegacyCommand(argv: readonly string[]): Promise<number 
   }
   if (command === "mock" && subcommand === "solo") {
     const temp = mkdtempSync(join(tmpdir(), "agenthub-cli-"));
-    const daemon = createDaemon({ databasePath: join(temp, "agenthub.sqlite"), port: 0 });
+    const webAssetsRoot = resolveWebAssetsRoot();
+    const migrationsDir = resolveMigrationsDir();
+    const agentTemplatesDir = resolveAgentTemplatesDir();
+    const roomMcpBridgeDir = resolveRoomMcpBridgeDir();
+    const daemon = createDaemon({ databasePath: join(temp, "agenthub.sqlite"), port: 0, ...(webAssetsRoot !== undefined ? { webAssetsRoot } : {}), ...(migrationsDir !== undefined ? { migrationsDir } : {}), ...(agentTemplatesDir !== undefined ? { agentTemplatesDir } : {}), ...(roomMcpBridgeDir !== undefined ? { roomMcpBridgeDir } : {}) });
     const server = await daemon.start();
     const address = server.address();
     if (typeof address !== "object" || address === null) throw new Error("daemon did not bind TCP port");

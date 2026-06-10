@@ -5,6 +5,7 @@ import { createDatabase, defaultMigrationsDir } from "@agenthub/db";
 import { createDaemon, daemonPidPath, ensureAgentHubHome, ensureParentDirectory, loadAgentHubConfig, redactConfig } from "@agenthub/daemon";
 
 import { valueArg } from "../args.ts";
+import { resolveAgentTemplatesDir, resolveMigrationsDir, resolveRoomMcpBridgeDir, resolveWebAssetsRoot } from "../package-resources.ts";
 
 type PidFile = { readonly pid: number; readonly host: string; readonly port: number; readonly startedAt: number };
 
@@ -21,10 +22,13 @@ async function start(argv: readonly string[]): Promise<number> {
   const configPath = valueArg(argv, "--config");
   const port = numericArg(argv, "--port");
   const workspaceRoot = daemonWorkspaceRoot(argv);
-  const webAssetsRoot = valueArg(argv, "--web-assets-root");
+  const webAssetsRoot = valueArg(argv, "--web-assets-root") ?? resolveWebAssetsRoot();
+  const migrationsDir = valueArg(argv, "--migrations-dir") ?? resolveMigrationsDir();
+  const agentTemplatesDir = valueArg(argv, "--agent-templates-dir") ?? resolveAgentTemplatesDir();
+  const roomMcpBridgeDir = valueArg(argv, "--room-mcp-bridge-dir") ?? resolveRoomMcpBridgeDir();
   const config = loadAgentHubConfig({ ...(configPath !== undefined ? { configPath } : {}), ...(port !== undefined ? { port } : {}) });
   ensureAgentHubHome();
-  const daemon = createDaemon({ databasePath: config.databasePath, workspaceRoot, ...(webAssetsRoot !== undefined ? { webAssetsRoot } : {}), host: config.server.bind, port: config.server.port, allowRemote: config.server.remote.enabled, ...(config.auth.token !== undefined ? { token: config.auth.token } : {}), ...(config.auth.allowedOrigins !== undefined ? { allowedOrigins: config.auth.allowedOrigins } : {}) });
+  const daemon = createDaemon({ databasePath: config.databasePath, workspaceRoot, ...(webAssetsRoot !== undefined ? { webAssetsRoot } : {}), ...(migrationsDir !== undefined ? { migrationsDir } : {}), ...(agentTemplatesDir !== undefined ? { agentTemplatesDir } : {}), ...(roomMcpBridgeDir !== undefined ? { roomMcpBridgeDir } : {}), host: config.server.bind, port: config.server.port, allowRemote: config.server.remote.enabled, ...(config.auth.token !== undefined ? { token: config.auth.token } : {}), ...(config.auth.allowedOrigins !== undefined ? { allowedOrigins: config.auth.allowedOrigins } : {}) });
   const server = await daemon.start();
   writePidFile({ pid: process.pid, host: config.server.bind, port: boundPort(server), startedAt: Date.now() });
   process.stdout.write(`${JSON.stringify(redactConfig(config), null, 2)}\n`);
@@ -92,6 +96,7 @@ async function doctor(argv: readonly string[]): Promise<number> {
   const configPath = valueArg(argv, "--config");
   const port = numericArg(argv, "--port");
   const overrides = { ...(configPath !== undefined ? { configPath } : {}), ...(port !== undefined ? { port } : {}) };
+  const migrationsDir = valueArg(argv, "--migrations-dir") ?? resolveMigrationsDir() ?? defaultMigrationsDir;
   const config = safeCheck("config", () => { loadAgentHubConfig(overrides); });
   const parsed = config.ok ? loadAgentHubConfig(overrides) : undefined;
   const checks = [
@@ -105,7 +110,7 @@ async function doctor(argv: readonly string[]): Promise<number> {
     await portCheck(parsed?.server.port ?? 6677),
     safeCheck("Keychain", () => undefined, "AES fallback (file-based)"),
     safeCheck("migrations", () => {
-      if (!existsSync(defaultMigrationsDir)) throw new Error("migration directory missing");
+      if (!existsSync(migrationsDir)) throw new Error("migration directory missing");
     }),
     config
   ];

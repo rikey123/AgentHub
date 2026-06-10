@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
 
+import { valueArg } from "../src/args.ts";
 import { daemonWorkspaceRoot } from "../src/commands/daemon.ts";
 import { runCli } from "../src/index.ts";
 
 describe("agenthub cli", () => {
+  it("parses --name=value and --name value CLI arguments", () => {
+    expect(valueArg(["agents", "reset", "--id=mock-builder"], "--id")).toBe("mock-builder");
+    expect(valueArg(["auth", "issue", "--description", "CI token"], "--description")).toBe("CI token");
+  });
+
   it("resolves daemon start workspace from the caller cwd preserved by the global shim", () => {
     expect(daemonWorkspaceRoot(["start"], { AGENTHUB_CALLER_CWD: "C:\\project\\test" }, "C:\\project\\AgentHub")).toBe("C:\\project\\test");
     expect(daemonWorkspaceRoot(["start", "--workspace-root", "D:\\repo"], { AGENTHUB_CALLER_CWD: "C:\\project\\test" }, "C:\\project\\AgentHub")).toBe("D:\\repo");

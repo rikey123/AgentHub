@@ -100,8 +100,8 @@ export function bootstrapBuiltInAgents(options: BootstrapBuiltInAgentsOptions = 
   }
 }
 
-export function resetBuiltInAgentTemplate(agentId: string, agentsDir = defaultUserAgentsDir()): string {
-  const template = builtInAgentTemplates().find((candidate) => candidate.id === agentId);
+export function resetBuiltInAgentTemplate(agentId: string, agentsDir = defaultUserAgentsDir(), templatesDir = defaultTemplatesDir): string {
+  const template = builtInAgentTemplates(templatesDir).find((candidate) => candidate.id === agentId);
   if (template === undefined) throw new Error(`Unknown built-in agent '${agentId}'`);
   mkdirSync(agentsDir, { recursive: true });
   const targetPath = join(agentsDir, template.fileName);
