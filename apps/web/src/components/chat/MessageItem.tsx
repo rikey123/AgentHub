@@ -1,10 +1,14 @@
 import { useRef, useState } from "react";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
-import { Avatar, Button, Card, Chip, Dropdown } from "@heroui/react";
+import { Button, Card, Chip, Dropdown } from "@heroui/react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { defaultAgentAvatarUrl, defaultSystemAvatarUrl, defaultUserAvatarUrl, isAvatarImageUrl } from "@agenthub/protocol/avatars";
 import type { MessageViewModel } from "../../types.ts";
-import { formatBytes, formatTime, initials } from "../../lib/format.ts";
+import { formatBytes, formatTime } from "../../lib/format.ts";
 import { pendingTurnColor } from "../../lib/status.ts";
+import { IdentityAvatar } from "../IdentityAvatar.tsx";
 import { CardRenderer } from "../cards/CardRenderer.tsx";
 import { ArtifactPreviewModal, normalizePreviewKind, type ArtifactChatReference } from "../artifacts/ArtifactPreviewModal.tsx";
 
@@ -36,7 +40,7 @@ interface MessageItemProps {
 
 export function MessageItem(props: MessageItemProps) {
   const { message, quotedMessage, isSelected, onSelect, onOpenQuotedMessage, onOpenRun, onReply, onQuote, onPin, onRegenerate, onDelete, onCancelPending, onEditPending, onReferenceArtifact, csrfFetch } = props;
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
   const [longMessageMotion, setLongMessageMotion] = useState<"idle" | "expanding" | "collapsing">("idle");
   const itemRef = useRef<HTMLDivElement>(null);
   const longMessageContentRef = useRef<HTMLDivElement>(null);
@@ -46,6 +50,7 @@ export function MessageItem(props: MessageItemProps) {
   const isUser = message.senderType === "user";
   const isSystem = message.senderType === "system";
   const senderColor = isUser ? "accent" : isSystem ? "default" : "success";
+  const senderAvatarUrl = avatarUrlForMessage(message);
   const isStreaming = message.status === "streaming";
   const isPending = !!message.pendingTurnId && (message.pendingTurnStatus === "queued" || message.pendingTurnStatus === "scheduled");
   const testId = `message-bubble-${isUser ? "user" : isSystem ? "system" : "agent"}`;
@@ -53,6 +58,7 @@ export function MessageItem(props: MessageItemProps) {
   const showFullLongMessage = expanded || longMessageMotion === "collapsing";
   const showLongMessagePreview = textPreview.collapsed && !showFullLongMessage;
   const visibleText = showLongMessagePreview ? textPreview.preview : message.text;
+  const renderedParts = message.parts.filter((part) => !isDuplicateTextPart(part, message.text));
   const longMessageContentId = `long-message-content-${message.id}`;
   const selectMessage = () => {
     onSelect?.();
@@ -115,9 +121,12 @@ export function MessageItem(props: MessageItemProps) {
     >
       <div className={["flex items-end gap-2.5", isUser ? "justify-end" : "justify-start"].join(" ")}>
         {!isUser ? (
-          <Avatar size="sm" className="mb-6 shrink-0 shadow-sm ring-2 ring-background">
-            <Avatar.Fallback>{initials(message.senderName)}</Avatar.Fallback>
-          </Avatar>
+          <IdentityAvatar
+            name={message.senderName}
+            avatarUrl={senderAvatarUrl}
+            size="sm"
+            className="mb-6 shrink-0 shadow-sm ring-2 ring-background"
+          />
         ) : null}
 
         <div className={["flex min-w-0 max-w-[min(88%,900px)] flex-col", isUser ? "items-end" : "items-start"].join(" ")}>
@@ -196,9 +205,9 @@ export function MessageItem(props: MessageItemProps) {
               />
             ) : null}
 
-            {message.parts.length > 0 ? (
+            {renderedParts.length > 0 ? (
               <div className="mt-3 flex flex-col gap-2">
-                {message.parts.map((part, i) => (
+                {renderedParts.map((part, i) => (
                   <PartView key={i} part={part} csrfFetch={csrfFetch} onReferenceArtifact={onReferenceArtifact} />
                 ))}
               </div>
@@ -250,13 +259,23 @@ export function MessageItem(props: MessageItemProps) {
         </div>
 
         {isUser ? (
-          <Avatar size="sm" className="mb-6 shrink-0 shadow-sm ring-2 ring-background">
-            <Avatar.Fallback>{initials(message.senderName)}</Avatar.Fallback>
-          </Avatar>
+          <IdentityAvatar
+            name={message.senderName}
+            avatarUrl={senderAvatarUrl}
+            size="sm"
+            className="mb-6 shrink-0 shadow-sm ring-2 ring-background"
+          />
         ) : null}
       </div>
     </div>
   );
+}
+
+function avatarUrlForMessage(message: MessageViewModel): string {
+  if (isAvatarImageUrl(message.senderAvatarUrl)) return message.senderAvatarUrl;
+  if (message.senderType === "agent") return defaultAgentAvatarUrl(message.senderId || "agent");
+  if (message.senderType === "system") return defaultSystemAvatarUrl(message.senderId || "agenthub");
+  return defaultUserAvatarUrl(message.senderId || "local");
 }
 
 function prefersReducedMotion(): boolean {
@@ -387,11 +406,38 @@ function MessageTextView({ text, isStreaming }: { readonly text: string; readonl
         }
 
         return segment.text.trim().length > 0 ? (
-          <p key={index} className="whitespace-pre-wrap break-words">
-            {segment.text.trim()}
-          </p>
+          <MarkdownText key={index} text={segment.text.trim()} />
         ) : null;
       })}
+    </div>
+  );
+}
+
+function MarkdownText({ text }: { readonly text: string }) {
+  return (
+    <div className="ah-message-markdown min-w-0 break-words">
+      <ReactMarkdown
+        remarkPlugins={[[remarkGfm, { singleTilde: false }]]}
+        components={{
+          h1: ({ children }) => <h1 className="mb-2 text-lg font-semibold leading-7">{children}</h1>,
+          h2: ({ children }) => <h2 className="mb-2 mt-3 text-base font-semibold leading-6">{children}</h2>,
+          h3: ({ children }) => <h3 className="mb-1.5 mt-3 text-sm font-semibold leading-6">{children}</h3>,
+          p: ({ children }) => <p className="mb-2 whitespace-pre-wrap last:mb-0">{children}</p>,
+          ul: ({ children }) => <ul className="mb-2 list-disc space-y-1 pl-5 last:mb-0">{children}</ul>,
+          ol: ({ children }) => <ol className="mb-2 list-decimal space-y-1 pl-5 last:mb-0">{children}</ol>,
+          li: ({ children }) => <li className="pl-0.5">{children}</li>,
+          strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
+          em: ({ children }) => <em className="italic">{children}</em>,
+          a: ({ href, children }) => <a className="text-accent underline underline-offset-2" href={href} target="_blank" rel="noreferrer">{children}</a>,
+          code: ({ children }) => <code className="rounded bg-surface-secondary px-1 py-0.5 ah-mono text-[0.85em]">{children}</code>,
+          blockquote: ({ children }) => <blockquote className="mb-2 border-l-4 border-border pl-3 text-muted last:mb-0">{children}</blockquote>,
+          table: ({ children }) => <div className="mb-2 overflow-auto rounded-md border border-border last:mb-0"><table className="min-w-full border-collapse text-sm">{children}</table></div>,
+          th: ({ children }) => <th className="border-b border-border bg-surface-secondary px-2 py-1 text-left font-semibold">{children}</th>,
+          td: ({ children }) => <td className="border-t border-border px-2 py-1">{children}</td>
+        }}
+      >
+        {text}
+      </ReactMarkdown>
     </div>
   );
 }
@@ -430,6 +476,10 @@ function publicAgentTextPreview(text: string, senderType: MessageViewModel["send
 
 function hasMarkdownFencedCode(text: string): boolean {
   return /^```[^\r\n`]*\r?\n[\s\S]*?\r?\n```[ \t]*$/m.test(text);
+}
+
+function isDuplicateTextPart(part: MessageViewModel["parts"][number], messageText: string): boolean {
+  return part.type === "text" && messageText.length > 0 && part.text === messageText;
 }
 
 function PartView({ part, csrfFetch, onReferenceArtifact }: { part: MessageViewModel["parts"][number]; csrfFetch: typeof fetch; onReferenceArtifact?: ((reference: ArtifactChatReference) => void) | undefined }) {
@@ -533,16 +583,25 @@ function CodePartView({ part }: { part: Extract<MessageViewModel["parts"][number
 function ArtifactAttachmentCard({ part, csrfFetch, onReferenceArtifact }: { part: Extract<MessageViewModel["parts"][number], { type: "attachment" }>; csrfFetch: typeof fetch; onReferenceArtifact?: ((reference: ArtifactChatReference) => void) | undefined }) {
   const [preview, setPreview] = useState<{ readonly title: string; readonly content: string; readonly error?: string | undefined } | undefined>();
   const [loading, setLoading] = useState(false);
-  const canPreview = part.artifactId !== undefined && part.path !== undefined;
+  const artifactPreviewUrl = part.artifactId !== undefined && part.path !== undefined
+    ? `/artifacts/${encodeURIComponent(part.artifactId)}/files/${encodeURIComponent(part.path)}`
+    : undefined;
+  const uploadedPreviewUrl = artifactPreviewUrl === undefined && part.fileId.length > 0
+    ? `/attachments/${encodeURIComponent(part.fileId)}`
+    : undefined;
+  const previewUrl = artifactPreviewUrl ?? uploadedPreviewUrl;
+  const canPreview = previewUrl !== undefined;
   const previewLabel = previewLabelFor(part.previewKind, part.mimeType);
-  const previewKind = normalizePreviewKind(part.previewKind, part.mimeType, part.name);
-  const downloadUrl = canPreview ? `/artifacts/${encodeURIComponent(part.artifactId!)}/files/${encodeURIComponent(part.path!)}/raw` : undefined;
+  const previewKind = normalizePreviewKind(part.previewKind === "download" ? undefined : part.previewKind, part.mimeType, part.name);
+  const downloadUrl = artifactPreviewUrl !== undefined && part.artifactId !== undefined && part.path !== undefined
+    ? `/artifacts/${encodeURIComponent(part.artifactId)}/files/${encodeURIComponent(part.path)}/raw`
+    : `/attachments/${encodeURIComponent(part.fileId)}/raw`;
 
   const openPreview = async () => {
-    if (!canPreview) return;
+    if (previewUrl === undefined) return;
     setLoading(true);
     try {
-      const res = await csrfFetch(`/artifacts/${encodeURIComponent(part.artifactId!)}/files/${encodeURIComponent(part.path!)}`);
+      const res = await csrfFetch(previewUrl);
       if (!res.ok) throw new Error(`Failed to load file (${res.status})`);
       const body = await res.json() as { readonly content?: { readonly content?: unknown } | null };
       const content = body.content && typeof body.content.content === "string" ? body.content.content : "";
