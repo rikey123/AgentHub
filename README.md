@@ -27,7 +27,6 @@ AgentHub 是一个**本地优先的多 Agent 协作平台**。它把对话式创
 
 - [项目亮点](#项目亮点)
 - [功能概览](#功能概览)
-- [界面预览](#界面预览)
 - [架构一览](#架构一览)
 - [快速开始](#快速开始)
 - [常用命令](#常用命令)
@@ -100,21 +99,6 @@ AgentHub 允许 Agent 参与本地任务，但不默认放开本地环境：
 - `.env`、私钥、云凭据、`.ssh`、`.netrc`、service-account JSON 等敏感路径默认 deny-first。
 - 适配器原始输出进入持久化或事件流前会经过 SecretRedactor 脱敏。
 
-## 界面预览
-
-截图建议放在 `docs/screenshots/`，用于 GitHub 首页、飞书文档和 Demo 视频脚本。
-
-| 场景                                                         | 建议文件                                   |
-| ------------------------------------------------------------ | ------------------------------------------ |
-| 主工作台：房间列表 + 聊天流 + 右侧面板                       | `docs/screenshots/01-chat-home.png`        |
-| 新建房间：联系人、模式、角色、运行时、技能                   | `docs/screenshots/02-new-room.png`         |
-| 多 Agent 群聊：`@Agent`、Assisted、Team                      | `docs/screenshots/03-group-chat.png`       |
-| Run Detail：transcript、tools、permissions、context、artifacts | `docs/screenshots/04-run-detail.png`       |
-| Diff 审查：逐文件 diff、评论、应用/拒绝                      | `docs/screenshots/05-diff-review.png`      |
-| Artifact 预览：HTML、Markdown、PDF、图片                     | `docs/screenshots/06-artifact-preview.png` |
-| 权限审批卡片                                                 | `docs/screenshots/07-permission-card.png`  |
-| 运行时、模型、技能设置                                       | `docs/screenshots/08-settings.png`         |
-| 桌面端与移动端                                               | `docs/screenshots/09-desktop-mobile.png`   |
 
 ## 架构一览
 
