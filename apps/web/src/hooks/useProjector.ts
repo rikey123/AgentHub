@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { defaultAgentAvatarUrl, defaultSystemAvatarUrl, defaultUserAvatarUrl, isAvatarImageUrl } from "@agenthub/protocol/avatars";
 import type { EventEnvelope } from "@agenthub/protocol/events";
 import { EVENT_REGISTRY } from "@agenthub/protocol/events";
 import type {
@@ -376,6 +377,11 @@ class Projector {
         changed = true;
         break;
       }
+      case "room.deleted": {
+        this.rooms.delete(roomId);
+        changed = true;
+        break;
+      }
       case "message.created": {
         if (payload && typeof payload.messageId === "string") {
           const messageId = payload.messageId;
@@ -393,6 +399,7 @@ class Projector {
             senderType,
             senderId,
             senderName: this.senderName(room, senderType, senderId),
+            senderAvatarUrl: this.senderAvatarUrl(room, senderType, senderId),
             role: typeof payload.role === "string" ? payload.role : "user",
             status: "streaming",
             text: typeof payload.text === "string" ? payload.text : "",
@@ -987,15 +994,26 @@ class Projector {
             role: typeof payload.role === "string" ? payload.role : "observer",
             presence: "observing",
             adapterId: typeof payload.adapterId === "string" ? payload.adapterId : "mock",
+            avatarUrl: isAvatarImageUrl(payload.avatarUrl) ? payload.avatarUrl : defaultAgentAvatarUrl(payload.agentId),
             agentBindingId: typeof payload.agentBindingId === "string" ? payload.agentBindingId : undefined,
             roleId: typeof payload.roleId === "string" ? payload.roleId : undefined,
             capabilities: parseStringArray(payload.capabilities) ?? []
           };
           const existing = room.participants.find((p) => p.id === payload.agentId);
+          const joinedIds = new Set([
+            payload.agentId,
+            typeof payload.agentBindingId === "string" ? payload.agentBindingId : payload.agentId
+          ]);
+          const messages = room.messages.map((message) =>
+            message.senderType === "agent" && joinedIds.has(message.senderId)
+              ? { ...message, senderName: name, senderAvatarUrl: nextParticipant.avatarUrl }
+              : message
+          );
           if (!existing) {
             room = advanceActivityAt({
               ...room,
-              participants: [...room.participants, nextParticipant]
+              participants: [...room.participants, nextParticipant],
+              messages
             }, event.createdAt);
             this.rooms.set(roomId, room);
             changed = true;
@@ -1004,7 +1022,8 @@ class Projector {
               ...room,
               participants: room.participants.map((participant) =>
                 participant.id === payload.agentId ? { ...participant, ...nextParticipant, presence: participant.presence } : participant
-              )
+              ),
+              messages
             }, event.createdAt);
             this.rooms.set(roomId, room);
             changed = true;
@@ -1457,6 +1476,7 @@ class Projector {
         if (payload && typeof payload.agentBindingId === "string" && typeof payload.displayName === "string") {
           const agentBindingId = payload.agentBindingId;
           const displayName = payload.displayName;
+          const avatarUrl = isAvatarImageUrl(payload.avatarUrl) ? payload.avatarUrl : undefined;
           room = {
             ...room,
             participantContactNames: {
@@ -1465,8 +1485,13 @@ class Projector {
             },
             participants: room.participants.map((participant) =>
               participant.agentBindingId === agentBindingId || participant.id === agentBindingId
-                ? { ...participant, name: displayName }
+                ? { ...participant, name: displayName, ...(avatarUrl !== undefined ? { avatarUrl } : {}) }
                 : participant
+            ),
+            messages: room.messages.map((message) =>
+              message.senderType === "agent" && message.senderId === agentBindingId
+                ? { ...message, senderName: displayName, ...(avatarUrl !== undefined ? { senderAvatarUrl: avatarUrl } : {}) }
+                : message
             )
           };
           this.rooms.set(roomId, room);
@@ -1629,10 +1654,20 @@ class Projector {
     return room.participants.find((p) => p.id === agentId)?.name;
   }
 
+  private agentAvatarUrl(room: RoomViewModel, agentId: string): string | undefined {
+    return room.participants.find((p) => p.id === agentId)?.avatarUrl;
+  }
+
   private senderName(room: RoomViewModel, senderType: MessageViewModel["senderType"], senderId: string): string {
     if (senderType === "agent") return this.agentName(room, senderId) ?? "Agent";
     if (senderType === "system") return "System";
     return "You";
+  }
+
+  private senderAvatarUrl(room: RoomViewModel, senderType: MessageViewModel["senderType"], senderId: string): string {
+    if (senderType === "agent") return this.agentAvatarUrl(room, senderId) ?? defaultAgentAvatarUrl(senderId);
+    if (senderType === "system") return defaultSystemAvatarUrl(senderId || "agenthub");
+    return defaultUserAvatarUrl(senderId || "local");
   }
 }
 
