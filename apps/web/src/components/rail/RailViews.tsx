@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Avatar, Button, Card, Chip, Input, Label, ListBox, Modal, ScrollShadow, Select, Spinner, TextArea, TextField } from "@heroui/react";
-import type { AgentContactViewModel } from "../../types.ts";
+import { Button, Card, Chip, Input, Label, ListBox, Modal, ScrollShadow, Select, Spinner, TextArea, TextField } from "@heroui/react";
+import type { AgentContactViewModel, BriefViewModel, RoomViewModel, RunViewModel } from "../../types.ts";
+import { formatDuration, formatRelativeTime, formatTokens, formatUsd } from "../../lib/format.ts";
 import { ArtifactPreviewModal, normalizePreviewKind, type ArtifactChatReference } from "../artifacts/ArtifactPreviewModal.tsx";
+import { IdentityAvatar } from "../IdentityAvatar.tsx";
 
 export type ArtifactLibraryItem = {
   readonly id: string;
@@ -44,6 +46,10 @@ type NewAgentDraft = {
   readonly runtimeName?: string | undefined;
   readonly description: string;
   readonly systemPrompt: string;
+};
+type RunsRailViewProps = {
+  readonly room?: RoomViewModel | undefined;
+  readonly onOpenRun?: ((runId: string) => void) | undefined;
 };
 
 export function ContactsRailContainer({ fetchImpl, onStartChat, onEditContact, onConfigureContact }: { readonly fetchImpl: typeof fetch; readonly onStartChat?: ((contact: AgentContactViewModel) => void) | undefined; readonly onEditContact?: ((contact: AgentContactViewModel) => void) | undefined; readonly onConfigureContact?: ((contact: AgentContactViewModel) => void) | undefined }) {
@@ -212,10 +218,7 @@ export function ContactsRailView({ contacts, loading, error, onStartChat, onCrea
           <Card key={contact.agentBindingId} variant="default" className="border border-border">
             <Card.Content className="p-4">
               <div className="flex min-w-0 items-start gap-3">
-                <Avatar size="md">
-                  {contact.avatarUrl ? <img className="h-full w-full object-cover" src={contact.avatarUrl} alt="" /> : null}
-                  <Avatar.Fallback>{initials(contact.displayName)}</Avatar.Fallback>
-                </Avatar>
+                <IdentityAvatar name={contact.displayName} avatarUrl={contact.avatarUrl} size="md" />
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 flex-wrap items-center gap-2">
                     <h2 className="truncate text-sm font-semibold">{contact.displayName}</h2>
@@ -341,24 +344,139 @@ export function ArtifactsRailView({ artifacts, loading, error, onOpenArtifact }:
   );
 }
 
-export function RunsRailView() {
+export function RunsRailView({ room, onOpenRun }: RunsRailViewProps) {
+  const runs = useMemo(() => sortedRuns(room?.runs ?? []), [room?.runs]);
+  const latestBriefs = useMemo(() => latestBriefsByRunId(room?.briefs ?? []), [room?.briefs]);
+  const activeCount = runs.filter(isActiveRunStatus).length;
+
   return (
-    <RailSurface title="运行" subtitle="实时和最近的 agent 活动" loading={false}>
-      <Card variant="default" className="border border-border">
-        <Card.Header>
-          <div className="flex flex-wrap items-center gap-2">
-            <Card.Title className="text-sm">运行活动</Card.Title>
-            <Chip size="sm" variant="soft" color="warning">实时</Chip>
-          </div>
-          <Card.Description className="text-xs">从聊天中打开运行，可查看转录、工具、产物和成本。</Card.Description>
-        </Card.Header>
-        <Card.Content className="grid gap-2 text-sm text-muted">
-          <p>从任意房间打开一次运行详情后，这里会保留最近活动，方便继续查看转录、工具和产物。</p>
-          <p className="text-xs">正在运行的 Agent 会在聊天底部实时显示状态。</p>
-        </Card.Content>
-      </Card>
+    <RailSurface title="运行" subtitle={room ? `${runs.length} 次运行 / ${activeCount} 进行中` : "当前房间的 agent 运行"} loading={false}>
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface px-3 py-3">
+        <div>
+          <h2 className="text-sm font-semibold">运行工作台</h2>
+          <p className="mt-1 text-xs text-muted">查看当前房间的运行历史、失败原因、产物和成本。</p>
+        </div>
+        <Chip size="sm" variant="soft" color={activeCount > 0 ? "warning" : "default"}>
+          {activeCount > 0 ? `${activeCount} 个进行中` : "无活动运行"}
+        </Chip>
+      </div>
+
+      {room === undefined ? (
+        <p className="text-sm text-muted">先打开一个房间，再在这里查看对应的运行记录。</p>
+      ) : runs.length === 0 ? (
+        <p className="text-sm text-muted">这个房间还没有运行记录。</p>
+      ) : (
+        <div className="grid gap-3">
+          {runs.map((run) => {
+            const brief = latestBriefs.get(run.id);
+            const duration = runDurationLabel(run);
+            const cost = runCostLabel(run, brief);
+            const failure = runFailureText(run, brief);
+            return (
+              <Card key={run.id} variant="default" className="border border-border">
+                <Card.Header className="gap-1.5">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <Card.Title className="min-w-0 flex-1 truncate text-sm">{run.agentName}</Card.Title>
+                    <Chip size="sm" variant="soft" color={runStatusColor(run.status)}>{runStatusLabel(run.status)}</Chip>
+                  </div>
+                  <Card.Description className="truncate text-xs">{runSummary(run, brief)}</Card.Description>
+                </Card.Header>
+                <Card.Content className="grid gap-3 px-4 pb-4 text-xs text-muted">
+                  <div className="flex flex-wrap gap-1.5">
+                    <Chip size="sm" variant="soft" color="default">{runTimeLabel(run)}</Chip>
+                    {duration ? <Chip size="sm" variant="soft" color="default">{duration}</Chip> : null}
+                    {run.wakeReason ? <Chip size="sm" variant="soft" color="default">{run.wakeReason}</Chip> : null}
+                    {run.taskId ? <Chip size="sm" variant="soft" color="accent">任务 {run.taskId.slice(0, 8)}</Chip> : null}
+                    {brief?.artifactCount ? <Chip size="sm" variant="soft" color="default">{brief.artifactCount} 个产物</Chip> : null}
+                    {cost ? <Chip size="sm" variant="soft" color="default">{cost}</Chip> : null}
+                  </div>
+                  {failure ? <p className="line-clamp-2 text-danger">{failure}</p> : null}
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="secondary" onPress={() => onOpenRun?.(run.id)} data-run-id={run.id}>
+                      打开运行详情
+                    </Button>
+                  </div>
+                </Card.Content>
+              </Card>
+            );
+          })}
+        </div>
+      )}
     </RailSurface>
   );
+}
+
+function sortedRuns(runs: readonly RunViewModel[]): RunViewModel[] {
+  return [...runs].sort((a, b) => runSortTime(b) - runSortTime(a) || a.agentName.localeCompare(b.agentName));
+}
+
+function latestBriefsByRunId(briefs: readonly BriefViewModel[]): Map<string, BriefViewModel> {
+  const result = new Map<string, BriefViewModel>();
+  for (const brief of briefs) result.set(brief.runId, brief);
+  return result;
+}
+
+function runSortTime(run: RunViewModel): number {
+  return run.endedAt ?? run.startedAt ?? 0;
+}
+
+function isActiveRunStatus(run: RunViewModel): boolean {
+  return run.status === "queued" || run.status === "starting" || run.status === "running" || run.status === "cancelling";
+}
+
+function runStatusColor(status: string): "success" | "danger" | "default" | "accent" | "warning" {
+  if (status === "completed") return "success";
+  if (status === "failed") return "danger";
+  if (status === "cancelled") return "default";
+  if (status === "queued" || status === "starting" || status === "running" || status === "cancelling") return "warning";
+  return "accent";
+}
+
+function runStatusLabel(status: string): string {
+  if (status === "completed") return "完成";
+  if (status === "failed") return "失败";
+  if (status === "cancelled") return "取消";
+  if (status === "queued") return "排队";
+  if (status === "starting") return "启动";
+  if (status === "running") return "运行中";
+  if (status === "cancelling") return "取消中";
+  return status;
+}
+
+function runSummary(run: RunViewModel, brief: BriefViewModel | undefined): string {
+  if (brief?.summary) return brief.summary;
+  if (run.error) return run.error;
+  if (run.taskId) return `关联任务 ${run.taskId}`;
+  if (run.messageId) return `关联消息 ${run.messageId}`;
+  return "运行详情、工具调用和产物记录";
+}
+
+function runTimeLabel(run: RunViewModel): string {
+  const timestamp = run.endedAt ?? run.startedAt;
+  return timestamp ? formatRelativeTime(timestamp) : "未开始";
+}
+
+function runDurationLabel(run: RunViewModel): string | undefined {
+  if (run.startedAt === undefined || run.endedAt === undefined) return undefined;
+  return formatDuration(Math.max(0, run.endedAt - run.startedAt));
+}
+
+function runCostLabel(run: RunViewModel, brief: BriefViewModel | undefined): string | undefined {
+  if (run.cost !== undefined) {
+    const tokens = run.cost.inputTokens + run.cost.outputTokens + run.cost.cachedTokens;
+    return `${formatTokens(tokens)} token / ${formatUsd(run.cost.costUsd)}`;
+  }
+  if (brief?.cost !== undefined) {
+    return `${formatTokens(brief.cost.tokens)} token${brief.cost.usd != null ? ` / ${formatUsd(brief.cost.usd)}` : ""}`;
+  }
+  return undefined;
+}
+
+function runFailureText(run: RunViewModel, brief: BriefViewModel | undefined): string | undefined {
+  const reason = brief?.failureReason ?? run.error;
+  const failureClass = brief?.failureClass ?? run.failureClass;
+  if (!reason) return undefined;
+  return failureClass ? `${failureClass}: ${reason}` : reason;
 }
 
 export function TasksRailView() {
@@ -940,10 +1058,6 @@ function statusRank(status: AgentContactViewModel["status"]): number {
 
 function isExperimentalRuntimeKind(value: unknown): boolean {
   return typeof value === "string" && value.toLowerCase().includes("codex");
-}
-
-function initials(value: string): string {
-  return value.split(/\s+/u).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? "").join("") || "A";
 }
 
 function formatBytes(value: number): string {
