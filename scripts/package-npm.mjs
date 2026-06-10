@@ -70,7 +70,7 @@ writeFileSync(join(outRoot, "package.json"), `${JSON.stringify({
     url: "https://github.com/rikey123/AgentHub/issues"
   },
   bin: {
-    agenthub: "./bin/agenthub.js"
+    agenthub: "bin/agenthub.js"
   },
   files: [
     "bin",
