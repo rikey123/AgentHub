@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import type { EventBus } from "@agenthub/bus";
 import type { AgentHubDatabase } from "@agenthub/db";
+import { defaultRoleAvatarUrl, dicebearAvatarUrl } from "@agenthub/protocol/avatars";
 
 type BuiltinRoleTemplate = {
   readonly id: string;
@@ -103,14 +104,28 @@ function seedBuiltinRoleFile(template: BuiltinRoleTemplate, sourcePath: string, 
 
 function insertBuiltinRole(database: AgentHubDatabase, template: BuiltinRoleTemplate, sourcePath: string, now: number): boolean {
   const existing = database.sqlite.prepare("SELECT 1 FROM roles WHERE id = ?").get(template.id);
+  const legacyAvatar = legacyBuiltinRoleAvatar(template.id);
   const result = database.sqlite.prepare(
     `INSERT INTO roles (
       id, workspace_id, name, avatar, description, prompt, capabilities, default_permission_profile_id,
       tags, is_builtin, source_path, version, created_at, updated_at
-    ) VALUES (?, ?, ?, NULL, ?, ?, ?, NULL, ?, 1, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, 1, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       workspace_id = excluded.workspace_id,
       name = excluded.name,
+      avatar = CASE
+        WHEN roles.avatar IS NULL
+          OR roles.avatar = ''
+          OR (
+            roles.avatar NOT LIKE '/avatars/%'
+            AND roles.avatar NOT LIKE 'http://%'
+            AND roles.avatar NOT LIKE 'https://%'
+            AND roles.avatar NOT LIKE 'data:image/%'
+          )
+          OR roles.avatar = ?
+        THEN excluded.avatar
+        ELSE roles.avatar
+      END,
       description = excluded.description,
       prompt = excluded.prompt,
       capabilities = excluded.capabilities,
@@ -124,6 +139,7 @@ function insertBuiltinRole(database: AgentHubDatabase, template: BuiltinRoleTemp
     template.id,
     DEFAULT_WORKSPACE_ID,
     template.name,
+    defaultRoleAvatarUrl(template.id),
     template.description,
     template.prompt,
     JSON.stringify(template.capabilities),
@@ -131,14 +147,20 @@ function insertBuiltinRole(database: AgentHubDatabase, template: BuiltinRoleTemp
     sourcePath,
     template.version,
     now,
-    now
+    now,
+    legacyAvatar
   );
   void result;
   return existing === undefined;
 }
 
+function legacyBuiltinRoleAvatar(roleId: string): string | null {
+  if (roleId === "project-manager") return dicebearAvatarUrl("personas", "role:project-manager");
+  return null;
+}
+
 function renderBuiltinRoleMarkdown(template: BuiltinRoleTemplate): string {
-  return `---\nname: ${template.name}\nversion: ${template.version}\ncapabilities:\n${template.capabilities.map((capability) => `  - ${capability}`).join("\n")}\n---\n\n${template.prompt}\n`;
+  return `---\nname: ${template.name}\navatar: ${defaultRoleAvatarUrl(template.id)}\nversion: ${template.version}\ncapabilities:\n${template.capabilities.map((capability) => `  - ${capability}`).join("\n")}\n---\n\n${template.prompt}\n`;
 }
 
 function readFrontmatterVersion(markdown: string): string | undefined {
