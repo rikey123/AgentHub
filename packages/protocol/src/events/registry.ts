@@ -175,6 +175,11 @@ export const RoomUnpinnedPayloadSchema = Schema.Struct({
 });
 export type RoomUnpinnedPayload = typeof RoomUnpinnedPayloadSchema.Type;
 
+export const RoomDeletedPayloadSchema = Schema.Struct({
+  roomId: IdSchema
+});
+export type RoomDeletedPayload = typeof RoomDeletedPayloadSchema.Type;
+
 export const MessagePinnedPayloadSchema = Schema.Struct({
   roomId: IdSchema,
   messageId: IdSchema,
@@ -275,6 +280,7 @@ export const EVENT_PAYLOAD_SCHEMAS = {
   "deployment.provider.deleted": DeploymentProviderDeletedPayloadSchema,
   "room.pinned": RoomPinnedPayloadSchema,
   "room.unpinned": RoomUnpinnedPayloadSchema,
+  "room.deleted": RoomDeletedPayloadSchema,
   "message.pinned": MessagePinnedPayloadSchema,
   "message.unpinned": MessageUnpinnedPayloadSchema,
   "agent.contact.updated": AgentContactUpdatedPayloadSchema,
@@ -318,6 +324,7 @@ export const EVENT_REGISTRY = [
   { type: "room.created", category: "room", durability: "durable", visibility: "both", schemaVersion: 1 },
   { type: "room.opened", category: "room", durability: "durable", visibility: "both", schemaVersion: 1 },
   { type: "room.closed", category: "room", durability: "durable", visibility: "both", schemaVersion: 1 },
+  { type: "room.deleted", category: "room", durability: "durable", visibility: "both", schemaVersion: 1 },
   { type: "agent.profile.loaded", category: "agent", durability: "durable", visibility: "detail", schemaVersion: 1 },
   { type: "agent.profile.updated", category: "agent", durability: "durable", visibility: "detail", schemaVersion: 1 },
   { type: "agent.profile.removed", category: "agent", durability: "durable", visibility: "detail", schemaVersion: 1 },
