@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 
 import type { EventBus } from "@agenthub/bus";
@@ -28,6 +28,15 @@ const oneMb = 1024 * 1024;
 export const attachmentMaxBytes = 50 * 1024 * 1024;
 export const orphanAttachmentMessageId = "__agenthub_orphan_attachment__";
 const blockedAttachmentMimes = new Set(["text/html", "application/javascript", "application/x-javascript", "text/javascript", "application/x-sh", "application/x-executable"]);
+const zipContainerAttachmentMimes = new Set([
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/vnd.oasis.opendocument.text",
+  "application/vnd.oasis.opendocument.spreadsheet",
+  "application/vnd.oasis.opendocument.presentation"
+]);
+const oleAttachmentMimes = new Set(["application/msword", "application/vnd.ms-excel", "application/vnd.ms-powerpoint"]);
 
 export class SecretRedactor {
   private readonly patterns: readonly { readonly name: string; readonly regex: RegExp; readonly replacement?: (match: string, ...groups: string[]) => string }[];
@@ -129,7 +138,7 @@ export function resolveWorkspacePath(workspaceRoot: string, requested: string, o
     const real = realpathOrResolve(candidate);
     const rel = relative(root, real);
     const normalizedRel = rel === "" ? "" : rel.replaceAll("\\", "/");
-    const inside = rel === "" || (!rel.startsWith("..") && !rel.split(sep).includes(".."));
+    const inside = rel === "" || (!isAbsolute(rel) && !rel.startsWith("..") && !rel.split(sep).includes(".."));
     const classification: WorkspacePathClassification = !inside ? "external" : matchesAny(options.sensitiveGlobs ?? defaultSensitiveGlobs, normalizedRel) ? "sensitive" : "internal";
     return { ok: true, abs: real, relativePath: normalizedRel, classification };
   } catch (error) {
@@ -162,7 +171,7 @@ export function sanitizeSvg(svg: string): string {
 
 export function storeAttachment(input: AttachmentUploadInput): AttachmentUploadResult {
   const sizeBytes = input.bytes.byteLength;
-  const mime = contentType(input.mimeType) ?? "";
+  const mime = contentType(input.mimeType) ?? attachmentMimeForName(input.originalName) ?? "application/octet-stream";
   if (sizeBytes > attachmentMaxBytes) return { ok: false, status: 413, error: "attachment_too_large", maxBytes: attachmentMaxBytes };
   if (!attachmentMimeAllowed(mime) || !attachmentMagicAllowed(mime, input.bytes.subarray(0, 512))) return { ok: false, status: 415, error: "attachment_mime_not_allowed", mime };
   const fileId = input.fileId ?? randomUUID();
@@ -337,21 +346,108 @@ function parseDataUri(uri: string): SafeUriResult {
 function validateStoredBearer(database: AgentHubDatabase, token: string, now: number): readonly AuthScope[] | undefined { const row = database.sqlite.prepare("SELECT scopes, expires_at, revoked_at FROM auth_tokens WHERE hash = ?").get(sha256(token)) as { readonly scopes: string; readonly expires_at: number | null; readonly revoked_at: number | null } | undefined; if (row === undefined || row.revoked_at !== null || (row.expires_at !== null && row.expires_at <= now)) return undefined; const scopes = JSON.parse(row.scopes) as AuthScope[]; return scopes.includes("admin") ? ["admin", "read", "write"] : scopes; }
 function originAllowed(origin: string, configured?: readonly string[]): boolean { if (configured?.includes(origin) === true) return true; try { const url = new URL(origin); return (url.protocol === "tauri:" && url.hostname === "localhost") || ((url.protocol === "http:" || url.protocol === "https:") && (url.hostname === "127.0.0.1" || url.hostname === "localhost")); } catch { return false; } }
 function hostAllowed(header: string | undefined, publicHost?: string): boolean { if (header === undefined) return false; const host = header.split(":")[0]?.toLowerCase(); if (publicHost !== undefined && header === publicHost) return true; return host === "127.0.0.1" || host === "localhost"; }
-function contentType(value: string | undefined): string | undefined { return value?.split(";")[0]?.trim().toLowerCase(); }
-function attachmentMimeAllowed(mime: string): boolean { return mime.length > 0 && !blockedAttachmentMimes.has(mime) && (mime.startsWith("text/") || mime.startsWith("image/") || mime === "application/json" || mime === "application/pdf" || mime === "application/zip" || mime === "application/octet-stream"); }
+function contentType(value: string | undefined): string | undefined {
+  const normalized = value?.split(";")[0]?.trim().toLowerCase();
+  return normalized !== undefined && normalized.length > 0 ? normalized : undefined;
+}
+function attachmentMimeForName(name: string): string | undefined {
+  const ext = name.toLowerCase().split(/[\\/]/u).pop()?.split(".").pop();
+  switch (ext) {
+    case "md":
+    case "markdown":
+      return "text/markdown";
+    case "txt":
+    case "log":
+    case "csv":
+    case "tsv":
+    case "json":
+    case "xml":
+    case "yaml":
+    case "yml":
+    case "toml":
+    case "ini":
+    case "conf":
+      return "text/plain";
+    case "pdf":
+      return "application/pdf";
+    case "docx":
+      return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    case "xlsx":
+      return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    case "pptx":
+      return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+    case "odt":
+      return "application/vnd.oasis.opendocument.text";
+    case "ods":
+      return "application/vnd.oasis.opendocument.spreadsheet";
+    case "odp":
+      return "application/vnd.oasis.opendocument.presentation";
+    case "doc":
+      return "application/msword";
+    case "xls":
+      return "application/vnd.ms-excel";
+    case "ppt":
+      return "application/vnd.ms-powerpoint";
+    case "zip":
+      return "application/zip";
+    case "png":
+      return "image/png";
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "gif":
+      return "image/gif";
+    case "webp":
+      return "image/webp";
+    case "svg":
+      return "image/svg+xml";
+    case "mp3":
+      return "audio/mpeg";
+    case "wav":
+      return "audio/wav";
+    case "m4a":
+      return "audio/mp4";
+    case "ogg":
+    case "oga":
+      return "audio/ogg";
+    case "flac":
+      return "audio/flac";
+    case "aac":
+      return "audio/aac";
+    case "opus":
+      return "audio/opus";
+    case "mp4":
+    case "m4v":
+      return "video/mp4";
+    case "mov":
+      return "video/quicktime";
+    case "webm":
+      return "video/webm";
+    case "mkv":
+      return "video/x-matroska";
+    case "avi":
+      return "video/x-msvideo";
+    default:
+      return undefined;
+  }
+}
+function attachmentMimeAllowed(mime: string): boolean { return mime.length > 0 && !blockedAttachmentMimes.has(mime) && (mime.startsWith("text/") || mime.startsWith("image/") || mime.startsWith("audio/") || mime.startsWith("video/") || mime === "application/json" || mime === "application/pdf" || mime === "application/zip" || mime === "application/octet-stream" || zipContainerAttachmentMimes.has(mime) || oleAttachmentMimes.has(mime)); }
 function attachmentMagicAllowed(mime: string, header: Buffer): boolean {
   if (header.length === 0) return true;
   if (mime === "application/pdf") return header.subarray(0, 5).equals(Buffer.from("%PDF-"));
-  if (mime === "application/zip") return header.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04])) || header.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x05, 0x06])) || header.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x07, 0x08]));
+  if (mime === "application/zip" || zipContainerAttachmentMimes.has(mime)) return hasZipMagic(header);
+  if (oleAttachmentMimes.has(mime)) return header.subarray(0, 8).equals(Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]));
   if (mime === "image/png") return header.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
   if (mime === "image/jpeg") return header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff;
   if (mime === "image/gif") return header.subarray(0, 6).toString("ascii") === "GIF87a" || header.subarray(0, 6).toString("ascii") === "GIF89a";
   if (mime === "image/webp") return header.subarray(0, 4).toString("ascii") === "RIFF" && header.subarray(8, 12).toString("ascii") === "WEBP";
   if (mime === "image/svg+xml") return /^\s*<svg[\s>]/iu.test(header.toString("utf8"));
+  if (mime.startsWith("audio/") || mime.startsWith("video/")) return !hasExecutableMagic(header) && !looksLikeHtmlOrScript(header);
   if (mime.startsWith("text/") || mime === "application/json") return !hasExecutableMagic(header);
   if (mime === "application/octet-stream") return !hasExecutableMagic(header) && !looksLikeHtmlOrScript(header);
   return true;
 }
+function hasZipMagic(header: Buffer): boolean { return header.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04])) || header.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x05, 0x06])) || header.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x07, 0x08])); }
 function hasExecutableMagic(header: Buffer): boolean { return header.subarray(0, 2).equals(Buffer.from([0x4d, 0x5a])) || header.subarray(0, 4).equals(Buffer.from([0x7f, 0x45, 0x4c, 0x46])) || header.subarray(0, 2).toString("ascii") === "#!"; }
 function looksLikeHtmlOrScript(header: Buffer): boolean { return /^\s*<(?:!doctype\s+html|html|script)\b/iu.test(header.toString("utf8")); }
 function sessionFromCookie(cookie: string | undefined): string | undefined { return cookie?.split(";").map((part) => part.trim()).find((part) => part.startsWith("agenthub_session="))?.slice("agenthub_session=".length); }
