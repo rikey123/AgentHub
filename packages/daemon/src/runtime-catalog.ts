@@ -1,3 +1,7 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 export type RuntimeDefinition = {
   readonly id: string;
   readonly kind: string;
@@ -6,6 +10,7 @@ export type RuntimeDefinition = {
   readonly args: readonly string[];
   readonly detectCommand?: string;
   readonly skillDir?: string;
+  readonly usesNpmCache?: boolean;
 };
 
 export type RuntimeDetection = {
@@ -36,9 +41,9 @@ export const TIER2_RUNTIME_KINDS = ["codex", "qwen", "goose", "kimi", "kiro", "h
 
 export const RUNTIME_DEFINITIONS: readonly RuntimeDefinition[] = [
   { id: "native-default", kind: "native", name: "AgentHub Native", command: null, args: [], skillDir: ".agenthub/skills" },
-  { id: "runtime-claude-code", kind: "claude-code", name: "Claude Code", command: "npx", args: ["-y", "@agentclientprotocol/claude-agent-acp@0.29.2"], detectCommand: "claude", skillDir: ".claude/skills" },
+  { id: "runtime-claude-code", kind: "claude-code", name: "Claude Code", command: process.execPath, args: npmAcpRunnerArgs("@agentclientprotocol/claude-agent-acp@0.44.0", "claude-agent-acp"), detectCommand: "claude", skillDir: ".claude/skills", usesNpmCache: true },
   { id: "runtime-opencode", kind: "opencode", name: "OpenCode", command: "opencode", args: ["acp"], detectCommand: "opencode", skillDir: ".opencode/skills" },
-  { id: "runtime-codex", kind: "codex", name: "Codex", command: "npx", args: ["-y", "@zed-industries/codex-acp@0.9.5"], detectCommand: "codex", skillDir: ".codex/skills" },
+  { id: "runtime-codex", kind: "codex", name: "Codex", command: process.execPath, args: npmAcpRunnerArgs("@zed-industries/codex-acp@0.15.0", "codex-acp"), detectCommand: "codex", skillDir: ".codex/skills", usesNpmCache: true },
   { id: "runtime-qwen", kind: "qwen", name: "Qwen Code", command: "qwen", args: ["--acp"], detectCommand: "qwen", skillDir: ".qwen/skills" },
   { id: "runtime-goose", kind: "goose", name: "Goose", command: "goose", args: ["acp"], detectCommand: "goose", skillDir: ".goose/skills" },
   { id: "runtime-kimi", kind: "kimi", name: "Kimi CLI", command: "kimi", args: ["acp"], detectCommand: "kimi", skillDir: ".kimi/skills" },
@@ -81,7 +86,7 @@ export function runtimeSeedRows(input: { readonly now: number; readonly detectio
       name: definition.name,
       command: definition.command,
       args: definition.args,
-      env: {},
+      env: runtimeSeedEnv(definition),
       detectedAt: detected === undefined ? null : input.now,
       detectedPath: detected?.path ?? null,
       detectedVersion: detected?.version ?? null,
@@ -97,4 +102,13 @@ export function runtimeSeedRows(input: { readonly now: number; readonly detectio
       updatedAt: input.now
     } satisfies RuntimeSeedRow;
   });
+}
+
+function runtimeSeedEnv(definition: RuntimeDefinition): Record<string, string> {
+  if (definition.command !== "npm" && definition.command !== "npx" && definition.usesNpmCache !== true) return {};
+  return { NPM_CONFIG_CACHE: join(homedir(), ".agenthub", "npm-cache") };
+}
+
+function npmAcpRunnerArgs(packageSpec: string, binName: string): readonly string[] {
+  return [fileURLToPath(new URL("./npm-acp-runner.mjs", import.meta.url)), packageSpec, binName];
 }

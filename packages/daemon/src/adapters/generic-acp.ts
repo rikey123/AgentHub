@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 
-import { ACPAdapter, ACPAdapterError, AdapterHealthRegistry, AdapterRawLogger, emitAdapterRegistered, type AcpAdapterSession, type AcpProviderEvent, type AdapterRuntimeServices, type JsonRpcMessage } from "@agenthub/adapter-acp-base";
+import { ACPAdapter, ACPAdapterError, AdapterHealthRegistry, AdapterRawLogger, emitAdapterRegistered, type AcpAdapterSession, type AcpProviderEvent, type AcpPromptCapabilityOverrides, type AdapterRuntimeServices, type JsonRpcMessage } from "@agenthub/adapter-acp-base";
 import type { PublishInput } from "@agenthub/bus";
-import { AdapterBridge, buildRunPrompt, persistAssistantPublicMessage, prepareAdapterRunWorkspace, runWithPreparedWorkDir, type AdapterArtifactFSBoundary, type RoomMcpServer, type RunLifecycleService, type RunRow } from "@agenthub/orchestrator";
-import type { AdapterError, AgentAdapterManifest, DetectedRuntime } from "@agenthub/protocol";
+import { AdapterBridge, buildRunPrompt, buildRunPromptAttachments, persistAssistantPublicMessage, prepareAdapterRunWorkspace, runWithPreparedWorkDir, type AdapterArtifactFSBoundary, type RoomMcpServer, type RunLifecycleService, type RunRow } from "@agenthub/orchestrator";
+import type { AdapterError, AdapterMessage, AgentAdapterManifest, DetectedRuntime } from "@agenthub/protocol";
 import { Effect } from "effect";
 
 export type GenericAcpAdapterConfig = {
@@ -41,7 +41,8 @@ export class GenericACPAdapter extends ACPAdapter {
     const manifest = genericManifest(options);
     const logger = options.services !== undefined && options.workspaceId !== undefined ? new AdapterRawLogger(options.services.eventBus, { workspaceId: options.workspaceId, ...(options.now !== undefined ? { now: options.now } : {}) }) : undefined;
     const rawLogger = logger?.write.bind(logger);
-    super(options.id, options.name, manifest, { ...(options.now !== undefined ? { now: options.now } : {}), ...(rawLogger !== undefined ? { rawSink: rawLogger } : {}) });
+    const promptCapabilityOverrides = promptCapabilityOverridesForRuntime(options.runtimeKind);
+    super(options.id, options.name, manifest, { ...(options.now !== undefined ? { now: options.now } : {}), ...(rawLogger !== undefined ? { rawSink: rawLogger } : {}), ...(promptCapabilityOverrides !== undefined ? { promptCapabilityOverrides } : {}) });
     this.health = options.services !== undefined ? new AdapterHealthRegistry(options.services.eventBus, { ...(options.now !== undefined ? { now: options.now } : {}) }) : undefined;
   }
 
@@ -77,7 +78,7 @@ export class GenericACPAdapter extends ACPAdapter {
     this.drainPendingFailure(run.id, acpSession);
     if (acpSession.state === "failed") return;
     this.health?.update({ adapterId: this.id, workspaceId: run.workspace_id, liveness: "busy", pendingRunIds: [run.id] });
-    this.sendPrompt(session.id, { role: "user", content: this.promptFromRun(promptRun) });
+    this.sendPrompt(session.id, this.promptMessageFromRun(promptRun));
   }
 
   warmRoomAgent(input: { readonly roomId: string; readonly agentId: string; readonly workDir?: string }): string {
@@ -227,6 +228,16 @@ export class GenericACPAdapter extends ACPAdapter {
     const skillsBlock = this.options.getSkillsBlock?.(run.id);
     return buildRunPrompt(run, db, { ...(this.options.now !== undefined ? { now: this.options.now } : {}), ...(skillsBlock !== undefined ? { skillsBlock } : {}) });
   }
+
+  private promptMessageFromRun(run: RunRow): AdapterMessage {
+    const db = this.options.services?.database;
+    const attachments = db !== undefined ? buildRunPromptAttachments(run, db, { localPathOnlyBinaryFiles: true }) : [];
+    return {
+      role: "user",
+      content: this.promptFromRun(run),
+      ...(attachments.length > 0 ? { attachments } : {})
+    };
+  }
 }
 
 function genericManifest(options: GenericAcpAdapterConfig): AgentAdapterManifest {
@@ -247,6 +258,11 @@ function genericProvider(runtimeKind: string): AgentAdapterManifest["provider"] 
   if (runtimeKind === "opencode") return "opencode";
   if (runtimeKind === "claude-code") return "claude-code";
   return "custom";
+}
+
+function promptCapabilityOverridesForRuntime(runtimeKind: string): AcpPromptCapabilityOverrides | undefined {
+  if (runtimeKind !== "codex") return undefined;
+  return { embeddedContext: true };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

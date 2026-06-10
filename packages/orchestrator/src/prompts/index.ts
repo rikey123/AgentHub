@@ -4,4 +4,4 @@ export { buildFirstWakePrompt } from "./first-wake-prompt.ts";
 export { buildPriorProgressBlock } from "./prior-progress.ts";
 export { assembleMissionBrief, buildMissionBriefBlock } from "./mission-brief.ts";
 export type { MissionBrief, MissionBriefEntry, SiblingTask } from "./mission-brief.ts";
-export { buildRunPrompt, type RunPromptOptions } from "./run-prompt.ts";
+export { buildRunPrompt, buildRunPromptAttachments, buildRunPromptImageAttachments, type RunPromptAttachment, type RunPromptAttachmentOptions, type RunPromptAudioAttachment, type RunPromptFileAttachment, type RunPromptImageAttachment, type RunPromptOptions } from "./run-prompt.ts";

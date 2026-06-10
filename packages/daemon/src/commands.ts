@@ -3,7 +3,9 @@ import { randomUUID } from "node:crypto";
 import type { Command, CommandBus, CommandErrorCode, CommandHandler, CommandMeta, CommandResult, EventBus, PublishInput } from "@agenthub/bus";
 import type { AgentHubDatabase } from "@agenthub/db";
 import { parseMentions, nameToSlug, type AssistedSelectorInput, type AssistedSelectorParticipant, type AssistedSelectorResult, type PendingTurnService } from "@agenthub/orchestrator";
+import { defaultAgentAvatarUrl, isAvatarImageUrl } from "@agenthub/protocol/avatars";
 import type { MessageContextRef } from "@agenthub/protocol/domains";
+import { normalizePreviewKind, type PreviewKind } from "@agenthub/protocol/preview";
 
 export type AssistedSelectorRouter = {
   readonly startTurn: (input: AssistedSelectorInput) => Promise<AssistedSelectorResult>;
@@ -28,6 +30,7 @@ export function createDaemonCommandHandlers(options: DaemonCommandHandlersOption
     AddParticipant: (command, meta) => addParticipant(options, command, meta),
     ArchiveRoom: (command) => setRoomArchived(options, command, true),
     UnarchiveRoom: (command) => setRoomArchived(options, command, false),
+    DeleteRoom: (command) => deleteRoom(options, command),
     SendMessage: (command, meta) => sendMessage(options, command, meta),
     CancelPendingTurn: (command) => cancelPendingTurn(options, command),
     DeleteMessage: (command) => deleteMessage(options, command),
@@ -71,11 +74,14 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
 
   const roomId = randomUUID();
   const now = options.now?.() ?? Date.now();
-  const lookupAgent = (agentId: string): { adapterId: string; name: string } => {
+  const lookupAgent = (agentId: string): { adapterId: string; name: string; avatarUrl: string } => {
     const binding = options.database.sqlite
       .prepare(
         `SELECT
-          COALESCE(roles.name, runtimes.name, agent_bindings.id) AS name,
+          COALESCE(agent_bindings.contact_name, roles.name, runtimes.name, agent_bindings.id) AS name,
+          agent_bindings.id AS binding_id,
+          agent_bindings.avatar_url AS avatar_url,
+          roles.avatar AS role_avatar,
           runtimes.kind AS runtime_kind
          FROM agent_bindings
          LEFT JOIN roles ON roles.id = agent_bindings.role_id
@@ -83,12 +89,12 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
          WHERE agent_bindings.id = ?
          LIMIT 1`
       )
-      .get(agentId) as { readonly runtime_kind?: string | null; readonly name?: string | null } | undefined;
-    if (binding !== undefined) return { adapterId: binding.runtime_kind ?? "mock", name: binding.name ?? agentId };
+      .get(agentId) as { readonly binding_id?: string | null; readonly avatar_url?: string | null; readonly role_avatar?: string | null; readonly runtime_kind?: string | null; readonly name?: string | null } | undefined;
+    if (binding !== undefined) return { adapterId: binding.runtime_kind ?? "mock", name: binding.name ?? agentId, avatarUrl: effectiveAvatarUrl(binding.avatar_url, binding.role_avatar, binding.binding_id ?? agentId) };
     const row = options.database.sqlite
-      .prepare("SELECT adapter_id, name FROM agent_profiles WHERE id = ?")
-      .get(agentId) as { adapter_id?: string; name?: string } | undefined;
-    return { adapterId: row?.adapter_id ?? "mock", name: row?.name ?? agentId };
+      .prepare("SELECT adapter_id, name, avatar FROM agent_profiles WHERE id = ?")
+      .get(agentId) as { adapter_id?: string; name?: string; avatar?: string | null } | undefined;
+    return { adapterId: row?.adapter_id ?? "mock", name: row?.name ?? agentId, avatarUrl: effectiveAvatarUrl(row?.avatar ?? null, null, agentId) };
   };
   const bindingStatus = (agentBindingId: string): "active" | "disabled" | "missing" => {
     const row = options.database.sqlite
@@ -102,15 +108,17 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
     return status === "disabled" ? failed("validation_failed", "agent_binding_disabled") : undefined;
   };
 
-  const lookupBinding = (roleId: string, runtimeId: string, modelConfigId: string | null | undefined): { readonly bindingId: string; readonly adapterId: string; readonly name: string } | undefined => {
+  const lookupBinding = (roleId: string, runtimeId: string, modelConfigId: string | null | undefined): { readonly bindingId: string; readonly adapterId: string; readonly name: string; readonly avatarUrl: string } | undefined => {
     const row = options.database.sqlite
       .prepare(
         `SELECT
           agent_bindings.id AS binding_id,
+          agent_bindings.avatar_url AS avatar_url,
           agent_bindings.role_id,
           agent_bindings.runtime_id,
           agent_bindings.model_config_id,
           roles.name AS role_name,
+          roles.avatar AS role_avatar,
           runtimes.kind AS runtime_kind,
           runtimes.name AS runtime_name
          FROM agent_bindings
@@ -121,10 +129,10 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
          LIMIT 1`
       )
       .get(...(modelConfigId === undefined ? [roleId, runtimeId] : [roleId, runtimeId, modelConfigId])) as
-      | { readonly binding_id?: string; readonly role_name?: string | null; readonly runtime_kind?: string | null; readonly runtime_name?: string | null }
+      | { readonly binding_id?: string; readonly avatar_url?: string | null; readonly role_avatar?: string | null; readonly role_name?: string | null; readonly runtime_kind?: string | null; readonly runtime_name?: string | null }
       | undefined;
     if (row?.binding_id === undefined) return undefined;
-    return { bindingId: row.binding_id, adapterId: row.runtime_kind ?? "mock", name: row.role_name ?? row.runtime_name ?? row.binding_id };
+    return { bindingId: row.binding_id, adapterId: row.runtime_kind ?? "mock", name: row.role_name ?? row.runtime_name ?? row.binding_id, avatarUrl: effectiveAvatarUrl(row.avatar_url ?? null, row.role_avatar ?? null, row.binding_id) };
   };
 
   type RoomParticipantRecord = {
@@ -132,6 +140,7 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
     readonly agentBindingId: string;
     readonly adapterId: string;
     readonly name: string;
+    readonly avatarUrl: string;
     readonly role: string;
     readonly presence: string;
   };
@@ -154,7 +163,7 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
       const info = lookupAgent(participant.agentId);
       const role = participantRole(participant, isTeamMode);
       const presence = participantPresence(participant, isTeamMode, role);
-      const record: RoomParticipantRecord = { participantId: participant.agentId, agentBindingId: participantBindingId, adapterId: info.adapterId, name: info.name, role, presence };
+      const record: RoomParticipantRecord = { participantId: participant.agentId, agentBindingId: participantBindingId, adapterId: info.adapterId, name: info.name, avatarUrl: info.avatarUrl, role, presence };
       resolvedParticipants.push(record);
       if (participant.agentId === primaryAgentId || participantBindingId === primaryAgentId || role === "primary") {
         primaryParticipant = record;
@@ -172,7 +181,7 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
       }
       const role = participantRole(participant, isTeamMode);
       const presence = participantPresence(participant, isTeamMode, role);
-      const record: RoomParticipantRecord = { participantId: binding.bindingId, agentBindingId: binding.bindingId, adapterId: binding.adapterId, name: binding.name, role, presence };
+      const record: RoomParticipantRecord = { participantId: binding.bindingId, agentBindingId: binding.bindingId, adapterId: binding.adapterId, name: binding.name, avatarUrl: binding.avatarUrl, role, presence };
       resolvedParticipants.push(record);
       if (
         (isTeamMode && leaderRoleId !== undefined && participant.roleId === leaderRoleId)
@@ -195,7 +204,7 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
   }
   const primary = primaryParticipant ?? (() => {
     const info = lookupAgent(primaryAgentId);
-    return { participantId: primaryAgentId, agentBindingId: explicitAgentBindingId ?? primaryAgentId, adapterId: info.adapterId, name: info.name, role: "primary", presence: "active" } satisfies RoomParticipantRecord;
+    return { participantId: primaryAgentId, agentBindingId: explicitAgentBindingId ?? primaryAgentId, adapterId: info.adapterId, name: info.name, avatarUrl: info.avatarUrl, role: "primary", presence: "active" } satisfies RoomParticipantRecord;
   })();
   const roomParticipantIds = new Set([primary.participantId, ...resolvedParticipants.map((participant) => participant.participantId)]);
   const missingParticipantAssignment = participantSkillAssignments.find((assignment) => !roomParticipantIds.has(assignment.participantId));
@@ -240,14 +249,15 @@ function createRoom(options: DaemonCommandHandlersOptions, command: Command, met
     // replay after a refresh) can rebuild the member roster without needing a separate API.
     // Without these events, refreshing the page lost all members until the daemon happened to
     // re-emit presence elsewhere.
-    const publishParticipantEvents = (agentId: string, agentName: string, adapterId: string, role: string, presence: string): void => {
-      options.eventBus.publish({ id: randomUUID(), type: "agent.joined", schemaVersion: 1, workspaceId, roomId, agentId, payload: { agentId, agentName, role, adapterId }, createdAt: now });
-      options.eventBus.publish({ id: randomUUID(), type: "agent.state.changed", schemaVersion: 1, workspaceId, roomId, agentId, payload: { agentId, state: presence }, createdAt: now });
+    const publishParticipantEvents = (participant: RoomParticipantRecord, role: string): void => {
+      const agentId = participant.participantId;
+      options.eventBus.publish({ id: randomUUID(), type: "agent.joined", schemaVersion: 1, workspaceId, roomId, agentId, payload: { agentId, agentName: participant.name, role, adapterId: participant.adapterId, agentBindingId: participant.agentBindingId, avatarUrl: participant.avatarUrl }, createdAt: now });
+      options.eventBus.publish({ id: randomUUID(), type: "agent.state.changed", schemaVersion: 1, workspaceId, roomId, agentId, payload: { agentId, state: participant.presence }, createdAt: now });
     };
-    publishParticipantEvents(primary.participantId, primary.name, primary.adapterId, "primary", primary.presence);
+    publishParticipantEvents(primary, "primary");
     for (const participant of resolvedParticipants) {
       if (participant.participantId !== primary.participantId) {
-        publishParticipantEvents(participant.participantId, participant.name, participant.adapterId, participant.role, participant.presence);
+        publishParticipantEvents(participant, participant.role);
       }
     }
   })();
@@ -277,7 +287,9 @@ function addParticipant(options: DaemonCommandHandlersOptions, command: Command,
         agent_bindings.workspace_id AS workspace_id,
         roles.id AS role_id,
         roles.name AS role_name,
+        roles.avatar AS role_avatar,
         roles.capabilities AS role_capabilities,
+        agent_bindings.avatar_url AS avatar_url,
         runtimes.kind AS runtime_kind,
         agent_bindings.disabled_at AS disabled_at
        FROM agent_bindings
@@ -287,7 +299,7 @@ function addParticipant(options: DaemonCommandHandlersOptions, command: Command,
        LIMIT 1`
     )
     .get(agentBindingId) as
-    | { readonly binding_id: string; readonly workspace_id: string; readonly role_id: string | null; readonly role_name: string | null; readonly role_capabilities: string | null; readonly runtime_kind: string | null; readonly disabled_at: number | null }
+    | { readonly binding_id: string; readonly workspace_id: string; readonly role_id: string | null; readonly role_name: string | null; readonly role_avatar: string | null; readonly role_capabilities: string | null; readonly avatar_url: string | null; readonly runtime_kind: string | null; readonly disabled_at: number | null }
     | undefined;
   if (binding === undefined) return failed("not_found", "agent_binding_not_found");
   if (binding.disabled_at !== null) return failed("validation_failed", "agent_binding_disabled");
@@ -303,6 +315,7 @@ function addParticipant(options: DaemonCommandHandlersOptions, command: Command,
   const presence = room.mode === "team" || room.mode === "squad" ? "active" : "observing";
   const adapterId = binding.runtime_kind ?? "mock";
   const name = displayNameOverride ?? binding.role_name ?? binding.binding_id;
+  const avatarUrl = effectiveAvatarUrl(binding.avatar_url, binding.role_avatar, binding.binding_id);
   const capabilities = parseCapabilities(binding.role_capabilities);
   const mailboxMessageId = randomUUID();
 
@@ -314,7 +327,7 @@ function addParticipant(options: DaemonCommandHandlersOptions, command: Command,
     options.database.sqlite
       .prepare("INSERT OR REPLACE INTO agent_presence (room_id, agent_id, state, reason, status_line, updated_at) VALUES (?, ?, ?, NULL, NULL, ?)")
       .run(roomId, agentBindingId, presence, now);
-    options.eventBus.publish({ id: randomUUID(), type: "agent.joined", schemaVersion: 1, workspaceId: room.workspace_id, roomId, agentId: agentBindingId, payload: { agentId: agentBindingId, agentName: name, role, adapterId, agentBindingId, roleId: binding.role_id, capabilities }, createdAt: now });
+    options.eventBus.publish({ id: randomUUID(), type: "agent.joined", schemaVersion: 1, workspaceId: room.workspace_id, roomId, agentId: agentBindingId, payload: { agentId: agentBindingId, agentName: name, role, adapterId, agentBindingId, roleId: binding.role_id, avatarUrl, capabilities }, createdAt: now });
     options.eventBus.publish({ id: randomUUID(), type: "agent.state.changed", schemaVersion: 1, workspaceId: room.workspace_id, roomId, agentId: agentBindingId, payload: { agentId: agentBindingId, state: presence }, createdAt: now });
 
     if (room.primary_agent_id !== null) {
@@ -328,7 +341,7 @@ function addParticipant(options: DaemonCommandHandlersOptions, command: Command,
   void meta;
   return {
     ok: true,
-    data: { participantId: agentBindingId, agentBindingId, agentId: agentBindingId, name, role, capabilities },
+    data: { participantId: agentBindingId, agentBindingId, agentId: agentBindingId, name, avatarUrl, role, capabilities },
     emittedEvents: latestEvents(options.database, roomId)
   };
 }
@@ -347,6 +360,22 @@ function setRoomArchived(options: DaemonCommandHandlersOptions, command: Command
   return { ok: true, data: { roomId, archived }, emittedEvents: latestEvents(options.database, roomId) };
 }
 
+function deleteRoom(options: DaemonCommandHandlersOptions, command: Command): CommandResult {
+  const roomId = stringField(command, "roomId");
+  if (!roomId) return failed("validation_failed", "roomId is required");
+  const now = options.now?.() ?? Date.now();
+  const room = options.database.sqlite
+    .prepare("SELECT id, workspace_id FROM rooms WHERE id = ? AND deleted_at IS NULL")
+    .get(roomId) as { readonly id: string; readonly workspace_id: string } | undefined;
+  if (!room) return failed("not_found", `Room '${roomId}' not found`);
+  options.database.sqlite.transaction(() => {
+    options.database.sqlite.prepare("UPDATE rooms SET deleted_at = ?, updated_at = ? WHERE id = ?").run(now, now, roomId);
+    options.eventBus.publish(roomEvent("room.deleted", room.workspace_id, roomId, { roomId }, now));
+  })();
+  options.disposeRoomAgents?.(roomId);
+  return { ok: true, data: { roomId, deleted: true }, emittedEvents: latestEvents(options.database, roomId) };
+}
+
 function sendMessage(options: DaemonCommandHandlersOptions, command: Command, meta: CommandMeta): CommandResult | Promise<CommandResult> {
   const roomId = stringField(command, "roomId");
   const text = stringField(command, "text");
@@ -361,7 +390,25 @@ function sendMessage(options: DaemonCommandHandlersOptions, command: Command, me
   const mentionPayloads = mentions.map((agentBindingId) => ({ agentBindingId }));
   const contextRefs = contextRefsFromCommand(command);
   const quotedMessageId = stringField(command, "quotedMessageId") ?? stringField(command, "quoted_message_id");
-  const attachmentFileIds = stringArrayField(command, "attachmentFileIds", "attachments");
+  const attachmentFileIds = Array.from(new Set(stringArrayField(command, "attachmentFileIds", "attachmentIds", "attachments")));
+  const attachmentRows = attachmentRowsForFileIds(options.database, attachmentFileIds);
+  if (attachmentRows.length !== attachmentFileIds.length) {
+    const found = new Set(attachmentRows.map((row) => row.fileId));
+    return failed("validation_failed", "attachment_not_found", { missingFileIds: attachmentFileIds.filter((fileId) => !found.has(fileId)) });
+  }
+  const attachmentParts = attachmentFileIds.map((fileId, index) => {
+    const row = attachmentRows.find((item) => item.fileId === fileId);
+    if (row === undefined) throw new Error(`missing attachment row ${fileId}`);
+    return {
+      type: "attachment" as const,
+      seq: index + 2,
+      fileId: row.fileId,
+      name: row.fileName,
+      mimeType: row.mimeType ?? "",
+      sizeBytes: row.byteSize,
+      previewKind: previewKindForAttachment(row.fileName, row.mimeType ?? "")
+    };
+  });
   const useAssistedSelector = room.mode === "assisted" && options.assistedSelector !== undefined;
   const wakeTargets = useAssistedSelector ? [] : wakeTargetsForMessage(room, mentions);
   const primaryTargeted = room.primary_agent_id !== null && wakeTargets.includes(room.primary_agent_id);
@@ -384,12 +431,17 @@ function sendMessage(options: DaemonCommandHandlersOptions, command: Command, me
       .run(messageId, room.workspace_id, roomId, actorId(meta), quotedMessageId ?? null, busy ? "pending" : "immediate", pendingTurnId ?? null, now, now);
     const textPayload = { text, mentions: mentionPayloads, ...(contextRefs.length > 0 ? { refs: contextRefs } : {}) };
     options.database.sqlite.prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, 1, 'text', ?, ?)").run(messageId, JSON.stringify(textPayload), now);
+    for (const part of attachmentParts) {
+      const { type: _type, seq: _seq, ...payload } = part;
+      options.database.sqlite.prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, ?, 'attachment', ?, ?)").run(messageId, part.seq, JSON.stringify(payload), now);
+    }
     if (attachmentFileIds.length > 0) {
       const placeholders = attachmentFileIds.map(() => "?").join(", ");
       options.database.sqlite.prepare(`UPDATE attachments SET message_id = ? WHERE file_id IN (${placeholders})`).run(messageId, ...attachmentFileIds);
     }
-    options.eventBus.publish(messageEvent("message.created", room.workspace_id, roomId, messageId, { text, senderId: actorId(meta), role: "user", turnDispatchMode: busy ? "pending" : "immediate", mentions: mentionPayloads, attachmentFileIds, ...(contextRefs.length > 0 ? { refs: contextRefs } : {}), ...(quotedMessageId !== undefined ? { quotedMessageId } : {}), ...(pendingTurnId !== undefined ? { pendingTurnId } : {}) }, now));
-    options.eventBus.publish(messageEvent("message.completed", room.workspace_id, roomId, messageId, { text, mentions: mentionPayloads, ...(contextRefs.length > 0 ? { refs: contextRefs } : {}) }, now));
+    const parts = [{ type: "text" as const, seq: 1, ...textPayload }, ...attachmentParts];
+    options.eventBus.publish(messageEvent("message.created", room.workspace_id, roomId, messageId, { text, senderId: actorId(meta), role: "user", turnDispatchMode: busy ? "pending" : "immediate", mentions: mentionPayloads, attachmentFileIds, attachmentIds: attachmentFileIds, parts, ...(contextRefs.length > 0 ? { refs: contextRefs } : {}), ...(quotedMessageId !== undefined ? { quotedMessageId } : {}), ...(pendingTurnId !== undefined ? { pendingTurnId } : {}) }, now));
+    options.eventBus.publish(messageEvent("message.completed", room.workspace_id, roomId, messageId, { text, mentions: mentionPayloads, attachmentFileIds, attachmentIds: attachmentFileIds, parts, ...(contextRefs.length > 0 ? { refs: contextRefs } : {}) }, now));
     if (pendingTurnId && room.primary_agent_id) {
       options.database.sqlite.prepare("INSERT INTO pending_turns (id, room_id, user_message_id, primary_agent_id, status, enqueued_at, scheduled_at, cancelled_at, notes) VALUES (?, ?, ?, ?, 'queued', ?, NULL, NULL, NULL)").run(pendingTurnId, roomId, messageId, room.primary_agent_id, now);
       options.eventBus.publish(pendingTurnEvent("pending_turn.created", room.workspace_id, roomId, room.primary_agent_id, pendingTurnId, messageId, "queued", now));
@@ -829,6 +881,27 @@ function mentionAgentIdsFromCommand(command: Command): string[] {
     .filter((item): item is string => item !== undefined && item.length > 0);
 }
 
+type UploadedAttachmentRow = {
+  readonly fileId: string;
+  readonly fileName: string;
+  readonly mimeType: string | null;
+  readonly byteSize: number;
+};
+
+function attachmentRowsForFileIds(database: AgentHubDatabase, fileIds: readonly string[]): UploadedAttachmentRow[] {
+  if (fileIds.length === 0) return [];
+  const placeholders = fileIds.map(() => "?").join(", ");
+  const rows = database.sqlite
+    .prepare(`SELECT file_id AS fileId, file_name AS fileName, mime_type AS mimeType, byte_size AS byteSize FROM attachments WHERE file_id IN (${placeholders})`)
+    .all(...fileIds) as UploadedAttachmentRow[];
+  const byId = new Map(rows.map((row) => [row.fileId, row]));
+  return fileIds.map((fileId) => byId.get(fileId)).filter((row): row is UploadedAttachmentRow => row !== undefined);
+}
+
+function previewKindForAttachment(fileName: string, mimeType: string): PreviewKind {
+  return normalizePreviewKind(undefined, mimeType, fileName);
+}
+
 function messageText(database: AgentHubDatabase, messageId: string): string {
   const rows = database.sqlite.prepare("SELECT payload FROM message_parts WHERE message_id = ? ORDER BY seq ASC").all(messageId) as { readonly payload: string }[];
   return rows.map((row) => {
@@ -836,7 +909,7 @@ function messageText(database: AgentHubDatabase, messageId: string): string {
   }).filter((text) => text.length > 0).join("\n");
 }
 
-function roomEvent(type: "room.created" | "room.opened" | "room.closed", workspaceId: string, roomId: string, payload: Record<string, unknown>, createdAt: number): PublishInput {
+function roomEvent(type: "room.created" | "room.opened" | "room.closed" | "room.deleted", workspaceId: string, roomId: string, payload: Record<string, unknown>, createdAt: number): PublishInput {
   return { id: randomUUID(), type, schemaVersion: 1, workspaceId, roomId, payload, createdAt };
 }
 
@@ -921,6 +994,12 @@ function parseCapabilities(value: string | null): string[] {
   } catch {
     return [];
   }
+}
+
+function effectiveAvatarUrl(avatarUrl: unknown, roleAvatar: unknown, agentId: string): string {
+  if (isAvatarImageUrl(avatarUrl)) return avatarUrl;
+  if (isAvatarImageUrl(roleAvatar)) return roleAvatar;
+  return defaultAgentAvatarUrl(agentId);
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

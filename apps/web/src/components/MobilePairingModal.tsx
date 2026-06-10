@@ -9,10 +9,24 @@ interface MobilePairingModalProps {
 }
 
 type ConnectionConfig = {
+  readonly version?: number;
   readonly url: string;
   readonly host: string;
   readonly port: number | null;
   readonly token: string;
+  readonly network?: "lan" | "loopback";
+  readonly source?: "primary-listener" | "mobile-bridge" | "request-host" | "unavailable";
+  readonly reachableFromMobile?: boolean;
+  readonly issue?: string;
+  readonly endpoint?: {
+    readonly url?: string;
+    readonly host?: string;
+    readonly port?: number | null;
+    readonly network?: string;
+    readonly source?: string;
+    readonly reachableFromMobile?: boolean;
+    readonly issue?: string;
+  };
   readonly qrPayload: string;
 };
 
@@ -39,6 +53,10 @@ async function issueMobileToken(csrfFetch: typeof fetch): Promise<ConnectionConf
 
 function isLoopback(host: string): boolean {
   return host === "127.0.0.1" || host === "::1" || host === "localhost";
+}
+
+function mobileReachable(connection: ConnectionConfig): boolean {
+  return connection.reachableFromMobile === true || connection.endpoint?.reachableFromMobile === true || !isLoopback(connection.host);
 }
 
 export function MobilePairingModal({ isOpen, onOpenChange, csrfFetch }: MobilePairingModalProps) {
@@ -95,6 +113,16 @@ export function MobilePairingModal({ isOpen, onOpenChange, csrfFetch }: MobilePa
                   <img src={state.qrDataUrl} alt="移动端验证二维码" className="rounded-lg border border-border bg-white p-2" width={240} height={240} />
                 </section>
 
+                <section className="rounded-lg border border-border bg-surface-muted p-3 text-xs">
+                  <div className="font-semibold text-foreground">手机连接地址</div>
+                  <div className="mt-1 font-mono text-foreground">{state.connection.url}</div>
+                  <div className="mt-1 text-muted">
+                    {mobileReachable(state.connection)
+                      ? `局域网可达，来源：${state.connection.source ?? state.connection.endpoint?.source ?? "配对清单"}`
+                      : "当前配置不可被手机直连"}
+                  </div>
+                </section>
+
                 <section className="flex flex-col gap-2">
                   <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">身份码</h3>
                   <textarea
@@ -109,9 +137,9 @@ export function MobilePairingModal({ isOpen, onOpenChange, csrfFetch }: MobilePa
                   </Button>
                 </section>
 
-                {isLoopback(state.connection.host) && (
+                {!mobileReachable(state.connection) && (
                   <p className="rounded-lg border border-warning/40 bg-warning-soft p-2.5 text-xs text-warning-soft-foreground">
-                    当前本地服务绑定在 {state.connection.host}，手机无法直连。请在远程访问设置中启用移动端连接，并将监听地址改为局域网 IP（如 192.168.x.x）；手机与电脑连同一 Wi-Fi 后再验证。
+                    当前身份码没有可用的局域网地址。{state.connection.issue ?? state.connection.endpoint?.issue ?? "请确认电脑已连接局域网，并允许 AgentHub 打开移动端通讯端口。"} 手机与电脑连同一 Wi-Fi 后重新生成二维码。
                   </p>
                 )}
               </div>

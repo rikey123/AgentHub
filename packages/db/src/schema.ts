@@ -17,6 +17,7 @@ export const rooms = sqliteTable("rooms", {
   primaryAgentId: text("primary_agent_id"),
   leaderRoleId: text("leader_role_id"),
   archivedAt: integer("archived_at"),
+  deletedAt: integer("deleted_at"),
   pinnedAt: integer("pinned_at"),
   lastActivityAt: integer("last_activity_at"),
   createdAt: integer("created_at").notNull(),

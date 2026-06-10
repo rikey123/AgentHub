@@ -10,6 +10,7 @@ import type { CommandBus, CommandResult, EventBus } from "@agenthub/bus";
 import type { CommandErrorCode } from "@agenthub/bus";
 import type { AgentHubDatabase } from "@agenthub/db";
 import type { ArtifactVersioningService } from "@agenthub/artifacts";
+import { defaultAgentAvatarUrl } from "@agenthub/protocol/avatars";
 import type { PermissionEngine, PermissionResource } from "../../../permissions/src/index.ts";
 
 import { nameToSlug } from "../mention-parser.ts";
@@ -124,6 +125,7 @@ export class RoomMcpServer {
    */
   getStdioConfig(session: RoomMcpSessionContext): RoomMcpStdioConfig {
     const scriptPath = resolveBridgeScript(this.options.bridgeDir);
+    const capabilities = this.agentCapabilitySet(session.roomId, session.agentId);
     return {
       name: "agenthub-room",
       command: "node",
@@ -134,6 +136,7 @@ export class RoomMcpServer {
         { name: "ROOM_MCP_ROOM_ID", value: session.roomId },
         ...(session.runId !== undefined ? [{ name: "ROOM_MCP_RUN_ID", value: session.runId }] : []),
         { name: "ROOM_MCP_AGENT_ID", value: session.agentId },
+        ...(capabilities !== undefined ? [{ name: "ROOM_MCP_AGENT_CAPABILITIES", value: JSON.stringify([...capabilities]) }] : []),
       ],
     };
   }
@@ -296,18 +299,13 @@ export class RoomMcpServer {
     const path = isRecord(input) && typeof input.path === "string" ? input.path : undefined;
     if (!path) return failure("validation_failed", "path is required");
     if (hasPathTraversal(path)) return failure("permission_denied", "path_traversal_denied");
+    if (isUploadedAttachmentToolPath(path)) return uploadedAttachmentToolFailure();
     const workspaceRoot = this.workspaceRootFor(session.roomId);
     if (workspaceRoot === undefined) return failure("not_found", `Workspace for room '${session.roomId}' not found`);
     // Canonicalize before permission check so the engine sees the resolved path.
     const resolvedRoot = resolve(workspaceRoot);
     const resolvedTarget = resolve(workspaceRoot, path);
     if (resolvedTarget !== resolvedRoot && !resolvedTarget.startsWith(`${resolvedRoot}${sep}`)) {
-      return failure("permission_denied", "path must be within workspace");
-    }
-    // Resolve symlinks to catch junction/symlink escapes pointing outside workspace.
-    const realTarget = realpathOrResolvedTarget(resolvedTarget);
-    const realRoot = realpathOrResolvedTarget(resolvedRoot);
-    if (realTarget !== realRoot && !realTarget.startsWith(`${realRoot}${sep}`)) {
       return failure("permission_denied", "path must be within workspace");
     }
     const permission = await this.checkPermissionAsync(session, context, { type: "file", path, operation: "read" });
@@ -319,6 +317,12 @@ export class RoomMcpServer {
         const content = this.options.artifactFs.readTextFile({ runId, path });
         if (content !== undefined) return { ok: true, data: { path, content } };
       }
+    }
+    // Resolve symlinks to catch junction/symlink escapes pointing outside workspace.
+    const realTarget = realpathOrResolvedTarget(resolvedTarget);
+    const realRoot = realpathOrResolvedTarget(resolvedRoot);
+    if (realTarget !== realRoot && !realTarget.startsWith(`${realRoot}${sep}`)) {
+      return failure("permission_denied", "path must be within workspace");
     }
     try {
       const content = readFileSync(realTarget, "utf8");
@@ -362,6 +366,7 @@ export class RoomMcpServer {
     const path = isRecord(input) && typeof input.path === "string" && input.path.length > 0 ? input.path : ".";
     const limit = boundedLimit(isRecord(input) ? input.limit : undefined, 200);
     const recursive = isRecord(input) && input.recursive === true;
+    if (isUploadedAttachmentToolPath(path)) return uploadedAttachmentToolFailure();
     const target = resolveWorkspacePath(root, path, { existing: true });
     if (!target.ok) return target.result;
     const permission = await this.checkPermissionAsync(session, context, { type: "file", path, operation: "read" });
@@ -384,7 +389,7 @@ export class RoomMcpServer {
     try {
       const limit = boundedLimit(input.limit, 200);
       const matcher = globMatcher(input.pattern);
-      const matches = allWorkspaceFiles(root, limit).filter((path) => matcher(path));
+      const matches = allWorkspaceFiles(root, limit).filter((path) => matcher(path)).slice(0, limit);
       return { ok: true, data: { pattern: input.pattern, matches } };
     } catch (error) {
       return failure("file_glob_failed", error instanceof Error ? error.message : String(error));
@@ -488,6 +493,10 @@ export class RoomMcpServer {
 
   private async handleShell(input: unknown, session: RoomMcpSessionContext, context: RoomMcpCallContext): Promise<RoomMcpToolResult> {
     if (!isRecord(input) || typeof input.command !== "string" || input.command.length === 0) return failure("validation_failed", "command is required");
+    const capabilities = this.agentCapabilitySet(session.roomId, session.agentId);
+    if (capabilities !== undefined && !capabilities.has("terminal.run")) {
+      return failure("tool_not_permitted", "shell requires the terminal.run capability");
+    }
     const permission = await this.checkPermissionAsync(session, context, { type: "shell", command: input.command });
     if (!permission.ok) return permission;
     const workspaceRoot = this.runtimeWorkspaceRootFor(session, context);
@@ -554,6 +563,24 @@ export class RoomMcpServer {
   private workspaceIdForRoom(roomId: string): string | undefined {
     const row = this.options.database.sqlite.prepare("SELECT workspace_id FROM rooms WHERE id = ? AND archived_at IS NULL").get(roomId) as { readonly workspace_id: string } | undefined;
     return row?.workspace_id;
+  }
+
+  private agentCapabilitySet(roomId: string, agentId: string): Set<string> | undefined {
+    const row = this.options.database.sqlite
+      .prepare(
+        `SELECT r.capabilities AS roleCapabilities, ap.capabilities AS profileCapabilities
+         FROM room_participants rp
+         LEFT JOIN agent_bindings ab ON ab.id = rp.agent_binding_id
+         LEFT JOIN roles r ON r.id = ab.role_id
+         LEFT JOIN agent_profiles ap ON ap.id = rp.participant_id
+         WHERE rp.room_id = ? AND rp.participant_id = ? AND rp.participant_type = 'agent'
+         LIMIT 1`
+      )
+      .get(roomId, agentId) as { readonly roleCapabilities: string | null; readonly profileCapabilities: string | null } | undefined;
+    if (row === undefined) return undefined;
+    const rawCapabilities = row.roleCapabilities ?? row.profileCapabilities;
+    if (rawCapabilities === null) return undefined;
+    return new Set(parseCapabilities(rawCapabilities));
   }
 
   // ---------------------------------------------------------------------------
@@ -1405,16 +1432,17 @@ export class RoomMcpServer {
 
     const now = this.options.now?.() ?? Date.now();
     const newAgentId = randomUUID();
+    const avatarUrl = defaultAgentAvatarUrl(newAgentId);
     const slug = nameToSlug(agentName);
 
     // Create agent profile + add to room in one transaction.
     this.options.database.sqlite.transaction(() => {
       this.options.database.sqlite
         .prepare(
-          `INSERT INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 0, NULL, ?, ?)`
+          `INSERT INTO agent_profiles (id, workspace_id, name, avatar, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, NULL, ?, ?)`
         )
-        .run(newAgentId, room.workspace_id, agentName, adapterId, model ?? null, rolePrompt, JSON.stringify(capabilities), now, now);
+        .run(newAgentId, room.workspace_id, agentName, avatarUrl, adapterId, model ?? null, rolePrompt, JSON.stringify(capabilities), now, now);
 
       const role = room.mode === "team" || room.mode === "squad" ? "teammate" : "observer";
       const presence = room.mode === "team" || room.mode === "squad" ? "active" : "observing";
@@ -1430,7 +1458,7 @@ export class RoomMcpServer {
         .run(session.roomId, newAgentId, presence, now);
 
       // Emit events so SSE consumers (projector) see the new member immediately.
-      this.options.eventBus.publish({ id: randomUUID(), type: "agent.joined", schemaVersion: 1, workspaceId: room.workspace_id, roomId: session.roomId, agentId: newAgentId, payload: { agentId: newAgentId, agentName, role, adapterId }, createdAt: now });
+      this.options.eventBus.publish({ id: randomUUID(), type: "agent.joined", schemaVersion: 1, workspaceId: room.workspace_id, roomId: session.roomId, agentId: newAgentId, payload: { agentId: newAgentId, agentName, role, adapterId, avatarUrl }, createdAt: now });
       this.options.eventBus.publish({ id: randomUUID(), type: "agent.state.changed", schemaVersion: 1, workspaceId: room.workspace_id, roomId: session.roomId, agentId: newAgentId, payload: { agentId: newAgentId, state: presence }, createdAt: now });
     })();
 
@@ -1852,6 +1880,15 @@ function resolveWorkspacePath(root: string, path: string, options: { readonly ex
     return { ok: false, result: failure("permission_denied", "path must be within workspace") };
   }
   return { ok: true, path: realTarget };
+}
+
+function isUploadedAttachmentToolPath(path: string): boolean {
+  const normalized = path.replace(/\\/gu, "/").replace(/^\.\//u, "").replace(/\/+/gu, "/").replace(/\/$/u, "");
+  return normalized === "attachments" || normalized.startsWith("attachments/");
+}
+
+function uploadedAttachmentToolFailure(): RoomMcpToolResult {
+  return failure("uploaded_attachment_not_tool_readable", "Uploaded attachments are delivered as model input resources and are not readable through room MCP file tools.");
 }
 
 function listWorkspaceEntries(root: string, target: string, options: { readonly recursive: boolean; readonly limit: number }): Array<{ readonly path: string; readonly type: "file" | "directory"; readonly size: number }> {

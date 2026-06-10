@@ -257,6 +257,49 @@ describe("AgentHubClient", () => {
     });
   });
 
+  it("parses mobile connection configs from structured LAN manifests", () => {
+    const config = parseMobileConnectionConfig(JSON.stringify({
+      version: 2,
+      kind: "agenthub.mobile.connection",
+      endpoint: {
+        protocol: "http",
+        url: "http://192.168.1.10:6677",
+        host: "192.168.1.10",
+        port: 6677,
+        network: "lan",
+        source: "mobile-bridge",
+        reachableFromMobile: true
+      },
+      auth: {
+        scheme: "bearer",
+        token: "ah_token",
+        tokenId: "token_1",
+        scopes: ["read", "write"],
+        expiresAt: null
+      }
+    }));
+
+    expect(config).toEqual({
+      version: 2,
+      url: "http://192.168.1.10:6677",
+      host: "192.168.1.10",
+      port: 6677,
+      token: "ah_token",
+      tokenId: "token_1",
+      scopes: ["read", "write"],
+      expiresAt: null,
+      endpoint: {
+        protocol: "http",
+        url: "http://192.168.1.10:6677",
+        host: "192.168.1.10",
+        port: 6677,
+        network: "lan",
+        source: "mobile-bridge",
+        reachableFromMobile: true
+      }
+    });
+  });
+
   it("parses mobile connection configs from scanned URLs", () => {
     const config = parseMobileConnectionConfig("http://192.168.1.10:6677/qr-login?token=ah_token");
 
@@ -372,6 +415,33 @@ describe("AgentHubClient", () => {
     expect(calls).toEqual(['http://daemon/sync/events?view=mobile&sinceSeq=10 {"accept":"application/json","authorization":"Bearer token_1"}']);
     expect(delivered).toEqual([11, 12]);
     expect(writes).toEqual([11, 12]);
+    subscription.close();
+  });
+
+  it("does not let an older stored cursor override the initial cursor", async () => {
+    const calls: string[] = [];
+    const delivered: number[] = [];
+    const stream = new AgentHubEventStream({
+      baseUrl: "http://daemon",
+      channel: "json-poll",
+      view: "mobile",
+      initialCursor: 50,
+      pollIntervalMs: 1_000,
+      cursorStore: {
+        read: () => 10,
+        write: () => undefined
+      },
+      fetchImpl: (async (url) => {
+        calls.push(String(url));
+        return new Response(JSON.stringify({ events: [envelope(50), envelope(51)], nextCursor: 51 }), { status: 200 });
+      }) as typeof fetch
+    });
+
+    const subscription = stream.subscribe((event) => { if (event.seq !== undefined) delivered.push(event.seq); });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    expect(calls).toEqual(["http://daemon/sync/events?view=mobile&sinceSeq=50"]);
+    expect(delivered).toEqual([51]);
     subscription.close();
   });
 });

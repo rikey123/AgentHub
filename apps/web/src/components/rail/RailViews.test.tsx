@@ -1,6 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import type { RoomViewModel } from "../../types.ts";
 import {
   ArtifactsRailView,
   ContactsRailView,
@@ -104,6 +105,7 @@ describe("rail views", () => {
     expect(html).toContain("编辑 / 配置");
     expect(html).toContain("测试连接");
     expect(html).toContain("runtime_opencode");
+    expect(html).toContain("src=\"https://example.test/avatar.png\"");
   });
 
   it("normalizes runtime options for the new agent editor", () => {
@@ -358,16 +360,75 @@ describe("rail views", () => {
     expect(html).toContain("最近产物");
   });
 
+  it("renders current room runs in the runs workbench", () => {
+    const html = renderToStaticMarkup(createElement(RunsRailView, {
+      room: roomFixture({
+        briefs: [{
+          kind: "run_completed",
+          runId: "run-builder",
+          agentId: "agent-builder",
+          agentName: "Builder",
+          summary: "Finished the reply",
+          artifactCount: 2,
+          cost: { tokens: 1234, usd: 0.02 }
+        }],
+        runs: [{
+          id: "run-builder",
+          agentId: "agent-builder",
+          agentName: "Builder",
+          status: "completed",
+          startedAt: 1000,
+          endedAt: 3500,
+          cost: { inputTokens: 1000, outputTokens: 200, cachedTokens: 34, costUsd: 0.02, modelId: "gpt-5" },
+          wakeReason: "primary_turn",
+          messageId: "message-1"
+        }]
+      }),
+      onOpenRun: () => undefined
+    }));
+
+    expect(html).toContain("Builder");
+    expect(html).toContain("Finished the reply");
+    expect(html).toContain("2 个产物");
+    expect(html).toContain("打开运行详情");
+    expect(html).toContain("data-run-id=\"run-builder\"");
+  });
+
   it("renders primary rail views for runs and tasks", () => {
     const runs = renderToStaticMarkup(createElement(RunsRailView));
     const tasks = renderToStaticMarkup(createElement(TasksRailView));
 
     expect(runs).toContain("运行");
-    expect(runs).toContain("运行活动");
+    expect(runs).toContain("运行工作台");
     expect(tasks).toContain("任务");
     expect(tasks).toContain("任务工作台");
   });
 });
+
+function roomFixture(patch: Partial<RoomViewModel>): RoomViewModel {
+  return {
+    id: "room-1",
+    title: "Room",
+    mode: "team",
+    primaryAgentId: undefined,
+    participants: [],
+    participantContactNames: {},
+    messages: [],
+    briefs: [],
+    unresolvedInterventions: [],
+    pendingPermissions: [],
+    contextItems: [],
+    tasks: [],
+    runs: [],
+    pendingTurns: [],
+    mailboxFailures: [],
+    artifactVersionsById: {},
+    deploymentsById: {},
+    deploymentLogsById: {},
+    unreadCount: 0,
+    ...patch
+  };
+}
 
 function jsonResponse(status: number, payload: unknown): Response {
   return new Response(JSON.stringify(payload), {

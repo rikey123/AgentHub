@@ -190,7 +190,7 @@ export const MessagePartSchema = Schema.Union(
     sizeBytes: Schema.Number,
     artifactId: Schema.optional(IdSchema),
     path: Schema.optional(Schema.String),
-    previewKind: Schema.optional(Schema.Literal("markdown", "text", "code", "image", "download"))
+    previewKind: Schema.optional(Schema.Literal("markdown", "text", "code", "html", "image", "pdf", "audio", "video", "download"))
   }),
   Schema.Struct({ type: Schema.Literal("card"), seq: Schema.Number, card: CardSchema })
 );

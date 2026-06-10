@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Avatar,
   Button,
   Chip,
   Input,
@@ -11,11 +10,11 @@ import {
   TextField
 } from "@heroui/react";
 import type { ParticipantViewModel, TaskViewModel } from "../../types.ts";
-import { initials } from "../../lib/format.ts";
 import { roleDisplayName } from "../../lib/roles.ts";
 import { isInternalRuntimeRecord, runtimeChipColor, runtimeDisplayName } from "../../lib/runtimeDisplay.ts";
 import { skillDisplayDescription, skillDisplayName } from "../../lib/skills.ts";
 import { presenceColor } from "../../lib/status.ts";
+import { IdentityAvatar } from "../IdentityAvatar.tsx";
 
 type AgentBindingOption = {
   readonly id: string;
@@ -377,9 +376,7 @@ function MemberRow({
   return (
     <li className="ah-member-card">
       <div className="flex min-w-0 items-start gap-3">
-        <Avatar className="ah-agent-avatar">
-          <Avatar.Fallback>{initials(member.name)}</Avatar.Fallback>
-        </Avatar>
+        <IdentityAvatar name={member.name} avatarUrl={member.avatarUrl} className="ah-agent-avatar" />
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <span className="min-w-0 truncate text-sm font-semibold">
@@ -444,23 +441,22 @@ function MemberSkills({
   const [open, setOpen] = useState(false);
   const [skills, setSkills] = useState<SkillSummary[]>([]);
   const [state, setState] = useState<MemberSkillState>({ effectiveSkills: [], overrides: [] });
-  const [loading, setLoading] = useState(false);
+  const [memberSkillsLoaded, setMemberSkillsLoaded] = useState(false);
+  const [loadingMemberSkills, setLoadingMemberSkills] = useState(false);
+  const [loadingCatalog, setLoadingCatalog] = useState(false);
   const [pending, setPending] = useState<string | undefined>();
   const [error, setError] = useState<string | undefined>();
 
-  const refresh = () => {
-    if (!roomId) return;
-    setLoading(true);
+  const loadMemberSkillState = useCallback(async () => {
+    if (!roomId) {
+      setState({ effectiveSkills: [], overrides: [] });
+      setMemberSkillsLoaded(true);
+      return;
+    }
+    setLoadingMemberSkills(true);
     setError(undefined);
-    void Promise.all([
-      csrfFetch("/skills", {
-        credentials: "same-origin",
-        headers: { accept: "application/json" }
-      }).then(async (response) => {
-        if (!response.ok) throw new Error(`Load skills failed: ${response.status}`);
-        return response.json() as Promise<unknown>;
-      }),
-      csrfFetch(
+    try {
+      const payload = await csrfFetch(
         `/rooms/${encodeURIComponent(roomId)}/participants/${encodeURIComponent(participantId)}/skills`,
         {
           credentials: "same-origin",
@@ -469,19 +465,48 @@ function MemberSkills({
       ).then(async (response) => {
         if (!response.ok) throw new Error(`Load member skills failed: ${response.status}`);
         return response.json() as Promise<unknown>;
-      })
-    ])
-      .then(([allSkills, memberSkills]) => {
-        setSkills(normalizeSkills(allSkills));
-        setState(normalizeMemberSkills(memberSkills));
-      })
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
-      .finally(() => setLoading(false));
-  };
+      });
+      setState(normalizeMemberSkills(payload));
+      setMemberSkillsLoaded(true);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoadingMemberSkills(false);
+    }
+  }, [csrfFetch, participantId, roomId]);
+
+  const loadSkillCatalog = useCallback(async () => {
+    setLoadingCatalog(true);
+    setError(undefined);
+    try {
+      const payload = await csrfFetch("/skills", {
+        credentials: "same-origin",
+        headers: { accept: "application/json" }
+      }).then(async (response) => {
+        if (!response.ok) throw new Error(`Load skills failed: ${response.status}`);
+        return response.json() as Promise<unknown>;
+      });
+      setSkills(normalizeSkills(payload));
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoadingCatalog(false);
+    }
+  }, [csrfFetch]);
+
+  const refresh = useCallback(async () => {
+    await Promise.all([loadMemberSkillState(), loadSkillCatalog()]);
+  }, [loadMemberSkillState, loadSkillCatalog]);
 
   useEffect(() => {
-    if (open) refresh();
-  }, [open, roomId, participantId]);
+    setMemberSkillsLoaded(false);
+    setState({ effectiveSkills: [], overrides: [] });
+    void loadMemberSkillState();
+  }, [loadMemberSkillState]);
+
+  useEffect(() => {
+    if (open) void refresh();
+  }, [open, refresh]);
 
   const writeOverride = (skillId: string, mode: "add" | "restrict") => {
     if (!roomId) return;
@@ -499,7 +524,7 @@ function MemberSkills({
       .then(async (response) => {
         if (!response.ok)
           throw new Error(await responseError(response, "Update skill override failed"));
-        refresh();
+        void refresh();
       })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
       .finally(() => setPending(undefined));
@@ -520,11 +545,14 @@ function MemberSkills({
       .then(async (response) => {
         if (!response.ok)
           throw new Error(await responseError(response, "Remove skill override failed"));
-        refresh();
+        void refresh();
       })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
       .finally(() => setPending(undefined));
   };
+
+  const loading = loadingMemberSkills || loadingCatalog;
+  const skillCountLabel = memberSkillsLoaded ? String(state.effectiveSkills.length) : error ? "!" : "...";
 
   return (
     <details
@@ -535,7 +563,7 @@ function MemberSkills({
       <summary className="ah-member-skills-summary">
         <span>技能</span>
         <Chip size="sm" variant="soft" color="default">
-          {state.effectiveSkills.length}
+          {skillCountLabel}
         </Chip>
       </summary>
       <div className="mt-3 grid gap-3">
@@ -546,7 +574,7 @@ function MemberSkills({
           </p>
         ) : null}
         <div className="flex flex-wrap gap-1">
-          {state.effectiveSkills.length === 0 ? (
+          {!memberSkillsLoaded ? null : state.effectiveSkills.length === 0 ? (
             <Chip size="sm" variant="soft" color="default">
               暂无生效技能
             </Chip>

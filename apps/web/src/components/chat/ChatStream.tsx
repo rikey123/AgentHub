@@ -3,7 +3,6 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { Button, ScrollShadow, Skeleton } from "@heroui/react";
 import type { RoomViewModel } from "../../types.ts";
 import { MessageItem, type QuotedMessagePreview } from "./MessageItem.tsx";
-import { BriefItem } from "./BriefItem.tsx";
 import { TypingIndicator } from "./TypingIndicator.tsx";
 import { ConnectionBanner } from "./ConnectionBanner.tsx";
 import { RunBriefToasts } from "./RunBriefToasts.tsx";
@@ -35,13 +34,7 @@ interface ChatStreamProps {
 
 type FeedItem =
   | { kind: "message"; id: string; data: ChatStreamProps["room"]["messages"][number] }
-  | { kind: "brief"; id: string; data: ChatStreamProps["room"]["briefs"][number] }
   | { kind: "permission"; id: string; data: ChatStreamProps["room"]["pendingPermissions"][number] };
-
-const taskNotificationBriefKinds = new Set<RoomViewModel["briefs"][number]["kind"]>([
-  "dispatch_started",
-  "dispatch_completed"
-]);
 
 export function buildChatFeedItems(room: RoomViewModel): FeedItem[] {
   return [
@@ -50,10 +43,7 @@ export function buildChatFeedItems(room: RoomViewModel): FeedItem[] {
       .map((m) => ({ kind: "message" as const, id: m.id, data: m })),
     ...room.pendingPermissions
       .filter((p) => p.status === "pending")
-      .map((p) => ({ kind: "permission" as const, id: p.id, data: p })),
-    ...room.briefs
-      .filter((b) => !taskNotificationBriefKinds.has(b.kind))
-      .map((b, i) => ({ kind: "brief" as const, id: `${b.runId}-${i}`, data: b }))
+      .map((p) => ({ kind: "permission" as const, id: p.id, data: p }))
   ];
 }
 
@@ -153,7 +143,7 @@ export function ChatStream(props: ChatStreamProps) {
 
   const items = useMemo<FeedItem[]>(() => {
     return buildChatFeedItems(room);
-  }, [room.messages, room.pendingPermissions, room.briefs]);
+  }, [room.messages, room.pendingPermissions]);
 
   const motionRootRef = useRef<HTMLDivElement>(null);
   const parentRef = useRef<HTMLDivElement>(null);
@@ -355,7 +345,7 @@ export function ChatStream(props: ChatStreamProps) {
                         onReferenceArtifact={props.onReferenceArtifact}
                         csrfFetch={props.csrfFetch}
                       />
-                    ) : item.kind === "permission" ? (
+                    ) : (
                       <div className="mx-auto my-2 w-full max-w-[760px] px-4" data-chat-motion-target>
                         <PermissionCard
                           card={{
@@ -368,10 +358,6 @@ export function ChatStream(props: ChatStreamProps) {
                           }}
                           csrfFetch={props.csrfFetch}
                         />
-                      </div>
-                    ) : (
-                      <div data-chat-motion-target>
-                        <BriefItem brief={item.data} onOpenRun={props.onOpenRun} />
                       </div>
                     )}
                   </div>

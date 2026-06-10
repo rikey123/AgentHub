@@ -6,10 +6,16 @@ describe("runtime catalog", () => {
   it("defines Tier 2 runtimes with concrete launch commands and ACP args", () => {
     expect(TIER2_RUNTIME_KINDS).toEqual(["codex", "qwen", "goose", "kimi", "kiro", "hermes"]);
 
+    expect(runtimeDefinitionForKind("claude-code")).toMatchObject({
+      kind: "claude-code",
+      command: process.execPath,
+      args: [expect.stringMatching(/[\\/]npm-acp-runner\.mjs$/u), "@agentclientprotocol/claude-agent-acp@0.44.0", "claude-agent-acp"],
+      detectCommand: "claude"
+    });
     expect(runtimeDefinitionForKind("codex")).toMatchObject({
       kind: "codex",
-      command: "npx",
-      args: ["-y", "@zed-industries/codex-acp@0.9.5"],
+      command: process.execPath,
+      args: [expect.stringMatching(/[\\/]npm-acp-runner\.mjs$/u), "@zed-industries/codex-acp@0.15.0", "codex-acp"],
       detectCommand: "codex"
     });
     expect(runtimeDefinitionForKind("qwen")).toMatchObject({ kind: "qwen", command: "qwen", args: ["--acp"] });
@@ -33,6 +39,7 @@ describe("runtime catalog", () => {
       detectedPath: "C:/bin/codex.cmd",
       detectedVersion: "codex 1.0.0"
     });
+    expect(rows.find((row) => row.id === "runtime-codex")?.env.NPM_CONFIG_CACHE).toMatch(/[\\/]\.agenthub[\\/]npm-cache$/u);
     expect(rows.find((row) => row.id === "runtime-qwen")).toMatchObject({
       kind: "qwen",
       status: "missing",

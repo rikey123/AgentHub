@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import * as os from "node:os";
 import { dirname, extname, isAbsolute, join, relative, resolve as resolvePath, sep } from "node:path";
 import { fileURLToPath, URL } from "node:url";
 
@@ -14,6 +15,7 @@ import { MockAdapterManager } from "@agenthub/adapter-mock";
 import { createInterventionCommandHandlers, InterventionEngine } from "@agenthub/interventions";
 import { ActiveWakesRegistry, AssistedSelectorGroupChatManager, checkTaskTimeouts, createCancelRunHandler, createCompleteTaskHandler, createConsumePendingTurnHandler, createCreateTaskHandler, createUpdateTaskHandler, createWakeAgentHandler, createWakeOutboxDispatcher, handleTeamDispatchReviewTerminal, MailboxService, maybePublishTeamDispatchCompleted, PendingTurnService, ReclaimStaleClaimedRun, reconcileTerminalDelegatedTaskRuns, resolveWakeOutboxAgentId, RoomMcpServer, RunLifecycleService, RunQueue, StartupRecovery, TaskModeGroupChatPresenter, TaskService, WELL_KNOWN_CAPABILITY_TOKENS, type BriefResolver, type WakeOutboxDispatcher } from "@agenthub/orchestrator";
 import { createPermissionCommandHandlers, permissionSettings, PermissionEngine, seedBuiltInPermissionProfiles, setAllowAllPermissions } from "@agenthub/permissions";
+import { defaultAgentAvatarUrl, defaultRoleAvatarUrl, isAvatarImageUrl } from "@agenthub/protocol/avatars";
 import type { EventEnvelope } from "@agenthub/protocol/events";
 import { artifactContentTypeFor as protocolArtifactContentTypeFor } from "@agenthub/protocol/preview";
 import type { AgentWorkflow, AgentWorkflowEdge, AgentWorkflowEdgeDelivery, AgentWorkflowNode, AgentWorkflowNodeRun, AgentWorkflowRun, AgentWorkflowVersion, WorkflowNodeKind, WorkflowValidationIssue, WorkflowValidationResult } from "@agenthub/protocol/workflows";
@@ -35,6 +37,7 @@ import { openApiDocument } from "./openapi.ts";
 import { injectPptNavigationGuard, rewritePptProxyLocation } from "./routes/ppt-proxy.ts";
 import { RUNTIME_DEFINITIONS, runtimeDefinitionForKind, runtimeSeedRows, type RuntimeDetection, type RuntimeSeedRow } from "./runtime-catalog.ts";
 import { createPptPreviewBridge, type PptPreviewBridge } from "./services/ppt-preview-bridge.ts";
+import { AVATAR_CACHE_CONTROL, matchesEtag, parseDiceBearAvatarPath, renderDiceBearAvatar } from "./avatar-service.ts";
 
 type PlanDocument = {
   readonly goal: string;
@@ -127,6 +130,17 @@ export type DaemonCloseOptions = { readonly forceCancelAfterMs?: number };
 export type DaemonCloseResult = { readonly forced: boolean; readonly cancelledRunIds: readonly string[] };
 export type DaemonApp = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly lifecycle: RunLifecycleService; readonly roomMcpServer: RoomMcpServer; readonly adapterRegistry: AdapterRegistry; readonly mockAdapter: MockAdapterManager; readonly deploymentService: DeploymentService; readonly handle: (req: IncomingMessage, res: ServerResponse) => void; readonly inFlightRunIds: () => readonly string[]; start(): Promise<Server>; close(options?: DaemonCloseOptions): Promise<DaemonCloseResult> };
 type StatusLineEventBus = EventBus & { flushStatusLines?: () => void };
+type MobilePairingEndpoint = {
+  readonly url: string;
+  readonly host: string;
+  readonly port: number | null;
+  readonly network: "lan" | "loopback";
+  readonly source: "primary-listener" | "mobile-bridge" | "request-host" | "unavailable";
+  readonly reachableFromMobile: boolean;
+  readonly bindHost?: string;
+  readonly issue?: string;
+};
+const MOBILE_SYNC_EVENT_LIMIT = 100;
 const PHASE_SQLITE: DaemonStartupPhase = "SQLite open + pragma + migrate";
 const PHASE_EVENT_STORE: DaemonStartupPhase = "EventStore readiness check";
 const PHASE_EVENT_BUS: DaemonStartupPhase = "EventBus (PubSub + per-type)";
@@ -168,6 +182,7 @@ type DaemonRuntime = {
   agentProfiles: AgentProfileWatcher;
   roleDraftGcCleanup: () => void;
   lifecycle: RunLifecycleService;
+  workspaceRoot: string;
 };
 
 type SseClient = { readonly res: ServerResponse; readonly close: () => void };
@@ -188,12 +203,16 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
   let stopping = false;
   let taskTimeoutTimer: ReturnType<typeof setInterval> | undefined;
   let deploymentExpiryTimer: ReturnType<typeof setInterval> | undefined;
+  let startupScheduleTimer: ReturnType<typeof setTimeout> | undefined;
   const sseClients = new Set<SseClient>();
   const settingsJobs = new Map<string, SettingsJobRecord>();
   const modelConfigSecrets = createKeychain("agenthub-model-configs");
   const webAssetsRoot = resolveWebAssetsRoot(options.webAssetsRoot);
+  let mobileBridge: { readonly server: Server; readonly endpoint: MobilePairingEndpoint } | undefined;
+  let mobileBridgeStarting: Promise<MobilePairingEndpoint> | undefined;
 
   const emitPhase = (direction: "startup" | "shutdown", phase: DaemonStartupPhase): void => {
+    if (process.env.AGENTHUB_DEBUG_PHASES === "1") process.stderr.write(`[agenthub] ${direction}: ${phase}\n`);
     options.onLifecyclePhase?.({ direction, phase });
   };
 
@@ -202,14 +221,56 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     return runtime;
   };
 
-  const handle = (req: IncomingMessage, res: ServerResponse) => {
+  const handleRequest = (req: IncomingMessage, res: ServerResponse, requestOptions: { readonly host: string; readonly requireBearer?: boolean }): void => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
     if (req.method === "GET" && url.pathname === "/healthz") return json(res, 200, stopping ? { status: "shutting_down" } : { ok: true });
     if (stopping) return json(res, 503, { error: "service_stopping" });
     if (!ready) return json(res, 503, { error: "service_starting", retryAfterMs: 500 });
     const app = requireRuntime();
-    if (!isApiPath(url.pathname) && serveWebAsset({ req, res, url, ...(webAssetsRoot !== undefined ? { webAssetsRoot } : {}) })) return;
-    void route({ req, res, database: app.database, eventBus: app.eventBus, commandBus: app.commandBus, artifactService: app.artifactService, deploymentService: app.deploymentService, taskService: app.taskService, skillRegistry: app.skillRegistry, pptPreviewBridge: app.pptPreviewBridge, outbox: app.outbox, stopAssistedDiscussion: (roomId) => stopAssistedRoomDiscussion(app, roomId), modelConfigSecrets, settingsJobs, modelTestFetch: options.modelTestFetch ?? globalThis.fetch.bind(globalThis), roleDraftGenerator: options.roleDraftGenerator ?? generateRoleDraftWithModelConfig, registerSseClient: (client) => { sseClients.add(client); return () => sseClients.delete(client); }, activeSseClientCount: () => sseClients.size, serveWebAsset: () => serveWebAsset({ req, res, url, ...(webAssetsRoot !== undefined ? { webAssetsRoot } : {}) }), ...(options.token !== undefined ? { token: options.token } : {}), ...(options.allowedOrigins !== undefined ? { allowedOrigins: options.allowedOrigins } : {}), host: `${options.host ?? "127.0.0.1"}:${options.port ?? 6677}`, ...(options.now !== undefined ? { now: options.now } : {}) });
+    if (requestOptions.requireBearer !== true && !isApiPath(url.pathname) && serveWebAsset({ req, res, url, ...(webAssetsRoot !== undefined ? { webAssetsRoot } : {}) })) return;
+    void route({ req, res, database: app.database, eventBus: app.eventBus, commandBus: app.commandBus, artifactService: app.artifactService, deploymentService: app.deploymentService, taskService: app.taskService, skillRegistry: app.skillRegistry, pptPreviewBridge: app.pptPreviewBridge, outbox: app.outbox, stopAssistedDiscussion: (roomId) => stopAssistedRoomDiscussion(app, roomId), modelConfigSecrets, settingsJobs, modelTestFetch: options.modelTestFetch ?? globalThis.fetch.bind(globalThis), roleDraftGenerator: options.roleDraftGenerator ?? generateRoleDraftWithModelConfig, registerSseClient: (client) => { sseClients.add(client); return () => sseClients.delete(client); }, activeSseClientCount: () => sseClients.size, serveWebAsset: () => requestOptions.requireBearer !== true && serveWebAsset({ req, res, url, ...(webAssetsRoot !== undefined ? { webAssetsRoot } : {}) }), workspaceRoot: app.workspaceRoot, ...(options.token !== undefined ? { token: options.token } : {}), ...(options.allowedOrigins !== undefined ? { allowedOrigins: options.allowedOrigins } : {}), host: requestOptions.host, ...(requestOptions.requireBearer === true ? { requireBearer: true } : {}), mobilePairingEndpoint: (requestHost) => mobilePairingEndpoint(requestHost), ...(options.now !== undefined ? { now: options.now } : {}) });
+  };
+
+  const handle = (req: IncomingMessage, res: ServerResponse): void => {
+    handleRequest(req, res, { host: primaryListenerHost() });
+  };
+
+  const primaryListenerHost = (): string => joinHostPort(options.host ?? "127.0.0.1", serverPort(server, options.port ?? 6677));
+
+  const mobilePairingEndpoint = async (requestHost?: string): Promise<MobilePairingEndpoint> => {
+    const primaryPort = serverPort(server, options.port ?? 6677);
+    const requested = requestHost === undefined ? undefined : endpointFromRequestHost(requestHost);
+    if (requested !== undefined) return requested;
+
+    const [boundHost] = splitHostPort(options.host ?? "127.0.0.1");
+    if (isWildcardHost(boundHost)) return primaryLanEndpoint(primaryPort, "primary-listener", boundHost);
+    if (!isLoopbackHost(boundHost)) return endpointForHost(boundHost, primaryPort, "primary-listener", true);
+    return ensureMobileBridge(primaryPort);
+  };
+
+  const ensureMobileBridge = async (preferredPort: number): Promise<MobilePairingEndpoint> => {
+    if (mobileBridge !== undefined) return mobileBridge.endpoint;
+    if (mobileBridgeStarting !== undefined) return mobileBridgeStarting;
+    mobileBridgeStarting = startMobileBridge(preferredPort).finally(() => {
+      mobileBridgeStarting = undefined;
+    });
+    return mobileBridgeStarting;
+  };
+
+  const startMobileBridge = async (preferredPort: number): Promise<MobilePairingEndpoint> => {
+    const lanHost = preferredLanIpv4Address();
+    if (lanHost === undefined) return unavailableMobileEndpoint("No LAN IPv4 address was detected on this machine.");
+    for (const port of [...new Set([preferredPort, 0])]) {
+      const bridgeServer = createServer((req, res) => {
+        handleRequest(req, res, { host: joinHostPort(lanHost, serverPort(bridgeServer, port)), requireBearer: true });
+      });
+      const endpoint = await listenForMobileBridge(bridgeServer, lanHost, port).catch(() => undefined);
+      if (endpoint !== undefined) {
+        mobileBridge = { server: bridgeServer, endpoint };
+        return endpoint;
+      }
+    }
+    return unavailableMobileEndpoint(`Could not open a LAN listener on ${lanHost}.`);
   };
 
   const start = async (): Promise<Server> => {
@@ -547,7 +608,6 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     // dead-pid runs, and lets fresh runs acquire locks cleanly.
     const reclaim = new ReclaimStaleClaimedRun(database, lifecycle, (run) => adapterRegistry.reclaimAdapterFor(run), options.now ?? Date.now);
     await new StartupRecovery(database, lifecycle, reclaim, options.now ?? Date.now).run();
-    await runQueue.scheduleTick();
 
     emitPhase("startup", PHASE_ADAPTERS);
     const mockAdapter = adapterRegistry.mockAdapter;
@@ -666,12 +726,18 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     };
     taskTimeoutTimer = setInterval(runTaskTimeoutSweep, 60_000);
     taskTimeoutTimer.unref?.();
-    runtime = { database, eventBus, commandBus, roomMcpServer, adapterRegistry, mockAdapter, artifactService, deploymentService, taskService, skillRegistry, pptPreviewBridge, assistedSelector, outbox, wakeOutbox, handlers, runQueue, agentProfiles, roleDraftGcCleanup, lifecycle };
+    runtime = { database, eventBus, commandBus, roomMcpServer, adapterRegistry, mockAdapter, artifactService, deploymentService, taskService, skillRegistry, pptPreviewBridge, assistedSelector, outbox, wakeOutbox, handlers, runQueue, agentProfiles, roleDraftGcCleanup, lifecycle, workspaceRoot };
 
     emitPhase("startup", PHASE_HTTP);
     return await new Promise<Server>((resolve) => {
       server = createServer(handle).listen(options.port ?? 6677, host, () => {
         ready = true;
+        startupScheduleTimer = setTimeout(() => {
+          startupScheduleTimer = undefined;
+          if (closed || runtime === undefined) return;
+          void runQueue.scheduleTick();
+        }, 0);
+        startupScheduleTimer.unref?.();
         resolve(server as Server);
       });
     });
@@ -682,12 +748,21 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     closed = true;
     stopping = true;
     ready = false;
+    if (startupScheduleTimer !== undefined) {
+      clearTimeout(startupScheduleTimer);
+      startupScheduleTimer = undefined;
+    }
     for (const client of sseClients) client.close();
     const shutdownRuns = await waitForInFlightRuns(closeOptions.forceCancelAfterMs ?? 0);
     for (const phase of DAEMON_SHUTDOWN_PHASES) {
       emitPhase("shutdown", phase);
       if (phase === PHASE_HTTP && server !== undefined) {
-        await new Promise<void>((resolve, reject) => server?.close((err) => err ? reject(err) : resolve()));
+        const bridge = mobileBridge;
+        mobileBridge = undefined;
+        await Promise.all([
+          new Promise<void>((resolve, reject) => server?.close((err) => err ? reject(err) : resolve())),
+          bridge === undefined ? Promise.resolve() : new Promise<void>((resolve, reject) => bridge.server.close((err) => err ? reject(err) : resolve()))
+        ]);
         server = undefined;
       } else if (phase === PHASE_OUTBOX) {
         runtime?.wakeOutbox.stop();
@@ -856,18 +931,21 @@ function wakeWorkspaceModeForCommand(reason: string): "isolated_worktree" | unde
   return reason === "delegated_task" ? "isolated_worktree" : undefined;
 }
 
-type RouteContext = { readonly req: IncomingMessage; readonly res: ServerResponse; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly artifactService: ArtifactService; readonly deploymentService: DeploymentService; readonly taskService: TaskService; readonly skillRegistry: SkillRegistry; readonly pptPreviewBridge: PptPreviewBridge; readonly outbox: { drainPending(): Promise<void> }; readonly stopAssistedDiscussion: (roomId: string) => Promise<{ readonly ok: boolean; readonly roomId: string; readonly cancelledRunIds: readonly string[] }>; readonly modelConfigSecrets: KeychainBridge; readonly settingsJobs: Map<string, SettingsJobRecord>; readonly modelTestFetch: typeof fetch; readonly roleDraftGenerator: RoleDraftGenerator; readonly registerSseClient: (client: SseClient) => () => void; readonly activeSseClientCount: () => number; readonly serveWebAsset: () => boolean; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly host: string; readonly now?: () => number };
+type RouteContext = { readonly req: IncomingMessage; readonly res: ServerResponse; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly artifactService: ArtifactService; readonly deploymentService: DeploymentService; readonly taskService: TaskService; readonly skillRegistry: SkillRegistry; readonly pptPreviewBridge: PptPreviewBridge; readonly outbox: { drainPending(): Promise<void> }; readonly stopAssistedDiscussion: (roomId: string) => Promise<{ readonly ok: boolean; readonly roomId: string; readonly cancelledRunIds: readonly string[] }>; readonly modelConfigSecrets: KeychainBridge; readonly settingsJobs: Map<string, SettingsJobRecord>; readonly modelTestFetch: typeof fetch; readonly roleDraftGenerator: RoleDraftGenerator; readonly registerSseClient: (client: SseClient) => () => void; readonly activeSseClientCount: () => number; readonly serveWebAsset: () => boolean; readonly workspaceRoot: string; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly host: string; readonly requireBearer?: boolean; readonly mobilePairingEndpoint?: (requestHost?: string) => Promise<MobilePairingEndpoint>; readonly now?: () => number };
 type AuthenticatedRequest = Extract<BrowserAuthResult, { readonly ok: true }>;
 
 async function route(ctx: RouteContext): Promise<void> {
   const url = new URL(ctx.req.url ?? "/", "http://127.0.0.1");
   const parts = url.pathname.split("/").filter(Boolean);
+  if ((ctx.req.method === "GET" || ctx.req.method === "HEAD") && parts[0] === "avatars") return avatar(ctx, url);
   const auth = authenticate(ctx, url);
   if (!auth.ok) return json(ctx.res, auth.status, { error: auth.error });
   if (ctx.req.method === "POST" && url.pathname === "/auth/session") return authSession(ctx);
   if (ctx.req.method === "POST" && url.pathname === "/auth/tokens") { if (!requireScope(auth, "write", ctx.res)) return; return issueAuthToken(ctx, await body(ctx)); }
   if (ctx.req.method === "GET" && url.pathname === "/auth/tokens") { if (!requireScope(auth, "read", ctx.res)) return; return listAuthTokens(ctx); }
   if (ctx.req.method === "POST" && url.pathname === "/attachments") return attachments(ctx);
+  if (ctx.req.method === "GET" && parts[0] === "attachments" && parts[1] && parts.length === 2) return uploadedAttachment(ctx, parts[1]);
+  if (ctx.req.method === "GET" && parts[0] === "attachments" && parts[1] && parts[2] === "raw" && parts.length === 3) return uploadedAttachmentRaw(ctx, parts[1], url.searchParams.get("download") === "1");
   if (ctx.req.method === "GET" && url.pathname === "/healthz") return json(ctx.res, 200, { ok: true });
   if (ctx.req.method === "GET" && url.pathname === "/openapi.json") return json(ctx.res, 200, openApiDocument);
   if (ctx.req.method === "GET" && url.pathname === "/model-configs") {
@@ -1138,6 +1216,7 @@ async function route(ctx: RouteContext): Promise<void> {
   if (ctx.req.method === "GET" && parts[0] === "rooms" && parts.length === 1) return roomsList(ctx, url);
   if (ctx.req.method === "POST" && parts[0] === "rooms" && parts[2] === "pin") return pinRoom(ctx, parts[1] as string);
   if (ctx.req.method === "DELETE" && parts[0] === "rooms" && parts[2] === "pin") return unpinRoom(ctx, parts[1] as string);
+  if (ctx.req.method === "DELETE" && parts[0] === "rooms" && parts.length === 2) return dispatch(ctx, { roomId: parts[1] }, "DeleteRoom");
   if (ctx.req.method === "GET" && parts[0] === "rooms" && parts[2] === "task-plans" && parts[3] === "latest") return latestTaskPlan(ctx, parts[1] as string);
   if (ctx.req.method === "GET" && parts[0] === "rooms" && parts.length === 2) return json(ctx.res, 200, { room: get(ctx.database, "SELECT * FROM rooms WHERE id = ?", parts[1]) });
   if (ctx.req.method === "GET" && parts[0] === "rooms" && parts[2] === "tasks") return tasks(ctx, parts[1] as string, url);
@@ -1342,6 +1421,7 @@ function roomsList(ctx: RouteContext, url: URL): void {
       `SELECT r.*
        FROM rooms r
        WHERE r.archived_at IS NULL
+         AND r.deleted_at IS NULL
          AND (
            ? IS NULL
            OR r.title LIKE ?
@@ -1486,7 +1566,7 @@ async function deploymentDownload(ctx: RouteContext, deploymentId: string): Prom
     ctx.res.writeHead(200, {
       "content-type": contentTypeFor(path),
       "content-length": String(stat.size),
-      "content-disposition": `attachment; filename="${safeDownloadName(path)}"`,
+      "content-disposition": contentDisposition("attachment", path),
       "cache-control": "no-cache",
       "x-content-type-options": "nosniff"
     });
@@ -1673,7 +1753,8 @@ async function runCommandProbe(command: string, args: readonly string[], env: Re
   return new Promise((resolve) => {
     let settled = false;
     let output = "";
-    const child = spawn(command, args, { env: { ...process.env, ...env }, windowsHide: true });
+    const invocation = windowsCommandInvocation(command, args);
+    const child = spawn(invocation.command, invocation.args, { env: { ...process.env, ...env }, windowsHide: true, windowsVerbatimArguments: false });
     const finish = (result: { readonly ok: true; readonly output: string } | { readonly ok: false; readonly error: string }): void => {
       if (settled) return;
       settled = true;
@@ -1690,6 +1771,34 @@ async function runCommandProbe(command: string, args: readonly string[], env: Re
     child.on("error", () => finish({ ok: false, error: "binary not found" }));
     child.on("close", (code) => finish(code === 0 ? { ok: true, output } : { ok: false, error: firstOutputLine(output) ?? `process exited ${code ?? "unknown"}` }));
   });
+}
+
+function avatar(ctx: RouteContext, url: URL): void {
+  const request = parseDiceBearAvatarPath(url.pathname);
+  if (request === undefined) return json(ctx.res, 404, { error: "avatar_not_found" });
+  if (request === "invalid") return json(ctx.res, 400, { error: "invalid_avatar_request" });
+  const rendered = renderDiceBearAvatar(request);
+  const headers = {
+    "content-type": "image/svg+xml; charset=utf-8",
+    "cache-control": AVATAR_CACHE_CONTROL,
+    "etag": rendered.etag,
+    "x-content-type-options": "nosniff"
+  };
+  if (matchesEtag(header(ctx, "if-none-match"), rendered.etag)) {
+    ctx.res.writeHead(304, headers);
+    ctx.res.end();
+    return;
+  }
+  ctx.res.writeHead(200, headers);
+  if (ctx.req.method === "HEAD") ctx.res.end();
+  else ctx.res.end(rendered.svg);
+}
+
+function windowsCommandInvocation(command: string, args: readonly string[]): { readonly command: string; readonly args: string[] } {
+  if (process.platform !== "win32") return { command, args: [...args] };
+  if (/\.(cmd|bat)$/iu.test(command)) return { command: "cmd.exe", args: ["/c", command, ...args] };
+  if (!/[\\/]/u.test(command) && !/\.[a-z0-9]+$/iu.test(command)) return { command: "cmd.exe", args: ["/c", command, ...args] };
+  return { command, args: [...args] };
 }
 
 function firstOutputLine(output: string): string | null {
@@ -1801,7 +1910,7 @@ async function detectWindowsCommands(commands: readonly string[]): Promise<Reado
   await Promise.all(commands.map(async (command) => {
     const where = await runCommandProbe("where", [command], {}, 1_500);
     if (where.ok) {
-      found.set(command, firstOutputLine(where.output) ?? command);
+      found.set(command, preferredWindowsCommandPath(where.output) ?? command);
       return;
     }
     missing.push(command);
@@ -1820,6 +1929,11 @@ async function detectWindowsCommands(commands: readonly string[]): Promise<Reado
     if (command && detectedPath && missing.includes(command)) found.set(command, detectedPath);
   }
   return found;
+}
+
+function preferredWindowsCommandPath(output: string): string | null {
+  const paths = output.split(/\r?\n/u).map((part) => part.trim()).filter((part) => part.length > 0);
+  return paths.find((path) => /\.(cmd|exe|bat)$/iu.test(path)) ?? paths[0] ?? null;
 }
 
 async function detectPosixCommand(command: string): Promise<string | null> {
@@ -1849,7 +1963,7 @@ function authSession(ctx: RouteContext): void {
   json(ctx.res, 200, { csrfToken: session.csrfToken, expiresAt: session.expiresAt });
 }
 
-function issueAuthToken(ctx: RouteContext, input: Record<string, unknown>): void {
+async function issueAuthToken(ctx: RouteContext, input: Record<string, unknown>): Promise<void> {
   const now = ctx.now?.() ?? Date.now();
   const token = `ah_${randomBytes(32).toString("base64url")}`;
   const id = randomUUID();
@@ -1857,9 +1971,12 @@ function issueAuthToken(ctx: RouteContext, input: Record<string, unknown>): void
   const expiresDays = typeof input.expiresDays === "number" && Number.isFinite(input.expiresDays) ? input.expiresDays : undefined;
   const expiresAt = expiresDays === undefined ? null : now + expiresDays * 86_400_000;
   const fingerprint = tokenFingerprint(token);
-  ctx.database.sqlite.prepare("INSERT INTO auth_tokens (id, fingerprint, hash, description, scopes, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(id, fingerprint, sha256(token), typeof input.description === "string" ? input.description : null, JSON.stringify(scopes), now, expiresAt);
-  ctx.eventBus.publish({ id: randomUUID(), type: "auth.token.issued", schemaVersion: 1, workspaceId: "default-workspace", payload: { tokenId: id, fingerprint, scopes }, createdAt: now });
-  json(ctx.res, 201, { id, token, fingerprint, scopes, expiresAt, connection: connectionConfig(ctx, token, id, scopes, expiresAt) });
+  const connection = await connectionConfig(ctx, token, id, scopes, expiresAt);
+  ctx.database.sqlite.transaction(() => {
+    ctx.database.sqlite.prepare("INSERT INTO auth_tokens (id, fingerprint, hash, description, scopes, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(id, fingerprint, sha256(token), typeof input.description === "string" ? input.description : null, JSON.stringify(scopes), now, expiresAt);
+    ctx.eventBus.publish({ id: randomUUID(), type: "auth.token.issued", schemaVersion: 1, workspaceId: "default-workspace", payload: { tokenId: id, fingerprint, scopes }, createdAt: now });
+  })();
+  json(ctx.res, 201, { id, token, fingerprint, scopes, expiresAt, connection });
 }
 
 function listAuthTokens(ctx: RouteContext): void {
@@ -1874,26 +1991,122 @@ function revokeToken(ctx: RouteContext, tokenId: string): void {
   const now = ctx.now?.() ?? Date.now();
   const existing = get(ctx.database, "SELECT id, fingerprint FROM auth_tokens WHERE id = ?", tokenId) as { readonly id: string; readonly fingerprint: string } | null;
   if (existing === null) return json(ctx.res, 404, { error: "token_not_found" });
-  ctx.database.sqlite.prepare("UPDATE auth_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").run(now, tokenId);
-  ctx.eventBus.publish({ id: randomUUID(), type: "auth.token.revoked", schemaVersion: 1, workspaceId: "default-workspace", payload: { tokenId, fingerprint: existing.fingerprint }, createdAt: now });
+  ctx.database.sqlite.transaction(() => {
+    ctx.database.sqlite.prepare("UPDATE auth_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").run(now, tokenId);
+    ctx.eventBus.publish({ id: randomUUID(), type: "auth.token.revoked", schemaVersion: 1, workspaceId: "default-workspace", payload: { tokenId, fingerprint: existing.fingerprint }, createdAt: now });
+  })();
   json(ctx.res, 200, { ok: true });
 }
 
-function connectionConfig(ctx: RouteContext, token: string, tokenId: string, scopes: readonly string[], expiresAt: number | null): Record<string, unknown> {
-  const publicHost = header(ctx, "host") ?? ctx.host;
-  const [hostPart, portPart] = splitHostPort(publicHost);
-  const url = `http://${publicHost}`;
+async function connectionConfig(ctx: RouteContext, token: string, tokenId: string, scopes: readonly string[], expiresAt: number | null): Promise<Record<string, unknown>> {
+  const endpoint = ctx.mobilePairingEndpoint === undefined
+    ? endpointForHost(...splitHostPort(mobileConnectionHost(header(ctx, "host") ?? ctx.host, ctx.host)), "primary-listener", true)
+    : await ctx.mobilePairingEndpoint(header(ctx, "host"));
+  const manifest = mobileConnectionManifest(endpoint, token, tokenId, scopes, expiresAt);
   return {
-    version: 1,
-    url,
-    host: hostPart,
-    port: portPart,
+    version: manifest.version,
+    url: endpoint.url,
+    host: endpoint.host,
+    port: endpoint.port,
     token,
     tokenId,
     scopes,
     expiresAt,
-    qrPayload: JSON.stringify({ version: 1, url, host: hostPart, port: portPart, token, tokenId, scopes, expiresAt })
+    network: endpoint.network,
+    source: endpoint.source,
+    reachableFromMobile: endpoint.reachableFromMobile,
+    ...(endpoint.issue !== undefined ? { issue: endpoint.issue } : {}),
+    endpoint: manifest.endpoint,
+    auth: { scheme: "bearer", tokenId, scopes, expiresAt },
+    manifest,
+    qrPayload: JSON.stringify(manifest)
   };
+}
+
+function mobileConnectionManifest(endpoint: MobilePairingEndpoint, token: string, tokenId: string, scopes: readonly string[], expiresAt: number | null): Record<string, unknown> {
+  return {
+    version: 2,
+    kind: "agenthub.mobile.connection",
+    url: endpoint.url,
+    host: endpoint.host,
+    port: endpoint.port,
+    token,
+    tokenId,
+    scopes,
+    expiresAt,
+    endpoint: {
+      protocol: "http",
+      url: endpoint.url,
+      host: endpoint.host,
+      port: endpoint.port,
+      network: endpoint.network,
+      source: endpoint.source,
+      reachableFromMobile: endpoint.reachableFromMobile,
+      ...(endpoint.bindHost !== undefined ? { bindHost: endpoint.bindHost } : {}),
+      ...(endpoint.issue !== undefined ? { issue: endpoint.issue } : {})
+    },
+    auth: { scheme: "bearer", token, tokenId, scopes, expiresAt },
+    requirements: { sameLan: endpoint.network === "lan", bearerToken: true }
+  };
+}
+
+function mobileConnectionHost(requestHost: string, boundHost: string): string {
+  const [requestHostPart, requestPort] = splitHostPort(requestHost);
+  const [boundHostPart, boundPort] = splitHostPort(boundHost);
+  const port = requestPort ?? boundPort;
+  if (!isLoopbackHost(requestHostPart) && !isWildcardHost(requestHostPart)) return joinHostPort(requestHostPart, port);
+  if (isLoopbackHost(boundHostPart)) return joinHostPort(requestHostPart, port);
+  const host = isWildcardHost(boundHostPart) ? preferredLanIpv4Address() ?? requestHostPart : boundHostPart;
+  return joinHostPort(host, port);
+}
+
+function endpointFromRequestHost(requestHost: string): MobilePairingEndpoint | undefined {
+  const [host, port] = splitHostPort(requestHost);
+  if (isLoopbackHost(host) || isWildcardHost(host)) return undefined;
+  return endpointForHost(host, port, "request-host", true);
+}
+
+function primaryLanEndpoint(port: number | null, source: MobilePairingEndpoint["source"], bindHost: string): MobilePairingEndpoint {
+  const lanHost = preferredLanIpv4Address();
+  return lanHost === undefined
+    ? unavailableMobileEndpoint("No LAN IPv4 address was detected on this machine.")
+    : endpointForHost(lanHost, port, source, true, bindHost);
+}
+
+function endpointForHost(host: string, port: number | null, source: MobilePairingEndpoint["source"], reachableFromMobile: boolean, bindHost?: string): MobilePairingEndpoint {
+  const network = isLoopbackHost(host) ? "loopback" : "lan";
+  const authority = joinHostPort(host, port);
+  return {
+    url: `http://${authority}`,
+    host,
+    port,
+    network,
+    source,
+    reachableFromMobile: reachableFromMobile && network === "lan",
+    ...(bindHost !== undefined ? { bindHost } : {})
+  };
+}
+
+function unavailableMobileEndpoint(issue: string): MobilePairingEndpoint {
+  return {
+    url: "http://127.0.0.1:6677",
+    host: "127.0.0.1",
+    port: 6677,
+    network: "loopback",
+    source: "unavailable",
+    reachableFromMobile: false,
+    issue
+  };
+}
+
+function listenForMobileBridge(server: Server, lanHost: string, port: number): Promise<MobilePairingEndpoint> {
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, lanHost, () => {
+      server.off("error", reject);
+      resolve(endpointForHost(lanHost, serverPort(server, port), "mobile-bridge", true, lanHost));
+    });
+  });
 }
 
 function splitHostPort(host: string): readonly [string, number | null] {
@@ -1906,6 +2119,38 @@ function splitHostPort(host: string): readonly [string, number | null] {
   if (index === -1) return [host, null];
   const port = Number(host.slice(index + 1));
   return [host.slice(0, index), Number.isFinite(port) ? port : null];
+}
+
+function joinHostPort(host: string, port: number | null): string {
+  const normalizedHost = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+  return port === null ? normalizedHost : `${normalizedHost}:${port}`;
+}
+
+function serverPort(server: Server | undefined, fallback: number): number {
+  const address = server?.address();
+  return typeof address === "object" && address !== null ? address.port : fallback;
+}
+
+function isWildcardHost(host: string): boolean {
+  return host === "0.0.0.0" || host === "::" || host === "";
+}
+
+function preferredLanIpv4Address(): string | undefined {
+  const addresses = Object.values(os.networkInterfaces()).flatMap((entries) =>
+    (entries ?? [])
+      .filter((entry) => entry.family === "IPv4" && !entry.internal)
+      .map((entry) => entry.address)
+  );
+  return addresses.find(isPrivateIpv4Address) ?? addresses[0];
+}
+
+function isPrivateIpv4Address(address: string): boolean {
+  if (address.startsWith("10.")) return true;
+  if (address.startsWith("192.168.")) return true;
+  const match = /^172\.(\d+)\./u.exec(address);
+  if (match === null) return false;
+  const second = Number(match[1]);
+  return second >= 16 && second <= 31;
 }
 
 function requireMobileRead(auth: AuthenticatedRequest, res: ServerResponse): boolean {
@@ -1928,9 +2173,33 @@ function syncEvents(ctx: RouteContext, url: URL, auth: AuthenticatedRequest): vo
   if (sinceSeq < 0) return json(ctx.res, 400, { error: "invalid_since_seq" });
   const roomId = url.searchParams.get("roomId") ?? undefined;
   const runId = url.searchParams.get("runId") ?? undefined;
-  const events = ctx.eventBus.replayDurableSinceSeq(sinceSeq, { view, ...(roomId !== undefined ? { roomId } : {}), ...(runId !== undefined ? { runId } : {}) });
+  const events = ctx.eventBus
+    .replayDurableSinceSeq(sinceSeq, { view, ...(roomId !== undefined ? { roomId } : {}), ...(runId !== undefined ? { runId } : {}) })
+    .slice(0, MOBILE_SYNC_EVENT_LIMIT)
+    .map(mobileSyncEvent);
   const nextCursor = events.reduce((cursor, event) => typeof event.seq === "number" && event.seq > cursor ? event.seq : cursor, sinceSeq);
   json(ctx.res, 200, { events, nextCursor });
+}
+
+function mobileSyncEvent(event: EventEnvelope): EventEnvelope {
+  return {
+    id: event.id,
+    type: event.type,
+    schemaVersion: event.schemaVersion,
+    durability: event.durability,
+    visibility: event.visibility,
+    ...(event.seq !== undefined ? { seq: event.seq } : {}),
+    workspaceId: event.workspaceId,
+    ...(event.roomId !== undefined ? { roomId: event.roomId } : {}),
+    ...(event.taskId !== undefined ? { taskId: event.taskId } : {}),
+    ...(event.runId !== undefined ? { runId: event.runId } : {}),
+    ...(event.agentId !== undefined ? { agentId: event.agentId } : {}),
+    ...(event.traceId !== undefined ? { traceId: event.traceId } : {}),
+    ...(event.causationId !== undefined ? { causationId: event.causationId } : {}),
+    ...(event.correlationId !== undefined ? { correlationId: event.correlationId } : {}),
+    payload: {},
+    createdAt: event.createdAt
+  };
 }
 
 function syncSnapshot(ctx: RouteContext, url: URL, auth: AuthenticatedRequest): void {
@@ -1940,7 +2209,7 @@ function syncSnapshot(ctx: RouteContext, url: URL, auth: AuthenticatedRequest): 
   const roomId = url.searchParams.get("roomId") ?? undefined;
   const roomWhere = roomId === undefined ? "archived_at IS NULL" : "id = ? AND archived_at IS NULL";
   const roomParams = roomId === undefined ? [] : [roomId];
-  const rooms = all(ctx.database, `SELECT id, workspace_id, title, mode, primary_agent_id, updated_at FROM rooms WHERE ${roomWhere} ORDER BY updated_at DESC LIMIT 50`, ...roomParams);
+  const rooms = all(ctx.database, `SELECT id, workspace_id, title, mode, primary_agent_id, updated_at FROM rooms WHERE ${roomWhere} ORDER BY updated_at DESC LIMIT 50`, ...roomParams).map(normalizeMobileRoomRow);
   const tasks = all(ctx.database, `${mobileTaskSelect()} ${roomId === undefined ? "" : "WHERE room_id = ?"} ORDER BY updated_at DESC LIMIT 100`, ...(roomId === undefined ? [] : [roomId]));
   const runs = all(ctx.database, `${mobileRunSelect()} ${roomId === undefined ? "" : "WHERE room_id = ?"} ORDER BY updated_at DESC LIMIT 100`, ...(roomId === undefined ? [] : [roomId]));
   const permissions = all(ctx.database, `${mobilePermissionSelect()} WHERE status = 'pending'${roomId === undefined ? "" : " AND room_id = ?"} ORDER BY created_at ASC LIMIT 100`, ...(roomId === undefined ? [] : [roomId])).map(redactPermissionResource);
@@ -1979,6 +2248,48 @@ function mobilePermissionSelect(): string {
 
 function mobileArtifactSelect(): string {
   return "SELECT id, workspace_id, room_id, task_id, run_id, type, title, status, updated_at FROM artifacts";
+}
+
+function normalizeMobileRoomRow(row: unknown): Record<string, unknown> {
+  const record = row as Record<string, unknown>;
+  const title = typeof record.title === "string" ? mobileDisplayText(record.title, "未命名房间") : "未命名房间";
+  return { ...record, title };
+}
+
+function mobileDisplayText(value: string, fallback: string): string {
+  const text = repairUtf8Mojibake(value).trim();
+  return isCorruptMobileText(text) || text.length === 0 ? fallback : text;
+}
+
+function repairUtf8Mojibake(value: string): string {
+  if (!/[\u0080-\u009fÃÂâæçèéêåäöï]/u.test(value)) return value;
+  const bytes: number[] = [];
+  for (const char of value) {
+    const code = char.charCodeAt(0);
+    if (code > 255) return value;
+    bytes.push(code);
+  }
+  try {
+    const decoded = new TextDecoder("utf-8", { fatal: false }).decode(Uint8Array.from(bytes));
+    return corruptMobileTextScore(decoded) < corruptMobileTextScore(value) ? decoded : value;
+  } catch {
+    return value;
+  }
+}
+
+function isCorruptMobileText(value: string): boolean {
+  return /[\u0080-\u009f\uFFFD]/u.test(value);
+}
+
+function corruptMobileTextScore(value: string): number {
+  let score = 0;
+  for (const char of value) {
+    const code = char.charCodeAt(0);
+    if (char === "\uFFFD") score += 2;
+    else if (code >= 0x80 && code <= 0x9f) score += 2;
+  }
+  const markerMatches = value.match(/[ÃÂâæçèéêåäöï¿½]/gu);
+  return score + (markerMatches?.length ?? 0);
 }
 
 function redactPermissionResource(row: unknown): unknown {
@@ -2023,9 +2334,80 @@ async function attachments(ctx: RouteContext): Promise<void> {
   if (Number.isFinite(contentLength) && contentLength > attachmentMaxBytes) return json(ctx.res, 413, { error: "attachment_too_large", maxBytes: attachmentMaxBytes });
   const parsed = await multipartFile(ctx);
   if (!parsed.ok) return json(ctx.res, parsed.status, parsed.body);
-  const result = storeAttachment({ database: ctx.database, workspaceRoot: process.cwd(), originalName: parsed.file.originalName, mimeType: parsed.file.mimeType, bytes: parsed.file.bytes, now: ctx.now?.() ?? Date.now() });
+  const result = storeAttachment({ database: ctx.database, workspaceRoot: ctx.workspaceRoot, originalName: parsed.file.originalName, mimeType: parsed.file.mimeType, bytes: parsed.file.bytes, now: ctx.now?.() ?? Date.now() });
   if (!result.ok) return json(ctx.res, result.status, result.error === "attachment_too_large" ? { error: result.error, maxBytes: result.maxBytes } : result.error === "attachment_mime_not_allowed" ? { error: result.error, mime: result.mime } : { error: result.error });
   return json(ctx.res, 200, result);
+}
+
+function uploadedAttachment(ctx: RouteContext, fileId: string): void {
+  const row = uploadedAttachmentRow(ctx, fileId);
+  if (row === undefined) return json(ctx.res, 404, { error: "attachment_not_found" });
+  const resolved = uploadedAttachmentPath(ctx, row);
+  if (resolved === undefined || !existsSync(resolved)) return json(ctx.res, 404, { error: "attachment_file_not_found" });
+  const content = isTextAttachment(row.mimeType, row.fileName) ? readFileSync(resolved, "utf8") : "";
+  return json(ctx.res, 200, {
+    attachment: {
+      fileId: row.fileId,
+      name: row.fileName,
+      mimeType: row.mimeType,
+      sizeBytes: row.byteSize
+    },
+    content: { content }
+  });
+}
+
+function uploadedAttachmentRaw(ctx: RouteContext, fileId: string, download: boolean): void {
+  const row = uploadedAttachmentRow(ctx, fileId);
+  if (row === undefined) return json(ctx.res, 404, { error: "attachment_not_found" });
+  const resolved = uploadedAttachmentPath(ctx, row);
+  if (resolved === undefined || !existsSync(resolved)) return json(ctx.res, 404, { error: "attachment_file_not_found" });
+  const buffer = readFileSync(resolved);
+  const mimeType = row.mimeType || artifactContentTypeFor(row.fileName);
+  ctx.res.writeHead(200, {
+    "content-type": mimeType,
+    "content-length": String(buffer.byteLength),
+    "content-disposition": contentDisposition(download ? "attachment" : "inline", row.fileName),
+    "cache-control": "no-cache",
+    "x-content-type-options": "nosniff"
+  });
+  ctx.res.end(buffer);
+}
+
+type UploadedAttachmentRouteRow = {
+  readonly fileId: string;
+  readonly fileName: string;
+  readonly mimeType: string;
+  readonly byteSize: number;
+  readonly storagePath: string;
+  readonly workspaceRoot: string | null;
+};
+
+function uploadedAttachmentRow(ctx: RouteContext, fileId: string): UploadedAttachmentRouteRow | undefined {
+  return ctx.database.sqlite.prepare(
+    `SELECT a.file_id AS fileId, a.file_name AS fileName, COALESCE(a.mime_type, '') AS mimeType,
+            a.byte_size AS byteSize, a.storage_path AS storagePath, w.root_path AS workspaceRoot
+       FROM attachments a
+       LEFT JOIN messages m ON m.id = a.message_id
+       LEFT JOIN workspaces w ON w.id = m.workspace_id
+      WHERE a.file_id = ?
+      LIMIT 1`
+  ).get(fileId) as UploadedAttachmentRouteRow | undefined;
+}
+
+function uploadedAttachmentPath(ctx: RouteContext, row: UploadedAttachmentRouteRow): string | undefined {
+  const root = resolvePath(row.workspaceRoot ?? ctx.workspaceRoot);
+  const resolved = resolvePath(root, row.storagePath);
+  return resolved === root || resolved.startsWith(`${root}${sep}`) ? resolved : undefined;
+}
+
+function isTextAttachment(mimeType: string, fileName: string): boolean {
+  const lowerName = fileName.toLowerCase();
+  const lowerMime = mimeType.toLowerCase();
+  return lowerMime.startsWith("text/") ||
+    lowerMime.includes("json") ||
+    lowerMime.includes("xml") ||
+    lowerMime.includes("yaml") ||
+    /\.(md|markdown|txt|json|css|html|xml|yaml|yml|ts|tsx|js|jsx|py|go|rs|java|kt|cs|cpp|c|h|hpp|sql|sh|ps1)$/u.test(lowerName);
 }
 
 function artifacts(ctx: RouteContext, url: URL): void {
@@ -2145,7 +2527,7 @@ function artifactFileRaw(ctx: RouteContext, artifactId: string, path: string, do
   ctx.res.writeHead(200, {
     "content-type": artifactContentTypeFor(path),
     "content-length": String(buffer.byteLength),
-    "content-disposition": `${download ? "attachment" : "inline"}; filename="${safeDownloadName(path)}"`,
+    "content-disposition": contentDisposition(download ? "attachment" : "inline", path),
     "cache-control": "no-cache",
     "x-content-type-options": "nosniff"
   });
@@ -2251,7 +2633,7 @@ function downloadArtifact(ctx: RouteContext, artifactId: string): void {
   ctx.res.writeHead(200, {
     "content-type": mimeType,
     "content-length": String(buffer.byteLength),
-    "content-disposition": `attachment; filename="${safeDownloadName(filename)}"`,
+    "content-disposition": contentDisposition("attachment", filename),
     "cache-control": "no-cache",
     "x-content-type-options": "nosniff"
   });
@@ -3533,7 +3915,7 @@ function agentContacts(ctx: RouteContext): void {
   const rows = all(
     ctx.database,
     `SELECT ab.id, ab.role_id, ab.runtime_id, ab.model_config_id, ab.contact_name, ab.avatar_url, ab.contact_description, ab.disabled_at, ab.updated_at,
-            r.name AS role_name, r.capabilities, rt.kind AS runtime_kind, rt.status AS runtime_status,
+            r.name AS role_name, r.avatar AS role_avatar, r.capabilities, rt.kind AS runtime_kind, rt.status AS runtime_status,
             (SELECT COUNT(*) FROM runtimes canonical
              WHERE canonical.kind = CASE rt.kind
                WHEN 'claude-code-default' THEN 'claude-code'
@@ -3566,28 +3948,31 @@ function createCustomAgent(ctx: RouteContext, input: Record<string, unknown>): v
   const workspaceId = stringField(input.workspaceId) ?? stringField(runtime.workspace_id) ?? "default-workspace";
   const roleId = randomUUID();
   const bindingId = randomUUID();
+  const avatarUrl = avatarUrlOverride(input.avatarUrl) ?? defaultAgentAvatarUrl(bindingId);
   const capabilities = JSON.stringify(Array.isArray(input.capabilities) ? input.capabilities.filter((value): value is string => typeof value === "string") : []);
   const skillIds = JSON.stringify(Array.isArray(input.skillIds) ? input.skillIds.filter((value): value is string => typeof value === "string") : []);
   ctx.database.sqlite.transaction(() => {
-    ctx.database.sqlite.prepare("INSERT INTO roles (id, workspace_id, name, avatar, description, prompt, capabilities, default_permission_profile_id, tags, is_builtin, source_path, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, 0, NULL, NULL, ?, ?)").run(roleId, workspaceId, name, stringOrNull(input.avatarUrl), stringOrNull(input.description), systemPrompt, capabilities, skillIds, now, now);
-    ctx.database.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at, avatar_url, contact_name, contact_description) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)").run(bindingId, workspaceId, roleId, runtimeId, stringOrNull(input.modelConfigId), now, now, stringOrNull(input.avatarUrl), name, stringOrNull(input.description));
+    ctx.database.sqlite.prepare("INSERT INTO roles (id, workspace_id, name, avatar, description, prompt, capabilities, default_permission_profile_id, tags, is_builtin, source_path, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, 0, NULL, NULL, ?, ?)").run(roleId, workspaceId, name, avatarUrl, stringOrNull(input.description), systemPrompt, capabilities, skillIds, now, now);
+    ctx.database.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at, avatar_url, contact_name, contact_description) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)").run(bindingId, workspaceId, roleId, runtimeId, stringOrNull(input.modelConfigId), now, now, avatarUrl, name, stringOrNull(input.description));
     ctx.eventBus.publish({ id: randomUUID(), type: "agent_binding.created", schemaVersion: 1, workspaceId, payload: { bindingId, roleId, runtimeId, workspaceId }, createdAt: now });
-    ctx.eventBus.publish({ id: randomUUID(), type: "agent.contact.updated", schemaVersion: 1, workspaceId, payload: { agentBindingId: bindingId, displayName: name, avatarUrl: stringOrNull(input.avatarUrl), description: stringOrNull(input.description) }, createdAt: now });
+    ctx.eventBus.publish({ id: randomUUID(), type: "agent.contact.updated", schemaVersion: 1, workspaceId, payload: { agentBindingId: bindingId, displayName: name, avatarUrl, description: stringOrNull(input.description) }, createdAt: now });
   })();
   json(ctx.res, 201, { agentBindingId: bindingId, roleId });
 }
 
 function updateCustomAgent(ctx: RouteContext, bindingId: string, input: Record<string, unknown>): void {
-  const existing = get(ctx.database, "SELECT ab.*, r.id AS role_id FROM agent_bindings ab JOIN roles r ON r.id = ab.role_id WHERE ab.id = ?", bindingId) as Record<string, unknown> | null;
+  const existing = get(ctx.database, "SELECT ab.*, r.id AS role_id, r.avatar AS role_avatar FROM agent_bindings ab JOIN roles r ON r.id = ab.role_id WHERE ab.id = ?", bindingId) as Record<string, unknown> | null;
   if (existing === null) return json(ctx.res, 404, { error: "agent_binding_not_found" });
   const now = ctx.now?.() ?? Date.now();
   const name = stringField(input.name) ?? stringField(existing.contact_name) ?? "Agent";
   const description = Object.prototype.hasOwnProperty.call(input, "description") ? stringOrNull(input.description) : stringOrNull(existing.contact_description);
-  const avatarUrl = Object.prototype.hasOwnProperty.call(input, "avatarUrl") ? stringOrNull(input.avatarUrl) : stringOrNull(existing.avatar_url);
+  const hasAvatarInput = Object.prototype.hasOwnProperty.call(input, "avatarUrl");
+  const storedAvatarUrl = hasAvatarInput ? avatarUrlOverride(input.avatarUrl) : stringOrNull(existing.avatar_url);
+  const avatarUrl = hasAvatarInput ? storedAvatarUrl ?? defaultAgentAvatarUrl(bindingId) : effectiveContactAvatarUrl(existing);
   const workspaceId = stringField(existing.workspace_id) ?? "default-workspace";
   ctx.database.sqlite.transaction(() => {
-    ctx.database.sqlite.prepare("UPDATE agent_bindings SET contact_name = ?, avatar_url = ?, contact_description = ?, updated_at = ? WHERE id = ?").run(name, avatarUrl, description, now, bindingId);
-    ctx.database.sqlite.prepare("UPDATE roles SET name = COALESCE(?, name), description = COALESCE(?, description), avatar = COALESCE(?, avatar), prompt = COALESCE(?, prompt), updated_at = ? WHERE id = ?").run(name, description, avatarUrl, stringField(input.systemPrompt), now, String(existing.role_id));
+    ctx.database.sqlite.prepare("UPDATE agent_bindings SET contact_name = ?, avatar_url = ?, contact_description = ?, updated_at = ? WHERE id = ?").run(name, storedAvatarUrl, description, now, bindingId);
+    ctx.database.sqlite.prepare("UPDATE roles SET name = COALESCE(?, name), description = COALESCE(?, description), avatar = ?, prompt = COALESCE(?, prompt), updated_at = ? WHERE id = ?").run(name, description, avatarUrl, stringField(input.systemPrompt), now, String(existing.role_id));
     ctx.eventBus.publish({ id: randomUUID(), type: "agent.contact.updated", schemaVersion: 1, workspaceId, payload: { agentBindingId: bindingId, displayName: name, avatarUrl, description }, createdAt: now });
   })();
   json(ctx.res, 200, { agentBindingId: bindingId });
@@ -3625,7 +4010,7 @@ function contactRow(row: Record<string, unknown>): Record<string, unknown> {
   return {
     agentBindingId: row.id,
     displayName: stringField(row.contact_name) ?? stringField(row.role_name) ?? String(row.id),
-    ...(stringField(row.avatar_url) !== undefined ? { avatarUrl: stringField(row.avatar_url) } : {}),
+    avatarUrl: effectiveContactAvatarUrl(row),
     roleId: row.role_id,
     runtimeId: row.runtime_id,
     ...(stringField(row.model_config_id) !== undefined ? { modelConfigId: stringField(row.model_config_id) } : {}),
@@ -3654,7 +4039,7 @@ function agentBindingRow(options: { readonly id: string; readonly workspaceId: s
 function agentBindingResponse(binding: { readonly id: string; readonly workspace_id: string | null; readonly role_id: string; readonly runtime_id: string; readonly model_config_id: string | null; readonly override_permission_profile_id: string | null; readonly created_at: number; readonly updated_at: number }, role: Record<string, unknown>, runtime: Record<string, unknown>, modelConfig: Record<string, unknown> | null): Record<string, unknown> {
   return {
     ...binding,
-    role: { id: String(role.id), name: stringField(role.name) ?? "", avatar: stringOrNull(role.avatar) },
+    role: { id: String(role.id), name: stringField(role.name) ?? "", avatar: effectiveRoleAvatarUrl(role) },
     runtime: { id: String(runtime.id), kind: stringField(runtime.kind) ?? "", name: stringField(runtime.name) ?? "", detectedVersion: stringOrNull(runtime.detected_version) },
     ...(modelConfig !== null ? { modelConfig: { id: String(modelConfig.id), name: stringField(modelConfig.name) ?? "", provider: stringField(modelConfig.provider) ?? "", model: stringField(modelConfig.model) ?? "", apiKeyFingerprint: stringOrNull(modelConfig.api_key_fingerprint) } } : {})
   };
@@ -3677,7 +4062,7 @@ function normalizeAgentBindingRow(row: Record<string, unknown>): Record<string, 
     : undefined;
   return {
     ...binding,
-    role: { id: row.role__id, name: row.role__name, avatar: row.role__avatar },
+    role: { id: row.role__id, name: row.role__name, avatar: effectiveRoleAvatarUrl({ id: row.role__id, avatar: row.role__avatar }) },
     runtime: { id: row.runtime__id, kind: row.runtime__kind, name: row.runtime__name, detectedVersion: row.runtime__detected_version },
     ...(modelConfig !== undefined ? { modelConfig } : {})
   };
@@ -3689,7 +4074,7 @@ function roleRow(options: { readonly id: string; readonly workspaceId: string; r
     id: options.id,
     workspace_id: options.workspaceId,
     name: options.name,
-    avatar: stringOrNull(options.input["avatar"] ?? existing["avatar"]),
+    avatar: roleAvatarInput(options.input["avatar"], existing["avatar"], options.id),
     description: stringOrNull(options.input["description"] ?? existing["description"]),
     prompt: options.prompt,
     capabilities: stringOrJson(options.input["capabilities"] ?? existing["capabilities"] ?? "[]", "[]"),
@@ -3706,6 +4091,7 @@ function roleRow(options: { readonly id: string; readonly workspaceId: string; r
 function normalizeRoleRow(row: Record<string, unknown>): Record<string, unknown> {
   return {
     ...row,
+    avatar: effectiveRoleAvatarUrl(row),
     capabilities: parseJsonField(row["capabilities"], []),
     tags: parseJsonField(row["tags"], null)
   };
@@ -3719,6 +4105,24 @@ function parseJsonField(value: unknown, fallback: unknown): unknown {
 
 function stringField(value: unknown): string | undefined { return typeof value === "string" && value.length > 0 ? value : undefined; }
 function stringOrNull(value: unknown): string | null { return typeof value === "string" ? value : null; }
+function avatarUrlOverride(value: unknown): string | null {
+  if (value === null) return null;
+  return isAvatarImageUrl(value) ? value : null;
+}
+function roleAvatarInput(inputValue: unknown, existingValue: unknown, roleId: string): string {
+  if (inputValue !== undefined) return isAvatarImageUrl(inputValue) ? inputValue : defaultRoleAvatarUrl(roleId);
+  return isAvatarImageUrl(existingValue) ? existingValue : defaultRoleAvatarUrl(roleId);
+}
+function effectiveRoleAvatarUrl(row: Record<string, unknown>): string {
+  const roleId = stringField(row.id) ?? stringField(row.role_id) ?? "role";
+  return isAvatarImageUrl(row.avatar) ? row.avatar : defaultRoleAvatarUrl(roleId);
+}
+function effectiveContactAvatarUrl(row: Record<string, unknown>): string {
+  const bindingId = stringField(row.id) ?? stringField(row.binding_id) ?? stringField(row.agentBindingId) ?? "agent";
+  if (isAvatarImageUrl(row.avatar_url)) return row.avatar_url;
+  if (isAvatarImageUrl(row.role_avatar)) return row.role_avatar;
+  return defaultAgentAvatarUrl(bindingId);
+}
 function stringOrJson(value: unknown, fallback: string): string;
 function stringOrJson(value: unknown, fallback: string | null): string | null;
 function stringOrJson(value: unknown, fallback: string | null): string | null { if (value === undefined) return fallback; if (value === null) return null; return typeof value === "string" ? value : JSON.stringify(value); }
@@ -4128,8 +4532,8 @@ function ensureWorkflowNodeBinding(database: AgentHubDatabase, graph: WorkflowGr
   const roleId = `workflow:${graph.workflow.id}:${node.nodeId}:role`;
   const bindingId = `workflow:${graph.workflow.id}:${node.nodeId}:binding`;
   database.sqlite.prepare(
-    "INSERT INTO roles (id, workspace_id, name, avatar, description, prompt, capabilities, default_permission_profile_id, tags, is_builtin, source_path, version, created_at, updated_at) VALUES (?, ?, ?, NULL, ?, ?, '[]', NULL, ?, 0, NULL, NULL, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, description = excluded.description, prompt = excluded.prompt, updated_at = excluded.updated_at"
-  ).run(roleId, graph.workflow.workspaceId, node.displayName, node.roleLabel ?? "Workflow agent context node", workflowRolePrompt(graph, node), JSON.stringify(["workflow"]), now, now);
+    "INSERT INTO roles (id, workspace_id, name, avatar, description, prompt, capabilities, default_permission_profile_id, tags, is_builtin, source_path, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, '[]', NULL, ?, 0, NULL, NULL, ?, ?) ON CONFLICT(id) DO UPDATE SET name = excluded.name, avatar = COALESCE(roles.avatar, excluded.avatar), description = excluded.description, prompt = excluded.prompt, updated_at = excluded.updated_at"
+  ).run(roleId, graph.workflow.workspaceId, node.displayName, defaultRoleAvatarUrl(roleId), node.roleLabel ?? "Workflow agent context node", workflowRolePrompt(graph, node), JSON.stringify(["workflow"]), now, now);
   database.sqlite.prepare(
     "INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NULL, ?, ?) ON CONFLICT(id) DO UPDATE SET role_id = excluded.role_id, runtime_id = excluded.runtime_id, model_config_id = excluded.model_config_id, updated_at = excluded.updated_at"
   ).run(bindingId, graph.workflow.workspaceId, roleId, runtime.id, modelConfig.id, now, now);
@@ -5116,7 +5520,9 @@ function numberQuery(url: URL, key: string): number | undefined { const value = 
 function isLoopbackHost(host: string): boolean { return host === "127.0.0.1" || host === "::1" || host === "localhost"; }
 function authenticate(ctx: RouteContext, url: URL) {
   const authorization = typeof ctx.req.headers.authorization === "string" ? ctx.req.headers.authorization : url.searchParams.get("token") !== null ? `Bearer ${url.searchParams.get("token")}` : undefined;
-  return authenticateBrowserRequest({ method: ctx.req.method ?? "GET", pathname: url.pathname, headers: { origin: header(ctx, "origin"), host: header(ctx, "host"), authorization, cookie: header(ctx, "cookie"), "content-type": header(ctx, "content-type"), "x-agenthub-csrf": header(ctx, "x-agenthub-csrf") }, database: ctx.database, ...(ctx.token !== undefined ? { token: ctx.token } : {}), host: ctx.host, ...(ctx.allowedOrigins !== undefined ? { allowedOrigins: ctx.allowedOrigins } : {}), now: ctx.now?.() ?? Date.now() });
+  const result = authenticateBrowserRequest({ method: ctx.req.method ?? "GET", pathname: url.pathname, headers: { origin: header(ctx, "origin"), host: header(ctx, "host"), authorization, cookie: header(ctx, "cookie"), "content-type": header(ctx, "content-type"), "x-agenthub-csrf": header(ctx, "x-agenthub-csrf") }, database: ctx.database, ...(ctx.token !== undefined ? { token: ctx.token } : {}), host: ctx.host, ...(ctx.allowedOrigins !== undefined ? { allowedOrigins: ctx.allowedOrigins } : {}), now: ctx.now?.() ?? Date.now() });
+  if (ctx.requireBearer === true && result.ok && result.authKind !== "bearer") return { ok: false, status: 401, error: "mobile_token_required" } as const;
+  return result;
 }
 function header(ctx: RouteContext, name: string): string | undefined { const value = ctx.req.headers[name]; return Array.isArray(value) ? value[0] : value; }
 function all(database: AgentHubDatabase, sql: string, ...params: unknown[]): unknown[] { return database.sqlite.prepare(sql).all(...params); }
@@ -5447,6 +5853,7 @@ const WEB_API_PREFIXES = [
   "/runtimes",
   "/model-configs",
   "/agent-bindings",
+  "/avatars",
   "/settings",
   "/agents",
   "/runs",
@@ -5573,6 +5980,28 @@ function artifactContentTypeFor(filePath: string): string {
 function safeDownloadName(path: string): string {
   const name = path.split(/[\\/]/u).filter(Boolean).at(-1) ?? "artifact";
   return name.replace(/["\r\n]/gu, "_");
+}
+
+function contentDisposition(disposition: "attachment" | "inline", path: string): string {
+  const name = safeDownloadName(path);
+  const fallback = asciiDownloadName(name);
+  if (fallback === name) return `${disposition}; filename="${fallback}"`;
+  return `${disposition}; filename="${fallback}"; filename*=UTF-8''${rfc5987Encode(name)}`;
+}
+
+function asciiDownloadName(name: string): string {
+  const sanitized = name
+    .replace(/[^\x20-\x7E]+/gu, "_")
+    .replace(/["\\\r\n]/gu, "_")
+    .replace(/_+/gu, "_")
+    .trim();
+  const extension = sanitized.match(/\.[A-Za-z0-9]{1,12}$/u)?.[0] ?? "";
+  const stem = extension.length > 0 ? sanitized.slice(0, -extension.length) : sanitized;
+  return /[A-Za-z0-9]/u.test(stem) ? sanitized : `download${extension}`;
+}
+
+function rfc5987Encode(value: string): string {
+  return encodeURIComponent(value).replace(/['()*]/gu, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`);
 }
 
 function modelConfigFingerprint(apiKey: string): string {

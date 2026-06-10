@@ -1,6 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
-  Avatar,
   Button,
   Checkbox,
   Chip,
@@ -22,6 +21,7 @@ import { initials } from "../lib/format.ts";
 import { roleDisplayText } from "../lib/roles.ts";
 import { runtimeChipColor, runtimeDisplayName, runtimeInstanceLabel } from "../lib/runtimeDisplay.ts";
 import { skillDisplayDescription, skillDisplayName, skillOriginColor, skillOriginLabel } from "../lib/skills.ts";
+import { IdentityAvatar } from "./IdentityAvatar.tsx";
 
 export type RoomMode = "solo" | "assisted" | "squad" | "team";
 export type RoomParticipantRole = "observer" | "reviewer" | "specialist";
@@ -480,10 +480,12 @@ export function ContactFirstPicker({
                 textValue={contact.displayName}
                 className="ah-contact-list-item"
               >
-                <Avatar className="ah-contact-avatar" size="sm">
-                  {contact.avatarUrl ? <Avatar.Image alt={contact.displayName} src={contact.avatarUrl} /> : null}
-                  <Avatar.Fallback>{initials(contact.displayName)}</Avatar.Fallback>
-                </Avatar>
+                <IdentityAvatar
+                  name={contact.displayName}
+                  avatarUrl={contact.avatarUrl}
+                  className="ah-contact-avatar"
+                  size="sm"
+                />
                 <span className="min-w-0 flex-1">
                   <span className="flex min-w-0 items-center gap-2">
                     <span className="min-w-0 flex-1 truncate text-sm font-semibold">{contact.displayName}</span>

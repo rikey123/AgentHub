@@ -17,11 +17,12 @@ import { CommandPalette, type PaletteCommand } from "./components/CommandPalette
 import { KeymapModal } from "./components/KeymapModal.tsx";
 import { MobilePairingModal } from "./components/MobilePairingModal.tsx";
 import { NewRoomDialog, type CreateRoomInput } from "./components/NewRoomDialog.tsx";
+import { DeleteRoomDialog } from "./components/DeleteRoomDialog.tsx";
 import { SettingsModal } from "./components/settings/index.ts";
 import { getSettingsSearch, getSettingsStateFromSearch } from "./components/settings/settingsUrl.ts";
 import type { SettingsTabId } from "./components/settings/SettingsModal.tsx";
 import type { ArtifactChatReference } from "./components/artifacts/ArtifactPreviewModal.tsx";
-import type { AgentContactViewModel, MessageViewModel } from "./types.ts";
+import type { AgentContactViewModel, MessageViewModel, RoomViewModel } from "./types.ts";
 import { normalizedRoomSearchQuery, useProjector } from "./hooks/useProjector.ts";
 import { useSdk, useCsrfFetch } from "./hooks/useSdk.ts";
 import { useTheme } from "./hooks/useTheme.ts";
@@ -180,6 +181,7 @@ export default function App() {
   const [keymapOpen, setKeymapOpen] = useState(false);
   const [mobilePairingOpen, setMobilePairingOpen] = useState(false);
   const [newRoomOpen, setNewRoomOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<RoomViewModel | undefined>(undefined);
   const [settingsOpen, setSettingsOpen] = useState(initialSettingsState.isOpen);
   const [settingsTab, setSettingsTab] = useState<SettingsTabId>(initialSettingsState.tab);
   const [leftCollapsed, setLeftCollapsed] = useState(false);
@@ -377,6 +379,16 @@ export default function App() {
     const request = roomPinRequestFor(roomId, isPinned);
     await csrfFetch(request.url, { method: request.method });
   }, [csrfFetch]);
+
+  const handleRequestDeleteRoom = useCallback((room: RoomViewModel) => {
+    setDeleteTarget(room);
+  }, []);
+
+  const handleConfirmDeleteRoom = useCallback(async (roomId: string) => {
+    const response = await csrfFetch(`/rooms/${encodeURIComponent(roomId)}`, { method: "DELETE" });
+    if (!response.ok) throw new Error(`删除房间失败（${response.status}）`);
+    if (activeRoomId === roomId) setActiveRoomId(undefined);
+  }, [activeRoomId, csrfFetch]);
 
   const handleRegenerate = useCallback(async (id: string) => {
     await csrfFetch(`/messages/${encodeURIComponent(id)}/regenerate`, { method: "POST" });
@@ -586,14 +598,14 @@ export default function App() {
       </div>
     </div>
   ) : (
-    <HomeView rooms={rooms} onOpenRoom={openRoom} onCreate={openNewRoom} />
+    <HomeView rooms={rooms} onOpenRoom={openRoom} onCreate={openNewRoom} onRequestDelete={handleRequestDeleteRoom} />
   );
   const center = workflowMode
     ? <WorkflowCanvasView workflows={projector.workflows} csrfFetch={csrfFetch} />
     : centerMode === "contacts"
       ? <ContactsRailContainer fetchImpl={csrfFetch} onStartChat={handleStartContactChat} />
       : centerMode === "runs"
-        ? <RunsRailView />
+        ? <RunsRailView room={activeRoom} onOpenRun={setActiveRunId} />
         : centerMode === "tasks"
           ? <TasksRailView />
           : centerMode === "artifacts"
@@ -627,6 +639,7 @@ export default function App() {
             onSelect={openRoom}
             onCreate={openNewRoom}
             onTogglePin={(roomId, isPinned) => void handleToggleRoomPin(roomId, isPinned)}
+            onRequestDelete={handleRequestDeleteRoom}
             onSearchQueryChange={setRoomSearchQuery}
             useServerSearchResults={hasMatchingServerSearchResults}
           />
@@ -640,6 +653,12 @@ export default function App() {
       <KeymapModal isOpen={keymapOpen} onOpenChange={setKeymapOpen} />
       <MobilePairingModal isOpen={mobilePairingOpen} onOpenChange={setMobilePairingOpen} csrfFetch={csrfFetch} />
       <NewRoomDialog isOpen={newRoomOpen} onOpenChange={setNewRoomOpen} onCreate={handleCreateRoom} csrfFetch={csrfFetch} />
+      <DeleteRoomDialog
+        room={deleteTarget}
+        isOpen={deleteTarget !== undefined}
+        onOpenChange={(open) => { if (!open) setDeleteTarget(undefined); }}
+        onConfirm={handleConfirmDeleteRoom}
+      />
       <SettingsModal
         isOpen={settingsOpen}
         selectedTab={settingsTab}

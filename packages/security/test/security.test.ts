@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { mkdtempSync } from "node:fs";
 
 import { createDatabase } from "@agenthub/db";
@@ -69,8 +70,13 @@ describe("M6 security package", () => {
 
     expect(resolveWorkspacePath(root, "src/../src/ok.txt")).toMatchObject({ ok: true, classification: "internal", relativePath: "src/ok.txt" });
     expect(resolveWorkspacePath(root, "../../outside.txt")).toMatchObject({ ok: true, classification: "external" });
+    const absoluteOutside = process.platform === "win32"
+      ? `${root[0]?.toUpperCase() === "C" ? "D" : "C"}:\\agenthub-security-outside.txt`
+      : "/agenthub-security-outside.txt";
+    expect(resolveWorkspacePath(root, absoluteOutside)).toMatchObject({ ok: true, classification: "external" });
     if (symlinkCreated) expect(resolveWorkspacePath(root, "escape/secret.txt")).toMatchObject({ ok: true, classification: "external" });
     expect(resolveSafeUri(`file://${join(root, "src", "ok.txt").replaceAll("\\", "/")}`, { workspaceRoot: root })).toMatchObject({ ok: true, kind: "file" });
+    expect(resolveSafeUri(pathToFileURL(absoluteOutside).toString(), { workspaceRoot: root })).toMatchObject({ ok: false, reason: "path_classification_external" });
     expect(resolveSafeUri("data:text/html;base64,PGgxPm5vPC9oMT4=", { workspaceRoot: root })).toMatchObject({ ok: false, reason: "data_uri_mime_rejected" });
   });
 
@@ -85,6 +91,30 @@ describe("M6 security package", () => {
     const row = database.sqlite.prepare("SELECT message_id, file_id, file_name, mime_type, byte_size, storage_path FROM attachments WHERE file_id = ?").get("123e4567-e89b-12d3-a456-426614174000") as { readonly message_id: string; readonly file_id: string; readonly file_name: string; readonly mime_type: string; readonly byte_size: number; readonly storage_path: string };
     expect(row).toMatchObject({ message_id: orphanAttachmentMessageId, file_name: "../report.pdf", mime_type: "application/pdf", byte_size: bytes.byteLength, storage_path: ".agenthub/attachments/2026/05/123e4567-e89b-12d3-a456-426614174000" });
     expect(existsSync(join(root, row.storage_path))).toBe(true);
+    database.sqlite.close();
+  });
+
+  it("stores common Office document MIME types when ZIP magic matches", () => {
+    const root = mkdtempSync(join(tmpdir(), "agenthub-security-attachment-office-"));
+    const database = createDatabase({ path: join(root, "db.sqlite"), applyMigrations: true });
+    const bytes = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00]);
+
+    const result = storeAttachment({ database, workspaceRoot: root, originalName: "brief.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", bytes, now: 1, fileId: "123e4567-e89b-12d3-a456-426614174004" });
+
+    expect(result).toMatchObject({ ok: true, fileId: "123e4567-e89b-12d3-a456-426614174004" });
+    expect(database.sqlite.prepare("SELECT mime_type FROM attachments WHERE file_id = ?").get("123e4567-e89b-12d3-a456-426614174004")).toMatchObject({ mime_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+    database.sqlite.close();
+  });
+
+  it("infers common attachment MIME types from filenames when the browser omits MIME", () => {
+    const root = mkdtempSync(join(tmpdir(), "agenthub-security-attachment-infer-"));
+    const database = createDatabase({ path: join(root, "db.sqlite"), applyMigrations: true });
+    const bytes = Buffer.from("%PDF-1.7\nbody");
+
+    const result = storeAttachment({ database, workspaceRoot: root, originalName: "report.pdf", mimeType: "", bytes, now: 1, fileId: "123e4567-e89b-12d3-a456-426614174005" });
+
+    expect(result).toMatchObject({ ok: true, fileId: "123e4567-e89b-12d3-a456-426614174005" });
+    expect(database.sqlite.prepare("SELECT mime_type FROM attachments WHERE file_id = ?").get("123e4567-e89b-12d3-a456-426614174005")).toMatchObject({ mime_type: "application/pdf" });
     database.sqlite.close();
   });
 

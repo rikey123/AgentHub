@@ -18,6 +18,7 @@ export default defineConfig({
       "/runtimes": "http://127.0.0.1:6677",
       "/model-configs": "http://127.0.0.1:6677",
       "/agent-bindings": "http://127.0.0.1:6677",
+      "/avatars": "http://127.0.0.1:6677",
       "/settings": "http://127.0.0.1:6677",
       "/agents": "http://127.0.0.1:6677",
       "/runs": "http://127.0.0.1:6677",

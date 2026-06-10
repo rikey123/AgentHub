@@ -1,10 +1,35 @@
-# AgentHub V1.2
+# AgentHub
 
-AgentHub is a local-first multi-agent workbench for running a daemon, a web UI, and task-oriented agents on your own machine. V1.2 completes the chat-to-artifact loop: agents can produce web pages, web apps, documents, presentations, code artifacts, diffs, and deployment cards that stay visible in the conversation, can be previewed or edited, and can be published through local deployment flows.
+AgentHub 是一个本地优先的多 Agent 工作台。它把聊天房间、任务调度、权限审批、上下文记忆、产物预览和代码/文档生成放在同一个本地 daemon 里运行，前端只通过 HTTP/SSE 和事件投影更新状态，不直接读数据库。
 
-V1.2 keeps the V1 foundation of SQLite persistence, OS keychain-backed secrets, HeroUI-based frontend surfaces, and task-backed multi-agent orchestration. It extends that foundation with Artifact Studio, deployment publishing, contact-first agent workflows, pinned context, room search and pinning, and stricter projector/EventBus state guarantees.
+## 核心功能
 
-## Quick start
+- 多 Agent 房间：支持 Solo、Assisted、Team 等协作方式，用户可以和主 Agent 对话，也可以让旁听 Agent 介入。
+- 任务与运行管理：每次 Agent 执行都是一个 Run，包含排队、运行、完成、失败、取消和恢复流程。
+- 产物工作流：Agent 可生成网页、Web App、文档、PPT、源码、Diff 和部署卡片，前端可预览、编辑、查看历史或应用变更。
+- 权限与安全：文件、shell、工具、上下文写入等操作走 Permission Engine；默认只监听 `127.0.0.1`，远程访问必须显式配置 token。
+- 事件驱动 UI：状态写入 SQLite 后，同事务发布 EventBus 事件；Web UI 通过 durable replay + live SSE 重建界面。
+- 多运行时适配：当前重点支持 Mock、Claude Code、OpenCode/ACP 方向，运行时和模型配置可在设置中管理。
+- 多端入口：Web 是主入口，Electron 桌面壳和 Capacitor 移动端复用同一套 daemon API。
+
+## 项目结构
+
+```text
+apps/cli       命令行入口，根目录 agenthub.cmd 会调用它
+apps/web       React + Vite Web UI
+apps/desktop   Electron 桌面壳，加载 daemon 提供的 Web UI
+apps/mobile    React + Capacitor 移动端
+packages/daemon        本地 HTTP/SSE daemon
+packages/bus           CommandBus、EventBus、outbox
+packages/orchestrator  Agent 调度、Run 生命周期、任务与 mailbox
+packages/db            SQLite schema 和 migrations
+packages/protocol      事件、协议、领域类型
+packages/*             agents、artifacts、permissions、context、security、sdk 等领域包
+```
+
+## 快速运行
+
+要求：Node.js `>=22`、pnpm `>=10`、Bun `>=1.1`。
 
 ```powershell
 pnpm.cmd install
@@ -12,96 +37,65 @@ pnpm.cmd build
 .\agenthub.cmd web
 ```
 
-The `web` launcher starts the local daemon and opens the browser UI. On a machine where the CLI is already on your `PATH`, the same command is also available as `agenthub web` or `agenthub -web`.
+`.\agenthub.cmd web` 会启动本地 daemon 并打开浏览器：
 
-By default, the daemon listens on `http://127.0.0.1:6677` and the web app runs on `http://127.0.0.1:5173`.
+- daemon 默认地址：`http://127.0.0.1:6677`
+- 如果 `apps/web/dist` 已存在，Web UI 由 daemon 直接提供
+- 如果没有构建产物，会自动启动 Vite dev server：`http://127.0.0.1:5173`
 
-## What V1.2 includes
-
-### 1. Artifact Studio
-
-- Agents can publish typed artifacts for `web_page`, `web_app`, `document`, `presentation`, `presentation_pptx`, `source_code`, and generic files.
-- Chat timeline cards render through stable payloads: `PreviewCard`, `DocumentCard`, `PresentationCard`, `DiffCard`, and `DeploymentCard`.
-- Artifact Studio adds preview, editor, history, and raw views, including version restore flows for editable artifacts.
-- Text artifacts store version snapshots, while binary artifacts such as PPTX use controlled storage paths with size, MIME type, and checksum metadata.
-
-### 2. Built-in artifact skills
-
-- V1.2 ships built-in SKILL.md packages for `web-page-builder`, `web-app-builder`, `one-pager-builder`, `html-slides-builder`, `document-builder`, and `officecli-pptx`.
-- Each built-in package declares an `artifact_kind` contract so artifact generation and card rendering can stay typed.
-- Web and slide builders prefer self-contained outputs that can be previewed without external network dependencies.
-- The `officecli-pptx` skill covers real PPTX generation and read-only preview through the daemon PPT bridge when `officecli` is available.
-
-### 3. Deployment publishing
-
-- Artifacts can be deployed as preview URLs, static sites, source zips, container export bundles, local container builds, or CapRover self-hosted deployments.
-- Deployment records live in SQLite and are reflected into chat through `DeploymentCard` message parts.
-- Build logs stream through `deployment.log.appended` live events and can be recovered through REST log endpoints.
-- CapRover provider credentials are stored by reference through the keychain path; raw tokens are not echoed back to the UI.
-
-### 4. Contacts and custom agents
-
-- Agent contacts are the IM-facing view of agent bindings, with display names, avatars, descriptions, runtime metadata, capabilities, and availability.
-- The Contacts rail supports contact discovery and contact-first chat creation.
-- New chat creation starts with contacts and mode selection, while advanced role/runtime/model/skills configuration remains available.
-- Custom agent creation and contact editing update agent binding display fields without changing the role/runtime/model identity model underneath.
-
-### 5. Room list, pinned context, and message actions
-
-- Rooms support search, pinning, archive filtering, and last-activity ordering.
-- Pinned rooms and pinned messages publish durable events so the UI updates without requiring a refresh.
-- Pinned messages are injected into prompt context ahead of ordinary clipped conversation history.
-- Message actions include reply, quote, regenerate, copy code, apply diff, expand preview, and pin/unpin.
-
-### 6. Visible group orchestration
-
-- Assisted and Team flows expose the coordination process in chat instead of hiding it entirely in run detail.
-- Team dispatch can post visible assignment announcements, failure downgrade messages, member summaries, and final aggregate messages.
-- Long-form outputs are expected to enter the timeline as artifacts or files, keeping ordinary chat messages short and readable.
-- WakeAgent outbox recovery and dependency auto-dispatch remain internal reliability mechanisms, backed by SQLite state.
-
-### 7. Settings and runtime directory
-
-- Settings includes real tabs for roles, runtimes, models, skills, permissions, workspace, deploy providers, and MCP/tool visibility.
-- Runtime cards support detection, custom ACP command configuration, connection testing, and version display.
-- Claude Code and OpenCode are the main V1.2 runtime targets.
-- Codex appears in the runtime directory with an `experimental` badge and is not treated as a primary V1.2 acceptance runtime.
-
-### 8. EventBus and projector state guarantees
-
-- AgentHub's UI reconstructs state from durable event replay plus live SSE streams, not from direct SQLite reads.
-- State mutations and `EventBus.publish()` calls must happen in the same SQLite transaction.
-- `message.part.added` is the timeline insertion signal for artifact and deployment cards.
-- The projector tracks normalized room state for pinned rooms, participant contact names, deployments, deployment logs, artifact versions, pinned messages, and relevant V1.2 lifecycle events.
-
-### 9. Security and storage
-
-- Durable state lives in SQLite.
-- Third-party API keys and deployment provider tokens are stored in the OS keychain and are not written to SQLite in plaintext.
-- Raw adapter output is redacted before it reaches the UI, logs, or persisted events.
-- The local daemon and browser UI keep localhost-only defaults unless remote access is explicitly configured with authentication.
-
-## Core command surface
+开发时也可以跳过构建，直接运行：
 
 ```powershell
-agenthub web|-web
-agenthub start|stop|status|doctor
-agenthub auth issue|list|revoke
-agenthub agents reset --id=<agentId>
-agenthub permissions profiles|requests|resolve
-agenthub interventions list
-agenthub artifacts list
-agenthub debug stats
+pnpm.cmd install
+.\agenthub.cmd web
 ```
 
-If you are working directly from the repository on Windows, `.\agenthub.cmd web` is the most convenient one-command launcher.
+## 常用命令
 
-## What is intentionally out of scope for V1.2
+```powershell
+# daemon
+.\agenthub.cmd start
+.\agenthub.cmd status
+.\agenthub.cmd stop
+.\agenthub.cmd doctor
 
-- Workflow artifacts, DAG execution, WorkflowCard, workflow visual editing, and recurring schedulers
-- SaaS deployment providers such as Vercel, Cloudflare, Fly.io, Dokploy, and Coolify
-- Full Codex adapter certification beyond the experimental runtime marker
-- Multi-user authentication, cloud sync, marketplace distribution, and hosted multi-tenant infrastructure
-- BM25/vector hybrid memory upgrades and plugin or LAN discovery flows
+# 质量检查
+pnpm.cmd typecheck
+pnpm.cmd test
+pnpm.cmd check:all
+pnpm.cmd lint
 
-V1.2 is focused on the local workbench loop: chat, contacts, orchestration, artifact creation, preview/edit/history, and practical local/self-hosted publishing.
+# Web
+pnpm.cmd --filter @agenthub/web dev
+pnpm.cmd --filter @agenthub/web build
+
+# 桌面端
+pnpm.cmd --filter @agenthub/desktop build
+pnpm.cmd --filter @agenthub/desktop start
+pnpm.cmd --filter @agenthub/desktop run package:dir
+
+# 移动端
+pnpm.cmd --filter @agenthub/mobile dev
+pnpm.cmd --filter @agenthub/mobile build
+pnpm.cmd --filter @agenthub/mobile run android:apk
+```
+
+## 本地数据
+
+默认数据目录在用户主目录下：
+
+```text
+%USERPROFILE%\.agenthub\agenthub.db
+%USERPROFILE%\.agenthub\config.toml
+%USERPROFILE%\.agenthub\daemon.pid
+```
+
+默认只绑定 `127.0.0.1`。如果要让手机或局域网设备直连 daemon，需要在配置中改为 LAN IP，并同时启用 `[server.remote] enabled = true` 与 `[auth] token = "..."`。
+
+## 参考文档
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - 后端、事件和投影架构
+- [docs/SECURITY.md](docs/SECURITY.md) - 本地安全、鉴权、脱敏和路径策略
+- [docs/PERMISSION_PROFILES.md](docs/PERMISSION_PROFILES.md) - 内置权限 profile
+- [docs/multi-platform-runbook.md](docs/multi-platform-runbook.md) - 桌面端、移动端和打包运行说明
+**

@@ -32,7 +32,7 @@ export type AcpPendingRequest = {
   readonly timeoutMs: number;
   readonly resolve: (result: unknown) => void;
   readonly reject: (err: AdapterError) => void;
-  readonly timer?: ReturnType<typeof setTimeout>;
+  timer?: ReturnType<typeof setTimeout>;
 };
 
 export type AcpAdapterSession = {
@@ -59,6 +59,8 @@ export type AcpAdapterSession = {
   serverSessionId?: string;
   /** True after initialize+session/new resolve (or fall back to legacy). Gates queued prompt flush. */
   handshakeComplete?: boolean;
+  /** Agent-declared prompt capabilities from initialize. Undefined means legacy/unknown ACP server. */
+  agentPromptCapabilities?: AcpPromptCapabilities;
   promptTimeoutPaused: boolean;
   /** Prompts submitted before session/new returned. Flushed once the server-issued sessionId is available. */
   queuedPrompts?: Array<{ message: AdapterMessage }>;
@@ -70,6 +72,13 @@ export type AdapterRawSink = (input: { readonly adapterId: string; readonly sess
 export type WarmSessionInput = { readonly roomId: string; readonly agentId: string; readonly sessionId?: string; readonly workDir?: string; readonly mcpServer?: unknown };
 export type WarmSessionBindingInput = { readonly roomId: string; readonly agentId: string; readonly runId: string; readonly workDir?: string; readonly mcpServer?: unknown };
 export type WarmExternalSession = Omit<ExternalSession, "runId"> & { readonly runId?: string };
+type AcpPromptContentBlock =
+  | { readonly type: "text"; readonly text: string }
+  | { readonly type: "image"; readonly mimeType: string; readonly data: string; readonly uri?: string }
+  | { readonly type: "audio"; readonly mimeType: string; readonly data: string }
+  | { readonly type: "resource"; readonly resource: { readonly uri: string; readonly mimeType?: string; readonly text: string } | { readonly uri: string; readonly mimeType?: string; readonly blob: string } };
+export type AcpPromptCapabilities = { readonly image?: boolean; readonly audio?: boolean; readonly embeddedContext?: boolean };
+export type AcpPromptCapabilityOverrides = Partial<AcpPromptCapabilities>;
 
 export const acpClientCapabilities: AcpClientCapabilities = {
   fs: { readTextFile: true, writeTextFile: true, deleteFile: true },
@@ -118,12 +127,16 @@ export abstract class ACPAdapter {
   protected readonly warmByRoomAgent = new Map<string, string>();
   protected readonly now: () => number;
   protected readonly requestTimeoutMs: number;
+  protected readonly promptTimeoutMs: number;
   protected readonly rawSink: AdapterRawSink | undefined;
+  private readonly promptCapabilityOverrides: AcpPromptCapabilityOverrides | undefined;
 
-  protected constructor(readonly id: string, readonly name: string, readonly manifest: AgentAdapterManifest, options: { readonly now?: () => number; readonly requestTimeoutMs?: number; readonly rawSink?: AdapterRawSink } = {}) {
+  protected constructor(readonly id: string, readonly name: string, readonly manifest: AgentAdapterManifest, options: { readonly now?: () => number; readonly requestTimeoutMs?: number; readonly promptTimeoutMs?: number; readonly rawSink?: AdapterRawSink; readonly promptCapabilityOverrides?: AcpPromptCapabilityOverrides } = {}) {
     this.now = options.now ?? Date.now;
     this.requestTimeoutMs = options.requestTimeoutMs ?? 60_000;
+    this.promptTimeoutMs = options.promptTimeoutMs ?? PROMPT_REQUEST_TIMEOUT_MS;
     this.rawSink = options.rawSink;
+    this.promptCapabilityOverrides = options.promptCapabilityOverrides;
   }
 
   abstract detect(): Effect.Effect<DetectedRuntime[], AdapterError>;
@@ -299,20 +312,32 @@ export abstract class ACPAdapter {
       throw new ACPAdapterError("prompt_in_flight", "ACP prompt already in flight");
     }
     const requestId = randomUUID();
-    const timeoutMs = options.timeoutMs ?? this.requestTimeoutMs;
+    const timeoutMs = options.timeoutMs ?? (options.prompt === true ? this.promptTimeoutMs : this.requestTimeoutMs);
     const pending: AcpPendingRequest = {
       requestId,
       method,
       startedAt: this.now(),
       timeoutMs,
       resolve: () => undefined,
-      reject: () => undefined,
-      timer: setTimeout(() => {
-        session.pendingRequests.delete(requestId);
-        if (session.inflightPromptRequestId === requestId) session.inflightPromptRequestId = undefined;
-      }, timeoutMs)
+      reject: () => undefined
     };
-    pending.timer?.unref?.();
+    const scheduleTimeout = (): void => {
+      pending.timer = setTimeout(() => {
+        const current = session.pendingRequests.get(requestId);
+        if (current === undefined) return;
+        session.pendingRequests.delete(requestId);
+        if (session.inflightPromptRequestId === requestId) {
+          session.inflightPromptRequestId = undefined;
+          if (options.prompt === true && !session.promptTimeoutPaused) {
+            this.failSession(session, new ACPAdapterError("prompt_timeout", `ACP prompt did not complete within ${timeoutMs}ms`));
+            return;
+          }
+        }
+        current.reject(new ACPAdapterError("request_timeout", `ACP request '${method}' did not complete within ${timeoutMs}ms`));
+      }, timeoutMs);
+      pending.timer?.unref?.();
+    };
+    scheduleTimeout();
     session.pendingRequests.set(requestId, pending);
     if (options.prompt === true) {
       session.inflightPromptRequestId = requestId;
@@ -334,8 +359,8 @@ export abstract class ACPAdapter {
     // ACP `session/prompt` requires `{ sessionId, prompt: ContentBlock[] }`.
     return this.request(sessionId, "session/prompt", {
       sessionId: session.serverSessionId ?? session.acpSessionId,
-      prompt: [{ type: "text", text: serializePrompt(message) }]
-    }, { prompt: true, timeoutMs: PROMPT_REQUEST_TIMEOUT_MS });
+      prompt: acpPromptContentBlocks(message, session.agentPromptCapabilities)
+    }, { prompt: true });
   }
 
   protected cancelRunSync(runId: string): void {
@@ -431,9 +456,19 @@ export abstract class ACPAdapter {
       }
       return undefined;
     }
+    if (message.id !== undefined && message.method !== undefined) {
+      if (this.handleProviderRequest(session, message)) {
+        this.refreshInflightPromptTimeout(session);
+        return undefined;
+      }
+      this.writeJson(session, { jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "Method not found" } });
+      this.refreshInflightPromptTimeout(session);
+      return undefined;
+    }
     if (message.method === "protocol/configUpdated") {
       const event = { type: "protocol/configUpdated", payload: message.params };
       this.onProviderEvent(session, event);
+      this.refreshInflightPromptTimeout(session);
       return event;
     }
     // ACP v1 spec uses `session/update` as the umbrella notification; translate the inner
@@ -447,13 +482,31 @@ export abstract class ACPAdapter {
           const synthetic: JsonRpcMessage = { jsonrpc: "2.0", method: translated.method, params: translated.params };
           const event = this.mapProviderEvent(synthetic) ?? { type: translated.method, payload: translated.params };
           this.onProviderEvent(session, event);
+          this.refreshInflightPromptTimeout(session);
           return event;
         }
       }
     }
     const event = this.mapProviderEvent(message);
-    if (event !== undefined) this.onProviderEvent(session, event);
+    if (event !== undefined) {
+      this.onProviderEvent(session, event);
+      this.refreshInflightPromptTimeout(session);
+    }
     return event;
+  }
+
+  private handleProviderRequest(session: AcpAdapterSession, message: JsonRpcMessage): boolean {
+    const requestId = message.id;
+    if (requestId === undefined) return false;
+    if (message.method === "session/request_permission" || message.method === "session/request_permissions") {
+      this.writeJson(session, {
+        jsonrpc: "2.0",
+        id: requestId,
+        result: permissionResponseForProviderRequest(message.params)
+      });
+      return true;
+    }
+    return false;
   }
 
   protected emitRaw(session: AcpAdapterSession, stream: "stdout" | "stderr", line: string): void {
@@ -473,7 +526,7 @@ export abstract class ACPAdapter {
       // (e.g. `claude` from `npm i -g`). It still works on POSIX without changes.
       const child = crossSpawn(invocation.command, invocation.args, {
         cwd: session.workDir,
-        env: filterSafeEnv(spawnSpec.env ?? process.env),
+        env: filterSafeEnv({ ...process.env, ...(spawnSpec.env ?? {}) }),
         windowsVerbatimArguments: false,
         windowsHide: process.platform === "win32",
         detached: false
@@ -512,7 +565,8 @@ export abstract class ACPAdapter {
         method: "initialize",
         startedAt: this.now(),
         timeoutMs: 30_000,
-        resolve: () => {
+        resolve: (result) => {
+          session.agentPromptCapabilities = promptCapabilitiesFromInitializeResult(result, this.promptCapabilityOverrides);
           // authMethods in initialize does NOT require calling authenticate first.
           // AionUi's confirmed strategy: attempt session/new directly regardless of authMethods.
           // opencode returns authMethods but doesn't implement authenticate (-32603 "not implemented").
@@ -573,6 +627,28 @@ export abstract class ACPAdapter {
         this.handleStdinWriteError(session, error);
       }
     }
+  }
+
+  private refreshInflightPromptTimeout(session: AcpAdapterSession): void {
+    const requestId = session.inflightPromptRequestId;
+    if (requestId === undefined) return;
+    const pending = session.pendingRequests.get(requestId);
+    if (pending === undefined || pending.method !== "session/prompt") return;
+    if (pending.timer !== undefined) clearTimeout(pending.timer);
+    pending.timer = setTimeout(() => {
+      const current = session.pendingRequests.get(requestId);
+      if (current === undefined) return;
+      session.pendingRequests.delete(requestId);
+      if (session.inflightPromptRequestId === requestId) {
+        session.inflightPromptRequestId = undefined;
+        if (!session.promptTimeoutPaused) {
+          this.failSession(session, new ACPAdapterError("prompt_timeout", `ACP prompt did not complete within ${current.timeoutMs}ms of provider activity`));
+          return;
+        }
+      }
+      current.reject(new ACPAdapterError("request_timeout", `ACP request '${current.method}' did not complete within ${current.timeoutMs}ms`));
+    }, pending.timeoutMs);
+    pending.timer?.unref?.();
   }
 
   private handleStdinWriteError(session: AcpAdapterSession, error: unknown): void {
@@ -651,8 +727,8 @@ export abstract class ACPAdapter {
       try {
         this.request(session.acpSessionId, "session/prompt", {
           sessionId: session.serverSessionId ?? session.acpSessionId,
-          prompt: [{ type: "text", text: serializePrompt(item.message) }]
-        }, { prompt: true, timeoutMs: PROMPT_REQUEST_TIMEOUT_MS });
+          prompt: acpPromptContentBlocks(item.message, session.agentPromptCapabilities)
+        }, { prompt: true });
       } catch (err) {
         this.emitRaw(session, "stderr", `failed to flush queued prompt: ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -662,6 +738,10 @@ export abstract class ACPAdapter {
   private startLiveness(session: AcpAdapterSession): void {
     session.livenessTimer = setInterval(() => {
       if (session.state === "disposed" || session.state === "failed") return;
+      // Startup can be slow for npx-backed ACP servers (notably Codex). The
+      // handshake timeout covers startup hangs; liveness pings only make sense
+      // after the server is ready to answer JSON-RPC requests.
+      if (session.handshakeComplete !== true) return;
       // Some ACP servers (e.g. opencode) don't implement `protocol/ping`. Skip pinging once
       // the server has told us it's an unknown method — process liveness is still detected
       // via `child.exit` + stdin write errors elsewhere.
@@ -802,7 +882,73 @@ export function adapterEvent(type: EventType, workspaceId: string, adapterId: st
 
 export function serializePrompt(message: AdapterMessage): string {
   const header = `<agenthub-message role="${message.role}">`;
-  return `${header}\n${message.content}\n</agenthub-message>`;
+  const attachments = message.attachments?.length
+    ? `\n\n<agenthub-attachments>\n${message.attachments.map(serializeAttachmentSummary).join("\n")}\n</agenthub-attachments>`
+    : "";
+  return `${header}\n${message.content}${attachments}\n</agenthub-message>`;
+}
+
+function serializeAttachmentSummary(attachment: NonNullable<AdapterMessage["attachments"]>[number], index: number): string {
+  const localPath = localPathForAttachment(attachment);
+  return `- ${attachment.type} ${index + 1}: ${attachment.name} (${attachment.mimeType})${localPath !== undefined ? ` [local path: ${localPath}]` : ""}`;
+}
+
+export function acpPromptContentBlocks(message: AdapterMessage, capabilities?: AcpPromptCapabilities): AcpPromptContentBlock[] {
+  void capabilities;
+  const blocks: AcpPromptContentBlock[] = [{ type: "text", text: serializePrompt(message) }];
+  for (const attachment of message.attachments ?? []) {
+    if (attachment.type === "image") {
+      blocks.push({ type: "image", mimeType: attachment.mimeType, data: attachment.data, ...(attachment.uri !== undefined ? { uri: attachment.uri } : {}) });
+    }
+    if (attachment.type === "audio") {
+      blocks.push({ type: "audio", mimeType: attachment.mimeType, data: attachment.data });
+    }
+    if (attachment.type === "file" && shouldSendAcpFileResource(attachment)) {
+      blocks.push({ type: "resource", resource: resourceContentBlock(attachment) });
+    }
+  }
+  return blocks;
+}
+
+function shouldSendAcpFileResource(attachment: Extract<NonNullable<AdapterMessage["attachments"]>[number], { readonly type: "file" }>): boolean {
+  if (isTextResourceAttachment(attachment)) return true;
+  return localPathForAttachment(attachment) === undefined;
+}
+
+function localPathForAttachment(attachment: NonNullable<AdapterMessage["attachments"]>[number]): string | undefined {
+  if (!("localPath" in attachment)) return undefined;
+  return typeof attachment.localPath === "string" && attachment.localPath.length > 0 ? attachment.localPath : undefined;
+}
+
+function resourceContentBlock(attachment: Extract<NonNullable<AdapterMessage["attachments"]>[number], { readonly type: "file" }>): { readonly uri: string; readonly mimeType?: string; readonly text: string } | { readonly uri: string; readonly mimeType?: string; readonly blob: string } {
+  if (isTextResourceAttachment(attachment)) {
+    return { uri: attachment.uri, mimeType: attachment.mimeType, text: Buffer.from(attachment.data, "base64").toString("utf8") };
+  }
+  return { uri: attachment.uri, mimeType: attachment.mimeType, blob: attachment.data };
+}
+
+function isTextResourceAttachment(attachment: { readonly name: string; readonly mimeType: string }): boolean {
+  const mime = attachment.mimeType.toLowerCase().split(";")[0]?.trim() ?? "";
+  const name = attachment.name.toLowerCase();
+  return mime.startsWith("text/")
+    || mime.includes("json")
+    || mime.includes("xml")
+    || mime.includes("yaml")
+    || mime.includes("javascript")
+    || mime.includes("typescript")
+    || name.endsWith(".md")
+    || name.endsWith(".markdown")
+    || name.endsWith(".txt")
+    || name.endsWith(".json")
+    || name.endsWith(".xml")
+    || name.endsWith(".yaml")
+    || name.endsWith(".yml")
+    || name.endsWith(".js")
+    || name.endsWith(".ts")
+    || name.endsWith(".tsx")
+    || name.endsWith(".jsx")
+    || name.endsWith(".css")
+    || name.endsWith(".html");
 }
 
 export function notImplementedEffect(adapterName: string, stage: string): Effect.Effect<never, AdapterError> {
@@ -831,6 +977,100 @@ export function classifyClaudeDetection(command = "claude"): { readonly ok: true
 export function permissionForTool(toolName: string, input: unknown): PermissionResource {
   if (toolName.toLowerCase() === "bash" && isRecord(input) && typeof input.command === "string") return { type: "shell", command: input.command };
   return { type: "tool", toolName, input };
+}
+
+function permissionResponseForProviderRequest(params: unknown): { readonly outcome: { readonly outcome: "selected"; readonly optionId: string } | { readonly outcome: "cancelled" } } {
+  const options = permissionOptions(params);
+  const agentHubRoomRequest = isAgentHubRoomPermissionRequest(params);
+  const preferred = agentHubRoomRequest
+    ? selectPermissionOption(options, ["allow_once", "allow_always"]) ?? firstNonRejectOption(options)
+    : selectPermissionOption(options, ["reject_once", "reject_always"]);
+  if (preferred !== undefined) return { outcome: { outcome: "selected", optionId: preferred.optionId } };
+  if (agentHubRoomRequest) return { outcome: { outcome: "selected", optionId: "allow_once" } };
+  return { outcome: { outcome: "cancelled" } };
+}
+
+function permissionOptions(params: unknown): Array<{ readonly optionId: string; readonly kind?: string; readonly name?: string }> {
+  const root = isRecord(params) ? params : {};
+  const rawOptions = rawPermissionOptions(root.options) ?? rawPermissionOptions(root.permissionOptions) ?? [];
+  const options: Array<{ readonly optionId: string; readonly kind?: string; readonly name?: string }> = [];
+  for (const rawOption of rawOptions) {
+    if (typeof rawOption === "string" && rawOption.length > 0) {
+      options.push({ optionId: rawOption, kind: normalizePermissionToken(rawOption), name: rawOption });
+      continue;
+    }
+    if (!isRecord(rawOption)) continue;
+    const optionId = stringField(rawOption, "optionId") ?? stringField(rawOption, "option_id") ?? stringField(rawOption, "id") ?? stringField(rawOption, "value");
+    if (optionId === undefined) continue;
+    const kind = stringField(rawOption, "kind") ?? stringField(rawOption, "type") ?? stringField(rawOption, "permissionKind");
+    const name = stringField(rawOption, "name") ?? stringField(rawOption, "label") ?? stringField(rawOption, "title");
+    options.push({
+      optionId,
+      ...(kind !== undefined ? { kind: normalizePermissionToken(kind) } : {}),
+      ...(name !== undefined ? { name } : {})
+    });
+  }
+  return options;
+}
+
+function selectPermissionOption(options: ReadonlyArray<{ readonly optionId: string; readonly kind?: string; readonly name?: string }>, kinds: readonly string[]): { readonly optionId: string } | undefined {
+  const normalizedKinds = kinds.map(normalizePermissionToken);
+  for (const kind of normalizedKinds) {
+    const exact = options.find((option) => normalizePermissionToken(option.kind ?? "") === kind);
+    if (exact !== undefined) return exact;
+  }
+  const patterns = normalizedKinds.flatMap((kind) => [kind, kind.replace(/_/gu, " "), kind.replace(/_/gu, "-")]);
+  return options.find((option) => {
+    const haystack = normalizePermissionToken(`${option.optionId} ${option.name ?? ""}`);
+    return patterns.some((pattern) => haystack.includes(normalizePermissionToken(pattern)));
+  });
+}
+
+function firstNonRejectOption(options: ReadonlyArray<{ readonly optionId: string; readonly kind?: string; readonly name?: string }>): { readonly optionId: string } | undefined {
+  return options.find((option) => {
+    const haystack = normalizePermissionToken(`${option.optionId} ${option.kind ?? ""} ${option.name ?? ""}`);
+    return !haystack.includes("reject") && !haystack.includes("deny");
+  });
+}
+
+function rawPermissionOptions(value: unknown): unknown[] | undefined {
+  if (Array.isArray(value)) return value;
+  if (!isRecord(value)) return undefined;
+  return Object.entries(value).map(([id, option]) => isRecord(option) ? { id, ...option } : option);
+}
+
+function normalizePermissionToken(value: string): string {
+  return value
+    .replace(/([a-z0-9])([A-Z])/gu, "$1_$2")
+    .replace(/[\s-]+/gu, "_")
+    .toLowerCase();
+}
+
+function isAgentHubRoomPermissionRequest(params: unknown): boolean {
+  const root = isRecord(params) ? params : {};
+  const toolCall = isRecord(root.toolCall) ? root.toolCall : isRecord(root.tool_call) ? root.tool_call : root;
+  const rawInput = isRecord(toolCall.rawInput)
+    ? toolCall.rawInput
+    : isRecord(toolCall.input)
+      ? toolCall.input
+      : isRecord(toolCall.arguments)
+        ? toolCall.arguments
+        : {};
+  const server = stringField(rawInput, "server") ?? stringField(toolCall, "server");
+  const title = stringField(toolCall, "title") ?? stringField(toolCall, "name") ?? stringField(root, "title") ?? stringField(root, "name");
+  const toolName = stringField(rawInput, "tool") ?? stringField(toolCall, "tool");
+  if (server === "agenthub-room") return true;
+  if (toolName !== undefined && toolName.startsWith("agenthub-room/")) return true;
+  if (title !== undefined && /\bagenthub-room\//u.test(title)) return true;
+  return containsAgentHubRoomReference(params);
+}
+
+function containsAgentHubRoomReference(value: unknown, depth = 0): boolean {
+  if (depth > 6) return false;
+  if (typeof value === "string") return /\bagenthub-room(?:\/|$)/u.test(value);
+  if (Array.isArray(value)) return value.some((item) => containsAgentHubRoomReference(item, depth + 1));
+  if (!isRecord(value)) return false;
+  return Object.values(value).some((item) => containsAgentHubRoomReference(item, depth + 1));
 }
 
 function clearPending(pending: AcpPendingRequest): void {
@@ -887,6 +1127,21 @@ function isMethodNotFound(err: AdapterError): boolean {
     if (typeof message === "string" && /method not found|unknown method/i.test(message)) return true;
   }
   return false;
+}
+
+function promptCapabilitiesFromInitializeResult(result: unknown, overrides?: AcpPromptCapabilityOverrides): AcpPromptCapabilities {
+  const root = isRecord(result) ? result : {};
+  const agentCapabilities = isRecord(root.agentCapabilities)
+    ? root.agentCapabilities
+    : isRecord(root.capabilities) ? root.capabilities : {};
+  const promptCapabilities = isRecord(agentCapabilities.promptCapabilities)
+    ? agentCapabilities.promptCapabilities
+    : isRecord(root.promptCapabilities) ? root.promptCapabilities : {};
+  return {
+    image: overrides?.image ?? promptCapabilities.image === true,
+    audio: overrides?.audio ?? promptCapabilities.audio === true,
+    embeddedContext: overrides?.embeddedContext ?? promptCapabilities.embeddedContext === true
+  };
 }
 
 function wrapFileReadResult(pending: AcpPendingRequest, result: unknown): unknown {

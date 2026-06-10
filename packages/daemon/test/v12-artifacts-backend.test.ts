@@ -310,12 +310,38 @@ describe("V1.2 artifact backend routes", () => {
     expect(created.status).toBe(201);
     const payload = await created.json() as { readonly agentBindingId: string };
 
-    const contacts = await (await fetch(`${baseUrl}/agents/contacts`)).json() as { readonly contacts: readonly { readonly agentBindingId: string; readonly displayName: string; readonly runtimeId: string; readonly modelConfigId?: string; readonly runtimeKind: string; readonly status: string }[] };
-    expect(contacts.contacts).toContainEqual(expect.objectContaining({ agentBindingId: payload.agentBindingId, displayName: "Frontend Expert", runtimeId, runtimeKind: "opencode", status: "available" }));
+    const contacts = await (await fetch(`${baseUrl}/agents/contacts`)).json() as { readonly contacts: readonly { readonly agentBindingId: string; readonly displayName: string; readonly avatarUrl: string; readonly runtimeId: string; readonly modelConfigId?: string; readonly runtimeKind: string; readonly status: string }[] };
+    const contact = contacts.contacts.find((item) => item.agentBindingId === payload.agentBindingId);
+    expect(contact).toMatchObject({ agentBindingId: payload.agentBindingId, displayName: "Frontend Expert", runtimeId, runtimeKind: "opencode", status: "available" });
+    expect(contact?.avatarUrl).toContain("/avatars/dicebear/v1/bottts-neutral/");
+
+    const avatar = await fetch(`${baseUrl}${contact?.avatarUrl ?? ""}`);
+    expect(avatar.status).toBe(200);
+    expect(avatar.headers.get("content-type")).toContain("image/svg+xml");
+    expect(avatar.headers.get("cache-control")).toContain("immutable");
+    expect(await avatar.text()).toContain("<svg");
+    const cachedAvatar = await fetch(`${baseUrl}${contact?.avatarUrl ?? ""}`, { headers: { "if-none-match": avatar.headers.get("etag") ?? "" } });
+    expect(cachedAvatar.status).toBe(304);
 
     const duplicate = await fetch(`${baseUrl}/agents/custom`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Frontend Expert", runtimeId, systemPrompt: "Again" }) });
     expect(duplicate.status).toBe(400);
     expect(await duplicate.json()).toMatchObject({ error: "agent_name_conflict" });
+  });
+
+  it("serves generated avatars as public cacheable image assets in token mode", async () => {
+    await currentDaemon().close();
+    daemon = undefined;
+    baseUrl = "";
+    await startTestDaemon("agenthub-v12-avatar-token-", { token: "test-token" });
+
+    const protectedApi = await fetch(`${baseUrl}/agents/contacts`);
+    expect(protectedApi.status).toBe(401);
+
+    const avatar = await fetch(`${baseUrl}/avatars/dicebear/v1/notionists-neutral/Zoish.svg`);
+    expect(avatar.status).toBe(200);
+    expect(avatar.headers.get("content-type")).toContain("image/svg+xml");
+    expect(avatar.headers.get("cache-control")).toContain("immutable");
+    expect(await avatar.text()).toContain("<svg");
   });
 
   it("updates and disables contacts through /agents/contacts routes with persistent disabled_at state", async () => {
@@ -325,7 +351,7 @@ describe("V1.2 artifact backend routes", () => {
     const updated = await fetch(`${baseUrl}/agents/contacts/${created.agentBindingId}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "Renamed Expert", description: "Updated contact", avatarUrl: "agenthub://avatar/renamed" })
+      body: JSON.stringify({ name: "Renamed Expert", description: "Updated contact", avatarUrl: "/avatars/dicebear/v1/personas/contact-renamed.svg" })
     });
     expect(updated.status).toBe(200);
     expect(await updated.json()).toMatchObject({ agentBindingId: created.agentBindingId });
@@ -335,7 +361,7 @@ describe("V1.2 artifact backend routes", () => {
       agentBindingId: created.agentBindingId,
       displayName: "Renamed Expert",
       description: "Updated contact",
-      avatarUrl: "agenthub://avatar/renamed"
+      avatarUrl: "/avatars/dicebear/v1/personas/contact-renamed.svg"
     }));
 
     const deleted = await fetch(`${baseUrl}/agents/contacts/${created.agentBindingId}`, { method: "DELETE" });
@@ -347,14 +373,14 @@ describe("V1.2 artifact backend routes", () => {
     expect(contacts.contacts.some((contact) => contact.agentBindingId === created.agentBindingId)).toBe(false);
   });
 
-  it("publishes explicit nulls when clearing contact avatar and description", async () => {
+  it("falls back to the default avatar when clearing contact avatar and description", async () => {
     const runtimeId = seedRuntime("runtime_contact_clear", "opencode");
     const created = await createCustomAgent("Clearable Expert", runtimeId);
 
     const populated = await fetch(`${baseUrl}/agents/contacts/${created.agentBindingId}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ description: "Has description", avatarUrl: "agenthub://avatar/clearable" })
+      body: JSON.stringify({ description: "Has description", avatarUrl: "/avatars/dicebear/v1/personas/contact-clearable.svg" })
     });
     expect(populated.status).toBe(200);
 
@@ -368,9 +394,10 @@ describe("V1.2 artifact backend routes", () => {
     const event = currentDaemon().database.sqlite.prepare("SELECT payload FROM events WHERE type = 'agent.contact.updated' AND json_extract(payload, '$.agentBindingId') = ? ORDER BY seq DESC LIMIT 1").get(created.agentBindingId) as { readonly payload: string } | undefined;
     expect(JSON.parse(event?.payload ?? "{}")).toMatchObject({
       agentBindingId: created.agentBindingId,
-      avatarUrl: null,
       description: null
     });
+    expect(JSON.parse(event?.payload ?? "{}").avatarUrl).toContain("/avatars/dicebear/v1/bottts-neutral/");
+    expect(currentDaemon().database.sqlite.prepare("SELECT avatar_url FROM agent_bindings WHERE id = ?").get(created.agentBindingId)).toMatchObject({ avatar_url: null });
   });
 
   it("allows recreating a disabled contact name and rejects disabled bindings as new room participants", async () => {

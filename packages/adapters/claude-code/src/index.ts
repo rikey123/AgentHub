@@ -2,9 +2,9 @@ import { randomUUID } from "node:crypto";
 
 import { ACPAdapter, ACPAdapterError, AdapterHealthRegistry, AdapterRawLogger, classifyClaudeDetection, emitAdapterRegistered, permissionForTool, type AcpAdapterSession, type AcpProviderEvent, type AdapterRuntimeServices, type JsonRpcMessage } from "@agenthub/adapter-acp-base";
 import type { PublishInput } from "@agenthub/bus";
-import { AdapterBridge, buildRunPrompt, persistAssistantPublicMessage, prepareAdapterRunWorkspace, runWithPreparedWorkDir, type AdapterArtifactFSBoundary, type RoomMcpServer, type RunLifecycleService, type RunRow } from "@agenthub/orchestrator";
+import { AdapterBridge, buildRunPrompt, buildRunPromptAttachments, persistAssistantPublicMessage, prepareAdapterRunWorkspace, runWithPreparedWorkDir, type AdapterArtifactFSBoundary, type RoomMcpServer, type RunLifecycleService, type RunRow } from "@agenthub/orchestrator";
 import type { PermissionEngine } from "@agenthub/permissions";
-import type { AdapterError, AgentAdapterManifest, DetectedRuntime } from "@agenthub/protocol";
+import type { AdapterError, AdapterMessage, AgentAdapterManifest, DetectedRuntime } from "@agenthub/protocol";
 import { Effect } from "effect";
 
 export const claudeCodeManifest: AgentAdapterManifest = {
@@ -106,7 +106,7 @@ export class ClaudeCodeACPAdapter extends ACPAdapter {
     this.drainPendingFailure(run.id, acpSession);
     if (acpSession.state === "failed") return;
     this.health?.update({ adapterId: this.id, workspaceId: run.workspace_id, liveness: "busy", pendingRunIds: [run.id] });
-    this.sendPrompt(session.id, { role: "user", content: this.promptFromRun(promptRun) });
+    this.sendPrompt(session.id, this.promptMessageFromRun(promptRun));
   }
 
   warmRoomAgent(input: { readonly roomId: string; readonly agentId: string; readonly workDir?: string }): string {
@@ -278,6 +278,16 @@ export class ClaudeCodeACPAdapter extends ACPAdapter {
     if (db === undefined) return `Run ${run.id} for agent ${run.agent_id}`;
     const skillsBlock = this.options.getSkillsBlock?.(run.id);
     return buildRunPrompt(run, db, { ...(this.options.now !== undefined ? { now: this.options.now } : {}), ...(skillsBlock !== undefined ? { skillsBlock } : {}) });
+  }
+
+  private promptMessageFromRun(run: RunRow): AdapterMessage {
+    const db = this.options.services?.database;
+    const attachments = db !== undefined ? buildRunPromptAttachments(run, db, { localPathOnlyBinaryFiles: true }) : [];
+    return {
+      role: "user",
+      content: this.promptFromRun(run),
+      ...(attachments.length > 0 ? { attachments } : {})
+    };
   }
 }
 

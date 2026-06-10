@@ -113,6 +113,7 @@ export type CommandType =
   | "CreateRoom"
   | "ArchiveRoom"
   | "UnarchiveRoom"
+  | "DeleteRoom"
   | "ReloadAgentProfile"
   | "WakeAgent"
   | "RetryRun"
@@ -234,6 +235,7 @@ const canonicalCommandTypes = new Set<CommandType>([
   "CreateRoom",
   "ArchiveRoom",
   "UnarchiveRoom",
+  "DeleteRoom",
   "ReloadAgentProfile",
   "WakeAgent",
   "RetryRun",

@@ -46,5 +46,6 @@ describe("MembersPanel team management contract", () => {
     expect(html).toContain("Build member management UI");
     expect(html).toContain("进行中");
     expect(html).toContain("技能");
+    expect(html).toMatch(/<summary class="ah-member-skills-summary">[\s\S]*\.\.\./);
   });
 });

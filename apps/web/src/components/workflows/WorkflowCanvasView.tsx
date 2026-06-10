@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Avatar, Chip, ListBox, Modal } from "@heroui/react";
+import { Chip, ListBox, Modal } from "@heroui/react";
 import {
   Background,
   Controls,
@@ -21,6 +21,7 @@ import "@xyflow/react/dist/style.css";
 import { initials } from "../../lib/format.ts";
 import { runtimeDisplayName, runtimeInstanceLabel } from "../../lib/runtimeDisplay.ts";
 import { normalizeAgentContacts } from "../rail/RailViews.tsx";
+import { IdentityAvatar } from "../IdentityAvatar.tsx";
 import { normalizeRuntimeList, type RuntimeConfig } from "../settings/RuntimesTab.tsx";
 import type {
   AgentContactViewModel,
@@ -905,10 +906,12 @@ function ContactImportModal({
                       textValue={contact.displayName}
                       className="ah-workflow-contact-item"
                     >
-                      <Avatar className="ah-workflow-contact-avatar" size="sm">
-                        {contact.avatarUrl ? <Avatar.Image alt={contact.displayName} src={contact.avatarUrl} /> : null}
-                        <Avatar.Fallback>{initials(contact.displayName)}</Avatar.Fallback>
-                      </Avatar>
+                      <IdentityAvatar
+                        name={contact.displayName}
+                        avatarUrl={contact.avatarUrl}
+                        className="ah-workflow-contact-avatar"
+                        size="sm"
+                      />
                       <span className="ah-workflow-contact-main">
                         <span className="ah-workflow-contact-title">
                           <span>{contact.displayName}</span>

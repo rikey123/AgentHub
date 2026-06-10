@@ -9,6 +9,7 @@ interface RoomListProps {
   onSelect: (id: string) => void;
   onCreate: () => void;
   onTogglePin?: ((id: string, isPinned: boolean) => void) | undefined;
+  onRequestDelete?: ((room: RoomViewModel) => void) | undefined;
   onSearchQueryChange?: ((query: string) => void) | undefined;
   useServerSearchResults?: boolean | undefined;
 }
@@ -88,7 +89,7 @@ export function updateRoomListSearchQuery(
   onSearchQueryChange?.(query);
 }
 
-export function RoomList({ rooms, activeRoomId, onSelect, onCreate, onTogglePin, onSearchQueryChange, useServerSearchResults }: RoomListProps) {
+export function RoomList({ rooms, activeRoomId, onSelect, onCreate, onTogglePin, onRequestDelete, onSearchQueryChange, useServerSearchResults }: RoomListProps) {
   const [query, setQuery] = useState("");
 
   const activeRooms = useMemo(() => {
@@ -227,6 +228,21 @@ export function RoomList({ rooms, activeRoomId, onSelect, onCreate, onTogglePin,
                     <Badge color="danger" variant="primary">{String(room.unreadCount)}</Badge>
                   ) : null}
                 </div>
+
+                {onRequestDelete ? (
+                  <button
+                    type="button"
+                    aria-label={`删除房间 ${room.title}`}
+                    data-testid={`room-list-delete-${room.id}`}
+                    className="absolute bottom-2 right-2 flex h-6 w-6 items-center justify-center rounded-full border border-border bg-overlay text-muted opacity-0 shadow-sm transition-opacity hover:border-danger hover:bg-danger-soft hover:text-danger focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-danger group-hover:opacity-100"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onRequestDelete(room);
+                    }}
+                  >
+                    <span aria-hidden="true" className="text-sm leading-none">×</span>
+                  </button>
+                ) : null}
               </li>
             );
           })}

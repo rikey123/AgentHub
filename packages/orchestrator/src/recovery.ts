@@ -220,6 +220,8 @@ export class ReclaimStaleClaimedRun {
 
   private enqueueRestartRecoveryWake(run: RunRow): void {
     if (run.room_id === null || run.agent_id === null) return;
+    const roomExists = this.database.sqlite.prepare("SELECT 1 FROM rooms WHERE id = ? AND deleted_at IS NULL LIMIT 1").get(run.room_id);
+    if (roomExists === undefined) return;
     const wakeAgentId = resolveWakeOutboxAgentId(this.database, run.room_id, run.agent_id);
     if (wakeAgentId === undefined) return;
     const payload = JSON.stringify({ runId: run.id });

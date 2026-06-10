@@ -15,5 +15,9 @@ export async function runCli(argv = process.argv.slice(2)): Promise<number> {
 }
 
 if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
-  runCli().then((code) => { process.exitCode = code; }, (error: unknown) => { process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`); process.exitCode = 1; });
+runCli().then((code) => { process.exitCode = code; }, (error: unknown) => {
+  const message = error instanceof Error && process.env.AGENTHUB_DEBUG_PHASES === "1" ? error.stack ?? error.message : error instanceof Error ? error.message : String(error);
+  process.stderr.write(`${message}\n`);
+  process.exitCode = 1;
+});
 }

@@ -6,9 +6,10 @@ interface HomeViewProps {
   rooms: ReadonlyArray<RoomViewModel>;
   onOpenRoom: (id: string) => void;
   onCreate: () => void;
+  onRequestDelete?: ((room: RoomViewModel) => void) | undefined;
 }
 
-export function HomeView({ rooms, onOpenRoom, onCreate }: HomeViewProps) {
+export function HomeView({ rooms, onOpenRoom, onCreate, onRequestDelete }: HomeViewProps) {
   const total = rooms.length;
   const active = rooms.filter((r) => r.runs.some((run) => run.status === "running" || run.status === "starting")).length;
   const unread = rooms.reduce((acc, r) => acc + r.unreadCount, 0);
@@ -68,9 +69,23 @@ export function HomeView({ rooms, onOpenRoom, onCreate }: HomeViewProps) {
                   <Card
                     key={room.id}
                     variant="default"
-                    className="cursor-pointer transition-colors hover:bg-surface-secondary"
+                    className="group relative cursor-pointer transition-colors hover:bg-surface-secondary"
                     onClick={() => onOpenRoom(room.id)}
                   >
+                    {onRequestDelete ? (
+                      <button
+                        type="button"
+                        aria-label={`删除房间 ${room.title}`}
+                        data-testid={`home-room-delete-${room.id}`}
+                        className="absolute right-2 top-2 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-border bg-overlay text-muted opacity-0 shadow-sm transition-opacity hover:border-danger hover:bg-danger-soft hover:text-danger focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-danger group-hover:opacity-100"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onRequestDelete(room);
+                        }}
+                      >
+                        <span aria-hidden="true" className="text-sm leading-none">×</span>
+                      </button>
+                    ) : null}
                     <Card.Header>
                       <div className="flex items-start gap-2">
                         <Card.Title className="flex-1 truncate">{room.title}</Card.Title>

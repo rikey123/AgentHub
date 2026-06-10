@@ -147,6 +147,18 @@ describe("useProjector replay handling", () => {
     expect(emittedState.rooms.get(roomId)?.archivedAt).toBeUndefined();
   });
 
+  it("removes a room from the view model when a room.deleted event arrives", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "solo" }, 100));
+    expect(emittedState.rooms.get(roomId)).toBeDefined();
+
+    projector.apply(makeEvent("room.deleted", roomId, { roomId }, 200));
+
+    expect(emittedState.rooms.has(roomId)).toBe(false);
+  });
+
   it("advances hydrated room activity from live activity events without moving backward", () => {
     const roomId = `room-${randomUUID()}`;
     const projector = getProjector();
@@ -1274,8 +1286,52 @@ describe("useProjector replay handling", () => {
     });
   });
 
+  it("assigns a default DiceBear avatar to user-authored messages", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "solo" }));
+    projector.apply(makeEvent("message.created", roomId, {
+      messageId: "user-message-with-avatar",
+      senderId: "local",
+      role: "user",
+      text: "Hello"
+    }));
+
+    expect(emittedState.rooms.get(roomId)?.messages.find((item) => item.id === "user-message-with-avatar")).toMatchObject({
+      senderType: "user",
+      senderAvatarUrl: "/avatars/dicebear/v1/notionists-neutral/Zoish.svg"
+    });
+  });
+
+  it("backfills existing agent messages when member avatar metadata arrives late", () => {
+    const roomId = `room-${randomUUID()}`;
+    const avatarUrl = "/avatars/dicebear/v1/notionists-neutral/late-reviewer.svg";
+    const projector = getProjector();
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "team" }));
+    projector.apply(makeEvent("message.created", roomId, {
+      messageId: "late-agent-message",
+      senderType: "agent",
+      senderId: "binding-reviewer",
+      role: "assistant",
+      text: "Review complete"
+    }));
+    projector.apply(makeAgentEvent("agent.joined", roomId, "binding-reviewer", {
+      agentId: "binding-reviewer",
+      agentBindingId: "binding-reviewer",
+      agentName: "Reviewer",
+      avatarUrl,
+      role: "teammate"
+    }));
+
+    expect(emittedState.rooms.get(roomId)?.messages.find((item) => item.id === "late-agent-message")).toMatchObject({
+      senderName: "Reviewer",
+      senderAvatarUrl: avatarUrl
+    });
+  });
+
   it("projects agent.joined V1.1 member metadata for the Members panel", () => {
     const roomId = `room-${randomUUID()}`;
+    const avatarUrl = "/avatars/dicebear/v1/bottts-neutral/test-builder.svg";
     const projector = getProjector();
     projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "team" }));
     projector.apply(makeAgentEvent("agent.joined", roomId, "binding-builder", {
@@ -1285,18 +1341,30 @@ describe("useProjector replay handling", () => {
       adapterId: "native",
       agentBindingId: "binding-builder",
       roleId: "role-builder",
+      avatarUrl,
       capabilities: ["code.edit", "file.write"]
+    }));
+    projector.apply(makeAgentEvent("message.created", roomId, "binding-builder", {
+      messageId: "message-with-avatar",
+      senderType: "agent",
+      senderId: "binding-builder",
+      role: "assistant",
+      text: "Avatar carried through"
     }));
 
     const participant = emittedState.rooms.get(roomId)?.participants.find((item) => item.id === "binding-builder");
     expect(participant).toMatchObject({
       id: "binding-builder",
       name: "Builder",
+      avatarUrl,
       role: "teammate",
       adapterId: "native",
       agentBindingId: "binding-builder",
       roleId: "role-builder",
       capabilities: ["code.edit", "file.write"]
+    });
+    expect(emittedState.rooms.get(roomId)?.messages.find((item) => item.id === "message-with-avatar")).toMatchObject({
+      senderAvatarUrl: avatarUrl
     });
   });
 

@@ -4,7 +4,7 @@ import type { Command, CommandBus, EventBus, PublishInput } from "@agenthub/bus"
 import type { AgentHubDatabase } from "@agenthub/db";
 import type { EventType } from "@agenthub/protocol/events";
 
-import { RunLifecycleService, type Cost, type RunRow } from "./run-lifecycle-service.ts";
+import { RunLifecycleService, type Cost, type RunRow, type WakeReason } from "./run-lifecycle-service.ts";
 
 /**
  * Synchronous brief resolver. Returns the brief text to embed in `message.brief.published`.
@@ -66,6 +66,45 @@ export function prepareAdapterRunWorkspace(input: { readonly run: RunRow; readon
 export function runWithPreparedWorkDir(run: RunRow, workDir: string): RunRow {
   return run.work_dir === workDir ? run : { ...run, work_dir: workDir };
 }
+
+const MAX_AUTO_CONTINUATION_DEPTH = 4;
+const CONTINUABLE_WAKE_REASONS = new Set<WakeReason>([
+  "primary_turn",
+  "user_mention",
+  "delegated_task",
+  "task_review",
+  "task_blocked",
+  "rule_review",
+  "knock_approved",
+  "group_review",
+  "phase_completed",
+  "agent_crashed",
+  "consume_pending_turn",
+  "mailbox_message",
+  "execute",
+  "agent_stalled"
+]);
+
+const AUTO_CONTINUE_INSTRUCTIONS = [
+  "Continue the previous run and finish the user's task now.",
+  "Do not stop after describing what you will do next. Use the available runtime tools now; when an uploaded attachment is represented by a local path, inspect that path directly.",
+  "Only end after you have provided the requested answer, or after you have clearly reported a concrete runtime limitation."
+].join("\n");
+
+const CONTINUATION_PROMISE_PATTERNS = [
+  /(?:\u63a5\u4e0b\u6765|\u4e0b\u4e00\u6b65|\u73b0\u5728)[\s,，、]*(?:\u6211)?(?:\u4f1a|\u5c06|\u8981|\u5148)?(?:\u5c1d\u8bd5)?(?:\u76f4\u63a5)?(?:\u8bfb\u53d6|\u9605\u8bfb|\u62bd\u53d6|\u63d0\u53d6|\u89e3\u6790|\u67e5\u770b|\u6253\u5f00|\u5206\u6790|\u68c0\u67e5|\u5904\u7406|\u7ee7\u7eed)/u,
+  /\u6211(?:\u4f1a|\u5c06|\u8981|\u5148)(?:\u5c1d\u8bd5|\u7ee7\u7eed|\u76f4\u63a5)?(?:\u8bfb\u53d6|\u9605\u8bfb|\u62bd\u53d6|\u63d0\u53d6|\u89e3\u6790|\u67e5\u770b|\u6253\u5f00|\u5206\u6790|\u68c0\u67e5|\u5904\u7406)/u,
+  /(?:\u6211\u6b63\u5728|\u6b63\u5728)(?:\u8bfb\u53d6|\u9605\u8bfb|\u62bd\u53d6|\u63d0\u53d6|\u89e3\u6790|\u67e5\u770b|\u6253\u5f00|\u5206\u6790|\u68c0\u67e5|\u5904\u7406)/u,
+  /\b(?:next|now)\s*,?\s*(?:i\s*)?(?:will|am going to|shall|need to|can)?\s*(?:try to\s*)?(?:inspect|read|extract|parse|open|analy[sz]e|check|process|continue|summari[sz]e)\b/iu,
+  /\bi(?:'ll| will| am going to| need to| can)\s+(?:try to\s+)?(?:inspect|read|extract|parse|open|analy[sz]e|check|process|continue|summari[sz]e)\b/iu,
+  /\blet me\s+(?:inspect|read|extract|parse|open|analy[sz]e|check|process|continue|summari[sz]e)\b/iu,
+  /\bi(?:'m| am)\s+(?:currently\s+)?(?:reading|extracting|parsing|opening|analy[sz]ing|checking|processing|continuing|summari[sz]ing)\b/iu
+];
+
+const EXPLICIT_LIMITATION_PATTERNS = [
+  /\b(?:cannot|can't|unable to|not able to|do not have access|don't have access|runtime limitation)\b/iu,
+  /(?:\u65e0\u6cd5|\u4e0d\u80fd|\u4e0d\u652f\u6301)/u
+];
 
 export class AdapterBridge {
   private readonly toolNamesByCallId = new Map<string, string>();
@@ -141,10 +180,20 @@ export class AdapterBridge {
       }
       const cancelled = event.reason === "cancelled";
       const briefText = this.computeBriefText({ cancelled });
-      if (cancelled) this.input.lifecycle.cancelFinalized(null, this.input.runId, briefText);
-      else this.input.lifecycle.complete(null, this.input.runId, event.cost ?? zeroCost(), briefText);
+      if (cancelled) {
+        const run = this.input.lifecycle.read(this.input.runId);
+        if (run.status === "cancelling") this.input.lifecycle.cancelFinalized(null, this.input.runId, briefText);
+        else {
+          const failureText = this.computeBriefText({ failureClass: "retryable_visible", failureReason: "provider_cancelled" });
+          this.input.lifecycle.fail(null, this.input.runId, "adapter_session_cancelled", "retryable_visible", "provider_cancelled", failureText);
+          return;
+        }
+      } else {
+        this.input.lifecycle.complete(null, this.input.runId, event.cost ?? zeroCost(), briefText);
+      }
+      const autoContinued = !cancelled && this.maybeAutoContinueIncompleteReply();
       if (this.input.wakeReason === "plan") void Promise.resolve(this.input.onPlanPhaseEnded?.(this.input.runId));
-      if (this.input.taskId !== undefined && !this.hasRecordedCompletionReport(this.input.taskId)) {
+      if (!autoContinued && this.input.taskId !== undefined && !this.hasRecordedCompletionReport(this.input.taskId)) {
         void Promise.resolve(this.input.onSessionEndedWithoutCompletion?.(this.input.taskId));
       }
       return;
@@ -231,6 +280,82 @@ export class AdapterBridge {
     if (db === undefined) return false;
     if (db.sqlite.prepare("SELECT 1 FROM events WHERE task_id = ? AND type = 'task.delegation.completed' LIMIT 1").get(taskId) !== undefined) return true;
     return db.sqlite.prepare("SELECT 1 FROM task_activities WHERE task_id = ? AND kind = 'status_change' AND by = 'room.complete_task' LIMIT 1").get(taskId) !== undefined;
+  }
+
+  private maybeAutoContinueIncompleteReply(): boolean {
+    if (this.input.wakeReason === "plan") return false;
+    const db = this.input.database;
+    const commandBus = this.input.getCommandBus?.();
+    if (db === undefined || commandBus === undefined) return false;
+    const finalAssistantText = this.finalAssistantText();
+    if (finalAssistantText === undefined || !shouldAutoContinueFinalAssistantText(finalAssistantText)) return false;
+    if (this.autoContinuationDepth() >= MAX_AUTO_CONTINUATION_DEPTH) return false;
+
+    const idempotencyKey = `auto-continue:${this.input.runId}`;
+    const inputRef = this.continuationInputRef();
+    const command: Command = {
+      type: "WakeAgent",
+      roomId: this.input.roomId,
+      agentId: this.input.agentId,
+      workspaceId: this.input.workspaceId,
+      reason: this.continuationWakeReason(),
+      ...(this.input.taskId !== undefined ? { taskId: this.input.taskId } : {}),
+      parentRunId: this.input.runId,
+      promptDelta: { kind: "delta_only", instructions: AUTO_CONTINUE_INSTRUCTIONS },
+      ...(inputRef.messageId !== undefined ? { messageId: inputRef.messageId } : {}),
+      ...(inputRef.pendingTurnId !== undefined ? { pendingTurnId: inputRef.pendingTurnId } : {}),
+      idempotencyKey
+    };
+
+    try {
+      const result = commandBus.dispatch(command, { actor: { type: "system" }, traceId: idempotencyKey, idempotencyKey, origin: "internal" });
+      if (isPromiseLike(result)) {
+        void result.catch(() => undefined);
+        return true;
+      }
+      return result.ok === true;
+    } catch {
+      return false;
+    }
+  }
+
+  private continuationWakeReason(): WakeReason {
+    const wakeReason = this.input.wakeReason;
+    return isContinuableWakeReason(wakeReason) ? wakeReason : "primary_turn";
+  }
+
+  private autoContinuationDepth(): number {
+    const db = this.input.database;
+    if (db === undefined) return 0;
+    const seen = new Set<string>();
+    let depth = 0;
+    let cursor: string | null = this.input.runId;
+    while (cursor !== null && !seen.has(cursor)) {
+      seen.add(cursor);
+      const row = db.sqlite.prepare("SELECT parent_run_id AS parentRunId FROM runs WHERE id = ?").get(cursor) as { readonly parentRunId: string | null } | undefined;
+      if (row?.parentRunId === undefined || row.parentRunId === null) break;
+      depth += 1;
+      cursor = row.parentRunId;
+    }
+    return depth;
+  }
+
+  private continuationInputRef(): { readonly messageId?: string; readonly pendingTurnId?: string } {
+    const db = this.input.database;
+    if (db === undefined) return {};
+    const queued = db.sqlite.prepare("SELECT payload FROM events WHERE run_id = ? AND type = 'agent.run.queued' ORDER BY seq DESC LIMIT 1").get(this.input.runId) as { readonly payload: string } | undefined;
+    const queuedPayload = queued !== undefined ? parseJsonRecord(queued.payload) : undefined;
+    const queuedMessageId = typeof queuedPayload?.messageId === "string" && queuedPayload.messageId.length > 0 ? queuedPayload.messageId : undefined;
+    const queuedPendingTurnId = typeof queuedPayload?.pendingTurnId === "string" && queuedPayload.pendingTurnId.length > 0 ? queuedPayload.pendingTurnId : undefined;
+    if (queuedMessageId !== undefined || queuedPendingTurnId !== undefined) return { ...(queuedMessageId !== undefined ? { messageId: queuedMessageId } : {}), ...(queuedPendingTurnId !== undefined ? { pendingTurnId: queuedPendingTurnId } : {}) };
+
+    const nextTurn = db.sqlite
+      .prepare("SELECT message_id AS messageId, pending_turn_id AS pendingTurnId FROM run_next_turns WHERE run_id = ? ORDER BY created_at ASC, id ASC LIMIT 1")
+      .get(this.input.runId) as { readonly messageId: string | null; readonly pendingTurnId: string | null } | undefined;
+    return {
+      ...(nextTurn?.messageId !== undefined && nextTurn.messageId !== null ? { messageId: nextTurn.messageId } : {}),
+      ...(nextTurn?.pendingTurnId !== undefined && nextTurn.pendingTurnId !== null ? { pendingTurnId: nextTurn.pendingTurnId } : {})
+    };
   }
 
   // ---------------------------------------------------------------------------
@@ -430,27 +555,7 @@ export class AdapterBridge {
     const db = this.input.database;
     if (resolver === undefined || db === undefined) return undefined;
     try {
-      const lastAssistant = db.sqlite.prepare(
-        `SELECT id FROM messages
-         WHERE run_id = ? AND sender_type = 'agent' AND deleted_at IS NULL
-         ORDER BY created_at DESC LIMIT 1`
-      ).get(this.input.runId) as { readonly id: string } | undefined;
-      let finalAssistantText: string | undefined;
-      if (lastAssistant !== undefined) {
-        const parts = db.sqlite.prepare(
-          "SELECT payload FROM message_parts WHERE message_id = ? AND part_type IN ('text','code') ORDER BY seq ASC"
-        ).all(lastAssistant.id) as Array<{ readonly payload: string }>;
-        const joined = parts
-          .map((row) => {
-            try {
-              const parsed = JSON.parse(row.payload) as { text?: unknown };
-              return typeof parsed.text === "string" ? parsed.text : "";
-            } catch { return ""; }
-          })
-          .filter((t) => t.length > 0)
-          .join("\n");
-        if (joined.length > 0) finalAssistantText = joined;
-      }
+      const finalAssistantText = this.finalAssistantText();
       const artifactCounts = (db.sqlite.prepare(
         `SELECT
            SUM(CASE WHEN type = 'diff' THEN 1 ELSE 0 END) AS diff,
@@ -475,6 +580,33 @@ export class AdapterBridge {
       return undefined;
     }
   }
+
+  private finalAssistantText(): string | undefined {
+    const db = this.input.database;
+    if (db === undefined) return undefined;
+    try {
+      const lastAssistant = db.sqlite.prepare(
+        `SELECT id FROM messages
+         WHERE run_id = ? AND sender_type = 'agent' AND role = 'assistant' AND deleted_at IS NULL
+         ORDER BY created_at DESC, id DESC LIMIT 1`
+      ).get(this.input.runId) as { readonly id: string } | undefined;
+      if (lastAssistant === undefined) return undefined;
+      const parts = db.sqlite.prepare(
+        "SELECT payload FROM message_parts WHERE message_id = ? AND part_type IN ('text','code') ORDER BY seq ASC"
+      ).all(lastAssistant.id) as Array<{ readonly payload: string }>;
+      const joined = parts
+        .map((row) => {
+          const parsed = parseJsonRecord(row.payload);
+          return typeof parsed?.text === "string" ? parsed.text : "";
+        })
+        .filter((text) => text.length > 0)
+        .join("\n")
+        .trim();
+      return joined.length > 0 ? joined : undefined;
+    } catch {
+      return undefined;
+    }
+  }
 }
 
 function zeroCost(): Cost {
@@ -488,4 +620,28 @@ function isTerminalTool(name: string): boolean {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseJsonRecord(value: string): Record<string, unknown> | undefined {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return isRecord(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function shouldAutoContinueFinalAssistantText(text: string): boolean {
+  const normalized = text.replace(/\r\n/g, "\n").replace(/[ \t]+/g, " ").trim();
+  if (normalized.length === 0) return false;
+  if (EXPLICIT_LIMITATION_PATTERNS.some((pattern) => pattern.test(normalized))) return false;
+  return CONTINUATION_PROMISE_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+function isContinuableWakeReason(value: string | undefined): value is WakeReason {
+  return value !== undefined && CONTINUABLE_WAKE_REASONS.has(value as WakeReason);
+}
+
+function isPromiseLike<T>(value: T | Promise<T>): value is Promise<T> {
+  return isRecord(value) && typeof value.then === "function";
 }

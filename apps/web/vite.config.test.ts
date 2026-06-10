@@ -11,6 +11,7 @@ describe("Vite daemon proxy", () => {
       "/runtimes",
       "/model-configs",
       "/agent-bindings",
+      "/avatars",
       "/settings"
     ]));
   });

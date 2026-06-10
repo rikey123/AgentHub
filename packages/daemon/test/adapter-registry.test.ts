@@ -29,6 +29,75 @@ describe("AdapterRegistry skill materialization failures", () => {
     expect(mockAdapter.runAgent).not.toHaveBeenCalled();
   });
 
+  it("routes Codex ACP runs with binary file attachments through native model input when a model config is bound", async () => {
+    const genericAdapter = {
+      runManaged: vi.fn(async () => undefined),
+      cancelManagedRun: vi.fn(async () => undefined),
+      warmRoomAgent: vi.fn(() => "generic-warm"),
+      disposeRoomWarmSessions: vi.fn(),
+      disposeAllSessions: vi.fn()
+    };
+    const nativeAdapter = { runManaged: vi.fn(async () => undefined), cancelManagedRun: vi.fn(async () => undefined), disposeAllRuns: vi.fn() };
+    const registry = new AdapterRegistry({
+      database: createDatabaseStub({ attachment: { fileName: "report.pdf", mimeType: "application/pdf" }, hasModelConfig: true }),
+      eventBus: { publish: vi.fn() } as unknown as EventBus,
+      lifecycle: lifecycleStub() as never,
+      nativeAdapter,
+      genericAcpAdapterFactory: vi.fn(() => genericAdapter)
+    } as never);
+
+    await registry.runAgent(runRow({ adapter_id: "codex" }));
+
+    expect(nativeAdapter.runManaged).toHaveBeenCalledWith(expect.objectContaining({ adapter_id: "codex" }));
+    expect(genericAdapter.runManaged).not.toHaveBeenCalled();
+  });
+
+  it("keeps Codex ACP runs with binary attachments on Codex when no model config is bound", async () => {
+    const genericAdapter = {
+      runManaged: vi.fn(async () => undefined),
+      cancelManagedRun: vi.fn(async () => undefined),
+      warmRoomAgent: vi.fn(() => "generic-warm"),
+      disposeRoomWarmSessions: vi.fn(),
+      disposeAllSessions: vi.fn()
+    };
+    const nativeAdapter = { runManaged: vi.fn(async () => undefined), cancelManagedRun: vi.fn(async () => undefined), disposeAllRuns: vi.fn() };
+    const registry = new AdapterRegistry({
+      database: createDatabaseStub({ attachment: { fileName: "report.pdf", mimeType: "application/pdf" } }),
+      eventBus: { publish: vi.fn() } as unknown as EventBus,
+      lifecycle: lifecycleStub() as never,
+      nativeAdapter,
+      genericAcpAdapterFactory: vi.fn(() => genericAdapter)
+    } as never);
+
+    await registry.runAgent(runRow({ adapter_id: "codex" }));
+
+    expect(genericAdapter.runManaged).toHaveBeenCalledWith(expect.objectContaining({ adapter_id: "codex" }));
+    expect(nativeAdapter.runManaged).not.toHaveBeenCalled();
+  });
+
+  it("keeps text attachments on Codex ACP", async () => {
+    const genericAdapter = {
+      runManaged: vi.fn(async () => undefined),
+      cancelManagedRun: vi.fn(async () => undefined),
+      warmRoomAgent: vi.fn(() => "generic-warm"),
+      disposeRoomWarmSessions: vi.fn(),
+      disposeAllSessions: vi.fn()
+    };
+    const nativeAdapter = { runManaged: vi.fn(async () => undefined), cancelManagedRun: vi.fn(async () => undefined), disposeAllRuns: vi.fn() };
+    const registry = new AdapterRegistry({
+      database: createDatabaseStub({ attachment: { fileName: "notes.md", mimeType: "text/markdown" } }),
+      eventBus: { publish: vi.fn() } as unknown as EventBus,
+      lifecycle: lifecycleStub() as never,
+      nativeAdapter,
+      genericAcpAdapterFactory: vi.fn(() => genericAdapter)
+    } as never);
+
+    await registry.runAgent(runRow({ adapter_id: "codex" }));
+
+    expect(genericAdapter.runManaged).toHaveBeenCalledWith(expect.objectContaining({ adapter_id: "codex" }));
+    expect(nativeAdapter.runManaged).not.toHaveBeenCalled();
+  });
+
   it("emits callback for non-task runs and fails the run", async () => {
     const callback = vi.fn();
     const lifecycle = lifecycleStub();
@@ -121,17 +190,27 @@ function lifecycleStub() {
   };
 }
 
-function createDatabaseStub(): AgentHubDatabase {
+function createDatabaseStub(options: { readonly attachment?: { readonly fileName: string; readonly mimeType: string }; readonly hasModelConfig?: boolean } = {}): AgentHubDatabase {
   return {
     sqlite: {
       prepare: vi.fn((sql: string) => ({
         get: vi.fn(() => {
+          if (sql.includes("SELECT payload FROM events WHERE run_id")) return options.attachment !== undefined ? { payload: JSON.stringify({ messageId: "msg-user" }) } : undefined;
+          if (sql.includes("SELECT file_name AS fileName")) return options.attachment;
+          if (sql.includes("ab.model_config_id IS NOT NULL")) return options.hasModelConfig === true ? { 1: 1 } : undefined;
           if (sql.includes("SELECT root_path FROM workspaces")) return { root_path: "." };
           if (sql.includes("SELECT adapter_id FROM agent_profiles")) return { adapter_id: "mock" };
           if (sql.includes("SELECT workspace_id FROM rooms")) return { workspace_id: "ws-1" };
           return undefined;
         }),
-        all: vi.fn(() => []),
+        all: vi.fn(() => {
+          if (sql.includes("SELECT payload FROM message_parts")) {
+            return options.attachment !== undefined
+              ? [{ payload: JSON.stringify({ fileId: "file-1", name: options.attachment.fileName, mimeType: options.attachment.mimeType }) }]
+              : [];
+          }
+          return [];
+        }),
         run: vi.fn(() => ({ changes: 0 }))
       })),
       transaction: vi.fn((fn: () => unknown) => () => fn())

@@ -1,3 +1,5 @@
+import { Capacitor, CapacitorHttp } from "@capacitor/core";
+
 // Native HTTP adapter: on a Capacitor native platform, route AgentHub SDK requests through the
 // CapacitorHttp plugin instead of the WebView's fetch. Native requests carry no browser Origin, so
 // the daemon authenticates them via Bearer token directly (its Origin check runs before Bearer and
@@ -38,8 +40,16 @@ function capacitor(): CapacitorGlobal {
   return globalThis as unknown as CapacitorGlobal;
 }
 
+function capacitorRuntime(): CapacitorGlobal["Capacitor"] {
+  return capacitor().Capacitor ?? Capacitor;
+}
+
+function capacitorHttpPlugin(): CapacitorHttpPlugin | undefined {
+  return capacitor().CapacitorHttp ?? CapacitorHttp as unknown as CapacitorHttpPlugin;
+}
+
 export function isCapacitorNative(): boolean {
-  const cap = capacitor().Capacitor;
+  const cap = capacitorRuntime();
   return typeof cap?.isNativePlatform === "function" && cap.isNativePlatform() === true;
 }
 
@@ -61,7 +71,7 @@ function bodyToData(body: BodyInit | null | undefined): unknown {
 // A fetch-compatible function backed by CapacitorHttp. Only the subset the AgentHub SDK uses is
 // implemented: method, headers, string body, and reading the response via text()/json().
 export async function capacitorFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
-  const plugin = capacitor().CapacitorHttp;
+  const plugin = capacitorHttpPlugin();
   if (plugin === undefined) throw new Error("CapacitorHttp plugin is unavailable");
   const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
   const method = (init.method ?? "GET").toUpperCase();
@@ -86,7 +96,7 @@ export async function capacitorFetch(input: RequestInfo | URL, init: RequestInit
 // Returns the fetch implementation to give the SDK: native HTTP on a Capacitor device, otherwise the
 // platform's standard fetch.
 export function resolveFetchImpl(): typeof fetch {
-  if (isCapacitorNative() && capacitor().CapacitorHttp !== undefined) {
+  if (isCapacitorNative() && capacitorHttpPlugin() !== undefined) {
     return capacitorFetch as typeof fetch;
   }
   return globalThis.fetch.bind(globalThis);

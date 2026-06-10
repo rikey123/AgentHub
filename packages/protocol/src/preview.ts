@@ -161,6 +161,15 @@ export function artifactContentTypeFor(filename: string): string {
   if (ext === "avi") return "video/x-msvideo";
   if (ext === "ogv") return "video/ogg";
   if (ext === "webmanifest") return "application/manifest+json; charset=utf-8";
+  if (ext === "docx") return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  if (ext === "xlsx") return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  if (ext === "pptx") return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+  if (ext === "odt") return "application/vnd.oasis.opendocument.text";
+  if (ext === "ods") return "application/vnd.oasis.opendocument.spreadsheet";
+  if (ext === "odp") return "application/vnd.oasis.opendocument.presentation";
+  if (ext === "doc") return "application/msword";
+  if (ext === "xls") return "application/vnd.ms-excel";
+  if (ext === "ppt") return "application/vnd.ms-powerpoint";
   if (ext === "woff2") return "font/woff2";
   if (ext === "woff") return "font/woff";
   if (isTextPreviewable(undefined, filename)) return "text/plain; charset=utf-8";

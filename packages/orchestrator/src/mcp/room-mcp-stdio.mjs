@@ -16,13 +16,30 @@ const ROOM_ID = process.env.ROOM_MCP_ROOM_ID ?? "";
 const RUN_ID = process.env.ROOM_MCP_RUN_ID ?? "";
 const AGENT_ID = process.env.ROOM_MCP_AGENT_ID ?? "";
 const SESSION_TOKEN = process.env.ROOM_MCP_SESSION_TOKEN ?? "";
+const AGENT_CAPABILITIES = parseCapabilities(process.env.ROOM_MCP_AGENT_CAPABILITIES);
 
 if (!PORT || !TOKEN || !ROOM_ID || !AGENT_ID) {
   process.stderr.write("[room-mcp-stdio] Missing required env vars\n");
   process.exit(1);
 }
 
-const TOOLS = JSON.parse(readFileSync(new URL("./room-mcp-tools.json", import.meta.url), "utf8"));
+const TOOLS = filterToolsForCapabilities(JSON.parse(readFileSync(new URL("./room-mcp-tools.json", import.meta.url), "utf8")), AGENT_CAPABILITIES);
+
+function parseCapabilities(value) {
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? new Set(parsed.filter((item) => typeof item === "string")) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function filterToolsForCapabilities(tools, capabilities) {
+  if (!(capabilities instanceof Set)) return tools;
+  if (capabilities.has("terminal.run")) return tools;
+  return tools.filter((tool) => tool?.name !== "shell");
+}
 
 function writeTcpMessage(socket, data) {
   const body = Buffer.from(JSON.stringify(data), "utf-8");

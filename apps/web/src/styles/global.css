@@ -171,6 +171,53 @@ body,
   margin-block: 0;
 }
 
+.ah-identity-avatar {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklab, var(--border) 70%, var(--overlay));
+  border-radius: 999px !important;
+  background: color-mix(in oklab, var(--accent-soft) 58%, var(--overlay));
+  color: var(--foreground);
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.ah-identity-avatar--sm {
+  width: 2rem;
+  height: 2rem;
+  font-size: 0.75rem;
+}
+
+.ah-identity-avatar--lg {
+  width: 3rem;
+  height: 3rem;
+  font-size: 0.92rem;
+}
+
+.ah-identity-avatar-image {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ah-identity-avatar-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+}
+
 .ah-chat-bubble {
   transform-origin: 50% 85%;
   transition:
