@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 
-import { stepCountIs, streamText, type LanguageModel, type ToolSet } from "ai";
+import { stepCountIs, streamText, type LanguageModel, type ToolSet, type UserContent } from "ai";
 import type { EventBus, PublishInput } from "../../bus/src/index.ts";
 import type { AgentHubDatabase } from "../../db/src/index.ts";
-import { AdapterBridge, buildFirstWakePrompt, buildPlanPhasePrompt, buildRunPrompt, persistAssistantPublicMessage, type AdapterArtifactFSBoundary, type FileMessageService, type RunLifecycleService, type RunRow } from "../../orchestrator/src/index.ts";
+import { AdapterBridge, buildFirstWakePrompt, buildPlanPhasePrompt, buildRunPrompt, buildRunPromptAttachments, persistAssistantPublicMessage, type AdapterArtifactFSBoundary, type FileMessageService, type RunLifecycleService, type RunPromptAttachment, type RunRow } from "../../orchestrator/src/index.ts";
 import { nameToSlug } from "../../orchestrator/src/mention-parser.ts";
 import type { AgentAdapterManifest } from "../../protocol/src/index.ts";
 import type { PermissionEngine, PermissionResource } from "../../permissions/src/index.ts";
@@ -156,11 +156,32 @@ export class NativeAgentAdapter {
         ...mcpToolSet
       } satisfies ToolSet;
       const prompt = this.loadRunPrompt(run);
+      const attachments = buildRunPromptAttachments(run, this.options.database);
       const messageId = `msg_${run.id}`;
+      if (shouldUseDirectOpenAiCompatible(modelConfig, attachments)) {
+        const direct = await directOpenAiCompatibleCompletion({
+          modelConfig,
+          ...(apiKey !== undefined ? { apiKey } : {}),
+          ...(prompt.system !== undefined ? { system: prompt.system } : {}),
+          input: prompt.input,
+          attachments,
+          abortSignal: controller.signal
+        });
+        if (direct.text.length > 0) this.appendAssistantText(run, messageId, direct.text, bridge);
+        const finalText = this.completeAssistantText(run, messageId);
+        if (finalText === undefined && run.wake_reason !== "plan") {
+          this.persistEmptyOutputMessage(run, messageId);
+          this.options.lifecycle.fail(null, run.id, "native_agent_empty_output", "retryable_visible", "native agent completed without producing a reply");
+          return;
+        }
+        bridge.handle({ type: "session.ended", sessionId, reason: "completed", cost: direct.cost });
+        if (run.wake_reason === "plan") void Promise.resolve(this.options.onPlanPhaseEnded?.(run.id, finalText));
+        return;
+      }
       const result = streamText({
         model: providerModel,
         ...(prompt.system !== undefined ? { system: prompt.system } : {}),
-        messages: [{ role: "user" as const, content: prompt.input }],
+        messages: [{ role: "user" as const, content: aiSdkUserContent(prompt.input, attachments) }],
         abortSignal: controller.signal,
         tools,
         stopWhen: stepCountIs(5)
@@ -415,6 +436,115 @@ function parseCapabilities(value: string | null): string[] {
   } catch {
     return [];
   }
+}
+
+function aiSdkUserContent(input: string, attachments: readonly RunPromptAttachment[]): UserContent {
+  if (attachments.length === 0) return input;
+  return [
+    { type: "text", text: input },
+    ...attachments.map((attachment) => {
+      if (attachment.type === "image") return { type: "image" as const, image: attachment.data, mediaType: attachment.mimeType };
+      return { type: "file" as const, data: attachment.data, mediaType: attachment.mimeType, filename: attachment.name };
+    })
+  ];
+}
+
+function shouldUseDirectOpenAiCompatible(modelConfig: ModelConfigRow, attachments: readonly RunPromptAttachment[]): boolean {
+  if (modelConfig.provider !== "openai-compatible" && modelConfig.provider !== "ollama") return false;
+  return attachments.some((attachment) => attachment.type === "file");
+}
+
+async function directOpenAiCompatibleCompletion(input: {
+  readonly modelConfig: ModelConfigRow;
+  readonly apiKey?: string;
+  readonly system?: string;
+  readonly input: string;
+  readonly attachments: readonly RunPromptAttachment[];
+  readonly abortSignal: AbortSignal;
+}): Promise<{ readonly text: string; readonly cost: ReturnType<typeof zeroCost> }> {
+  const response = await fetch(openAiCompatibleChatCompletionsUrl(input.modelConfig), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...(input.modelConfig.provider === "ollama" ? {} : input.apiKey !== undefined ? { authorization: `Bearer ${input.apiKey}` } : {})
+    },
+    body: JSON.stringify({
+      model: input.modelConfig.model,
+      stream: false,
+      messages: [
+        ...(input.system !== undefined && input.system.length > 0 ? [{ role: "system", content: input.system }] : []),
+        { role: "user", content: openAiCompatibleUserContent(input.input, input.attachments) }
+      ]
+    }),
+    signal: input.abortSignal
+  });
+  const bodyText = await response.text();
+  if (!response.ok) throw new Error(openAiCompatibleErrorMessage(response.status, bodyText));
+  const body = safeJsonRecord(bodyText);
+  const text = openAiCompatibleResponseText(body);
+  return { text, cost: openAiCompatibleCost(body.usage, input.modelConfig.model) };
+}
+
+function openAiCompatibleChatCompletionsUrl(modelConfig: ModelConfigRow): string {
+  const baseURL = modelConfig.base_url ?? "http://localhost:11434/v1";
+  return new URL("chat/completions", baseURL.endsWith("/") ? baseURL : `${baseURL}/`).toString();
+}
+
+function openAiCompatibleUserContent(input: string, attachments: readonly RunPromptAttachment[]): unknown[] {
+  return [
+    { type: "text", text: input },
+    ...attachments.map((attachment) => {
+      const dataUrl = `data:${attachment.mimeType};base64,${attachment.data}`;
+      if (attachment.type === "image") return { type: "image_url", image_url: { url: dataUrl } };
+      return { type: "file", file: { filename: attachment.name, file_data: dataUrl } };
+    })
+  ];
+}
+
+function openAiCompatibleResponseText(body: Record<string, unknown>): string {
+  const choices = Array.isArray(body.choices) ? body.choices : [];
+  const first = choices.find(isRecord);
+  const message = first !== undefined && isRecord(first.message) ? first.message : undefined;
+  const content = message?.content;
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content.map((part) => {
+      if (!isRecord(part)) return "";
+      if (typeof part.text === "string") return part.text;
+      if (typeof part.content === "string") return part.content;
+      return "";
+    }).join("");
+  }
+  return "";
+}
+
+function openAiCompatibleCost(usage: unknown, modelId: string): ReturnType<typeof zeroCost> {
+  const record = isRecord(usage) ? usage : {};
+  const inputTokens = Number(record.prompt_tokens ?? record.input_tokens ?? record.inputTokens ?? 0);
+  const outputTokens = Number(record.completion_tokens ?? record.output_tokens ?? record.outputTokens ?? 0);
+  const cachedTokens = Number(record.cached_tokens ?? record.cachedInputTokens ?? 0);
+  const costUsd = Math.round((((inputTokens / 1_000_000) * 3) + ((outputTokens / 1_000_000) * 15)) * 1_000_000) / 1_000_000;
+  return { inputTokens, outputTokens, cachedTokens, costUsd, modelId };
+}
+
+function openAiCompatibleErrorMessage(status: number, bodyText: string): string {
+  const body = safeJsonRecord(bodyText);
+  const error = body.error;
+  if (isRecord(error) && typeof error.message === "string") return `openai-compatible request failed (${status}): ${error.message}`;
+  return `openai-compatible request failed (${status}): ${bodyText.slice(0, 500)}`;
+}
+
+function safeJsonRecord(value: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return isRecord(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function costFromUsage(usage: unknown, modelId: string) {
