@@ -3310,11 +3310,33 @@ describe("daemon M1.4 composition", () => {
 
   it("issues, lists without secret, and revokes auth tokens", async () => {
     const issued = await fetch(`${baseUrl}/auth/tokens`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ description: "ci", scopes: ["read"], expiresDays: 1 }) });
-    const issuedPayload = await issued.json() as { readonly id: string; readonly token: string; readonly fingerprint: string; readonly connection: { readonly url: string; readonly host: string; readonly port: number; readonly token: string; readonly qrPayload: string } };
+    const issuedPayload = await issued.json() as { readonly id: string; readonly token: string; readonly fingerprint: string; readonly connection: { readonly version: number; readonly url: string; readonly host: string; readonly port: number; readonly token: string; readonly qrPayload: string; readonly reachableFromMobile?: boolean; readonly source?: string; readonly endpoint?: { readonly url?: string; readonly host?: string; readonly port?: number; readonly reachableFromMobile?: boolean } } };
     expect(issued.status).toBe(201);
     expect(issuedPayload.token).toMatch(/^ah_/u);
-    expect(issuedPayload.connection).toMatchObject({ url: baseUrl, host: "127.0.0.1", token: issuedPayload.token });
-    expect(JSON.parse(issuedPayload.connection.qrPayload)).toMatchObject({ url: baseUrl, token: issuedPayload.token });
+    expect(issuedPayload.connection).toMatchObject({ version: 2, token: issuedPayload.token });
+    expect(issuedPayload.connection.endpoint).toMatchObject({ url: issuedPayload.connection.url, host: issuedPayload.connection.host, port: issuedPayload.connection.port });
+    const manifest = JSON.parse(issuedPayload.connection.qrPayload) as { readonly version: number; readonly kind: string; readonly url: string; readonly host: string; readonly token: string; readonly endpoint?: { readonly url?: string; readonly reachableFromMobile?: boolean }; readonly auth?: { readonly token?: string } };
+    expect(manifest).toMatchObject({
+      version: 2,
+      kind: "agenthub.mobile.connection",
+      url: issuedPayload.connection.url,
+      host: issuedPayload.connection.host,
+      token: issuedPayload.token,
+      endpoint: { url: issuedPayload.connection.url },
+      auth: { token: issuedPayload.token }
+    });
+    const lanAddress = Object.values(networkInterfaces()).flatMap((entries) =>
+      (entries ?? []).filter((entry) => entry.family === "IPv4" && !entry.internal).map((entry) => entry.address)
+    )[0];
+    if (lanAddress !== undefined) expect(issuedPayload.connection.url).not.toMatch(/^http:\/\/127\.0\.0\.1:/u);
+    if (issuedPayload.connection.reachableFromMobile === true) {
+      expect(issuedPayload.connection.source).toBe("mobile-bridge");
+      expect(manifest.endpoint?.reachableFromMobile).toBe(true);
+      const unauthenticatedMobile = await fetch(`${issuedPayload.connection.url}/sync/snapshot?view=mobile`);
+      expect(unauthenticatedMobile.status).toBe(401);
+      const authenticatedMobile = await fetch(`${issuedPayload.connection.url}/sync/snapshot?view=mobile`, { headers: { authorization: `Bearer ${issuedPayload.token}` } });
+      expect(authenticatedMobile.status).toBe(200);
+    }
 
     const listed = await fetch(`${baseUrl}/auth/tokens`);
     const listedPayload = await listed.json() as { readonly tokens: readonly { readonly id: string; readonly fingerprint: string; readonly token?: string }[] };
@@ -3335,14 +3357,22 @@ describe("daemon M1.4 composition", () => {
     const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-mobile-lan-"));
     daemon = createDaemon({ databasePath: join(dir, "agenthub.sqlite"), port: 0, host: lanAddress, token: "remote-token", allowRemote: true, modelTestFetch: modelTestFetchMock });
     currentDaemon = daemon;
-    await daemon.start();
+    const remoteServer = await daemon.start();
 
     const response = await invokeHandler(daemon, "POST", "/auth/tokens", { description: "mobile", scopes: ["read"] }, { host: "127.0.0.1:6677", authorization: "Bearer remote-token", "content-type": "application/json" });
-    const body = response.body as { readonly connection?: { readonly url: string; readonly host: string; readonly qrPayload: string } };
+    const body = response.body as { readonly connection?: { readonly url: string; readonly host: string; readonly port: number; readonly source?: string; readonly reachableFromMobile?: boolean; readonly qrPayload: string } };
+    const address = remoteServer.address();
+    if (typeof address !== "object" || address === null) throw new Error("daemon did not bind TCP port");
 
     expect(response.status).toBe(201);
-    expect(body.connection).toMatchObject({ url: `http://${lanAddress}:6677`, host: lanAddress });
-    expect(JSON.parse(body.connection?.qrPayload ?? "{}")).toMatchObject({ url: `http://${lanAddress}:6677`, host: lanAddress });
+    expect(body.connection).toMatchObject({ url: `http://${lanAddress}:${address.port}`, host: lanAddress, port: address.port, source: "primary-listener", reachableFromMobile: true });
+    expect(JSON.parse(body.connection?.qrPayload ?? "{}")).toMatchObject({
+      version: 2,
+      kind: "agenthub.mobile.connection",
+      url: `http://${lanAddress}:${address.port}`,
+      host: lanAddress,
+      endpoint: { url: `http://${lanAddress}:${address.port}`, source: "primary-listener", reachableFromMobile: true }
+    });
   });
 
   it("serves token-only mobile sync events by seq with redaction and revocation", async () => {
@@ -3364,6 +3394,7 @@ describe("daemon M1.4 composition", () => {
     expect(response.status).toBe(200);
     expect(payload.events.map((event) => event.type)).toContain("message.created");
     expect(payload.events.map((event) => event.type)).not.toContain("agent.run.resumed");
+    expect(payload.events.find((event) => event.type === "message.created")?.payload).toEqual({});
     expect(JSON.stringify(payload)).not.toContain("sk-testmobilesupersecret123456");
 
     const since = payload.nextCursor;
@@ -3376,11 +3407,47 @@ describe("daemon M1.4 composition", () => {
     expect(revoked.status).toBe(401);
   });
 
+  it("serves mobile sync events in bounded JSON batches", async () => {
+    const issued = await fetch(`${baseUrl}/auth/tokens`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ description: "mobile paging", scopes: ["read"] }) });
+    const issuedPayload = await issued.json() as { readonly id: string; readonly token: string };
+    const bigText = "x".repeat(4_000);
+    for (let index = 0; index < 120; index += 1) {
+      daemon.eventBus.publish({
+        id: `evt_mobile_page_${index}`,
+        type: "message.created",
+        schemaVersion: 1,
+        workspaceId: "default-workspace",
+        roomId: "room_mobile_page",
+        payload: { messageId: `msg_mobile_page_${index}`, text: bigText },
+        createdAt: Date.now() + index
+      });
+    }
+
+    const first = await fetch(`${baseUrl}/sync/events?sinceSeq=0&view=mobile`, { headers: { authorization: `Bearer ${issuedPayload.token}` } });
+    const firstText = await first.text();
+    const firstPayload = JSON.parse(firstText) as { readonly events: readonly { readonly seq: number; readonly payload: Record<string, unknown> }[]; readonly nextCursor: number };
+    expect(first.status).toBe(200);
+    expect(firstPayload.events).toHaveLength(100);
+    expect(firstPayload.events.every((event) => Object.keys(event.payload).length === 0)).toBe(true);
+    expect(firstText).not.toContain(bigText);
+
+    const second = await fetch(`${baseUrl}/sync/events?sinceSeq=${firstPayload.nextCursor}&view=mobile`, { headers: { authorization: `Bearer ${issuedPayload.token}` } });
+    const secondPayload = await second.json() as { readonly events: readonly { readonly seq: number }[]; readonly nextCursor: number };
+    expect(second.status).toBe(200);
+    expect(secondPayload.events.length).toBeGreaterThan(0);
+    expect(secondPayload.events.length).toBeLessThanOrEqual(100);
+    expect(secondPayload.nextCursor).toBeGreaterThan(firstPayload.nextCursor);
+
+    await fetch(`${baseUrl}/auth/tokens/${issuedPayload.id}`, { method: "DELETE" });
+  });
+
   it("serves mobile snapshot and read-only artifact preview with security checks", async () => {
     const issued = await fetch(`${baseUrl}/auth/tokens`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ description: "mobile snapshot", scopes: ["read"] }) });
     const issuedPayload = await issued.json() as { readonly token: string };
     const now = Date.now();
     daemon.database.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES ('room_mobile_snapshot', 'default-workspace', 'Mobile Snapshot', 'solo', 'conversation', 'mock-builder', NULL, ?, ?)").run(now, now);
+    daemon.database.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES ('room_mobile_mojibake', 'default-workspace', ?, 'solo', 'conversation', 'mock-builder', NULL, ?, ?)").run("\u00e6\u0088\u00bf\u00e9\u0097\u00b4 06/10 15:06", now + 1, now + 1);
+    daemon.database.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES ('room_mobile_corrupt', 'default-workspace', ?, 'solo', 'conversation', 'mock-builder', NULL, ?, ?)").run("\u027e\ufffd\ufffd\ufffd\ufffd\ufffd\ufffd", now + 2, now + 2);
     daemon.database.sqlite.prepare("INSERT INTO tasks (id, workspace_id, room_id, parent_task_id, title, description, status, assignee_agent_id, source_run_id, source_message_id, dependencies, priority, due_at, created_by, created_at, updated_at) VALUES ('task_mobile_snapshot', 'default-workspace', 'room_mobile_snapshot', NULL, 'Ship mobile', 'Verbose detail omitted', 'open', 'mock-builder', NULL, NULL, '[]', 'P1', NULL, 'local', ?, ?)").run(now, now);
     seedBusyRun("room_mobile_snapshot", "mock-builder", "run_mobile_snapshot", "waiting_permission");
     daemon.database.sqlite.prepare("INSERT INTO permission_requests (id, workspace_id, room_id, agent_id, run_id, adapter_session_id, idempotency_key, resource, reason, status, remember_decision, scope, decision, created_at, resolved_at, expires_at) VALUES ('perm_mobile_snapshot', 'default-workspace', 'room_mobile_snapshot', 'mock-builder', 'run_mobile_snapshot', NULL, NULL, ?, 'Need approval', 'pending', 0, NULL, NULL, ?, NULL, NULL)").run(JSON.stringify({ type: "file", path: "C:/Users/me/.env", apiKey: "sk-testpermissionsupersecret123456" }), now);
@@ -3395,9 +3462,11 @@ describe("daemon M1.4 composition", () => {
     expect(artifactId).not.toBe("");
 
     const snapshot = await fetch(`${baseUrl}/sync/snapshot?view=mobile`, { headers: { authorization: `Bearer ${issuedPayload.token}` } });
-    const snapshotPayload = await snapshot.json() as { readonly rooms: readonly { readonly id: string }[]; readonly tasks: readonly Record<string, unknown>[]; readonly permissions: readonly Record<string, unknown>[]; readonly artifacts: readonly { readonly id: string }[]; readonly cursor: number };
+    const snapshotPayload = await snapshot.json() as { readonly rooms: readonly { readonly id: string; readonly title?: string }[]; readonly tasks: readonly Record<string, unknown>[]; readonly permissions: readonly Record<string, unknown>[]; readonly artifacts: readonly { readonly id: string }[]; readonly cursor: number };
     expect(snapshot.status).toBe(200);
     expect(snapshotPayload.rooms.map((room) => room.id)).toContain("room_mobile_snapshot");
+    expect(snapshotPayload.rooms.find((room) => room.id === "room_mobile_mojibake")?.title).toBe("房间 06/10 15:06");
+    expect(snapshotPayload.rooms.find((room) => room.id === "room_mobile_corrupt")?.title).toBe("未命名房间");
     expect(snapshotPayload.tasks.find((task) => task.id === "task_mobile_snapshot")).not.toHaveProperty("description");
     expect(snapshotPayload.permissions.find((request) => request.id === "perm_mobile_snapshot")).toBeDefined();
     expect(snapshotPayload.artifacts.map((item) => item.id)).toContain(artifactId);
@@ -3426,7 +3495,7 @@ describe("daemon M1.4 composition", () => {
     const firstPayload = await firstPull.json() as { readonly events: readonly { readonly seq: number; readonly type: string; readonly payload: Record<string, unknown> }[]; readonly nextCursor: number };
     expect(firstPull.status).toBe(200);
     expect(firstPayload.events).toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: "message.created", payload: expect.objectContaining({ text: "web client wrote this" }) })
+      expect.objectContaining({ type: "message.created", payload: {} })
     ]));
 
     await mobileClient.sendMessage(room.data.roomId, { text: "mobile client wrote this", idempotencyKey: "acceptance-mobile-1" });
@@ -3434,7 +3503,7 @@ describe("daemon M1.4 composition", () => {
     const reconnectPayload = await reconnectPull.json() as { readonly events: readonly { readonly seq: number; readonly type: string; readonly payload: Record<string, unknown> }[]; readonly nextCursor: number };
     expect(reconnectPull.status).toBe(200);
     expect(reconnectPayload.events).toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: "message.created", payload: expect.objectContaining({ text: "mobile client wrote this" }) })
+      expect.objectContaining({ type: "message.created", payload: {} })
     ]));
     expect(reconnectPayload.nextCursor).toBeGreaterThan(firstPayload.nextCursor);
 
