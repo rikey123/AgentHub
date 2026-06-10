@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -111,6 +111,30 @@ describe("NativeAgentAdapter integration", () => {
     expect(eventPayload("tool.call.completed", run.id)).toMatchObject({ ok: true, output: { written: true } });
     expect(eventPayload("agent.run.completed", run.id)).toMatchObject({ cost: { inputTokens: 120, outputTokens: 45, cachedTokens: 12, costUsd: 0.001035, modelId: "gpt-4o" } });
     expect(runCost(run.id)).toMatchObject({ input_tokens: 120, output_tokens: 45, cached_tokens: 12, cost_usd: 0.001035, model_id: "gpt-4o" });
+  });
+
+  test("sends uploaded files as AI SDK content parts", async () => {
+    currentDatabase().sqlite.prepare("UPDATE workspaces SET root_path = ? WHERE id = 'ws_1'").run(currentTempDir());
+    const messageId = "msg_user_pdf";
+    seedUserMessage(messageId, "read this pdf");
+    seedUploadedAttachment(messageId, "file_pdf", "lesson.pdf", Buffer.from("%PDF-1.7\nbody"), "application/pdf");
+    const run = createStartingRun("run_native_uploaded_file", "primary_turn", messageId);
+    streamTextMock.mockReturnValue({ fullStream: asyncGenerator([{ type: "text-delta", text: "read" }]), usage: Promise.resolve({ inputTokens: 10, outputTokens: 2 }) });
+
+    await new NativeAgentAdapter({
+      database: currentDatabase(),
+      eventBus: currentBus() as unknown as import("../../bus/src/index.ts").EventBus,
+      lifecycle: currentLifecycle(),
+      permissions: currentPermissions(),
+      modelConfig: openAiModelConfig(),
+      now: () => now
+    }).runManaged(run);
+
+    const call = streamTextMock.mock.calls[0]?.[0] as { readonly messages?: readonly { readonly content?: unknown }[] } | undefined;
+    expect(call?.messages?.[0]?.content).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "text", text: expect.stringContaining("[Attachment: lesson.pdf (application/pdf)]") }),
+      { type: "file", data: Buffer.from("%PDF-1.7\nbody").toString("base64"), mediaType: "application/pdf", filename: "lesson.pdf" }
+    ]));
   });
 
   test("turns long assisted public replies into a short chat message plus a file card", async () => {
@@ -372,6 +396,7 @@ function currentDatabase(): AgentHubDatabase { expect(database).toBeDefined(); r
 function currentBus(): EventBus { expect(eventBus).toBeDefined(); return eventBus as EventBus; }
 function currentLifecycle(): RunLifecycleService { expect(lifecycle).toBeDefined(); return lifecycle as RunLifecycleService; }
 function currentPermissions(): PermissionEngine { expect(permissions).toBeDefined(); return permissions as PermissionEngine; }
+function currentTempDir(): string { expect(tempDir).toBeDefined(); return tempDir as string; }
 
 function seedSoloRoom(): void {
   currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO workspaces (id, name, root_path, created_at, updated_at) VALUES ('ws_1', 'Workspace', '.', ?, ?)").run(now, now);
@@ -380,11 +405,24 @@ function seedSoloRoom(): void {
   currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, default_presence, joined_at) VALUES ('room_1', 'agent_1', 'agent', 'primary', 'native', NULL, 'active', ?)").run(now);
 }
 
-function createStartingRun(runId: string, wakeReason: "primary_turn" | "plan" = "primary_turn"): RunRow {
-  currentLifecycle().create(null, { runId, workspaceId: "ws_1", roomId: "room_1", agentId: "agent_1", wakeReason, workspaceMode: "shadow_buffer", messageId: `msg_${runId}` });
+function createStartingRun(runId: string, wakeReason: "primary_turn" | "plan" = "primary_turn", messageId = `msg_${runId}`): RunRow {
+  currentLifecycle().create(null, { runId, workspaceId: "ws_1", roomId: "room_1", agentId: "agent_1", wakeReason, workspaceMode: "shadow_buffer", messageId });
   currentLifecycle().markClaimed(null, runId);
   currentLifecycle().markStarting(null, runId, 123);
   return currentLifecycle().read(runId);
+}
+
+function seedUserMessage(messageId: string, text: string): void {
+  currentDatabase().sqlite.prepare("INSERT INTO messages (id, workspace_id, room_id, sender_type, sender_id, run_id, role, status, quoted_message_id, turn_dispatch_mode, pending_turn_id, created_at, updated_at, deleted_at) VALUES (?, 'ws_1', 'room_1', 'user', 'user_1', NULL, 'user', 'completed', NULL, 'immediate', NULL, ?, ?, NULL)").run(messageId, now, now);
+  currentDatabase().sqlite.prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, 1, 'text', ?, ?)").run(messageId, JSON.stringify({ text }), now);
+}
+
+function seedUploadedAttachment(messageId: string, fileId: string, name: string, content: Buffer, mimeType: string): void {
+  const relativeStoragePath = `.agenthub/attachments/2026/06/${fileId}`;
+  mkdirSync(join(currentTempDir(), ".agenthub", "attachments", "2026", "06"), { recursive: true });
+  writeFileSync(join(currentTempDir(), relativeStoragePath), content);
+  currentDatabase().sqlite.prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, 2, 'attachment', ?, ?)").run(messageId, JSON.stringify({ fileId, name, mimeType, previewKind: "pdf" }), now);
+  currentDatabase().sqlite.prepare("INSERT INTO attachments (id, message_id, file_id, file_name, mime_type, byte_size, sha256, storage_path, created_at) VALUES (?, ?, ?, ?, ?, ?, 'sha', ?, ?)").run(`att_${fileId}`, messageId, fileId, name, mimeType, content.byteLength, relativeStoragePath, now);
 }
 
 function seedPermissionRule(id: string, resourceType: string, resourceMatch: string, action: "allow" | "deny"): void {
