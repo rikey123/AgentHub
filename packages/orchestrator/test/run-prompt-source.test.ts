@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { EventBus } from "@agenthub/bus";
 import { createDatabase, type AgentHubDatabase } from "@agenthub/db";
 
-import { buildRunPrompt, RunLifecycleService, type AgentPromptDelta, type RunRow, type WakeReason } from "../src/index.ts";
+import { buildRunPrompt, buildRunPromptAttachments, buildRunPromptImageAttachments, RunLifecycleService, type AgentPromptDelta, type RunRow, type WakeReason } from "../src/index.ts";
 
 let tempDir: string | undefined;
 let database: AgentHubDatabase | undefined;
@@ -129,6 +129,105 @@ describe("buildRunPrompt", () => {
     expect(prompt).not.toContain("WRONG latest user message");
   });
 
+  test("queued user input passes uploaded file attachments as model resource blocks", () => {
+    currentDatabase().sqlite.prepare("UPDATE rooms SET mode = 'solo' WHERE id = 'room_1'").run();
+    seedUserMessage("msg_uploaded_input", "Review this uploaded issue", 1);
+    seedUploadedAttachment("msg_uploaded_input", "123e4567-e89b-12d3-a456-426614174202", "issue.md", "# Problem\n\nCurrent input attachment details.", 2);
+    createRun("run_uploaded_input", "primary_turn", { messageId: "msg_uploaded_input" });
+
+    const prompt = buildRunPrompt(run("run_uploaded_input"), currentDatabase(), { now: () => now });
+    const attachments = buildRunPromptAttachments(run("run_uploaded_input"), currentDatabase());
+
+    expect(prompt).toContain("Review this uploaded issue");
+    expect(prompt).toContain("AgentHub does not parse, OCR, or convert uploaded files.");
+    expect(prompt).toContain("[Attachment: issue.md (text/markdown)]");
+    expect(prompt).toContain("[attached model resource]");
+    expect(prompt).not.toContain("[MCP path:");
+    expect(prompt).not.toContain("Current input attachment details.");
+    expect(attachments).toEqual([{
+      type: "file",
+      name: "issue.md",
+      mimeType: "text/markdown",
+      data: Buffer.from("# Problem\n\nCurrent input attachment details.", "utf8").toString("base64"),
+      uri: "agenthub://attachments/123e4567-e89b-12d3-a456-426614174202/issue.md",
+      sizeBytes: Buffer.byteLength("# Problem\n\nCurrent input attachment details.", "utf8")
+    }]);
+  });
+
+  test("queued user input exposes uploaded image attachments as model image blocks", () => {
+    currentDatabase().sqlite.prepare("UPDATE rooms SET mode = 'solo' WHERE id = 'room_1'").run();
+    seedUserMessage("msg_uploaded_image", "Look at this screenshot", 1);
+    seedUploadedImageAttachment("msg_uploaded_image", "123e4567-e89b-12d3-a456-426614174204", "screen.png", Buffer.from([137, 80, 78, 71]), 2);
+    createRun("run_uploaded_image", "primary_turn", { messageId: "msg_uploaded_image" });
+
+    const attachments = buildRunPromptImageAttachments(run("run_uploaded_image"), currentDatabase());
+
+    expect(attachments).toEqual([{
+      type: "image",
+      name: "screen.png",
+      mimeType: "image/png",
+      data: Buffer.from([137, 80, 78, 71]).toString("base64"),
+      uri: "agenthub://attachments/123e4567-e89b-12d3-a456-426614174204/screen.png",
+      sizeBytes: 4
+    }]);
+  });
+
+  test("queued user input exposes uploaded PDF attachments by local path", () => {
+    currentDatabase().sqlite.prepare("UPDATE rooms SET mode = 'solo' WHERE id = 'room_1'").run();
+    const fileId = "123e4567-e89b-12d3-a456-426614174205";
+    seedUserMessage("msg_uploaded_pdf", "Read this report", 1);
+    seedUploadedAttachment("msg_uploaded_pdf", fileId, "report.pdf", "%PDF-1.7\nreport bytes", 2, "application/pdf", "pdf");
+    createRun("run_uploaded_pdf", "primary_turn", { messageId: "msg_uploaded_pdf" });
+
+    const prompt = buildRunPrompt(run("run_uploaded_pdf"), currentDatabase(), { now: () => now });
+    const attachments = buildRunPromptAttachments(run("run_uploaded_pdf"), currentDatabase());
+    const acpAttachments = buildRunPromptAttachments(run("run_uploaded_pdf"), currentDatabase(), { localPathOnlyBinaryFiles: true });
+    const localPath = join(tempDir as string, ".agenthub", "attachments", "2026", "06", fileId);
+
+    expect(prompt).toContain(`[Attachment: report.pdf (application/pdf)] [local path: ${localPath}]`);
+    expect(prompt).toContain("when a local path is shown");
+    expect(attachments).toEqual([{
+      type: "file",
+      name: "report.pdf",
+      mimeType: "application/pdf",
+      data: Buffer.from("%PDF-1.7\nreport bytes", "utf8").toString("base64"),
+      uri: "agenthub://attachments/123e4567-e89b-12d3-a456-426614174205/report.pdf",
+      localPath,
+      sizeBytes: Buffer.byteLength("%PDF-1.7\nreport bytes", "utf8")
+    }]);
+    expect(acpAttachments).toEqual([{
+      type: "file",
+      name: "report.pdf",
+      mimeType: "application/pdf",
+      data: "",
+      uri: "agenthub://attachments/123e4567-e89b-12d3-a456-426614174205/report.pdf",
+      localPath,
+      sizeBytes: Buffer.byteLength("%PDF-1.7\nreport bytes", "utf8")
+    }]);
+  });
+
+
+  test("next-turn queued message passes uploaded file attachments as model resource blocks", () => {
+    currentDatabase().sqlite.prepare("UPDATE rooms SET mode = 'solo' WHERE id = 'room_1'").run();
+    createRun("run_next_upload", "primary_turn");
+    seedUserMessage("msg_next_upload", "Follow up with this upload", 2);
+    seedUploadedAttachment("msg_next_upload", "123e4567-e89b-12d3-a456-426614174203", "next.md", "# Next\n\nQueued upload attachment details.", 3);
+    currentDatabase().sqlite.prepare(
+      `INSERT INTO run_next_turns (id, run_id, room_id, agent_id, prompt_delta_json, message_id, pending_turn_id, source_reason, source_idempotency_key, created_at, consumed_at)
+       VALUES ('nt_upload', 'run_next_upload', 'room_1', 'agent_1', '', 'msg_next_upload', NULL, 'primary_turn', 'wake_upload', ?, NULL)`
+    ).run(now);
+
+    const prompt = buildRunPrompt(run("run_next_upload"), currentDatabase(), { now: () => now });
+    const attachments = buildRunPromptAttachments(run("run_next_upload"), currentDatabase());
+
+    expect(prompt).toContain("[Queued message] Follow up with this upload");
+    expect(prompt).toContain("[Attachment: next.md (text/markdown)]");
+    expect(prompt).toContain("[attached model resource]");
+    expect(prompt).not.toContain("[MCP path:");
+    expect(prompt).not.toContain("Queued upload attachment details.");
+    expect(attachments).toEqual([expect.objectContaining({ type: "file", name: "next.md", mimeType: "text/markdown" })]);
+  });
+
   test("injects context refs from the real queued message into the run prompt", () => {
     expect(tempDir).toBeDefined();
     currentDatabase().sqlite.prepare("UPDATE workspaces SET root_path = ? WHERE id = 'ws_1'").run(tempDir as string);
@@ -141,6 +240,7 @@ describe("buildRunPrompt", () => {
     const prompt = buildRunPrompt(run("run_context_refs"), currentDatabase(), { now: () => now });
 
     expect(prompt).toContain("## Context References");
+    expect(prompt).not.toContain("## Uploaded Attachments");
     expect(prompt).toContain('<context-ref type="artifact" id="artifact_prompt" lines="2-2"');
     expect(prompt).toContain("doc two");
     expect(prompt).toContain('<context-ref type="workspace" path="src/app.ts" lines="1-1"');
@@ -309,6 +409,21 @@ describe("buildRunPrompt", () => {
     expect(prompt).toContain("Detailed architecture section from the file.");
   });
 
+  test("assisted shared transcript names uploaded fileId attachments and passes them as resource blocks", () => {
+    seedUserMessage("msg_assisted", "Discuss this uploaded issue", 1);
+    seedUploadedAttachment("msg_assisted", "123e4567-e89b-12d3-a456-426614174201", "issue.md", "# Problem\n\nUploaded stack trace details.", 2);
+    createRun("run_uploaded_attachment", "primary_turn", { messageId: "msg_assisted" });
+
+    const prompt = buildRunPrompt(run("run_uploaded_attachment"), currentDatabase(), { now: () => now });
+    const attachments = buildRunPromptAttachments(run("run_uploaded_attachment"), currentDatabase());
+
+    expect(prompt).toContain("[Attachment: issue.md (text/markdown)]");
+    expect(prompt).toContain("[attached model resource]");
+    expect(prompt).not.toContain("[MCP path:");
+    expect(prompt).not.toContain("Uploaded stack trace details.");
+    expect(attachments).toEqual([expect.objectContaining({ type: "file", name: "issue.md", mimeType: "text/markdown" })]);
+  });
+
   test("assisted shared transcript uses role binding names for prior speakers", () => {
     seedRoleBoundAssistedRoom();
     seedUserMessage("msg_assisted", "Design a multi-agent platform", 1);
@@ -390,6 +505,42 @@ function seedFileAttachment(messageId: string, artifactId: string, path: string,
     sizeBytes: Buffer.byteLength(content, "utf8"),
     path,
     previewKind: "markdown"
+  }), createdAt);
+}
+
+function seedUploadedAttachment(messageId: string, fileId: string, name: string, content: string, createdAt: number, mimeType = "text/markdown", previewKind = "markdown"): void {
+  if (tempDir === undefined) throw new Error("missing temp dir");
+  currentDatabase().sqlite.prepare("UPDATE workspaces SET root_path = ? WHERE id = 'ws_1'").run(tempDir);
+  const relativeStoragePath = `.agenthub/attachments/2026/06/${fileId}`;
+  const storagePath = join(tempDir, ...relativeStoragePath.split("/"));
+  mkdirSync(join(tempDir, ".agenthub", "attachments", "2026", "06"), { recursive: true });
+  writeFileSync(storagePath, content, "utf8");
+  currentDatabase().sqlite.prepare("INSERT INTO attachments (id, message_id, file_id, file_name, mime_type, byte_size, sha256, storage_path, created_at) VALUES (?, ?, ?, ?, ?, ?, 'sha', ?, ?)").run(`att_${fileId}`, messageId, fileId, name, mimeType, Buffer.byteLength(content, "utf8"), relativeStoragePath, createdAt);
+  currentDatabase().sqlite.prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, 2, 'attachment', ?, ?)").run(messageId, JSON.stringify({
+    type: "attachment",
+    fileId,
+    name,
+    mimeType,
+    sizeBytes: Buffer.byteLength(content, "utf8"),
+    previewKind
+  }), createdAt);
+}
+
+function seedUploadedImageAttachment(messageId: string, fileId: string, name: string, content: Buffer, createdAt: number): void {
+  if (tempDir === undefined) throw new Error("missing temp dir");
+  currentDatabase().sqlite.prepare("UPDATE workspaces SET root_path = ? WHERE id = 'ws_1'").run(tempDir);
+  const relativeStoragePath = `.agenthub/attachments/2026/06/${fileId}`;
+  const storagePath = join(tempDir, ...relativeStoragePath.split("/"));
+  mkdirSync(join(tempDir, ".agenthub", "attachments", "2026", "06"), { recursive: true });
+  writeFileSync(storagePath, content);
+  currentDatabase().sqlite.prepare("INSERT INTO attachments (id, message_id, file_id, file_name, mime_type, byte_size, sha256, storage_path, created_at) VALUES (?, ?, ?, ?, 'image/png', ?, 'sha', ?, ?)").run(`att_${fileId}`, messageId, fileId, name, content.byteLength, relativeStoragePath, createdAt);
+  currentDatabase().sqlite.prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, 2, 'attachment', ?, ?)").run(messageId, JSON.stringify({
+    type: "attachment",
+    fileId,
+    name,
+    mimeType: "image/png",
+    sizeBytes: content.byteLength,
+    previewKind: "image"
   }), createdAt);
 }
 
