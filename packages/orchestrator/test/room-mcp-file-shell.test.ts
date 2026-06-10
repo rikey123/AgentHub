@@ -148,13 +148,12 @@ describe("RoomMcpServer file and shell safeguards", () => {
     });
     server = createServer();
 
-    const writePath = join(tempDir!, "allowed.txt");
     const resultPromise = currentServer().callTool("file.write", { path: "allowed.txt", content: "hello" }, session(), context());
     deferred.resolve({ decision: "allowed", reason: "approved", requestId: "req_write_allow" });
     const result = await resultPromise;
 
     expect(result).toEqual({ ok: true, data: { path: "allowed.txt", written: true } });
-    expect(writeFileSyncMock).toHaveBeenCalledWith(writePath, "hello", "utf8");
+    expect(writeFileSyncMock).toHaveBeenCalledWith(expect.stringMatching(/[\\/]allowed\.txt$/u), "hello", "utf8");
   });
 
   test("file.write with ArtifactFS avoids real filesystem writes", async () => {
@@ -180,6 +179,45 @@ describe("RoomMcpServer file and shell safeguards", () => {
     const result = await currentServer().callTool("shell", { command: "echo hi", cwd: "../../" }, session(), context());
 
     expect(result).toMatchObject({ ok: false, error: { code: "permission_denied", message: "cwd must be within workspace" } });
+    expect(execFileMock).not.toHaveBeenCalled();
+  });
+
+  test("shell denies agents without terminal.run before requesting permission", async () => {
+    seedRoom("room_1", "agent_1");
+    bindRoleCapabilities("room_1", "agent_1", ["chat", "context.read"]);
+    const check = vi.fn(() => ({ status: "allow" as const }));
+    permissionEngine = { check };
+    server = createServer();
+
+    const result = await currentServer().callTool("shell", { command: "python --version" }, session(), context());
+
+    expect(result).toMatchObject({ ok: false, error: { code: "tool_not_permitted", message: "shell requires the terminal.run capability" } });
+    expect(check).not.toHaveBeenCalled();
+    expect(execFileMock).not.toHaveBeenCalled();
+  });
+
+  test("stdio config includes agent capabilities so the bridge can hide shell", () => {
+    seedRoom("room_1", "agent_1");
+    bindRoleCapabilities("room_1", "agent_1", ["chat", "context.read"]);
+
+    const config = currentServer().getRegisteredStdioConfig({ roomId: "room_1", agentId: "agent_1", runId: "run_1", adapterSessionId: "adapter_1" });
+
+    expect(config.env).toEqual(expect.arrayContaining([
+      { name: "ROOM_MCP_AGENT_CAPABILITIES", value: JSON.stringify(["chat", "context.read"]) }
+    ]));
+  });
+
+  test("shell permits agents with terminal.run to reach permission checks", async () => {
+    seedRoom("room_1", "agent_1");
+    bindRoleCapabilities("room_1", "agent_1", ["chat", "terminal.run"]);
+    const check = vi.fn(() => ({ status: "deny" as const, reason: "blocked" }));
+    permissionEngine = { check };
+    server = createServer();
+
+    const result = await currentServer().callTool("shell", { command: "echo hi" }, session(), context());
+
+    expect(result).toMatchObject({ ok: false, error: { code: "permission_denied", message: "blocked" } });
+    expect(check).toHaveBeenCalledTimes(1);
     expect(execFileMock).not.toHaveBeenCalled();
   });
 
@@ -230,6 +268,42 @@ describe("RoomMcpServer file and shell safeguards", () => {
 
     expect(result).toEqual({ ok: true, data: { path: "shadow.txt", content: shadowContent } });
     // readFileSyncMock should NOT have been called — content came from ArtifactFS.
+    expect(readFileSyncMock).not.toHaveBeenCalled();
+  });
+
+  test("file.list does not expose uploaded attachments as a virtual attachments directory", async () => {
+    seedRoom("room_1", "agent_1");
+    seedUploadedAttachment("file_pdf", "course.pdf", "application/pdf", 4096);
+
+    const root = await currentServer().callTool("file.list", { path: ".", recursive: false, limit: 100 }, session(), context());
+    const attachments = await currentServer().callTool("file.list", { path: "attachments", recursive: false, limit: 100 }, session(), context());
+
+    expect(root).toMatchObject({ ok: true, data: { entries: expect.not.arrayContaining([{ path: "attachments", type: "directory", size: 0 }]) } });
+    expect(attachments).toMatchObject({ ok: false, error: { code: "uploaded_attachment_not_tool_readable" } });
+    expect(readFileSyncMock).not.toHaveBeenCalled();
+  });
+
+  test("file.glob does not include uploaded attachments", async () => {
+    seedRoom("room_1", "agent_1");
+    seedUploadedAttachment("file_pdf", "course.pdf", "application/pdf", 4096);
+
+    const result = await currentServer().callTool("file.glob", { pattern: "**/*.pdf", limit: 50 }, session(), context());
+
+    expect(result).toEqual({ ok: true, data: { pattern: "**/*.pdf", matches: [] } });
+    expect(readFileSyncMock).not.toHaveBeenCalled();
+  });
+
+  test("file.read rejects uploaded attachment virtual paths before permission checks", async () => {
+    seedRoom("room_1", "agent_1");
+    seedUploadedAttachment("file_pdf", "course.pdf", "application/pdf", 4096);
+    const check = vi.fn(() => ({ status: "allow" as const }));
+    permissionEngine = { check };
+    server = createServer();
+
+    const result = await currentServer().callTool("file.read", { path: "attachments/file_pdf/course.pdf" }, session(), context());
+
+    expect(result).toMatchObject({ ok: false, error: { code: "uploaded_attachment_not_tool_readable" } });
+    expect(check).not.toHaveBeenCalled();
     expect(readFileSyncMock).not.toHaveBeenCalled();
   });
 
@@ -290,6 +364,27 @@ function seedRoom(roomId: string, agentId: string): void {
   currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO workspaces (id, name, root_path, created_at, updated_at) VALUES ('ws_1', 'Workspace', ?, ?, ?)").run(tempDir, now, now);
   currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES (?, 'ws_1', 'Room', 'solo', 'conversation', ?, NULL, ?, ?)").run(roomId, agentId, now, now);
   currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, default_presence, joined_at) VALUES (?, ?, 'agent', 'primary', 'mock', NULL, 'active', ?)").run(roomId, agentId, now);
+}
+
+function bindRoleCapabilities(roomId: string, agentId: string, capabilities: readonly string[]): void {
+  currentDatabase().sqlite.prepare("INSERT OR REPLACE INTO roles (id, workspace_id, name, prompt, capabilities, is_builtin, created_at, updated_at) VALUES ('role_agent_1', 'ws_1', 'Agent Role', '', ?, 0, ?, ?)").run(JSON.stringify(capabilities), now, now);
+  currentDatabase().sqlite.prepare("INSERT OR REPLACE INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES ('binding_agent_1', 'ws_1', 'role_agent_1', 'runtime_1', NULL, NULL, ?, ?)").run(now, now);
+  currentDatabase().sqlite.prepare("UPDATE room_participants SET agent_binding_id = 'binding_agent_1' WHERE room_id = ? AND participant_id = ? AND participant_type = 'agent'").run(roomId, agentId);
+}
+
+function seedUploadedAttachment(fileId: string, fileName: string, mimeType: string, byteSize: number): void {
+  const messageId = `msg_${fileId}`;
+  const storagePath = `.agenthub/attachments/2026/06/${fileId}`;
+  currentDatabase().sqlite.prepare("INSERT INTO messages (id, workspace_id, room_id, sender_type, sender_id, run_id, role, status, quoted_message_id, turn_dispatch_mode, pending_turn_id, created_at, updated_at, deleted_at) VALUES (?, 'ws_1', 'room_1', 'user', 'u_1', NULL, 'user', 'completed', NULL, 'immediate', NULL, ?, ?, NULL)").run(messageId, now, now);
+  currentDatabase().sqlite.prepare("INSERT INTO attachments (id, message_id, file_id, file_name, mime_type, byte_size, sha256, storage_path, created_at) VALUES (?, ?, ?, ?, ?, ?, 'sha', ?, ?)").run(`att_${fileId}`, messageId, fileId, fileName, mimeType, byteSize, storagePath, now);
+  currentDatabase().sqlite.prepare("INSERT INTO message_parts (message_id, seq, part_type, payload, created_at) VALUES (?, 1, 'attachment', ?, ?)").run(messageId, JSON.stringify({
+    type: "attachment",
+    fileId,
+    name: fileName,
+    mimeType,
+    sizeBytes: byteSize,
+    previewKind: "download"
+  }), now);
 }
 
 function session(extra: Partial<RoomMcpSessionContext> = {}): RoomMcpSessionContext {
