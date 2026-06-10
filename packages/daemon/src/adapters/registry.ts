@@ -33,11 +33,13 @@ export type AdapterRegistryOptions = {
   readonly nativeAdapter?: NativeManagedAdapter;
   readonly genericAcpAdapterFactory?: (config: GenericAcpAdapterConfig) => WarmableManagedAdapter;
   readonly adapterCommands?: {
-    readonly claude?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv };
-    readonly opencode?: { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv };
+    readonly claude?: AdapterCommand;
+    readonly opencode?: AdapterCommand;
   };
   readonly now?: () => number;
 };
+
+type AdapterCommand = { readonly command: string; readonly args?: readonly string[]; readonly env?: NodeJS.ProcessEnv };
 
 type WarmableManagedAdapter = Pick<ClaudeCodeACPAdapter, "runManaged" | "cancelManagedRun" | "warmRoomAgent" | "disposeRoomWarmSessions" | "disposeAllSessions"> & {
   readonly debugSession?: ClaudeCodeACPAdapter["debugSession"];
@@ -91,6 +93,7 @@ type RuntimeConfigRow = {
 };
 
 const GENERIC_ACP_RUNTIME_KINDS = new Set(["custom-acp", "codex", "qwen", "goose", "kimi", "cursor", "kiro", "hermes"]);
+const ACP_RUNTIME_KINDS_WITH_BINARY_RESOURCE_GAP = new Set<RuntimeAdapterId>(["codex"]);
 
 export class AdapterRegistry {
   readonly mockAdapter: MockAdapterManager;
@@ -119,7 +122,8 @@ export class AdapterRegistry {
   }
 
   async runAgent(run: RunRow): Promise<void> {
-    const adapterId = this.adapterIdForRun(run);
+    const initialAdapterId = this.adapterIdForRun(run);
+    const adapterId = this.adapterIdForAttachments(run, initialAdapterId);
     this.runAdapters.set(run.id, adapterId);
     try {
       this.options.skillRegistry?.materializeForRun(this.skillRunInput(run, adapterId));
@@ -259,6 +263,7 @@ export class AdapterRegistry {
   }
 
   private claude(): WarmableManagedAdapter {
+    const catalogCommand = runtimeDefinitionAdapterCommand("claude-code");
     this.claudeAdapter ??= new ClaudeCodeACPAdapter({
       services: { database: this.options.database, eventBus: this.options.eventBus, ...(this.options.getCommandBus !== undefined ? { getCommandBus: this.options.getCommandBus } : {}), ...(this.options.permissionEngine !== undefined ? { permissionEngine: this.options.permissionEngine } : {}), ...(this.options.artifactFs !== undefined ? { artifactFs: this.options.artifactFs } : {}), ...(this.options.fileMessageService !== undefined ? { fileMessageService: this.options.fileMessageService } : {}), ...(this.options.briefResolver !== undefined ? { briefResolver: this.options.briefResolver } : {}) },
       lifecycle: this.options.lifecycle,
@@ -266,6 +271,7 @@ export class AdapterRegistry {
       ...(this.options.onSessionEndedWithoutCompletion !== undefined ? { onSessionEndedWithoutCompletion: this.options.onSessionEndedWithoutCompletion } : {}),
       ...(this.options.onPlanPhaseEnded !== undefined ? { onPlanPhaseEnded: this.options.onPlanPhaseEnded } : {}),
       getSkillsBlock: (runId) => this.getSkillsBlock(runId),
+      ...(catalogCommand !== undefined ? catalogCommand : {}),
       ...(this.options.adapterCommands?.claude !== undefined ? this.options.adapterCommands.claude : {}),
       ...(this.options.permissionEngine !== undefined ? { permissionEngine: this.options.permissionEngine } : {}),
       ...(this.options.getRoomMcpServer !== undefined ? { mcpServer: this.options.getRoomMcpServer() } : {}),
@@ -414,6 +420,12 @@ export class AdapterRegistry {
     return row?.root_path ?? process.cwd();
   }
 
+  private adapterIdForAttachments(run: RunRow, adapterId: RuntimeAdapterId): RuntimeAdapterId {
+    if (!ACP_RUNTIME_KINDS_WITH_BINARY_RESOURCE_GAP.has(adapterId)) return adapterId;
+    if (!runHasBinaryAttachmentsForModelInput(this.options.database, run.id)) return adapterId;
+    return runHasBoundModelConfig(this.options.database, run) ? "native" : adapterId;
+  }
+
   private adapterIdForPersistedRun(runId: string): RuntimeAdapterId {
     const row = this.options.database.sqlite.prepare("SELECT adapter_id, agent_id FROM runs WHERE id = ?").get(runId) as { readonly adapter_id: string | null; readonly agent_id: string } | undefined;
     if (row === undefined) return "mock";
@@ -509,6 +521,134 @@ export class AdapterRegistry {
   }
 }
 
+function runHasBinaryAttachmentsForModelInput(database: AgentHubDatabase, runId: string): boolean {
+  const messageIds = currentRunInputMessageIdsForAttachments(database, runId);
+  if (messageIds.size === 0) return false;
+
+  for (const messageId of messageIds) {
+    const rows = database.sqlite.prepare("SELECT payload FROM message_parts WHERE message_id = ? AND part_type = 'attachment' ORDER BY seq ASC").all(messageId) as Array<{ readonly payload: string }>;
+    for (const row of rows) {
+      const payload = parseAttachmentPayload(row.payload);
+      if (payload?.fileId === undefined) continue;
+      const attachment = database.sqlite.prepare("SELECT file_name AS fileName, mime_type AS mimeType FROM attachments WHERE file_id = ? LIMIT 1").get(payload.fileId) as { readonly fileName: string; readonly mimeType: string | null } | undefined;
+      const fileName = attachment?.fileName ?? payload.name ?? payload.fileId;
+      const mimeType = attachment?.mimeType ?? payload.mimeType ?? "";
+      if (!codexAcpCanDeliverAttachment(fileName, mimeType)) return true;
+    }
+  }
+  return false;
+}
+
+function runHasBoundModelConfig(database: AgentHubDatabase, run: RunRow): boolean {
+  const row = database.sqlite
+    .prepare(
+      `SELECT 1
+       FROM room_participants rp
+       JOIN agent_bindings ab ON ab.id = rp.agent_binding_id
+       WHERE rp.room_id = ? AND rp.participant_id = ? AND rp.participant_type = 'agent' AND ab.model_config_id IS NOT NULL
+       LIMIT 1`
+    )
+    .get(run.room_id, run.agent_id) as { readonly "1": number } | undefined;
+  return row !== undefined;
+}
+
+function currentRunInputMessageIdsForAttachments(database: AgentHubDatabase, runId: string): Set<string> {
+  const ids = new Set<string>();
+  const queued = database.sqlite.prepare("SELECT payload FROM events WHERE run_id = ? AND type = 'agent.run.queued' ORDER BY seq DESC LIMIT 1").get(runId) as { readonly payload: string } | undefined;
+  const queuedPayload = queued !== undefined ? parseQueuedRunPayload(queued.payload) : undefined;
+  addString(ids, queuedPayload?.messageId);
+  if (queuedPayload?.pendingTurnId !== undefined) addString(ids, pendingTurnMessageId(database, queuedPayload.pendingTurnId));
+
+  const nextTurns = database.sqlite.prepare("SELECT message_id, pending_turn_id FROM run_next_turns WHERE run_id = ?").all(runId) as Array<{ readonly message_id: string | null; readonly pending_turn_id: string | null }>;
+  for (const row of nextTurns) {
+    addString(ids, row.message_id ?? undefined);
+    if (row.pending_turn_id !== null) addString(ids, pendingTurnMessageId(database, row.pending_turn_id));
+  }
+  return ids;
+}
+
+function pendingTurnMessageId(database: AgentHubDatabase, pendingTurnId: string): string | undefined {
+  const row = database.sqlite.prepare("SELECT user_message_id FROM pending_turns WHERE id = ? LIMIT 1").get(pendingTurnId) as { readonly user_message_id: string } | undefined;
+  return row?.user_message_id;
+}
+
+function addString(values: Set<string>, value: string | undefined): void {
+  if (value !== undefined && value.length > 0) values.add(value);
+}
+
+function parseQueuedRunPayload(value: string): { readonly messageId?: string; readonly pendingTurnId?: string } | undefined {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!isRecord(parsed)) return undefined;
+    return {
+      ...(typeof parsed.messageId === "string" && parsed.messageId.length > 0 ? { messageId: parsed.messageId } : {}),
+      ...(typeof parsed.pendingTurnId === "string" && parsed.pendingTurnId.length > 0 ? { pendingTurnId: parsed.pendingTurnId } : {})
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function parseAttachmentPayload(value: string): { readonly fileId?: string; readonly name?: string; readonly mimeType?: string } | undefined {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!isRecord(parsed)) return undefined;
+    return {
+      ...(typeof parsed.fileId === "string" && parsed.fileId.length > 0 ? { fileId: parsed.fileId } : {}),
+      ...(typeof parsed.name === "string" && parsed.name.length > 0 ? { name: parsed.name } : {}),
+      ...(typeof parsed.mimeType === "string" && parsed.mimeType.length > 0 ? { mimeType: parsed.mimeType } : {})
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function codexAcpCanDeliverAttachment(fileName: string, mimeType: string): boolean {
+  const mime = mimeType.toLowerCase().split(";")[0]?.trim() ?? "";
+  const name = fileName.toLowerCase();
+  if (mime.startsWith("image/") || imageFileName(name)) return true;
+  return isTextLikeAttachment(name, mime);
+}
+
+function isTextLikeAttachment(name: string, mime: string): boolean {
+  return mime.startsWith("text/")
+    || mime.includes("json")
+    || mime.includes("xml")
+    || mime.includes("yaml")
+    || mime.includes("javascript")
+    || mime.includes("typescript")
+    || name.endsWith(".md")
+    || name.endsWith(".markdown")
+    || name.endsWith(".txt")
+    || name.endsWith(".csv")
+    || name.endsWith(".json")
+    || name.endsWith(".xml")
+    || name.endsWith(".yaml")
+    || name.endsWith(".yml")
+    || name.endsWith(".js")
+    || name.endsWith(".ts")
+    || name.endsWith(".tsx")
+    || name.endsWith(".jsx")
+    || name.endsWith(".css")
+    || name.endsWith(".html");
+}
+
+function imageFileName(name: string): boolean {
+  return name.endsWith(".png")
+    || name.endsWith(".jpg")
+    || name.endsWith(".jpeg")
+    || name.endsWith(".gif")
+    || name.endsWith(".webp")
+    || name.endsWith(".avif")
+    || name.endsWith(".bmp")
+    || name.endsWith(".tif")
+    || name.endsWith(".tiff");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function parseStringArray(value: unknown): readonly string[] {
   const parsed = typeof value === "string" ? safeJson(value, []) : value;
   return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
@@ -518,6 +658,12 @@ function parseEnv(value: unknown): NodeJS.ProcessEnv {
   const parsed = typeof value === "string" ? safeJson(value, {}) : value;
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
   return Object.fromEntries(Object.entries(parsed as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+}
+
+function runtimeDefinitionAdapterCommand(kind: string): AdapterCommand | undefined {
+  const definition = runtimeDefinitionForKind(kind);
+  if (definition?.command === undefined || definition.command === null) return undefined;
+  return { command: definition.command, args: definition.args };
 }
 
 function safeJson(value: string, fallback: unknown): unknown {
