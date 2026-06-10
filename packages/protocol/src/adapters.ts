@@ -86,9 +86,42 @@ export const ExternalSessionSchema = Schema.Struct({
 });
 export type ExternalSession = typeof ExternalSessionSchema.Type;
 
+export const AdapterMessageAttachmentSchema = Schema.Union(
+  Schema.Struct({
+    type: Schema.Literal("image"),
+    name: Schema.String,
+    mimeType: Schema.String,
+    data: Schema.String,
+    uri: Schema.optional(Schema.String),
+    linkUri: Schema.optional(Schema.String),
+    sizeBytes: Schema.optional(Schema.Number)
+  }),
+  Schema.Struct({
+    type: Schema.Literal("audio"),
+    name: Schema.String,
+    mimeType: Schema.String,
+    data: Schema.String,
+    uri: Schema.optional(Schema.String),
+    linkUri: Schema.optional(Schema.String),
+    sizeBytes: Schema.optional(Schema.Number)
+  }),
+  Schema.Struct({
+    type: Schema.Literal("file"),
+    name: Schema.String,
+    mimeType: Schema.String,
+    data: Schema.String,
+    uri: Schema.String,
+    localPath: Schema.optional(Schema.String),
+    linkUri: Schema.optional(Schema.String),
+    sizeBytes: Schema.optional(Schema.Number)
+  })
+);
+export type AdapterMessageAttachment = typeof AdapterMessageAttachmentSchema.Type;
+
 export const AdapterMessageSchema = Schema.Struct({
   role: Schema.Literal("user", "assistant", "system", "tool"),
-  content: Schema.String
+  content: Schema.String,
+  attachments: Schema.optional(Schema.Array(AdapterMessageAttachmentSchema))
 });
 export type AdapterMessage = typeof AdapterMessageSchema.Type;
 
