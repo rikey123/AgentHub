@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { get as httpGet } from "node:http";
-import { tmpdir } from "node:os";
+import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentHubClient } from "@agenthub/sdk";
 import { createEventBus } from "@agenthub/bus";
 import { createDatabase } from "@agenthub/db";
+import { defaultRoleAvatarUrl } from "@agenthub/protocol/avatars";
+import { orphanAttachmentMessageId } from "@agenthub/security";
 import { Effect, Stream } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -656,6 +658,31 @@ describe("daemon M1.4 composition", () => {
     expect(daemon.eventBus.replayDurableSinceSeq(0, { view: "main" }).filter((event) => event.type === "room.unpinned" && (event.payload as Record<string, unknown>).roomId === roomId)).toHaveLength(1);
   });
 
+  it("soft-deletes a room, publishes a durable room.deleted event, and excludes it from the room list", async () => {
+    const room = await fetch(`${baseUrl}/rooms`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Delete Me", mode: "solo", primaryAgentId: "mock-builder" })
+    });
+    const body = await room.json() as { readonly data?: { readonly roomId?: string } };
+    const roomId = body.data?.roomId ?? "";
+
+    const beforeList = await (await fetch(`${baseUrl}/rooms`)).json() as { readonly rooms: ReadonlyArray<{ readonly id: string }> };
+    expect(beforeList.rooms.map((r) => r.id)).toContain(roomId);
+
+    const deleted = await fetch(`${baseUrl}/rooms/${roomId}`, { method: "DELETE" });
+    expect(deleted.status).toBe(200);
+    expect(daemon.database.sqlite.prepare("SELECT deleted_at FROM rooms WHERE id = ?").get(roomId)).toMatchObject({ deleted_at: expect.any(Number) });
+    expect(daemon.eventBus.replayDurableSinceSeq(0, { view: "main" }).filter((event) => event.type === "room.deleted" && (event.payload as Record<string, unknown>).roomId === roomId)).toHaveLength(1);
+    expect(daemon.eventBus.replayDurableSinceSeq(0, { view: "detail" }).filter((event) => event.type === "room.deleted" && (event.payload as Record<string, unknown>).roomId === roomId)).toHaveLength(1);
+
+    const afterList = await (await fetch(`${baseUrl}/rooms`)).json() as { readonly rooms: ReadonlyArray<{ readonly id: string }> };
+    expect(afterList.rooms.map((r) => r.id)).not.toContain(roomId);
+
+    const deletedAgain = await fetch(`${baseUrl}/rooms/${roomId}`, { method: "DELETE" });
+    expect(deletedAgain.status).toBe(404);
+  });
+
   it("saves workflow drafts as graph rows and durable workflow events without mailbox rows", async () => {
     const createResponse = await fetch(`${baseUrl}/workflows`, {
       method: "POST",
@@ -1127,9 +1154,9 @@ describe("daemon M1.4 composition", () => {
     const seededCodex = seededCatalog.find((runtime) => runtime.id === "runtime-codex");
     expect(seededCodex).toMatchObject({
       kind: "codex",
-      command: "npx",
-      args: JSON.stringify(["-y", "@zed-industries/codex-acp@0.9.5"])
+      command: process.execPath
     });
+    expect(JSON.parse(seededCodex?.args ?? "[]")).toEqual([expect.stringMatching(/[\\/]npm-acp-runner\.mjs$/u), "@zed-industries/codex-acp@0.15.0", "codex-acp"]);
     expect(["missing", "connected"]).toContain(seededCodex?.status);
     expect(JSON.parse(seededCodex?.manifest_json ?? "{}")).toMatchObject({ runtimeKind: "codex", detectCommand: "codex", skillDir: ".codex/skills" });
     expect(daemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'runtime.detected' AND json_extract(payload, '$.runtimeId') = 'native-default'").get()).toMatchObject({ count: 1 });
@@ -1149,7 +1176,7 @@ describe("daemon M1.4 composition", () => {
     const createdKnownRuntime = await fetch(`${baseUrl}/runtimes`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ id: "runtime-codex-manual", kind: "codex", name: "Codex Manual", command: "npx", args: ["-y", "@zed-industries/codex-acp@0.9.5"], supportedCaps: ["chat"], manifestJson: JSON.stringify({ runtimeKind: "codex", detectCommand: "codex" }) })
+      body: JSON.stringify({ id: "runtime-codex-manual", kind: "codex", name: "Codex Manual", command: "npm", args: ["exec", "--yes", "--ignore-scripts", "--", "@zed-industries/codex-acp@0.15.0"], supportedCaps: ["chat"], manifestJson: JSON.stringify({ runtimeKind: "codex", detectCommand: "codex" }) })
     });
     const createdKnownPayload = await createdKnownRuntime.json() as { readonly runtime?: { readonly id: string; readonly kind: string; readonly name: string } | null };
     expect(createdKnownRuntime.status).toBe(201);
@@ -2166,6 +2193,26 @@ describe("daemon M1.4 composition", () => {
     }
   });
 
+  it("upgrades a legacy builtin project manager avatar during reseed", () => {
+    const dir = mkdtempSync(join(tmpdir(), "agenthub-builtin-roles-avatar-"));
+    const rolesDir = join(dir, "roles");
+    const database = createDatabase({ path: join(dir, "agenthub.sqlite"), applyMigrations: true });
+    const eventBus = createEventBus({ database });
+    const legacyAvatar = "/avatars/dicebear/v1/personas/role%3Aproject-manager.svg";
+    try {
+      seedBuiltinRoles(database, rolesDir, eventBus, 1234);
+      database.sqlite.prepare("UPDATE roles SET avatar = ? WHERE id = 'project-manager'").run(legacyAvatar);
+
+      seedBuiltinRoles(database, rolesDir, eventBus, 5678);
+
+      expect(database.sqlite.prepare("SELECT avatar FROM roles WHERE id = 'project-manager'").get()).toMatchObject({
+        avatar: defaultRoleAvatarUrl("project-manager")
+      });
+    } finally {
+      database.sqlite.close();
+    }
+  });
+
   it("preserves existing newer builtin role files without overwriting", () => {
     const dir = mkdtempSync(join(tmpdir(), "agenthub-builtin-roles-newer-"));
     const rolesDir = join(dir, "roles");
@@ -2681,6 +2728,77 @@ describe("daemon M1.4 composition", () => {
     expect(payload.messages.find((message) => message.id === messageId)?.parts).toEqual([
       { seq: 0, type: "attachment", fileId: "artifact-1", artifactId: "artifact-1", name: "design.md", mimeType: "text/markdown", sizeBytes: 42, path: "design.md", previewKind: "markdown" }
     ]);
+  });
+
+  it("persists uploaded attachment ids as message parts and event payload parts", async () => {
+    const client = new AgentHubClient({ baseUrl });
+    const room = await client.createRoom({ title: "Uploaded Attachment Parts", mode: "solo", primaryAgentId: "mock-builder" }) as { readonly data: { readonly roomId: string } };
+    const fileId = "123e4567-e89b-12d3-a456-426614174101";
+    const fileName = "成员四五分钟面试讲稿_中英文对照.md";
+    const content = "uploaded question details";
+    const workspaceRoot = mkdtempSync(join(tmpdir(), "agenthub-upload-preview-"));
+    mkdirSync(join(workspaceRoot, ".agenthub", "attachments", "2026", "06"), { recursive: true });
+    writeFileSync(join(workspaceRoot, ".agenthub", "attachments", "2026", "06", "file"), content, "utf8");
+    daemon.database.sqlite.prepare("UPDATE workspaces SET root_path = ? WHERE id = 'default-workspace'").run(workspaceRoot);
+    daemon.database.sqlite.prepare("INSERT INTO attachments (id, message_id, file_id, file_name, mime_type, byte_size, sha256, storage_path, created_at) VALUES ('att_uploaded_message_part', ?, ?, ?, 'text/markdown', ?, ?, '.agenthub/attachments/2026/06/file', 1)").run(orphanAttachmentMessageId, fileId, fileName, Buffer.byteLength(content, "utf8"), createHash("sha256").update(content).digest("hex"));
+
+    const sent = await fetch(`${baseUrl}/rooms/${room.data.roomId}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "看看这个问题", attachmentIds: [fileId], idempotencyKey: "uploaded-attachment-part-1" })
+    });
+    const sentPayload = await sent.json() as { readonly ok?: boolean; readonly data?: { readonly messageId?: string } };
+    expect(sent.status).toBe(200);
+    expect(sentPayload.ok).toBe(true);
+    const messageId = sentPayload.data?.messageId ?? "";
+
+    expect(daemon.database.sqlite.prepare("SELECT message_id FROM attachments WHERE file_id = ?").get(fileId)).toMatchObject({ message_id: messageId });
+    const attachmentPart = daemon.database.sqlite.prepare("SELECT seq, part_type, payload FROM message_parts WHERE message_id = ? AND part_type = 'attachment'").get(messageId) as { readonly seq: number; readonly part_type: string; readonly payload: string };
+    expect({ seq: attachmentPart.seq, partType: attachmentPart.part_type, payload: JSON.parse(attachmentPart.payload) }).toMatchObject({
+      seq: 2,
+      partType: "attachment",
+      payload: { fileId, name: fileName, mimeType: "text/markdown", sizeBytes: Buffer.byteLength(content, "utf8"), previewKind: "markdown" }
+    });
+
+    const response = await fetch(`${baseUrl}/rooms/${room.data.roomId}/messages`);
+    const history = await response.json() as { readonly messages: readonly { readonly id: string; readonly parts?: readonly unknown[] }[] };
+    expect(history.messages.find((message) => message.id === messageId)?.parts).toContainEqual(expect.objectContaining({ type: "attachment", fileId, name: fileName }));
+    expect(messagePayload(daemon, messageId, "message.created")).toMatchObject({ attachmentIds: [fileId], parts: expect.arrayContaining([expect.objectContaining({ type: "attachment", fileId, name: fileName })]) });
+
+    const preview = await fetch(`${baseUrl}/attachments/${fileId}`);
+    expect(preview.status).toBe(200);
+    expect(await preview.json()).toMatchObject({ content: { content }, attachment: { fileId, name: fileName } });
+    const raw = await fetch(`${baseUrl}/attachments/${fileId}/raw`);
+    expect(raw.status).toBe(200);
+    expect(raw.headers.get("content-type")).toContain("text/markdown");
+    expect(raw.headers.get("content-disposition")).toBe(`inline; filename="download.md"; filename*=UTF-8''${encodeURIComponent(fileName)}`);
+    expect(await raw.text()).toBe(content);
+  });
+
+  it("classifies uploaded PDF attachment message parts as PDF previews", async () => {
+    const client = new AgentHubClient({ baseUrl });
+    const room = await client.createRoom({ title: "Uploaded PDF Parts", mode: "solo", primaryAgentId: "mock-builder" }) as { readonly data: { readonly roomId: string } };
+    const fileId = "123e4567-e89b-12d3-a456-426614174102";
+    const content = "%PDF-1.7\nreport";
+    const workspaceRoot = mkdtempSync(join(tmpdir(), "agenthub-upload-pdf-"));
+    mkdirSync(join(workspaceRoot, ".agenthub", "attachments", "2026", "06"), { recursive: true });
+    writeFileSync(join(workspaceRoot, ".agenthub", "attachments", "2026", "06", "pdf"), content, "utf8");
+    daemon.database.sqlite.prepare("UPDATE workspaces SET root_path = ? WHERE id = 'default-workspace'").run(workspaceRoot);
+    daemon.database.sqlite.prepare("INSERT INTO attachments (id, message_id, file_id, file_name, mime_type, byte_size, sha256, storage_path, created_at) VALUES ('att_uploaded_pdf_part', ?, ?, 'report.pdf', 'application/pdf', ?, ?, '.agenthub/attachments/2026/06/pdf', 1)").run(orphanAttachmentMessageId, fileId, Buffer.byteLength(content, "utf8"), createHash("sha256").update(content).digest("hex"));
+
+    const sent = await fetch(`${baseUrl}/rooms/${room.data.roomId}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text: "read pdf", attachmentIds: [fileId], idempotencyKey: "uploaded-pdf-part-1" })
+    });
+    const sentPayload = await sent.json() as { readonly ok?: boolean; readonly data?: { readonly messageId?: string } };
+    expect(sent.status).toBe(200);
+    expect(sentPayload.ok).toBe(true);
+    const messageId = sentPayload.data?.messageId ?? "";
+
+    const attachmentPart = daemon.database.sqlite.prepare("SELECT payload FROM message_parts WHERE message_id = ? AND part_type = 'attachment'").get(messageId) as { readonly payload: string };
+    expect(JSON.parse(attachmentPart.payload)).toMatchObject({ fileId, name: "report.pdf", mimeType: "application/pdf", previewKind: "pdf" });
+    expect(messagePayload(daemon, messageId, "message.created")).toMatchObject({ parts: expect.arrayContaining([expect.objectContaining({ type: "attachment", fileId, name: "report.pdf", previewKind: "pdf" })]) });
   });
 
   it("pins messages as room context and regenerates assistant messages through WakeAgent", async () => {
@@ -3207,6 +3325,26 @@ describe("daemon M1.4 composition", () => {
     expect(revoked.status).toBe(200);
   });
 
+  it("uses a LAN address in mobile pairing config when daemon is remotely bound", async () => {
+    const lanAddress = Object.values(networkInterfaces()).flatMap((entries) =>
+      (entries ?? []).filter((entry) => entry.family === "IPv4" && !entry.internal).map((entry) => entry.address)
+    )[0];
+    if (lanAddress === undefined) return;
+    await daemon.close();
+    currentDaemon = undefined;
+    const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-mobile-lan-"));
+    daemon = createDaemon({ databasePath: join(dir, "agenthub.sqlite"), port: 0, host: lanAddress, token: "remote-token", allowRemote: true, modelTestFetch: modelTestFetchMock });
+    currentDaemon = daemon;
+    await daemon.start();
+
+    const response = await invokeHandler(daemon, "POST", "/auth/tokens", { description: "mobile", scopes: ["read"] }, { host: "127.0.0.1:6677", authorization: "Bearer remote-token", "content-type": "application/json" });
+    const body = response.body as { readonly connection?: { readonly url: string; readonly host: string; readonly qrPayload: string } };
+
+    expect(response.status).toBe(201);
+    expect(body.connection).toMatchObject({ url: `http://${lanAddress}:6677`, host: lanAddress });
+    expect(JSON.parse(body.connection?.qrPayload ?? "{}")).toMatchObject({ url: `http://${lanAddress}:6677`, host: lanAddress });
+  });
+
   it("serves token-only mobile sync events by seq with redaction and revocation", async () => {
     const issued = await fetch(`${baseUrl}/auth/tokens`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ description: "mobile", scopes: ["read"] }) });
     const issuedPayload = await issued.json() as { readonly id: string; readonly token: string };
@@ -3462,12 +3600,12 @@ async function readSseEvent(body: ReadableStream<Uint8Array> | null, eventName: 
   throw new Error(`Timed out waiting for SSE event ${eventName}: ${buffer}`);
 }
 
-async function invokeHandler(daemon: DaemonApp, method: string, url: string, body?: unknown): Promise<{ readonly status: number; readonly body: unknown }> {
+async function invokeHandler(daemon: DaemonApp, method: string, url: string, body?: unknown, headers: Record<string, string> = {}): Promise<{ readonly status: number; readonly body: unknown }> {
   const { EventEmitter } = await import("node:events");
   const req = new EventEmitter() as Parameters<DaemonApp["handle"]>[0] & { method?: string; url?: string; headers?: Record<string, string>; [Symbol.asyncIterator]?: () => AsyncIterableIterator<Buffer> };
   req.method = method;
   req.url = url;
-  req.headers = body === undefined ? {} : { "content-type": "application/json" };
+  req.headers = { ...(body === undefined ? {} : { "content-type": "application/json" }), ...headers };
   req[Symbol.asyncIterator] = async function* () {
     if (body === undefined) return;
     yield Buffer.from(JSON.stringify(body));
