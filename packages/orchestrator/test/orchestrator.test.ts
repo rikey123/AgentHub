@@ -275,6 +275,22 @@ describe("WakeAgent and CancelRun handlers", () => {
     expect(statusOf("run_cancel_reject")).toBe("cancelled");
   });
 
+  test("provider cancelled session fails a running run instead of throwing cancelFinalized", () => {
+    createRun("run_provider_cancelled");
+    currentLifecycle().markClaimed(null, "run_provider_cancelled");
+    currentLifecycle().markStarting(null, "run_provider_cancelled", 123);
+    currentLifecycle().markRunning(null, "run_provider_cancelled", "s_provider_cancelled");
+    const bridge = bridgeFor("run_provider_cancelled");
+
+    expect(() => bridge.handle({ type: "session.ended", sessionId: "s_provider_cancelled", reason: "cancelled", cost: zeroCost() })).not.toThrow();
+
+    expect(statusOf("run_provider_cancelled")).toBe("failed");
+    expect(currentLifecycle().read("run_provider_cancelled")).toMatchObject({
+      failure_class: "retryable_visible",
+      error: "provider_cancelled"
+    });
+  });
+
   test("CancelRun swallows synchronous adapter cancel throw", () => {
     createRun("run_cancel_sync_throw");
     currentLifecycle().markClaimed(null, "run_cancel_sync_throw");
