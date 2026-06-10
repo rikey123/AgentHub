@@ -74,7 +74,7 @@ describe("ChatStream task notification feed", () => {
     expect(buildChatFeedItems(room)).toEqual([]);
   });
 
-  it("keeps ordinary run briefs in the main chat feed", () => {
+  it("keeps ordinary run briefs out of the main chat feed", () => {
     const room = roomFixture({
       briefs: [
         {
@@ -87,9 +87,7 @@ describe("ChatStream task notification feed", () => {
       ]
     });
 
-    expect(buildChatFeedItems(room)).toMatchObject([
-      { kind: "brief", id: "run-1-0" }
-    ]);
+    expect(buildChatFeedItems(room)).toEqual([]);
   });
 
   it("does not turn task activity rows into main timeline feed items", () => {
