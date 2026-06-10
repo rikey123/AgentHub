@@ -7,6 +7,10 @@ import { resolveFetchImpl } from "./nativeHttp.ts";
 
 type Notice = { readonly tone: "ok" | "warn" | "error"; readonly text: string };
 type PreviewState = { readonly loading: boolean; readonly artifactId?: string; readonly path?: string; readonly data?: MobileArtifactPreviewResponse; readonly error?: string };
+type BarcodeDetectorLike = {
+  readonly detect: (source: HTMLVideoElement) => Promise<readonly { readonly rawValue?: string }[]>;
+};
+type BarcodeDetectorConstructor = new (options?: { readonly formats?: readonly string[] }) => BarcodeDetectorLike;
 
 function makeIdempotencyKey(prefix: string): string {
   const random = globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
@@ -33,7 +37,8 @@ export function App(): React.JSX.Element {
   const subscription = useRef<AgentHubEventSubscription | null>(null);
   const selectedRoomIdRef = useRef<string | null>(null);
 
-  const client = useMemo(() => connection === null ? null : new AgentHubClient({ baseUrl: clientBaseUrl(connection), token: connection.token, fetchImpl: resolveFetchImpl() }), [connection]);
+  const baseUrl = useMemo(() => connection === null ? null : clientBaseUrl(connection), [connection]);
+  const client = useMemo(() => connection === null || baseUrl === null ? null : new AgentHubClient({ baseUrl, token: connection.token, fetchImpl: resolveFetchImpl() }), [baseUrl, connection]);
   const selectedRoomId = state.selectedRoomId;
   const roomMessages = state.messages;
   const roomTasks = visibleForRoom(state.tasks, selectedRoomId);
@@ -51,9 +56,9 @@ export function App(): React.JSX.Element {
       const snapshot = await client.syncSnapshot();
       setState((current) => applySnapshot(current, snapshot));
     } catch (error) {
-      setState((current) => markOffline(current, errorMessage(error)));
+      setState((current) => markOffline(current, connectionErrorMessage(error, baseUrl)));
     }
-  }, [client]);
+  }, [baseUrl, client]);
 
   const refreshMessages = useCallback(async (targetRoomId: string | null) => {
     if (client === null || targetRoomId === null) return;
@@ -61,9 +66,9 @@ export function App(): React.JSX.Element {
       const response = await client.listMessages(targetRoomId);
       setState((current) => ({ ...current, status: current.status === "offline" ? "connected" : current.status, messages: mergeMessages(current.messages, response.messages ?? []) }));
     } catch (error) {
-      setState((current) => markOffline(current, errorMessage(error)));
+      setState((current) => markOffline(current, connectionErrorMessage(error, baseUrl)));
     }
-  }, [client]);
+  }, [baseUrl, client]);
 
   useEffect(() => {
     if (connection === null || client === null) return;
@@ -91,10 +96,10 @@ export function App(): React.JSX.Element {
           void refreshSnapshot();
           void refreshMessages(currentRoomId);
         }, (error) => {
-          setState((current) => markOffline(current, error.message));
+          setState((current) => markOffline(current, connectionErrorMessage(error, baseUrl)));
         });
       } catch (error) {
-        if (!cancelled) setState((current) => markOffline(current, errorMessage(error)));
+        if (!cancelled) setState((current) => markOffline(current, connectionErrorMessage(error, baseUrl)));
       }
     })();
     return () => {
@@ -102,7 +107,7 @@ export function App(): React.JSX.Element {
       subscription.current?.close();
       subscription.current = null;
     };
-  }, [client, connection, refreshMessages, refreshSnapshot]);
+  }, [baseUrl, client, connection, refreshMessages, refreshSnapshot]);
 
   useEffect(() => {
     void refreshMessages(selectedRoomId);
@@ -195,7 +200,9 @@ export function App(): React.JSX.Element {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
           <span className={`status-pill ${state.status}`}>{statusLabel(state.status)}</span>
-          <button className="icon-button" type="button" title="断开连接" aria-label="断开连接" onClick={disconnect}>⏻</button>
+          <button className="icon-button" type="button" title="断开连接" aria-label="断开连接" onClick={disconnect}>
+            <PowerIcon />
+          </button>
         </div>
       </header>
 
@@ -337,16 +344,43 @@ export function App(): React.JSX.Element {
   );
 }
 
-function ConnectScreen(props: { readonly onConnect: (config: MobileConnectionConfig) => void; readonly notice: Notice | null }): React.JSX.Element {
+export function ConnectScreen(props: { readonly onConnect: (config: MobileConnectionConfig) => void; readonly notice: Notice | null }): React.JSX.Element {
+  const { onConnect, notice } = props;
   const [payload, setPayload] = useState("");
   const [host, setHost] = useState("");
   const [port, setPort] = useState("6677");
   const [token, setToken] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [scannerStatus, setScannerStatus] = useState<string | null>(null);
+  const [scannerError, setScannerError] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const scanFrameRef = useRef<number | null>(null);
+  const scannerActiveRef = useRef(false);
+
+  const releaseScannerResources = useCallback((): void => {
+    scannerActiveRef.current = false;
+    if (scanFrameRef.current !== null) {
+      window.cancelAnimationFrame(scanFrameRef.current);
+      scanFrameRef.current = null;
+    }
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    if (videoRef.current !== null) videoRef.current.srcObject = null;
+  }, []);
+
+  const stopScanner = useCallback((): void => {
+    releaseScannerResources();
+    setScannerOpen(false);
+    setScannerStatus(null);
+  }, [releaseScannerResources]);
+
+  useEffect(() => releaseScannerResources, [releaseScannerResources]);
 
   const importPayload = (): void => {
     try {
-      props.onConnect(parseMobileConnectionConfig(payload));
+      onConnect(parseMobileConnectionConfig(payload));
     } catch (caught) {
       setError(errorMessage(caught));
     }
@@ -354,11 +388,107 @@ function ConnectScreen(props: { readonly onConnect: (config: MobileConnectionCon
 
   const importManual = (): void => {
     try {
-      props.onConnect(normalizeManualConnection({ host, port, token }));
+      onConnect(normalizeManualConnection({ host, port, token }));
     } catch (caught) {
       setError(errorMessage(caught));
     }
   };
+
+  const connectScannedPayload = useCallback((value: string): void => {
+    try {
+      const config = parseMobileConnectionConfig(value);
+      setPayload(value);
+      setError(null);
+      setScannerError(null);
+      stopScanner();
+      onConnect(config);
+    } catch (caught) {
+      setPayload(value);
+      setError(errorMessage(caught));
+      stopScanner();
+      setScannerError("识别到二维码，但不是有效的 AgentHub 移动端验证码。请确认扫描的是网页端或桌面端的移动端验证二维码。");
+    }
+  }, [onConnect, stopScanner]);
+
+  const startScanner = useCallback((): void => {
+    setError(null);
+    setScannerError(null);
+    setScannerOpen(true);
+    setScannerStatus("正在打开摄像头...");
+  }, []);
+
+  useEffect(() => {
+    if (!scannerOpen) return;
+    let cancelled = false;
+
+    const openCamera = async (): Promise<void> => {
+      const BarcodeDetector = barcodeDetectorConstructor();
+      if (BarcodeDetector === undefined) {
+        if (!cancelled) {
+          setScannerError("当前浏览器或 WebView 不支持直接扫码。请使用系统相机复制二维码内容，或粘贴网页端/桌面端的身份码。");
+          stopScanner();
+        }
+        return;
+      }
+      if (navigator.mediaDevices?.getUserMedia === undefined) {
+        if (!cancelled) {
+          setScannerError("当前环境无法打开摄像头。请检查相机权限，或粘贴网页端/桌面端的身份码。");
+          stopScanner();
+        }
+        return;
+      }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: { facingMode: { ideal: "environment" } }
+        });
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        streamRef.current = stream;
+        scannerActiveRef.current = true;
+        const video = videoRef.current;
+        if (video === null) throw new Error("Scanner video element is not ready");
+        video.srcObject = stream;
+        await video.play();
+        const detector = new BarcodeDetector({ formats: ["qr_code"] });
+        setScannerStatus("将二维码放入取景框内，识别后会自动连接。");
+
+        const scan = async (): Promise<void> => {
+          if (cancelled || !scannerActiveRef.current) return;
+          const target = videoRef.current;
+          if (target !== null && target.readyState >= target.HAVE_CURRENT_DATA) {
+            try {
+              const codes = await detector.detect(target);
+              const rawValue = codes.find((code) => typeof code.rawValue === "string" && code.rawValue.length > 0)?.rawValue;
+              if (rawValue !== undefined) {
+                connectScannedPayload(rawValue);
+                return;
+              }
+            } catch (caught) {
+              setScannerError(errorMessage(caught));
+            }
+          }
+          scanFrameRef.current = window.requestAnimationFrame(() => { void scan(); });
+        };
+
+        scanFrameRef.current = window.requestAnimationFrame(() => { void scan(); });
+      } catch (caught) {
+        if (!cancelled) {
+          stopScanner();
+          setScannerError(`无法打开摄像头：${errorMessage(caught)}`);
+        }
+      }
+    };
+
+    void openCamera();
+    return () => {
+      cancelled = true;
+      releaseScannerResources();
+    };
+  }, [connectScannedPayload, releaseScannerResources, scannerOpen, stopScanner]);
 
   return (
     <main className="connect-shell">
@@ -367,14 +497,28 @@ function ConnectScreen(props: { readonly onConnect: (config: MobileConnectionCon
           <p className="eyebrow">AgentHub 移动端</p>
           <h1>连接到 daemon</h1>
         </div>
-        <p className="lede">扫描或粘贴桌面端 / Web 端生成的连接配置，也可以手动填写。</p>
-        {props.notice !== null && <p className={`notice notice-${props.notice.tone}`}>{props.notice.text}</p>}
+        <p className="lede">扫描网页端或桌面端的移动端验证二维码，识别后会直接连接并进入主页。</p>
+        {notice !== null && <p className={`notice notice-${notice.tone}`}>{notice.text}</p>}
         {error !== null && <p className="notice notice-error">{error}</p>}
+        <div className="scanner-card">
+          <button className="primary wide" type="button" onClick={startScanner} disabled={scannerOpen}>
+            扫码验证并连接
+          </button>
+          {scannerOpen && (
+            <div className="scanner-panel">
+              <video ref={videoRef} className="scanner-video" muted playsInline aria-label="移动端验证扫码取景框" />
+              <div className="scanner-frame" aria-hidden="true" />
+              <button className="wide" type="button" onClick={stopScanner}>关闭扫码</button>
+            </div>
+          )}
+          {scannerStatus !== null && <p className="scanner-help">{scannerStatus}</p>}
+          {scannerError !== null && <p className="notice notice-warn">{scannerError}</p>}
+        </div>
         <label>
           身份码 / 二维码内容
           <textarea value={payload} onChange={(event) => setPayload(event.target.value)} rows={5} placeholder='粘贴桌面端「移动端验证」生成的身份码，或扫码内容' />
         </label>
-        <button className="primary wide" type="button" onClick={importPayload} disabled={payload.trim().length === 0}>导入配置</button>
+        <button className="wide" type="button" onClick={importPayload} disabled={payload.trim().length === 0}>导入配置</button>
         <div className="divider">手动填写</div>
         <label>
           主机
@@ -392,6 +536,10 @@ function ConnectScreen(props: { readonly onConnect: (config: MobileConnectionCon
       </section>
     </main>
   );
+}
+
+function barcodeDetectorConstructor(): BarcodeDetectorConstructor | undefined {
+  return (globalThis as unknown as { readonly BarcodeDetector?: BarcodeDetectorConstructor }).BarcodeDetector;
 }
 
 function StatusList(props: { readonly items: readonly AgentHubJsonObject[]; readonly primary: string }): React.JSX.Element {
@@ -425,6 +573,15 @@ function Preview(props: { readonly preview: PreviewState }): React.JSX.Element {
 
 function Empty(props: { readonly label: string }): React.JSX.Element {
   return <p className="empty">{props.label}</p>;
+}
+
+function PowerIcon(): React.JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M12 3v8" />
+      <path d="M7.05 7.05a7 7 0 1 0 9.9 0" />
+    </svg>
+  );
 }
 
 // 与 web 端 lib/status.ts 的中文译法保持一致。
@@ -472,6 +629,15 @@ function messageText(message: AgentHubJsonObject): string {
 function errorMessage(error: unknown): string {
   if (error instanceof AgentHubApiError) return `请求失败（${error.status}）`;
   return error instanceof Error ? error.message : String(error);
+}
+
+function connectionErrorMessage(error: unknown, baseUrl: string | null): string {
+  const message = errorMessage(error);
+  if (baseUrl === null) return message;
+  if (/failed to fetch|network request failed|load failed|capacitorhttp/i.test(message)) {
+    return `${message}。当前连接地址：${baseUrl}。如果这里是 127.0.0.1/localhost，手机会连到自己；请在电脑端启用局域网监听后重新生成二维码。`;
+  }
+  return message;
 }
 
 function formatTime(value: number): string {
