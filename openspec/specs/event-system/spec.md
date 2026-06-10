@@ -68,6 +68,7 @@ The canonical event registry SHALL be extended with the following V1.0 event typ
 | `room.created` | room | durable | both | rooms | 需要 projector handler |
 | `room.opened` | room | durable | both | rooms | 需要 projector handler |
 | `room.closed` | room | durable | both | rooms | 需要 projector handler |
+| `room.deleted` | room | durable | both | rooms | 需要 projector handler（软删除，从列表移除） |
 | `agent.profile.loaded` | agent | durable | detail | agents | Settings REST-only |
 | `agent.profile.updated` | agent | durable | detail | agents | Settings REST-only |
 | `agent.profile.removed` | agent | durable | detail | agents | Settings REST-only |
