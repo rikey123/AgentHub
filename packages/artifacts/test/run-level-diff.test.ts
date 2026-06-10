@@ -40,6 +40,22 @@ afterEach(() => {
 });
 
 describe("ArtifactFSRunRegistry run-level diffs", () => {
+  it("returns the active isolated workDir for worktree runs", () => {
+    const isolatedRoot = join(currentRoot(), ".agenthub", "worktrees", "run_isolated");
+    mkdirSync(isolatedRoot, { recursive: true });
+    const isolatedRegistry = new ArtifactFSRunRegistry({
+      database: currentDb(),
+      eventBus: currentEventBus(),
+      service: currentService(),
+      now: () => 70_000,
+      rootForRun: () => isolatedRoot
+    });
+
+    const run = isolatedRegistry.beginRun({ runId: "run_isolated", workspaceId: "ws_1", roomId: "room_1", agentId: "builder", mode: "isolated_worktree", terminalEnabled: true });
+
+    expect(run.workDir).toBe(isolatedRoot);
+  });
+
   it("builds a four-file diff after one file is rolled back and rewritten", () => {
     writeWorkspace("src/a.ts", "old a");
     writeWorkspace("src/b.ts", "old b");

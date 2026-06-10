@@ -147,6 +147,24 @@ describe("buildRunPrompt", () => {
     expect(prompt).toContain("workspace one");
   });
 
+  test("resolves workspace context refs from the prepared run workDir when present", () => {
+    expect(tempDir).toBeDefined();
+    const primaryRoot = join(tempDir as string, "primary");
+    const isolatedRoot = join(tempDir as string, "isolated");
+    currentDatabase().sqlite.prepare("UPDATE workspaces SET root_path = ? WHERE id = 'ws_1'").run(primaryRoot);
+    mkdirSync(join(primaryRoot, "src"), { recursive: true });
+    mkdirSync(join(isolatedRoot, "src"), { recursive: true });
+    writeFileSync(join(primaryRoot, "src", "app.ts"), "primary workspace content");
+    writeFileSync(join(isolatedRoot, "src", "app.ts"), "isolated worktree content");
+    seedUserMessage("msg_context_run_workdir", "Use @workspace:src/app.ts#L1-L1", 1);
+    createRun("run_context_run_workdir", "primary_turn", { messageId: "msg_context_run_workdir" });
+
+    const prompt = buildRunPrompt({ ...run("run_context_run_workdir"), work_dir: isolatedRoot }, currentDatabase(), { now: () => now });
+
+    expect(prompt).toContain("isolated worktree content");
+    expect(prompt).not.toContain("primary workspace content");
+  });
+
   test("injects room pinned messages and compact artifact refs for assisted runs", () => {
     seedPinnedUserMessage("msg_pinned_text", "API base path is /api/v2", 1);
     seedPinnedArtifactMessage("msg_pinned_artifact", "artifact_pinned", 2);

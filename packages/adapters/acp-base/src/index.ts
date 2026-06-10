@@ -3,7 +3,7 @@ import { spawn as crossSpawn } from "cross-spawn";
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import type { CommandBus, EventBus, PublishInput } from "@agenthub/bus";
 import type { AgentHubDatabase } from "@agenthub/db";
@@ -68,7 +68,7 @@ export type JsonRpcMessage = { readonly jsonrpc?: "2.0"; readonly id?: string | 
 export type AcpProviderEvent = { readonly type: string; readonly payload?: unknown };
 export type AdapterRawSink = (input: { readonly adapterId: string; readonly sessionId: string; readonly runId?: string; readonly stream: "stdout" | "stderr"; readonly line: string }) => void;
 export type WarmSessionInput = { readonly roomId: string; readonly agentId: string; readonly sessionId?: string; readonly workDir?: string; readonly mcpServer?: unknown };
-export type WarmSessionBindingInput = { readonly roomId: string; readonly agentId: string; readonly runId: string; readonly mcpServer?: unknown };
+export type WarmSessionBindingInput = { readonly roomId: string; readonly agentId: string; readonly runId: string; readonly workDir?: string; readonly mcpServer?: unknown };
 export type WarmExternalSession = Omit<ExternalSession, "runId"> & { readonly runId?: string };
 
 export const acpClientCapabilities: AcpClientCapabilities = {
@@ -239,6 +239,7 @@ export abstract class ACPAdapter {
       return undefined;
     }
     if (session.inflightPromptRequestId !== undefined || session.state === "prompting" || session.state === "cancelling") return undefined;
+    if (input.workDir !== undefined && resolve(session.workDir) !== resolve(input.workDir)) return undefined;
     if (session.runId !== undefined) this.pendingByRun.delete(session.runId);
     session.runId = input.runId;
     if (input.mcpServer !== undefined) session.mcpServer = input.mcpServer;

@@ -7,7 +7,7 @@ import { createDatabase, type AgentHubDatabase } from "@agenthub/db";
 import { RunLifecycleService } from "@agenthub/orchestrator";
 import type { AdapterMessage } from "@agenthub/protocol";
 import { Effect } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { OpenCodeACPAdapter, opencodeManifest } from "../src/index.ts";
 
@@ -80,6 +80,28 @@ describe("OpenCodeACPAdapter", () => {
 
       expect(adapter.capturedPrompt).toContain("mailbox task from teammate");
       expect(adapter.capturedPrompt).not.toContain("WRONG latest user message");
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("creates managed sessions in the ArtifactFS prepared workDir", async () => {
+    const fixture = createPromptFixture("opencode");
+    try {
+      const preparedRoot = join("prepared", "opencode-run");
+      const artifactFs = {
+        beginRun: vi.fn(() => ({ workDir: preparedRoot })),
+        writeTextFile: vi.fn(),
+        deleteFile: vi.fn(),
+        buildRunArtifact: vi.fn(),
+        buildWorktreeDiffArtifact: vi.fn()
+      };
+      const adapter = new CapturingOpenCodeACPAdapter({ command: "", services: { database: fixture.database, eventBus: fixture.eventBus }, lifecycle: fixture.lifecycle, workspaceId: "ws_1", artifactFs });
+
+      await adapter.runManaged(fixture.lifecycle.read("run_mailbox"));
+
+      expect(artifactFs.beginRun).toHaveBeenCalledWith(expect.objectContaining({ runId: "run_mailbox", messageId: "msg_run_mailbox", terminalEnabled: false }));
+      expect(adapter.debugSession("acp-opencode-run_mailbox")).toMatchObject({ workDir: preparedRoot });
     } finally {
       fixture.close();
     }

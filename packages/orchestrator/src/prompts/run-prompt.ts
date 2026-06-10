@@ -394,6 +394,7 @@ function renderWorkspaceContextRef(workspaceRoot: string, ref: Extract<ParsedCon
 }
 
 function workspaceRootForRun(run: RunRow, database: AgentHubDatabase): string | undefined {
+  if (run.work_dir !== null && run.work_dir.trim().length > 0) return run.work_dir;
   const row = database.sqlite.prepare("SELECT root_path FROM workspaces WHERE id = ?").get(run.workspace_id) as { readonly root_path: string | null } | undefined;
   return row?.root_path ?? undefined;
 }

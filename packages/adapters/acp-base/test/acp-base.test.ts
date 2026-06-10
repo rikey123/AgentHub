@@ -1,4 +1,5 @@
 import { Effect, Stream } from "effect";
+import { join } from "node:path";
 import { redactAndTruncate } from "@agenthub/security";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -107,6 +108,19 @@ describe("ACPAdapter base", () => {
     adapter.completePromptForTest(warm.id);
     const rebound = adapter.bindWarmSessionToRun({ roomId: "room", agentId: "agent", runId: "run-warm-2" });
     expect(rebound).toMatchObject({ id: warm.id, runId: "run-warm-2" });
+  });
+
+  it("does not bind a warm session prepared for a different workDir", () => {
+    const adapter = new TestAcpAdapter();
+    const warmRoot = join("workspace", "warm");
+    const runRoot = join("workspace", "run");
+    const warm = adapter.createWarmSession({ roomId: "room", agentId: "agent", workDir: warmRoot });
+
+    const rejected = adapter.bindWarmSessionToRun({ roomId: "room", agentId: "agent", runId: "run-workdir", workDir: runRoot });
+
+    expect(rejected).toBeUndefined();
+    expect(adapter.debugSession(warm.id)).toMatchObject({ runId: undefined, workDir: warmRoot });
+    expect(adapter.bindWarmSessionToRun({ roomId: "room", agentId: "agent", runId: "run-workdir", workDir: warmRoot })).toMatchObject({ id: warm.id, runId: "run-workdir", workDir: warmRoot });
   });
 
   it("automatically dispatches parsed provider events to the adapter hook", () => {

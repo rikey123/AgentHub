@@ -493,6 +493,10 @@ export class ArtifactFS {
     for (const [path, content] of Object.entries(options.snapshot ?? {})) this.base.set(normalizePath(path), content);
   }
 
+  get workDir(): string {
+    return this.activeRoot();
+  }
+
   read(path: string): string {
     const normalized = normalizePath(path);
     if (this.deleted.has(normalized)) throw new ArtifactFSError("file_not_found", normalized);

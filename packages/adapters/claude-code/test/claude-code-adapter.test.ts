@@ -215,6 +215,28 @@ describe("ClaudeCodeACPAdapter", () => {
       fixture.close();
     }
   });
+
+  it("creates managed sessions in the ArtifactFS prepared workDir", async () => {
+    const fixture = createPromptFixture("claude-code");
+    try {
+      const preparedRoot = join("prepared", "claude-run");
+      const artifactFs = {
+        beginRun: vi.fn(() => ({ workDir: preparedRoot })),
+        writeTextFile: vi.fn(),
+        deleteFile: vi.fn(),
+        buildRunArtifact: vi.fn(),
+        buildWorktreeDiffArtifact: vi.fn()
+      };
+      const adapter = new CapturingClaudeCodeACPAdapter({ command: "", services: { database: fixture.database, eventBus: fixture.eventBus }, lifecycle: fixture.lifecycle, workspaceId: "ws_1", artifactFs });
+
+      await adapter.runManaged(fixture.lifecycle.read("run_mailbox"));
+
+      expect(artifactFs.beginRun).toHaveBeenCalledWith(expect.objectContaining({ runId: "run_mailbox", messageId: "msg_run_mailbox", terminalEnabled: false }));
+      expect(adapter.debugSession("acp-claude-code-run_mailbox")).toMatchObject({ workDir: preparedRoot });
+    } finally {
+      fixture.close();
+    }
+  });
 });
 
 class CapturingClaudeCodeACPAdapter extends ClaudeCodeACPAdapter {

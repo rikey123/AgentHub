@@ -490,7 +490,7 @@ export class RoomMcpServer {
     if (!isRecord(input) || typeof input.command !== "string" || input.command.length === 0) return failure("validation_failed", "command is required");
     const permission = await this.checkPermissionAsync(session, context, { type: "shell", command: input.command });
     if (!permission.ok) return permission;
-    const workspaceRoot = this.workspaceRootFor(session.roomId);
+    const workspaceRoot = this.runtimeWorkspaceRootFor(session, context);
     if (workspaceRoot === undefined) return failure("not_found", `Workspace for room '${session.roomId}' not found`);
     const rawCwd = typeof input.cwd === "string" && input.cwd.length > 0 ? join(workspaceRoot, input.cwd) : workspaceRoot;
     const resolvedCwd = resolve(rawCwd);
@@ -540,6 +540,15 @@ export class RoomMcpServer {
   private workspaceRootFor(roomId: string): string | undefined {
     const row = this.options.database.sqlite.prepare("SELECT w.root_path AS root_path FROM rooms r JOIN workspaces w ON w.id = r.workspace_id WHERE r.id = ? AND r.archived_at IS NULL").get(roomId) as { readonly root_path: string | null } | undefined;
     return row?.root_path ?? undefined;
+  }
+
+  private runtimeWorkspaceRootFor(session: RoomMcpSessionContext, context: RoomMcpCallContext): string | undefined {
+    const runId = this.resolveRunId(session, context);
+    if (runId !== undefined) {
+      const row = this.options.database.sqlite.prepare("SELECT work_dir FROM runs WHERE id = ?").get(runId) as { readonly work_dir: string | null } | undefined;
+      if (row?.work_dir !== null && row?.work_dir !== undefined && row.work_dir.trim().length > 0) return row.work_dir;
+    }
+    return this.workspaceRootFor(session.roomId);
   }
 
   private workspaceIdForRoom(roomId: string): string | undefined {

@@ -4,7 +4,7 @@ import type { Command, CommandBus, EventBus, PublishInput } from "@agenthub/bus"
 import type { AgentHubDatabase } from "@agenthub/db";
 import type { EventType } from "@agenthub/protocol/events";
 
-import { RunLifecycleService, type Cost } from "./run-lifecycle-service.ts";
+import { RunLifecycleService, type Cost, type RunRow } from "./run-lifecycle-service.ts";
 
 /**
  * Synchronous brief resolver. Returns the brief text to embed in `message.brief.published`.
@@ -38,12 +38,34 @@ export type AdapterEvent =
   | { readonly type: "session.crashed"; readonly sessionId: string; readonly error: string };
 
 export type AdapterArtifactFSBoundary = {
-  readonly beginRun?: (input: { readonly runId: string; readonly workspaceId: string; readonly roomId: string; readonly agentId: string; readonly taskId?: string; readonly messageId?: string; readonly mode?: string; readonly terminalEnabled?: boolean; readonly workDir?: string }) => void;
+  readonly beginRun?: (input: { readonly runId: string; readonly workspaceId: string; readonly roomId: string; readonly agentId: string; readonly taskId?: string; readonly messageId?: string; readonly mode?: string; readonly terminalEnabled?: boolean; readonly workDir?: string }) => { readonly workDir: string } | void;
   readonly writeTextFile: (input: { readonly runId: string; readonly path: string; readonly content: string }) => void;
   readonly deleteFile: (input: { readonly runId: string; readonly path: string }) => void;
   readonly buildRunArtifact: (input: { readonly runId: string; readonly title?: string }) => unknown;
   readonly buildWorktreeDiffArtifact?: (input: { readonly runId: string; readonly title?: string }) => unknown;
 };
+
+export function prepareAdapterRunWorkspace(input: { readonly run: RunRow; readonly artifactFs?: AdapterArtifactFSBoundary; readonly terminalEnabled?: boolean; readonly messageId?: string }): string {
+  const run = input.run;
+  const prepared = input.artifactFs?.beginRun?.({
+    runId: run.id,
+    workspaceId: run.workspace_id,
+    roomId: run.room_id,
+    agentId: run.agent_id,
+    ...(run.task_id !== null ? { taskId: run.task_id } : {}),
+    ...(input.messageId !== undefined ? { messageId: input.messageId } : {}),
+    ...(run.workspace_mode !== null ? { mode: run.workspace_mode } : {}),
+    terminalEnabled: input.terminalEnabled === true,
+    ...(run.work_dir !== null ? { workDir: run.work_dir } : {})
+  });
+  return prepared !== undefined && typeof prepared === "object" && typeof prepared.workDir === "string" && prepared.workDir.length > 0
+    ? prepared.workDir
+    : (run.work_dir ?? process.cwd());
+}
+
+export function runWithPreparedWorkDir(run: RunRow, workDir: string): RunRow {
+  return run.work_dir === workDir ? run : { ...run, work_dir: workDir };
+}
 
 export class AdapterBridge {
   private readonly toolNamesByCallId = new Map<string, string>();

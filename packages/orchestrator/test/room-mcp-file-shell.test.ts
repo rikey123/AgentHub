@@ -200,6 +200,20 @@ describe("RoomMcpServer file and shell safeguards", () => {
     expect(execFileMock).toHaveBeenCalledTimes(1);
   });
 
+  test("shell executes inside the active run workDir when one is recorded", async () => {
+    seedRoom("room_1", "agent_1");
+    const workDir = join(tempDir!, ".agenthub", "worktrees", "run_1");
+    seedRunWorkDir(workDir);
+    permissionEngine = createPermissionEngine({ shell: () => ({ status: "allow" }) });
+    execFileMock.mockResolvedValue({ stdout: "stdout", stderr: "" } as never);
+    server = createServer();
+
+    const result = await currentServer().callTool("shell", { command: "echo hi" }, session({ runId: "run_1" }), context());
+
+    expect(result).toEqual({ ok: true, data: { stdout: "stdout", stderr: "", code: 0 } });
+    expect(execFileMock).toHaveBeenCalledWith(expect.any(String), expect.any(Array), expect.objectContaining({ cwd: workDir }));
+  });
+
   test("shell waits for ask resolution and denies on rejection", async () => {
     seedRoom("room_1", "agent_1");
     const deferred = createDeferredResolution();
@@ -290,6 +304,12 @@ function seedRoom(roomId: string, agentId: string): void {
   currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO workspaces (id, name, root_path, created_at, updated_at) VALUES ('ws_1', 'Workspace', ?, ?, ?)").run(tempDir, now, now);
   currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES (?, 'ws_1', 'Room', 'solo', 'conversation', ?, NULL, ?, ?)").run(roomId, agentId, now, now);
   currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, default_presence, joined_at) VALUES (?, ?, 'agent', 'primary', 'mock', NULL, 'active', ?)").run(roomId, agentId, now);
+}
+
+function seedRunWorkDir(workDir: string): void {
+  currentDatabase().sqlite.prepare(
+    "INSERT INTO runs (id, workspace_id, task_id, room_id, agent_id, adapter_id, adapter_session_id, provider_conversation_id, parent_run_id, status, wake_reason, waiting_reason, workspace_path, work_dir, workspace_mode, context_version, target_files, mailbox_claim_count, pid_at_start, claimed_at, started_at, ended_at, input_tokens, output_tokens, cached_tokens, cost_usd, model_id, failure_class, error, created_at, updated_at) VALUES ('run_1', 'ws_1', NULL, 'room_1', 'agent_1', 'mock', NULL, NULL, NULL, 'running', 'primary_turn', NULL, NULL, ?, 'isolated_worktree', NULL, '[]', 0, NULL, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)"
+  ).run(workDir, now, now, now, now);
 }
 
 function session(extra: Partial<RoomMcpSessionContext> = {}): RoomMcpSessionContext {

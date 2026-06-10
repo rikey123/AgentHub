@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { ACPAdapter, ACPAdapterError, AdapterHealthRegistry, AdapterRawLogger, classifyClaudeDetection, emitAdapterRegistered, permissionForTool, type AcpAdapterSession, type AcpProviderEvent, type AdapterRuntimeServices, type JsonRpcMessage } from "@agenthub/adapter-acp-base";
 import type { PublishInput } from "@agenthub/bus";
-import { AdapterBridge, buildRunPrompt, persistAssistantPublicMessage, type AdapterArtifactFSBoundary, type RoomMcpServer, type RunLifecycleService, type RunRow } from "@agenthub/orchestrator";
+import { AdapterBridge, buildRunPrompt, persistAssistantPublicMessage, prepareAdapterRunWorkspace, runWithPreparedWorkDir, type AdapterArtifactFSBoundary, type RoomMcpServer, type RunLifecycleService, type RunRow } from "@agenthub/orchestrator";
 import type { PermissionEngine } from "@agenthub/permissions";
 import type { AdapterError, AgentAdapterManifest, DetectedRuntime } from "@agenthub/protocol";
 import { Effect } from "effect";
@@ -80,29 +80,33 @@ export class ClaudeCodeACPAdapter extends ACPAdapter {
 
   async runManaged(run: RunRow): Promise<void> {
     if (this.options.services === undefined || this.options.lifecycle === undefined) throw new ACPAdapterError("configuration", "Claude managed run requires services and lifecycle");
-    const workDir = run.work_dir ?? process.cwd();
     this.health?.update({ adapterId: this.id, workspaceId: run.workspace_id, liveness: "starting", pendingRunIds: [run.id] });
     emitAdapterRegistered(this.options.services.eventBus, run.workspace_id, claudeCodeManifest, this.options.now?.() ?? Date.now());
     const artifactFs = this.options.artifactFs ?? this.options.services.artifactFs;
+    const messageId = `msg_${run.id}`;
+    const workDir = prepareAdapterRunWorkspace({ run, ...(artifactFs !== undefined ? { artifactFs } : {}), terminalEnabled: false, messageId });
     const getCommandBus = this.options.services.getCommandBus;
-    const bridge = new AdapterBridge({ runId: run.id, workspaceId: run.workspace_id, roomId: run.room_id, agentId: run.agent_id, lifecycle: this.options.lifecycle, eventBus: this.options.services.eventBus, database: this.options.services.database, ...(getCommandBus !== undefined ? { getCommandBus } : {}), ...(this.options.services.briefResolver !== undefined ? { briefResolver: this.options.services.briefResolver } : {}), ...(this.options.now !== undefined ? { now: this.options.now } : {}), ...(run.wake_reason !== null ? { wakeReason: run.wake_reason } : {}), ...(this.options.onSessionEndedWithoutCompletion !== undefined ? { onSessionEndedWithoutCompletion: this.options.onSessionEndedWithoutCompletion } : {}), ...(this.options.onPlanPhaseEnded !== undefined ? { onPlanPhaseEnded: this.options.onPlanPhaseEnded } : {}), ...(run.task_id !== null ? { taskId: run.task_id } : {}), messageId: `msg_${run.id}`, ...(run.workspace_mode !== null ? { workspaceMode: run.workspace_mode } : {}), terminalEnabled: false, ...(artifactFs !== undefined ? { artifactFs } : {}) });
+    const bridge = new AdapterBridge({ runId: run.id, workspaceId: run.workspace_id, roomId: run.room_id, agentId: run.agent_id, lifecycle: this.options.lifecycle, eventBus: this.options.services.eventBus, database: this.options.services.database, ...(getCommandBus !== undefined ? { getCommandBus } : {}), ...(this.options.services.briefResolver !== undefined ? { briefResolver: this.options.services.briefResolver } : {}), ...(this.options.now !== undefined ? { now: this.options.now } : {}), ...(run.wake_reason !== null ? { wakeReason: run.wake_reason } : {}), ...(this.options.onSessionEndedWithoutCompletion !== undefined ? { onSessionEndedWithoutCompletion: this.options.onSessionEndedWithoutCompletion } : {}), ...(this.options.onPlanPhaseEnded !== undefined ? { onPlanPhaseEnded: this.options.onPlanPhaseEnded } : {}), ...(run.task_id !== null ? { taskId: run.task_id } : {}), messageId, ...(run.workspace_mode !== null ? { workspaceMode: run.workspace_mode } : {}), terminalEnabled: false, ...(artifactFs !== undefined ? { artifactFs } : {}) });
     this.bridgeByRun.set(run.id, bridge);
-    this.runById.set(run.id, run);
+    this.runById.set(run.id, runWithPreparedWorkDir(run, workDir));
     this.workspaceByRun.set(run.id, run.workspace_id);
-    let session = this.bindWarmSessionToRun({ roomId: run.room_id, agentId: run.agent_id, runId: run.id });
+    let session = this.bindWarmSessionToRun({ roomId: run.room_id, agentId: run.agent_id, runId: run.id, workDir });
     if (session === undefined) {
       const sessionId = `acp-${this.id}-${run.id}`;
       const mcpServer = this.options.mcpServer?.getRegisteredStdioConfig({ roomId: run.room_id, runId: run.id, agentId: run.agent_id, adapterSessionId: sessionId });
       session = Effect.runSync(this.createSession({ runId: run.id, roomId: run.room_id, agentId: run.agent_id, workDir, ...(mcpServer !== undefined ? { mcpServer } : {}) }));
     }
+    const sessionWorkDir = session.workDir ?? workDir;
+    const promptRun = runWithPreparedWorkDir(run, sessionWorkDir);
+    this.runById.set(run.id, promptRun);
     const acpSession = this.debugSession(session.id);
     if (acpSession === undefined) throw new ACPAdapterError("session_not_found", `ACP session '${session.id}' not found`);
-    bridge.handle({ type: "session.opened", sessionId: session.id, workDir, ...(session.providerConversationId !== undefined ? { providerConversationId: session.providerConversationId } : {}) });
+    bridge.handle({ type: "session.opened", sessionId: session.id, workDir: sessionWorkDir, ...(session.providerConversationId !== undefined ? { providerConversationId: session.providerConversationId } : {}) });
     this.openedRuns.add(run.id);
     this.drainPendingFailure(run.id, acpSession);
     if (acpSession.state === "failed") return;
     this.health?.update({ adapterId: this.id, workspaceId: run.workspace_id, liveness: "busy", pendingRunIds: [run.id] });
-    this.sendPrompt(session.id, { role: "user", content: this.promptFromRun(run) });
+    this.sendPrompt(session.id, { role: "user", content: this.promptFromRun(promptRun) });
   }
 
   warmRoomAgent(input: { readonly roomId: string; readonly agentId: string; readonly workDir?: string }): string {
