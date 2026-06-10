@@ -1468,7 +1468,92 @@ body,
 .ah-member-skills {
   margin-top: 0.75rem;
   border-top: 1px solid #d6e4f2;
-  padding-top: 0.65rem;
+  border-radius: 8px;
+  padding: 0.65rem 0 0;
+  transition:
+    border-color 220ms ease,
+    background-color 220ms ease,
+    box-shadow 220ms ease,
+    padding 220ms ease;
+}
+
+.ah-member-skills[data-open="true"] {
+  border-color: #bfd8f4;
+  background: color-mix(in oklab, var(--ah-dashboard-card-low) 76%, #ffffff 24%);
+  padding: 0.75rem;
+  box-shadow:
+    0 10px 24px rgba(48, 86, 134, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.86);
+}
+
+.ah-member-skills > .mt-3 {
+  max-height: 0;
+  margin-top: 0;
+  overflow: hidden;
+  opacity: 0;
+  transform: translateY(-0.25rem);
+  transition:
+    max-height 260ms ease,
+    margin-top 220ms ease,
+    opacity 180ms ease,
+    transform 220ms ease;
+}
+
+.ah-member-skills[data-open="true"] > .mt-3 {
+  max-height: 44rem;
+  margin-top: 0.75rem;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.ah-member-skills > .ah-member-skills-summary {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+}
+
+.ah-member-skills-count {
+  margin-left: 0.1rem;
+}
+
+.ah-member-skills-hint {
+  margin-left: auto;
+  color: var(--ah-dashboard-muted);
+  font-size: 0.72rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.ah-member-skills-chevron {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 999px;
+  color: var(--ah-dashboard-blue-dark);
+  font-size: 1.05rem;
+  line-height: 1;
+  transform: rotate(0deg);
+  transition:
+    transform 220ms ease,
+    background-color 180ms ease;
+}
+
+.ah-member-skills[data-open="true"] .ah-member-skills-chevron {
+  background: rgba(0, 104, 232, 0.09);
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ah-member-skills,
+  .ah-member-skills > .mt-3,
+  .ah-member-skills-chevron {
+    transition-duration: 0ms;
+  }
 }
 
 .ah-skill-section {
@@ -2121,6 +2206,18 @@ html[data-theme="dark"],
 
 [data-theme="dark"] .ah-member-skills {
   border-top-color: var(--ah-dashboard-border);
+}
+
+[data-theme="dark"] .ah-member-skills[data-open="true"] {
+  border-color: var(--ah-dashboard-border-strong);
+  background: color-mix(in oklab, var(--ah-dashboard-card-low) 86%, #000000 14%);
+  box-shadow:
+    0 12px 26px rgba(0, 0, 0, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+[data-theme="dark"] .ah-member-skills[data-open="true"] .ah-member-skills-chevron {
+  background: rgba(110, 173, 255, 0.14);
 }
 
 [data-theme="dark"] .ah-empty-row,

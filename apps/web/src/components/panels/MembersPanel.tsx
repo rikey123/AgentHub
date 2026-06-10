@@ -501,8 +501,8 @@ function MemberSkills({
   useEffect(() => {
     setMemberSkillsLoaded(false);
     setState({ effectiveSkills: [], overrides: [] });
-    void loadMemberSkillState();
-  }, [loadMemberSkillState]);
+    void refresh();
+  }, [refresh]);
 
   useEffect(() => {
     if (open) void refresh();
@@ -530,42 +530,66 @@ function MemberSkills({
       .finally(() => setPending(undefined));
   };
 
-  const removeOverride = (skillId: string) => {
-    if (!roomId) return;
-    setPending(`remove:${skillId}`);
-    setError(undefined);
-    void csrfFetch(
-      `/rooms/${encodeURIComponent(roomId)}/participants/${encodeURIComponent(participantId)}/skills/${encodeURIComponent(skillId)}`,
-      {
-        method: "DELETE",
-        credentials: "same-origin",
-        headers: { accept: "application/json" }
-      }
-    )
-      .then(async (response) => {
-        if (!response.ok)
-          throw new Error(await responseError(response, "Remove skill override failed"));
-        void refresh();
-      })
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)))
-      .finally(() => setPending(undefined));
+  const effectiveSkillIds = useMemo(
+    () => new Set(state.effectiveSkills.map((skill) => skill.id)),
+    [state.effectiveSkills]
+  );
+  const overrideBySkillId = useMemo(
+    () => new Map(state.overrides.map((skill) => [skill.id, skill])),
+    [state.overrides]
+  );
+  const visibleSkills = useMemo(() => {
+    const byId = new Map<string, SkillSummary>();
+    for (const skill of skills) byId.set(skill.id, skill);
+    for (const skill of state.effectiveSkills) if (!byId.has(skill.id)) byId.set(skill.id, skill);
+    for (const skill of state.overrides) if (!byId.has(skill.id)) byId.set(skill.id, skill);
+    return Array.from(byId.values()).sort((a, b) =>
+      skillDisplayName(a).localeCompare(skillDisplayName(b))
+    );
+  }, [skills, state.effectiveSkills, state.overrides]);
+
+  const setMemberSkillEnabled = (skillId: string, enabled: boolean) => {
+    const isEffective = effectiveSkillIds.has(skillId);
+    const override = overrideBySkillId.get(skillId);
+    if (enabled && isEffective && override?.mode !== "restrict") return;
+    if (!enabled && !isEffective && override?.mode === "restrict") return;
+    if (!enabled && !isEffective && override === undefined) return;
+    writeOverride(skillId, enabled ? "add" : "restrict");
   };
 
   const loading = loadingMemberSkills || loadingCatalog;
-  const skillCountLabel = memberSkillsLoaded ? String(state.effectiveSkills.length) : error ? "!" : "...";
+  const enabledCount = state.effectiveSkills.length;
+  const totalCount = visibleSkills.length;
+  const skillCountLabel = memberSkillsLoaded
+    ? totalCount > 0
+      ? `${enabledCount}/${totalCount}`
+      : String(enabledCount)
+    : error
+      ? "!"
+      : "...";
 
   return (
-    <details
-      className="ah-member-skills"
-      open={open}
-      onToggle={(event) => setOpen((event.currentTarget as HTMLDetailsElement).open)}
-    >
-      <summary className="ah-member-skills-summary">
+    <section className="ah-member-skills" data-open={open ? "true" : "false"}>
+      <button
+        type="button"
+        className="ah-member-skills-summary"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      >
         <span>技能</span>
-        <Chip size="sm" variant="soft" color="default">
+        <Chip
+          className="ah-member-skills-count"
+          size="sm"
+          variant="soft"
+          color={enabledCount > 0 ? "accent" : "default"}
+        >
           {skillCountLabel}
         </Chip>
-      </summary>
+        <span className="ah-member-skills-hint">{open ? "收起配置" : "展开配置"}</span>
+        <span className="ah-member-skills-chevron" aria-hidden="true">
+          ›
+        </span>
+      </button>
       <div className="mt-3 grid gap-3">
         {loading ? <p className="text-xs text-muted">正在加载技能...</p> : null}
         {error ? (
@@ -586,61 +610,22 @@ function MemberSkills({
             ))
           )}
         </div>
-        {open ? (
-          <div className="grid gap-2">
-            {skills.map((skill) => {
-              const override = state.overrides.find((item) => item.id === skill.id);
-              return (
-                <div key={skill.id} className="ah-skill-override-row">
-                  <div className="min-w-0">
-                    <div className="truncate text-xs font-semibold">{skillDisplayName(skill)}</div>
-                    <div className="truncate text-xs text-muted">
-                      {override?.mode
-                        ? `覆盖：${skillOverrideModeLabel(override.mode)}`
-                        : skillDisplayDescription(skill) || "无覆盖"}
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 flex-wrap gap-1">
-                    <Button
-                      isIconOnly
-                      size="sm"
-                      variant="secondary"
-                      isDisabled={pending !== undefined}
-                      onPress={() => writeOverride(skill.id, "add")}
-                      aria-label={`添加 ${skillDisplayName(skill)}`}
-                    >
-                      +
-                    </Button>
-                    <Button
-                      isIconOnly
-                      size="sm"
-                      variant="tertiary"
-                      isDisabled={pending !== undefined}
-                      onPress={() => writeOverride(skill.id, "restrict")}
-                      aria-label={`限制 ${skillDisplayName(skill)}`}
-                    >
-                      -
-                    </Button>
-                    {override ? (
-                      <Button
-                        isIconOnly
-                        size="sm"
-                        variant="danger"
-                        isDisabled={pending !== undefined}
-                        onPress={() => removeOverride(skill.id)}
-                        aria-label={`清除 ${skillDisplayName(skill)}`}
-                      >
-                        x
-                      </Button>
-                    ) : null}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ) : null}
+        <div className="grid gap-2">
+          {visibleSkills.length === 0 && !loading ? (
+            <p className="text-xs text-muted">当前工作区还没有可配置技能。</p>
+          ) : null}
+          {visibleSkills.map((skill) => (
+            <SkillToggleRow
+              key={skill.id}
+              skill={skill}
+              enabled={effectiveSkillIds.has(skill.id)}
+              pending={pending !== undefined || !open}
+              onChange={(selected) => setMemberSkillEnabled(skill.id, selected)}
+            />
+          ))}
+        </div>
       </div>
-    </details>
+    </section>
   );
 }
 
@@ -748,12 +733,6 @@ function taskStatusColor(status: string): "default" | "success" | "warning" | "d
     default:
       return "default";
   }
-}
-
-function skillOverrideModeLabel(mode: string): string {
-  if (mode === "add") return "添加";
-  if (mode === "restrict") return "限制";
-  return mode;
 }
 
 function normalizeAgentBindings(payload: unknown): AgentBindingOption[] {
