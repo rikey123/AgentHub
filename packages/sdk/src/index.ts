@@ -63,6 +63,16 @@ export type MobileConnectionConfig = {
   readonly tokenId?: string;
   readonly scopes?: readonly string[];
   readonly expiresAt?: number | null;
+  readonly endpoint?: {
+    readonly protocol?: string;
+    readonly url: string;
+    readonly host: string;
+    readonly port: number | null;
+    readonly network?: string;
+    readonly source?: string;
+    readonly reachableFromMobile?: boolean;
+    readonly issue?: string;
+  };
 };
 export type MobileSnapshotResponse = {
   readonly view: "mobile";
@@ -349,7 +359,7 @@ export class AgentHubEventStream {
 
   private async readCursor(): Promise<number> {
     const stored = await this.cursorStore?.read();
-    return typeof stored === "number" && Number.isFinite(stored) ? stored : this.currentCursor;
+    return typeof stored === "number" && Number.isFinite(stored) ? Math.max(stored, this.currentCursor) : this.currentCursor;
   }
 
   private createEventSource(url: string): EventSourceLike {
@@ -388,17 +398,29 @@ export function parseMobileConnectionConfig(input: string): MobileConnectionConf
   const trimmed = input.trim();
   if (trimmed.length === 0) throw new Error("Connection config is empty");
   const parsed = parseConnectionInput(trimmed);
-  const url = configString(parsed, "url");
-  const token = configString(parsed, "token");
+  const endpointConfig = configRecord(parsed, "endpoint");
+  const authConfig = configRecord(parsed, "auth");
+  const url = (endpointConfig === undefined ? undefined : configString(endpointConfig, "url")) ?? configString(parsed, "url");
+  const token = (authConfig === undefined ? undefined : configString(authConfig, "token")) ?? configString(parsed, "token");
   if (url === undefined) throw new Error("Connection config is missing url");
   if (token === undefined) throw new Error("Connection config is missing token");
   const endpoint = new URL(url);
   if (endpoint.protocol !== "http:" && endpoint.protocol !== "https:") throw new Error("Connection config url must be http or https");
-  const host = configString(parsed, "host") ?? endpoint.hostname;
-  const port = configNumber(parsed, "port") ?? (endpoint.port.length > 0 ? Number(endpoint.port) : null);
-  const tokenId = configString(parsed, "tokenId");
-  const scopes = configStringArray(parsed, "scopes");
-  const expiresAt = configOptionalNumber(parsed, "expiresAt");
+  const host = (endpointConfig === undefined ? undefined : configString(endpointConfig, "host")) ?? configString(parsed, "host") ?? endpoint.hostname;
+  const port = (endpointConfig === undefined ? undefined : configNumber(endpointConfig, "port")) ?? configNumber(parsed, "port") ?? (endpoint.port.length > 0 ? Number(endpoint.port) : null);
+  const tokenId = (authConfig === undefined ? undefined : configString(authConfig, "tokenId")) ?? configString(parsed, "tokenId");
+  const scopes = (authConfig === undefined ? undefined : configStringArray(authConfig, "scopes")) ?? configStringArray(parsed, "scopes");
+  const expiresAt = firstDefined(authConfig === undefined ? undefined : configOptionalNumber(authConfig, "expiresAt"), configOptionalNumber(parsed, "expiresAt"));
+  const endpointDetails = endpointConfig === undefined ? undefined : {
+    ...(configString(endpointConfig, "protocol") !== undefined ? { protocol: configString(endpointConfig, "protocol") as string } : {}),
+    url: normalizeBaseUrl(endpoint.toString()),
+    host,
+    port: Number.isFinite(port) ? port : null,
+    ...(configString(endpointConfig, "network") !== undefined ? { network: configString(endpointConfig, "network") as string } : {}),
+    ...(configString(endpointConfig, "source") !== undefined ? { source: configString(endpointConfig, "source") as string } : {}),
+    ...(typeof endpointConfig.reachableFromMobile === "boolean" ? { reachableFromMobile: endpointConfig.reachableFromMobile } : {}),
+    ...(configString(endpointConfig, "issue") !== undefined ? { issue: configString(endpointConfig, "issue") as string } : {})
+  };
   return {
     version: configNumber(parsed, "version") ?? 1,
     url: normalizeBaseUrl(endpoint.toString()),
@@ -407,7 +429,8 @@ export function parseMobileConnectionConfig(input: string): MobileConnectionConf
     token,
     ...(tokenId !== undefined ? { tokenId } : {}),
     ...(scopes !== undefined ? { scopes } : {}),
-    ...(expiresAt !== undefined ? { expiresAt } : {})
+    ...(expiresAt !== undefined ? { expiresAt } : {}),
+    ...(endpointDetails !== undefined ? { endpoint: endpointDetails } : {})
   };
 }
 
@@ -426,6 +449,11 @@ function parseConnectionInput(input: string): Record<string, unknown> {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function configRecord(record: Record<string, unknown>, key: string): Record<string, unknown> | undefined {
+  const value = record[key];
+  return isRecord(value) ? value : undefined;
 }
 
 function configString(record: Record<string, unknown>, key: string): string | undefined {
@@ -448,6 +476,10 @@ function configOptionalNumber(record: Record<string, unknown>, key: string): num
 function configStringArray(record: Record<string, unknown>, key: string): readonly string[] | undefined {
   const value = record[key];
   return Array.isArray(value) && value.every((entry) => typeof entry === "string") ? value : undefined;
+}
+
+function firstDefined<T>(...values: readonly T[]): T | undefined {
+  return values.find((value) => value !== undefined);
 }
 
 export class AgentHubApiError extends Error {
