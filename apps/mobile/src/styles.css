@@ -157,15 +157,24 @@ button.danger {
 }
 
 .icon-button {
+  display: inline-grid;
+  place-items: center;
   width: 40px;
   height: 40px;
   min-height: 40px;
   padding: 0;
   border-radius: 50%;
-  font-size: 1.2rem;
-  line-height: 1;
   color: var(--muted);
   background: var(--surface-secondary);
+}
+.icon-button svg {
+  width: 20px;
+  height: 20px;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
 }
 
 .wide { width: 100%; }
@@ -527,6 +536,47 @@ textarea:focus, input:focus {
 }
 .connect-panel h1 { font-size: 1.5rem; font-weight: 680; letter-spacing: -0.02em; }
 .connect-panel .lede { color: var(--muted); font-size: 0.88rem; margin-top: -6px; }
+
+.scanner-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.scanner-panel {
+  position: relative;
+  display: grid;
+  gap: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: oklch(0.12 0.02 252);
+  padding: 10px;
+}
+
+.scanner-video {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: var(--radius-sm);
+  background: #000;
+  object-fit: cover;
+}
+
+.scanner-frame {
+  position: absolute;
+  inset: 15%;
+  pointer-events: none;
+  border: 2px solid color-mix(in oklab, var(--accent) 88%, white 12%);
+  border-radius: 18px;
+  box-shadow:
+    0 0 0 999px rgba(0, 0, 0, 0.24),
+    0 0 22px color-mix(in oklab, var(--accent) 42%, transparent);
+}
+
+.scanner-help {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
 
 .divider {
   display: flex;
