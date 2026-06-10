@@ -9,6 +9,7 @@ coverage/
 .turbo/
 .vite/
 release/
+.android-sdk/
 apps/desktop/package-resources/
 playwright-report/
 
