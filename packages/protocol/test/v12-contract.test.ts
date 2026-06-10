@@ -6,6 +6,7 @@ import {
   MessageCreatePayloadSchema,
   RoomViewModelSchema
 } from "../src/domains.ts";
+import { defaultRoleAvatarUrl } from "../src/avatars.ts";
 import { EVENT_PAYLOAD_SCHEMAS, EVENT_REGISTRY } from "../src/events/index.ts";
 
 const V12_EVENT_EXPECTATIONS = [
@@ -160,6 +161,10 @@ describe("V1.2 contract registry", () => {
 });
 
 describe("V1.2 shared domain contracts", () => {
+  it("uses a calmer avatar preset for the project manager role", () => {
+    expect(defaultRoleAvatarUrl("project-manager")).toContain("/avatars/dicebear/v1/notionists-neutral/");
+  });
+
   it("defines artifact and deployment card payloads for message.part.added", () => {
     Schema.decodeUnknownSync(ArtifactCardPayloadSchema)({
       type: "artifact",
