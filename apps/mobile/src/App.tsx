@@ -190,13 +190,14 @@ export function App(): React.JSX.Element {
   if (connection === null) return <ConnectScreen onConnect={connect} notice={notice} />;
 
   const pendingCount = roomPermissions.length;
+  const currentRoom = state.rooms.find((room) => stringField(room, "id") === selectedRoomId);
 
   return (
     <main className="app-shell">
       <header className="topbar">
         <div>
           <p className="eyebrow">AgentHub</p>
-          <h1>{stringField(state.rooms.find((room) => stringField(room, "id") === selectedRoomId), "title") ?? `${connection.host}:${connection.port ?? "6677"}`}</h1>
+          <h1>{displayField(currentRoom, ["title"], `${connection.host}:${connection.port ?? "6677"}`)}</h1>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
           <span className={`status-pill ${state.status}`}>{statusLabel(state.status)}</span>
@@ -221,8 +222,8 @@ export function App(): React.JSX.Element {
                 const id = stringField(room, "id") ?? "";
                 return (
                   <button key={id} className={id === selectedRoomId ? "room-item active" : "room-item"} type="button" onClick={() => setState((current) => ({ ...current, selectedRoomId: id, messages: [] }))}>
-                    <span>{stringField(room, "title") ?? id}</span>
-                    <small>{stringField(room, "mode") ?? "Room"}</small>
+                    <span>{displayField(room, ["title"], id.length > 0 ? id : "未命名房间")}</span>
+                    <small>{displayField(room, ["mode"], "Room")}</small>
                   </button>
                 );
               })}
@@ -245,7 +246,7 @@ export function App(): React.JSX.Element {
                 const role = stringField(message, "role", "author_type") ?? "message";
                 return (
                   <article className={`message role-${role.toLowerCase()}`} key={stringField(message, "id") ?? JSON.stringify(message)}>
-                    <strong>{role}</strong>
+                    <strong>{displayText(role, "message")}</strong>
                     <p>{messageText(message)}</p>
                   </article>
                 );
@@ -288,8 +289,8 @@ export function App(): React.JSX.Element {
               return (
                 <article className="approval" key={id}>
                   <div>
-                    <strong>{stringField(permission, "reason") ?? "权限请求"}</strong>
-                    <p>{stringField(permission, "resource") ?? id}</p>
+                    <strong>{displayField(permission, ["reason"], "权限请求")}</strong>
+                    <p>{displayField(permission, ["resource"], id)}</p>
                   </div>
                   <div className="approval-actions">
                     <button type="button" className="danger" onClick={() => { void resolvePermission(id, "deny"); }}>拒绝</button>
@@ -313,8 +314,8 @@ export function App(): React.JSX.Element {
                   const id = stringField(artifact, "id") ?? "";
                   return (
                     <button type="button" className={preview.artifactId === id ? "artifact active" : "artifact"} key={id} onClick={() => { void selectArtifact(id); }}>
-                      <span>{stringField(artifact, "title") ?? id}</span>
-                      <small>{stringField(artifact, "status") ?? stringField(artifact, "type") ?? "产物"}</small>
+                      <span>{displayField(artifact, ["title"], id)}</span>
+                      <small>{displayField(artifact, ["status", "type"], "产物")}</small>
                     </button>
                   );
                 })}
@@ -324,7 +325,7 @@ export function App(): React.JSX.Element {
               <div className="file-pills">
                 {files.map((file) => {
                   const path = stringField(file, "path") ?? "";
-                  return <button type="button" key={path} onClick={() => preview.artifactId !== undefined && void openPreview(preview.artifactId, path)}>{path}</button>;
+                  return <button type="button" key={path} onClick={() => preview.artifactId !== undefined && void openPreview(preview.artifactId, path)}>{displayText(path, "文件")}</button>;
                 })}
               </div>
             )}
@@ -551,9 +552,9 @@ function StatusList(props: { readonly items: readonly AgentHubJsonObject[]; read
         return (
           <article className="list-item" key={stringField(item, "id") ?? JSON.stringify(item)}>
             <div style={{ minWidth: 0 }}>
-              <div className="primary-text">{stringField(item, props.primary) ?? stringField(item, "id") ?? "—"}</div>
+              <div className="primary-text">{displayField(item, [props.primary, "id"], "—")}</div>
               {stringField(item, "assignee_agent_id", "agent_id") !== undefined && (
-                <div className="sub-text">{stringField(item, "assignee_agent_id", "agent_id")}</div>
+                <div className="sub-text">{displayField(item, ["assignee_agent_id", "agent_id"], "")}</div>
               )}
             </div>
             {status.length > 0 && <span className={`badge ${status.toLowerCase()}`}>{statusLabel(status)}</span>}
@@ -613,17 +614,60 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 function statusLabel(status: string): string {
-  return STATUS_LABELS[status.toLowerCase()] ?? status;
+  return STATUS_LABELS[status.toLowerCase()] ?? displayText(status, status);
 }
 
 function messageText(message: AgentHubJsonObject): string {
   const direct = stringField(message, "text", "content");
-  if (direct !== undefined) return direct;
+  if (direct !== undefined) return displayText(direct, "内容无法显示");
   const parts = message.parts;
   if (Array.isArray(parts)) {
-    return parts.map((part) => typeof part === "object" && part !== null && "text" in part && typeof part.text === "string" ? part.text : "").filter(Boolean).join("\n");
+    return parts.map((part) => typeof part === "object" && part !== null && "text" in part && typeof part.text === "string" ? displayText(part.text, "") : "").filter(Boolean).join("\n");
   }
-  return stringField(message, "id") ?? "";
+  return displayField(message, ["id"], "");
+}
+
+function displayField(record: AgentHubJsonObject | undefined, keys: readonly string[], fallback: string): string {
+  return displayText(stringField(record, ...keys), fallback);
+}
+
+export function displayText(value: string | undefined, fallback: string): string {
+  if (value === undefined || value.trim().length === 0) return fallback;
+  const repaired = repairMojibake(value).trim();
+  if (isCorruptDisplayText(repaired)) return fallback;
+  return repaired;
+}
+
+function repairMojibake(value: string): string {
+  if (!/[\u0080-\u009fÃÂâæçèéêåäöï]/u.test(value)) return value;
+  const bytes: number[] = [];
+  for (const char of value) {
+    const code = char.charCodeAt(0);
+    if (code > 255) return value;
+    bytes.push(code);
+  }
+  try {
+    const decoded = new TextDecoder("utf-8", { fatal: false }).decode(Uint8Array.from(bytes));
+    return corruptionScore(decoded) < corruptionScore(value) ? decoded : value;
+  } catch {
+    return value;
+  }
+}
+
+function isCorruptDisplayText(value: string): boolean {
+  return /[\u0080-\u009f\uFFFD]/u.test(value);
+}
+
+function corruptionScore(value: string): number {
+  let score = 0;
+  for (const char of value) {
+    const code = char.charCodeAt(0);
+    if (char === "\uFFFD") score += 2;
+    else if (code >= 0x80 && code <= 0x9f) score += 2;
+  }
+  const markerMatches = value.match(/[ÃÂâæçèéêåäöï¿½]/gu);
+  score += markerMatches?.length ?? 0;
+  return score;
 }
 
 function errorMessage(error: unknown): string {
