@@ -130,6 +130,17 @@ export type DaemonCloseOptions = { readonly forceCancelAfterMs?: number };
 export type DaemonCloseResult = { readonly forced: boolean; readonly cancelledRunIds: readonly string[] };
 export type DaemonApp = { readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly lifecycle: RunLifecycleService; readonly roomMcpServer: RoomMcpServer; readonly adapterRegistry: AdapterRegistry; readonly mockAdapter: MockAdapterManager; readonly deploymentService: DeploymentService; readonly handle: (req: IncomingMessage, res: ServerResponse) => void; readonly inFlightRunIds: () => readonly string[]; start(): Promise<Server>; close(options?: DaemonCloseOptions): Promise<DaemonCloseResult> };
 type StatusLineEventBus = EventBus & { flushStatusLines?: () => void };
+type MobilePairingEndpoint = {
+  readonly url: string;
+  readonly host: string;
+  readonly port: number | null;
+  readonly network: "lan" | "loopback";
+  readonly source: "primary-listener" | "mobile-bridge" | "request-host" | "unavailable";
+  readonly reachableFromMobile: boolean;
+  readonly bindHost?: string;
+  readonly issue?: string;
+};
+const MOBILE_SYNC_EVENT_LIMIT = 100;
 const PHASE_SQLITE: DaemonStartupPhase = "SQLite open + pragma + migrate";
 const PHASE_EVENT_STORE: DaemonStartupPhase = "EventStore readiness check";
 const PHASE_EVENT_BUS: DaemonStartupPhase = "EventBus (PubSub + per-type)";
@@ -197,6 +208,8 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
   const settingsJobs = new Map<string, SettingsJobRecord>();
   const modelConfigSecrets = createKeychain("agenthub-model-configs");
   const webAssetsRoot = resolveWebAssetsRoot(options.webAssetsRoot);
+  let mobileBridge: { readonly server: Server; readonly endpoint: MobilePairingEndpoint } | undefined;
+  let mobileBridgeStarting: Promise<MobilePairingEndpoint> | undefined;
 
   const emitPhase = (direction: "startup" | "shutdown", phase: DaemonStartupPhase): void => {
     if (process.env.AGENTHUB_DEBUG_PHASES === "1") process.stderr.write(`[agenthub] ${direction}: ${phase}\n`);
@@ -208,14 +221,56 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     return runtime;
   };
 
-  const handle = (req: IncomingMessage, res: ServerResponse) => {
+  const handleRequest = (req: IncomingMessage, res: ServerResponse, requestOptions: { readonly host: string; readonly requireBearer?: boolean }): void => {
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
     if (req.method === "GET" && url.pathname === "/healthz") return json(res, 200, stopping ? { status: "shutting_down" } : { ok: true });
     if (stopping) return json(res, 503, { error: "service_stopping" });
     if (!ready) return json(res, 503, { error: "service_starting", retryAfterMs: 500 });
     const app = requireRuntime();
-    if (!isApiPath(url.pathname) && serveWebAsset({ req, res, url, ...(webAssetsRoot !== undefined ? { webAssetsRoot } : {}) })) return;
-    void route({ req, res, database: app.database, eventBus: app.eventBus, commandBus: app.commandBus, artifactService: app.artifactService, deploymentService: app.deploymentService, taskService: app.taskService, skillRegistry: app.skillRegistry, pptPreviewBridge: app.pptPreviewBridge, outbox: app.outbox, stopAssistedDiscussion: (roomId) => stopAssistedRoomDiscussion(app, roomId), modelConfigSecrets, settingsJobs, modelTestFetch: options.modelTestFetch ?? globalThis.fetch.bind(globalThis), roleDraftGenerator: options.roleDraftGenerator ?? generateRoleDraftWithModelConfig, registerSseClient: (client) => { sseClients.add(client); return () => sseClients.delete(client); }, activeSseClientCount: () => sseClients.size, serveWebAsset: () => serveWebAsset({ req, res, url, ...(webAssetsRoot !== undefined ? { webAssetsRoot } : {}) }), workspaceRoot: app.workspaceRoot, ...(options.token !== undefined ? { token: options.token } : {}), ...(options.allowedOrigins !== undefined ? { allowedOrigins: options.allowedOrigins } : {}), host: `${options.host ?? "127.0.0.1"}:${options.port ?? 6677}`, ...(options.now !== undefined ? { now: options.now } : {}) });
+    if (requestOptions.requireBearer !== true && !isApiPath(url.pathname) && serveWebAsset({ req, res, url, ...(webAssetsRoot !== undefined ? { webAssetsRoot } : {}) })) return;
+    void route({ req, res, database: app.database, eventBus: app.eventBus, commandBus: app.commandBus, artifactService: app.artifactService, deploymentService: app.deploymentService, taskService: app.taskService, skillRegistry: app.skillRegistry, pptPreviewBridge: app.pptPreviewBridge, outbox: app.outbox, stopAssistedDiscussion: (roomId) => stopAssistedRoomDiscussion(app, roomId), modelConfigSecrets, settingsJobs, modelTestFetch: options.modelTestFetch ?? globalThis.fetch.bind(globalThis), roleDraftGenerator: options.roleDraftGenerator ?? generateRoleDraftWithModelConfig, registerSseClient: (client) => { sseClients.add(client); return () => sseClients.delete(client); }, activeSseClientCount: () => sseClients.size, serveWebAsset: () => requestOptions.requireBearer !== true && serveWebAsset({ req, res, url, ...(webAssetsRoot !== undefined ? { webAssetsRoot } : {}) }), workspaceRoot: app.workspaceRoot, ...(options.token !== undefined ? { token: options.token } : {}), ...(options.allowedOrigins !== undefined ? { allowedOrigins: options.allowedOrigins } : {}), host: requestOptions.host, ...(requestOptions.requireBearer === true ? { requireBearer: true } : {}), mobilePairingEndpoint: (requestHost) => mobilePairingEndpoint(requestHost), ...(options.now !== undefined ? { now: options.now } : {}) });
+  };
+
+  const handle = (req: IncomingMessage, res: ServerResponse): void => {
+    handleRequest(req, res, { host: primaryListenerHost() });
+  };
+
+  const primaryListenerHost = (): string => joinHostPort(options.host ?? "127.0.0.1", serverPort(server, options.port ?? 6677));
+
+  const mobilePairingEndpoint = async (requestHost?: string): Promise<MobilePairingEndpoint> => {
+    const primaryPort = serverPort(server, options.port ?? 6677);
+    const requested = requestHost === undefined ? undefined : endpointFromRequestHost(requestHost);
+    if (requested !== undefined) return requested;
+
+    const [boundHost] = splitHostPort(options.host ?? "127.0.0.1");
+    if (isWildcardHost(boundHost)) return primaryLanEndpoint(primaryPort, "primary-listener", boundHost);
+    if (!isLoopbackHost(boundHost)) return endpointForHost(boundHost, primaryPort, "primary-listener", true);
+    return ensureMobileBridge(primaryPort);
+  };
+
+  const ensureMobileBridge = async (preferredPort: number): Promise<MobilePairingEndpoint> => {
+    if (mobileBridge !== undefined) return mobileBridge.endpoint;
+    if (mobileBridgeStarting !== undefined) return mobileBridgeStarting;
+    mobileBridgeStarting = startMobileBridge(preferredPort).finally(() => {
+      mobileBridgeStarting = undefined;
+    });
+    return mobileBridgeStarting;
+  };
+
+  const startMobileBridge = async (preferredPort: number): Promise<MobilePairingEndpoint> => {
+    const lanHost = preferredLanIpv4Address();
+    if (lanHost === undefined) return unavailableMobileEndpoint("No LAN IPv4 address was detected on this machine.");
+    for (const port of [...new Set([preferredPort, 0])]) {
+      const bridgeServer = createServer((req, res) => {
+        handleRequest(req, res, { host: joinHostPort(lanHost, serverPort(bridgeServer, port)), requireBearer: true });
+      });
+      const endpoint = await listenForMobileBridge(bridgeServer, lanHost, port).catch(() => undefined);
+      if (endpoint !== undefined) {
+        mobileBridge = { server: bridgeServer, endpoint };
+        return endpoint;
+      }
+    }
+    return unavailableMobileEndpoint(`Could not open a LAN listener on ${lanHost}.`);
   };
 
   const start = async (): Promise<Server> => {
@@ -699,7 +754,12 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
     for (const phase of DAEMON_SHUTDOWN_PHASES) {
       emitPhase("shutdown", phase);
       if (phase === PHASE_HTTP && server !== undefined) {
-        await new Promise<void>((resolve, reject) => server?.close((err) => err ? reject(err) : resolve()));
+        const bridge = mobileBridge;
+        mobileBridge = undefined;
+        await Promise.all([
+          new Promise<void>((resolve, reject) => server?.close((err) => err ? reject(err) : resolve())),
+          bridge === undefined ? Promise.resolve() : new Promise<void>((resolve, reject) => bridge.server.close((err) => err ? reject(err) : resolve()))
+        ]);
         server = undefined;
       } else if (phase === PHASE_OUTBOX) {
         runtime?.wakeOutbox.stop();
@@ -858,7 +918,7 @@ function wakeReasonForCommand(reason: string): "primary_turn" | "user_mention" |
   return "delegated_task";
 }
 
-type RouteContext = { readonly req: IncomingMessage; readonly res: ServerResponse; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly artifactService: ArtifactService; readonly deploymentService: DeploymentService; readonly taskService: TaskService; readonly skillRegistry: SkillRegistry; readonly pptPreviewBridge: PptPreviewBridge; readonly outbox: { drainPending(): Promise<void> }; readonly stopAssistedDiscussion: (roomId: string) => Promise<{ readonly ok: boolean; readonly roomId: string; readonly cancelledRunIds: readonly string[] }>; readonly modelConfigSecrets: KeychainBridge; readonly settingsJobs: Map<string, SettingsJobRecord>; readonly modelTestFetch: typeof fetch; readonly roleDraftGenerator: RoleDraftGenerator; readonly registerSseClient: (client: SseClient) => () => void; readonly activeSseClientCount: () => number; readonly serveWebAsset: () => boolean; readonly workspaceRoot: string; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly host: string; readonly now?: () => number };
+type RouteContext = { readonly req: IncomingMessage; readonly res: ServerResponse; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly artifactService: ArtifactService; readonly deploymentService: DeploymentService; readonly taskService: TaskService; readonly skillRegistry: SkillRegistry; readonly pptPreviewBridge: PptPreviewBridge; readonly outbox: { drainPending(): Promise<void> }; readonly stopAssistedDiscussion: (roomId: string) => Promise<{ readonly ok: boolean; readonly roomId: string; readonly cancelledRunIds: readonly string[] }>; readonly modelConfigSecrets: KeychainBridge; readonly settingsJobs: Map<string, SettingsJobRecord>; readonly modelTestFetch: typeof fetch; readonly roleDraftGenerator: RoleDraftGenerator; readonly registerSseClient: (client: SseClient) => () => void; readonly activeSseClientCount: () => number; readonly serveWebAsset: () => boolean; readonly workspaceRoot: string; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly host: string; readonly requireBearer?: boolean; readonly mobilePairingEndpoint?: (requestHost?: string) => Promise<MobilePairingEndpoint>; readonly now?: () => number };
 type AuthenticatedRequest = Extract<BrowserAuthResult, { readonly ok: true }>;
 
 async function route(ctx: RouteContext): Promise<void> {
@@ -1890,7 +1950,7 @@ function authSession(ctx: RouteContext): void {
   json(ctx.res, 200, { csrfToken: session.csrfToken, expiresAt: session.expiresAt });
 }
 
-function issueAuthToken(ctx: RouteContext, input: Record<string, unknown>): void {
+async function issueAuthToken(ctx: RouteContext, input: Record<string, unknown>): Promise<void> {
   const now = ctx.now?.() ?? Date.now();
   const token = `ah_${randomBytes(32).toString("base64url")}`;
   const id = randomUUID();
@@ -1898,9 +1958,12 @@ function issueAuthToken(ctx: RouteContext, input: Record<string, unknown>): void
   const expiresDays = typeof input.expiresDays === "number" && Number.isFinite(input.expiresDays) ? input.expiresDays : undefined;
   const expiresAt = expiresDays === undefined ? null : now + expiresDays * 86_400_000;
   const fingerprint = tokenFingerprint(token);
-  ctx.database.sqlite.prepare("INSERT INTO auth_tokens (id, fingerprint, hash, description, scopes, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(id, fingerprint, sha256(token), typeof input.description === "string" ? input.description : null, JSON.stringify(scopes), now, expiresAt);
-  ctx.eventBus.publish({ id: randomUUID(), type: "auth.token.issued", schemaVersion: 1, workspaceId: "default-workspace", payload: { tokenId: id, fingerprint, scopes }, createdAt: now });
-  json(ctx.res, 201, { id, token, fingerprint, scopes, expiresAt, connection: connectionConfig(ctx, token, id, scopes, expiresAt) });
+  const connection = await connectionConfig(ctx, token, id, scopes, expiresAt);
+  ctx.database.sqlite.transaction(() => {
+    ctx.database.sqlite.prepare("INSERT INTO auth_tokens (id, fingerprint, hash, description, scopes, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(id, fingerprint, sha256(token), typeof input.description === "string" ? input.description : null, JSON.stringify(scopes), now, expiresAt);
+    ctx.eventBus.publish({ id: randomUUID(), type: "auth.token.issued", schemaVersion: 1, workspaceId: "default-workspace", payload: { tokenId: id, fingerprint, scopes }, createdAt: now });
+  })();
+  json(ctx.res, 201, { id, token, fingerprint, scopes, expiresAt, connection });
 }
 
 function listAuthTokens(ctx: RouteContext): void {
@@ -1915,25 +1978,62 @@ function revokeToken(ctx: RouteContext, tokenId: string): void {
   const now = ctx.now?.() ?? Date.now();
   const existing = get(ctx.database, "SELECT id, fingerprint FROM auth_tokens WHERE id = ?", tokenId) as { readonly id: string; readonly fingerprint: string } | null;
   if (existing === null) return json(ctx.res, 404, { error: "token_not_found" });
-  ctx.database.sqlite.prepare("UPDATE auth_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").run(now, tokenId);
-  ctx.eventBus.publish({ id: randomUUID(), type: "auth.token.revoked", schemaVersion: 1, workspaceId: "default-workspace", payload: { tokenId, fingerprint: existing.fingerprint }, createdAt: now });
+  ctx.database.sqlite.transaction(() => {
+    ctx.database.sqlite.prepare("UPDATE auth_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").run(now, tokenId);
+    ctx.eventBus.publish({ id: randomUUID(), type: "auth.token.revoked", schemaVersion: 1, workspaceId: "default-workspace", payload: { tokenId, fingerprint: existing.fingerprint }, createdAt: now });
+  })();
   json(ctx.res, 200, { ok: true });
 }
 
-function connectionConfig(ctx: RouteContext, token: string, tokenId: string, scopes: readonly string[], expiresAt: number | null): Record<string, unknown> {
-  const publicHost = mobileConnectionHost(header(ctx, "host") ?? ctx.host, ctx.host);
-  const [hostPart, portPart] = splitHostPort(publicHost);
-  const url = `http://${publicHost}`;
+async function connectionConfig(ctx: RouteContext, token: string, tokenId: string, scopes: readonly string[], expiresAt: number | null): Promise<Record<string, unknown>> {
+  const endpoint = ctx.mobilePairingEndpoint === undefined
+    ? endpointForHost(...splitHostPort(mobileConnectionHost(header(ctx, "host") ?? ctx.host, ctx.host)), "primary-listener", true)
+    : await ctx.mobilePairingEndpoint(header(ctx, "host"));
+  const manifest = mobileConnectionManifest(endpoint, token, tokenId, scopes, expiresAt);
   return {
-    version: 1,
-    url,
-    host: hostPart,
-    port: portPart,
+    version: manifest.version,
+    url: endpoint.url,
+    host: endpoint.host,
+    port: endpoint.port,
     token,
     tokenId,
     scopes,
     expiresAt,
-    qrPayload: JSON.stringify({ version: 1, url, host: hostPart, port: portPart, token, tokenId, scopes, expiresAt })
+    network: endpoint.network,
+    source: endpoint.source,
+    reachableFromMobile: endpoint.reachableFromMobile,
+    ...(endpoint.issue !== undefined ? { issue: endpoint.issue } : {}),
+    endpoint: manifest.endpoint,
+    auth: { scheme: "bearer", tokenId, scopes, expiresAt },
+    manifest,
+    qrPayload: JSON.stringify(manifest)
+  };
+}
+
+function mobileConnectionManifest(endpoint: MobilePairingEndpoint, token: string, tokenId: string, scopes: readonly string[], expiresAt: number | null): Record<string, unknown> {
+  return {
+    version: 2,
+    kind: "agenthub.mobile.connection",
+    url: endpoint.url,
+    host: endpoint.host,
+    port: endpoint.port,
+    token,
+    tokenId,
+    scopes,
+    expiresAt,
+    endpoint: {
+      protocol: "http",
+      url: endpoint.url,
+      host: endpoint.host,
+      port: endpoint.port,
+      network: endpoint.network,
+      source: endpoint.source,
+      reachableFromMobile: endpoint.reachableFromMobile,
+      ...(endpoint.bindHost !== undefined ? { bindHost: endpoint.bindHost } : {}),
+      ...(endpoint.issue !== undefined ? { issue: endpoint.issue } : {})
+    },
+    auth: { scheme: "bearer", token, tokenId, scopes, expiresAt },
+    requirements: { sameLan: endpoint.network === "lan", bearerToken: true }
   };
 }
 
@@ -1945,6 +2045,55 @@ function mobileConnectionHost(requestHost: string, boundHost: string): string {
   if (isLoopbackHost(boundHostPart)) return joinHostPort(requestHostPart, port);
   const host = isWildcardHost(boundHostPart) ? preferredLanIpv4Address() ?? requestHostPart : boundHostPart;
   return joinHostPort(host, port);
+}
+
+function endpointFromRequestHost(requestHost: string): MobilePairingEndpoint | undefined {
+  const [host, port] = splitHostPort(requestHost);
+  if (isLoopbackHost(host) || isWildcardHost(host)) return undefined;
+  return endpointForHost(host, port, "request-host", true);
+}
+
+function primaryLanEndpoint(port: number | null, source: MobilePairingEndpoint["source"], bindHost: string): MobilePairingEndpoint {
+  const lanHost = preferredLanIpv4Address();
+  return lanHost === undefined
+    ? unavailableMobileEndpoint("No LAN IPv4 address was detected on this machine.")
+    : endpointForHost(lanHost, port, source, true, bindHost);
+}
+
+function endpointForHost(host: string, port: number | null, source: MobilePairingEndpoint["source"], reachableFromMobile: boolean, bindHost?: string): MobilePairingEndpoint {
+  const network = isLoopbackHost(host) ? "loopback" : "lan";
+  const authority = joinHostPort(host, port);
+  return {
+    url: `http://${authority}`,
+    host,
+    port,
+    network,
+    source,
+    reachableFromMobile: reachableFromMobile && network === "lan",
+    ...(bindHost !== undefined ? { bindHost } : {})
+  };
+}
+
+function unavailableMobileEndpoint(issue: string): MobilePairingEndpoint {
+  return {
+    url: "http://127.0.0.1:6677",
+    host: "127.0.0.1",
+    port: 6677,
+    network: "loopback",
+    source: "unavailable",
+    reachableFromMobile: false,
+    issue
+  };
+}
+
+function listenForMobileBridge(server: Server, lanHost: string, port: number): Promise<MobilePairingEndpoint> {
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, lanHost, () => {
+      server.off("error", reject);
+      resolve(endpointForHost(lanHost, serverPort(server, port), "mobile-bridge", true, lanHost));
+    });
+  });
 }
 
 function splitHostPort(host: string): readonly [string, number | null] {
@@ -1962,6 +2111,11 @@ function splitHostPort(host: string): readonly [string, number | null] {
 function joinHostPort(host: string, port: number | null): string {
   const normalizedHost = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
   return port === null ? normalizedHost : `${normalizedHost}:${port}`;
+}
+
+function serverPort(server: Server | undefined, fallback: number): number {
+  const address = server?.address();
+  return typeof address === "object" && address !== null ? address.port : fallback;
 }
 
 function isWildcardHost(host: string): boolean {
@@ -2006,9 +2160,33 @@ function syncEvents(ctx: RouteContext, url: URL, auth: AuthenticatedRequest): vo
   if (sinceSeq < 0) return json(ctx.res, 400, { error: "invalid_since_seq" });
   const roomId = url.searchParams.get("roomId") ?? undefined;
   const runId = url.searchParams.get("runId") ?? undefined;
-  const events = ctx.eventBus.replayDurableSinceSeq(sinceSeq, { view, ...(roomId !== undefined ? { roomId } : {}), ...(runId !== undefined ? { runId } : {}) });
+  const events = ctx.eventBus
+    .replayDurableSinceSeq(sinceSeq, { view, ...(roomId !== undefined ? { roomId } : {}), ...(runId !== undefined ? { runId } : {}) })
+    .slice(0, MOBILE_SYNC_EVENT_LIMIT)
+    .map(mobileSyncEvent);
   const nextCursor = events.reduce((cursor, event) => typeof event.seq === "number" && event.seq > cursor ? event.seq : cursor, sinceSeq);
   json(ctx.res, 200, { events, nextCursor });
+}
+
+function mobileSyncEvent(event: EventEnvelope): EventEnvelope {
+  return {
+    id: event.id,
+    type: event.type,
+    schemaVersion: event.schemaVersion,
+    durability: event.durability,
+    visibility: event.visibility,
+    ...(event.seq !== undefined ? { seq: event.seq } : {}),
+    workspaceId: event.workspaceId,
+    ...(event.roomId !== undefined ? { roomId: event.roomId } : {}),
+    ...(event.taskId !== undefined ? { taskId: event.taskId } : {}),
+    ...(event.runId !== undefined ? { runId: event.runId } : {}),
+    ...(event.agentId !== undefined ? { agentId: event.agentId } : {}),
+    ...(event.traceId !== undefined ? { traceId: event.traceId } : {}),
+    ...(event.causationId !== undefined ? { causationId: event.causationId } : {}),
+    ...(event.correlationId !== undefined ? { correlationId: event.correlationId } : {}),
+    payload: {},
+    createdAt: event.createdAt
+  };
 }
 
 function syncSnapshot(ctx: RouteContext, url: URL, auth: AuthenticatedRequest): void {
@@ -2018,7 +2196,7 @@ function syncSnapshot(ctx: RouteContext, url: URL, auth: AuthenticatedRequest): 
   const roomId = url.searchParams.get("roomId") ?? undefined;
   const roomWhere = roomId === undefined ? "archived_at IS NULL" : "id = ? AND archived_at IS NULL";
   const roomParams = roomId === undefined ? [] : [roomId];
-  const rooms = all(ctx.database, `SELECT id, workspace_id, title, mode, primary_agent_id, updated_at FROM rooms WHERE ${roomWhere} ORDER BY updated_at DESC LIMIT 50`, ...roomParams);
+  const rooms = all(ctx.database, `SELECT id, workspace_id, title, mode, primary_agent_id, updated_at FROM rooms WHERE ${roomWhere} ORDER BY updated_at DESC LIMIT 50`, ...roomParams).map(normalizeMobileRoomRow);
   const tasks = all(ctx.database, `${mobileTaskSelect()} ${roomId === undefined ? "" : "WHERE room_id = ?"} ORDER BY updated_at DESC LIMIT 100`, ...(roomId === undefined ? [] : [roomId]));
   const runs = all(ctx.database, `${mobileRunSelect()} ${roomId === undefined ? "" : "WHERE room_id = ?"} ORDER BY updated_at DESC LIMIT 100`, ...(roomId === undefined ? [] : [roomId]));
   const permissions = all(ctx.database, `${mobilePermissionSelect()} WHERE status = 'pending'${roomId === undefined ? "" : " AND room_id = ?"} ORDER BY created_at ASC LIMIT 100`, ...(roomId === undefined ? [] : [roomId])).map(redactPermissionResource);
@@ -2057,6 +2235,48 @@ function mobilePermissionSelect(): string {
 
 function mobileArtifactSelect(): string {
   return "SELECT id, workspace_id, room_id, task_id, run_id, type, title, status, updated_at FROM artifacts";
+}
+
+function normalizeMobileRoomRow(row: unknown): Record<string, unknown> {
+  const record = row as Record<string, unknown>;
+  const title = typeof record.title === "string" ? mobileDisplayText(record.title, "未命名房间") : "未命名房间";
+  return { ...record, title };
+}
+
+function mobileDisplayText(value: string, fallback: string): string {
+  const text = repairUtf8Mojibake(value).trim();
+  return isCorruptMobileText(text) || text.length === 0 ? fallback : text;
+}
+
+function repairUtf8Mojibake(value: string): string {
+  if (!/[\u0080-\u009fÃÂâæçèéêåäöï]/u.test(value)) return value;
+  const bytes: number[] = [];
+  for (const char of value) {
+    const code = char.charCodeAt(0);
+    if (code > 255) return value;
+    bytes.push(code);
+  }
+  try {
+    const decoded = new TextDecoder("utf-8", { fatal: false }).decode(Uint8Array.from(bytes));
+    return corruptMobileTextScore(decoded) < corruptMobileTextScore(value) ? decoded : value;
+  } catch {
+    return value;
+  }
+}
+
+function isCorruptMobileText(value: string): boolean {
+  return /[\u0080-\u009f\uFFFD]/u.test(value);
+}
+
+function corruptMobileTextScore(value: string): number {
+  let score = 0;
+  for (const char of value) {
+    const code = char.charCodeAt(0);
+    if (char === "\uFFFD") score += 2;
+    else if (code >= 0x80 && code <= 0x9f) score += 2;
+  }
+  const markerMatches = value.match(/[ÃÂâæçèéêåäöï¿½]/gu);
+  return score + (markerMatches?.length ?? 0);
 }
 
 function redactPermissionResource(row: unknown): unknown {
@@ -5287,7 +5507,9 @@ function numberQuery(url: URL, key: string): number | undefined { const value = 
 function isLoopbackHost(host: string): boolean { return host === "127.0.0.1" || host === "::1" || host === "localhost"; }
 function authenticate(ctx: RouteContext, url: URL) {
   const authorization = typeof ctx.req.headers.authorization === "string" ? ctx.req.headers.authorization : url.searchParams.get("token") !== null ? `Bearer ${url.searchParams.get("token")}` : undefined;
-  return authenticateBrowserRequest({ method: ctx.req.method ?? "GET", pathname: url.pathname, headers: { origin: header(ctx, "origin"), host: header(ctx, "host"), authorization, cookie: header(ctx, "cookie"), "content-type": header(ctx, "content-type"), "x-agenthub-csrf": header(ctx, "x-agenthub-csrf") }, database: ctx.database, ...(ctx.token !== undefined ? { token: ctx.token } : {}), host: ctx.host, ...(ctx.allowedOrigins !== undefined ? { allowedOrigins: ctx.allowedOrigins } : {}), now: ctx.now?.() ?? Date.now() });
+  const result = authenticateBrowserRequest({ method: ctx.req.method ?? "GET", pathname: url.pathname, headers: { origin: header(ctx, "origin"), host: header(ctx, "host"), authorization, cookie: header(ctx, "cookie"), "content-type": header(ctx, "content-type"), "x-agenthub-csrf": header(ctx, "x-agenthub-csrf") }, database: ctx.database, ...(ctx.token !== undefined ? { token: ctx.token } : {}), host: ctx.host, ...(ctx.allowedOrigins !== undefined ? { allowedOrigins: ctx.allowedOrigins } : {}), now: ctx.now?.() ?? Date.now() });
+  if (ctx.requireBearer === true && result.ok && result.authKind !== "bearer") return { ok: false, status: 401, error: "mobile_token_required" } as const;
+  return result;
 }
 function header(ctx: RouteContext, name: string): string | undefined { const value = ctx.req.headers[name]; return Array.isArray(value) ? value[0] : value; }
 function all(database: AgentHubDatabase, sql: string, ...params: unknown[]): unknown[] { return database.sqlite.prepare(sql).all(...params); }
