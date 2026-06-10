@@ -84,6 +84,37 @@ describe("RunQueue lock matrix", () => {
 
     expect(lockRows()).toEqual(expect.arrayContaining([{ lock_type: "workspace", lock_key: "ws_1", workspace_id: "ws_1", run_id: "run_a" }]));
   });
+
+  test("delegated isolated worktree runs in the same room can start in parallel", async () => {
+    createRun("run_a", undefined, "ws_1", "room_1", "agent_a", { wakeReason: "delegated_task", workspaceMode: "isolated_worktree" });
+    createRun("run_b", undefined, "ws_1", "room_1", "agent_b", { wakeReason: "delegated_task", workspaceMode: "isolated_worktree" });
+
+    await queue().scheduleTick();
+
+    expect(statusOf("run_a")).toBe("starting");
+    expect(statusOf("run_b")).toBe("starting");
+    expect(lockRows()).toEqual([
+      { lock_type: "agent", lock_key: "agent_a", workspace_id: null, run_id: "run_a" },
+      { lock_type: "agent", lock_key: "agent_b", workspace_id: null, run_id: "run_b" }
+    ]);
+  });
+
+  test("stale waiting run starts once its blocking lock has been released", async () => {
+    createRun("run_blocker", [], "ws_1", "room_1", "agent_blocker");
+    createRun("run_waiting", [], "ws_1", "room_2", "agent_waiting");
+    const runQueue = new RunQueue({ database: currentDatabase(), lifecycle: currentLifecycle(), pid: 321, now: () => now, lockTimeoutMs: 100 });
+
+    await runQueue.scheduleTick();
+    expect(statusOf("run_blocker")).toBe("starting");
+    expect(statusOf("run_waiting")).toBe("waiting");
+
+    runQueue.releaseLocks("run_blocker");
+    now += 101;
+    await runQueue.scheduleTick();
+
+    expect(statusOf("run_waiting")).toBe("starting");
+    expect(waitingReason("run_waiting")).toBeNull();
+  });
 });
 
 function currentDatabase(): AgentHubDatabase {
@@ -105,13 +136,21 @@ function queue(): RunQueue {
   return new RunQueue({ database: currentDatabase(), lifecycle: currentLifecycle(), pid: 321, now: () => now });
 }
 
-function createRun(runId: string, targetFiles: readonly string[] | undefined, workspaceId = "ws_1", roomId = "room_1", agentId = "agent_1"): void {
+function createRun(
+  runId: string,
+  targetFiles: readonly string[] | undefined,
+  workspaceId = "ws_1",
+  roomId = "room_1",
+  agentId = "agent_1",
+  options: { readonly wakeReason?: "primary_turn" | "delegated_task"; readonly workspaceMode?: "isolated_worktree" } = {}
+): void {
   currentLifecycle().create(null, {
     runId,
     workspaceId,
     roomId,
     agentId,
-    wakeReason: "primary_turn",
+    wakeReason: options.wakeReason ?? "primary_turn",
+    ...(options.workspaceMode !== undefined ? { workspaceMode: options.workspaceMode } : {}),
     ...(targetFiles !== undefined ? { targetFiles } : {}),
     messageId: `msg_${runId}`
   });

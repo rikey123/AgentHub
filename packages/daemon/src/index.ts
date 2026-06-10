@@ -12,7 +12,7 @@ import { ContextLedger, createContextCommandHandlers, HeuristicBriefGenerator } 
 import { createDatabase, type AgentHubDatabase } from "@agenthub/db";
 import { MockAdapterManager } from "@agenthub/adapter-mock";
 import { createInterventionCommandHandlers, InterventionEngine } from "@agenthub/interventions";
-import { ActiveWakesRegistry, AssistedSelectorGroupChatManager, checkTaskTimeouts, createCancelRunHandler, createCompleteTaskHandler, createConsumePendingTurnHandler, createCreateTaskHandler, createUpdateTaskHandler, createWakeAgentHandler, createWakeOutboxDispatcher, handleTeamDispatchReviewTerminal, MailboxService, maybePublishTeamDispatchCompleted, PendingTurnService, ReclaimStaleClaimedRun, reconcileTerminalDelegatedTaskRuns, RoomMcpServer, RunLifecycleService, RunQueue, StartupRecovery, TaskModeGroupChatPresenter, TaskService, WELL_KNOWN_CAPABILITY_TOKENS, type BriefResolver, type WakeOutboxDispatcher } from "@agenthub/orchestrator";
+import { ActiveWakesRegistry, AssistedSelectorGroupChatManager, checkTaskTimeouts, createCancelRunHandler, createCompleteTaskHandler, createConsumePendingTurnHandler, createCreateTaskHandler, createUpdateTaskHandler, createWakeAgentHandler, createWakeOutboxDispatcher, handleTeamDispatchReviewTerminal, MailboxService, maybePublishTeamDispatchCompleted, PendingTurnService, ReclaimStaleClaimedRun, reconcileTerminalDelegatedTaskRuns, resolveWakeOutboxAgentId, RoomMcpServer, RunLifecycleService, RunQueue, StartupRecovery, TaskModeGroupChatPresenter, TaskService, WELL_KNOWN_CAPABILITY_TOKENS, type BriefResolver, type WakeOutboxDispatcher } from "@agenthub/orchestrator";
 import { createPermissionCommandHandlers, permissionSettings, PermissionEngine, seedBuiltInPermissionProfiles, setAllowAllPermissions } from "@agenthub/permissions";
 import type { EventEnvelope } from "@agenthub/protocol/events";
 import { artifactContentTypeFor as protocolArtifactContentTypeFor } from "@agenthub/protocol/preview";
@@ -623,14 +623,17 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
         const room = database.sqlite.prepare("SELECT workspace_id FROM rooms WHERE id = ?").get(item.roomId) as { readonly workspace_id: string } | undefined;
         const payload = parseWakePayload(item.payload);
         const taskId = typeof payload.taskId === "string" ? payload.taskId : Array.isArray(payload.taskIds) && typeof payload.taskIds[0] === "string" ? payload.taskIds[0] : undefined;
+        const reason = wakeReasonForCommand(item.reason);
+        const workspaceMode = wakeWorkspaceModeForCommand(item.reason);
         const result = await Promise.resolve(commandBus.dispatch(
           {
             type: "WakeAgent",
             roomId: item.roomId,
             agentId: item.agentId,
             workspaceId: room?.workspace_id ?? "default-workspace",
-            reason: wakeReasonForCommand(item.reason),
+            reason,
             ...(taskId !== undefined ? { taskId } : {}),
+            ...(workspaceMode !== undefined ? { workspaceMode } : {}),
             promptDelta: { kind: "delta_only", instructions: promptForWakeOutbox(item.reason, payload) },
             idempotencyKey: `wake-outbox:${item.id}`
           },
@@ -750,7 +753,7 @@ export function createDaemon(options: DaemonOptions): DaemonApp {
 async function stopAssistedRoomDiscussion(app: DaemonRuntime, roomId: string): Promise<{ readonly ok: boolean; readonly roomId: string; readonly cancelledRunIds: readonly string[] }> {
   app.assistedSelector.forgetRoomTurns(roomId);
   const rows = app.database.sqlite
-    .prepare("SELECT id FROM runs WHERE room_id = ? AND status IN ('queued','waiting','claimed','starting','running','waiting_permission') ORDER BY created_at ASC")
+    .prepare("SELECT id FROM runs WHERE room_id = ? AND status IN ('queued','waiting','claimed','starting','running','waiting_permission','cancelling') ORDER BY created_at ASC")
     .all(roomId) as { readonly id: string }[];
   const cancelledRunIds: string[] = [];
   for (const row of rows) {
@@ -809,14 +812,16 @@ function parseWakePayload(payload: string | undefined): Record<string, unknown> 
 
 function enqueueWakeOutbox(database: AgentHubDatabase, roomId: string, agentId: string, reason: "task_completed" | "task_blocked" | "task_review", payload: Record<string, unknown>, now: number): void {
   const wakeReason = reason === "task_completed" ? "task_review" : reason;
+  const wakeAgentId = resolveWakeOutboxAgentId(database, roomId, agentId);
+  if (wakeAgentId === undefined) return;
   const payloadJson = JSON.stringify(payload);
   const existing = database.sqlite
     .prepare("SELECT id FROM wake_outbox WHERE room_id = ? AND agent_id = ? AND reason = ? AND payload = ? AND status IN ('pending', 'dispatching', 'dispatched') LIMIT 1")
-    .get(roomId, agentId, wakeReason, payloadJson);
+    .get(roomId, wakeAgentId, wakeReason, payloadJson);
   if (existing !== undefined) return;
   database.sqlite
     .prepare("INSERT INTO wake_outbox (id, room_id, agent_id, reason, payload, status, attempt_count, max_attempts, created_at, dispatch_after) VALUES (?, ?, ?, ?, ?, 'pending', 0, 3, ?, NULL)")
-    .run(randomUUID(), roomId, agentId, wakeReason, payloadJson, now);
+    .run(randomUUID(), roomId, wakeAgentId, wakeReason, payloadJson, now);
 }
 
 function promptForWakeOutbox(reason: string, payload: Record<string, unknown>): string {
@@ -824,7 +829,11 @@ function promptForWakeOutbox(reason: string, payload: Record<string, unknown>): 
     return "All delegated tasks reached terminal states. Summarize completed artifacts, blocked work, and review items for the room.";
   }
   if (reason === "task_review") {
-    return "Delegated tasks are ready for leader review. Review their outputs and provide the next coordination step.";
+    return [
+      "Delegated tasks are ready for leader review. Review their outputs and choose the next concrete coordination step.",
+      "If more implementation, polishing, or artifact production is needed, you MUST call `room.delegate` in this turn to hand it to the right teammate; do not merely say that you will hand it off.",
+      "If the work is already complete, call `room.review` with an approval decision or synthesize the final answer briefly."
+    ].join("\n");
   }
   if (reason === "task_blocked") {
     return "A delegated task is blocked. Explain the issue and choose a degradation, retry, or user-intervention path.";
@@ -841,6 +850,10 @@ function wakeReasonForCommand(reason: string): "primary_turn" | "user_mention" |
   if (reason === "restart_recovery") return "agent_crashed";
   if (reason === "task_review" || reason === "task_blocked" || reason === "delegated_task") return reason;
   return "delegated_task";
+}
+
+function wakeWorkspaceModeForCommand(reason: string): "isolated_worktree" | undefined {
+  return reason === "delegated_task" ? "isolated_worktree" : undefined;
 }
 
 type RouteContext = { readonly req: IncomingMessage; readonly res: ServerResponse; readonly database: AgentHubDatabase; readonly eventBus: EventBus; readonly commandBus: CommandBus; readonly artifactService: ArtifactService; readonly deploymentService: DeploymentService; readonly taskService: TaskService; readonly skillRegistry: SkillRegistry; readonly pptPreviewBridge: PptPreviewBridge; readonly outbox: { drainPending(): Promise<void> }; readonly stopAssistedDiscussion: (roomId: string) => Promise<{ readonly ok: boolean; readonly roomId: string; readonly cancelledRunIds: readonly string[] }>; readonly modelConfigSecrets: KeychainBridge; readonly settingsJobs: Map<string, SettingsJobRecord>; readonly modelTestFetch: typeof fetch; readonly roleDraftGenerator: RoleDraftGenerator; readonly registerSseClient: (client: SseClient) => () => void; readonly activeSseClientCount: () => number; readonly serveWebAsset: () => boolean; readonly token?: string; readonly allowedOrigins?: readonly string[]; readonly host: string; readonly now?: () => number };
@@ -5225,7 +5238,18 @@ function parseGitHubSkillUrl(sourceUrl: string): GitHubSkillUrl | undefined {
   } catch {
     return undefined;
   }
-  if (parsed.hostname.toLowerCase() !== "github.com") return undefined;
+  const host = parsed.hostname.toLowerCase();
+  if (host === "raw.githubusercontent.com") {
+    const rawParts = parsed.pathname.split("/").filter((part) => part.length > 0).map((part) => decodeURIComponent(part));
+    if (rawParts.length < 4) throw new Error("expected raw GitHub URL format raw.githubusercontent.com/{owner}/{repo}/{ref}/.../SKILL.md");
+    const owner = rawParts[0];
+    const repoPart = rawParts[1];
+    const last = rawParts[rawParts.length - 1];
+    if (owner === undefined || repoPart === undefined) throw new Error("expected raw GitHub URL format raw.githubusercontent.com/{owner}/{repo}/{ref}/.../SKILL.md");
+    if (last?.toLowerCase() !== "skill.md") throw new Error("Raw GitHub skill URL must point to SKILL.md; use a github.com /tree/ URL to import a skill package directory.");
+    return { owner, repo: repoPart.replace(/\.git$/iu, ""), kind: "blob", refAndPathSegments: rawParts.slice(2, -1) };
+  }
+  if (host !== "github.com") return undefined;
   const parts = parsed.pathname.split("/").filter((part) => part.length > 0).map((part) => decodeURIComponent(part));
   if (parts.length < 2) throw new Error("expected GitHub URL format github.com/{owner}/{repo}");
   const owner = parts[0];
@@ -5239,7 +5263,7 @@ function parseGitHubSkillUrl(sourceUrl: string): GitHubSkillUrl | undefined {
   if (rest.length === 0) throw new Error(`missing ref after /${marker}/`);
   if (marker === "blob") {
     const last = rest[rest.length - 1];
-    if (last?.toLowerCase() !== "skill.md") throw new Error("GitHub blob URL must point to a SKILL.md file");
+    if (last?.toLowerCase() !== "skill.md") throw new Error("GitHub blob URL must point to SKILL.md; use a github.com /tree/ URL to import a skill package directory.");
     return { owner, repo, kind: "blob", refAndPathSegments: rest.slice(0, -1) };
   }
   return { owner, repo, kind: "tree", refAndPathSegments: rest };

@@ -5,6 +5,7 @@ import type { EventBus } from "@agenthub/bus";
 
 import { RunLifecycleService, type RunRow } from "./run-lifecycle-service.ts";
 import { TaskService, type TaskStatus } from "./task-service.ts";
+import { resolveWakeOutboxAgentId } from "./wake-outbox-ids.ts";
 
 export type CrashRecoveryMode = "resumable" | "restartable" | "fail_run";
 
@@ -219,13 +220,15 @@ export class ReclaimStaleClaimedRun {
 
   private enqueueRestartRecoveryWake(run: RunRow): void {
     if (run.room_id === null || run.agent_id === null) return;
+    const wakeAgentId = resolveWakeOutboxAgentId(this.database, run.room_id, run.agent_id);
+    if (wakeAgentId === undefined) return;
     const payload = JSON.stringify({ runId: run.id });
     const existing = this.database.sqlite
       .prepare("SELECT id FROM wake_outbox WHERE room_id = ? AND agent_id = ? AND reason = 'restart_recovery' AND payload = ? AND status IN ('pending', 'dispatching', 'dispatched') LIMIT 1")
-      .get(run.room_id, run.agent_id, payload);
+      .get(run.room_id, wakeAgentId, payload);
     if (existing !== undefined) return;
     this.database.sqlite
       .prepare("INSERT INTO wake_outbox (id, room_id, agent_id, reason, payload, status, attempt_count, max_attempts, created_at, dispatch_after) VALUES (?, ?, ?, 'restart_recovery', ?, 'pending', 0, 3, ?, NULL)")
-      .run(randomUUID(), run.room_id, run.agent_id, payload, this.now());
+      .run(randomUUID(), run.room_id, wakeAgentId, payload, this.now());
   }
 }

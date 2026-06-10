@@ -78,6 +78,8 @@ export const acpClientCapabilities: AcpClientCapabilities = {
   context: { inject: true }
 };
 
+const PROMPT_REQUEST_TIMEOUT_MS = 10 * 60 * 1000;
+
 export class ACPAdapterError extends Error implements AdapterError {
   constructor(readonly code: string, message: string, override readonly cause?: unknown) {
     super(message);
@@ -333,7 +335,7 @@ export abstract class ACPAdapter {
     return this.request(sessionId, "session/prompt", {
       sessionId: session.serverSessionId ?? session.acpSessionId,
       prompt: [{ type: "text", text: serializePrompt(message) }]
-    }, { prompt: true });
+    }, { prompt: true, timeoutMs: PROMPT_REQUEST_TIMEOUT_MS });
   }
 
   protected cancelRunSync(runId: string): void {
@@ -350,6 +352,13 @@ export abstract class ACPAdapter {
       prompt.reject(new ACPAdapterError("cancelled", "prompt cancelled"));
     }
     session.inflightPromptRequestId = undefined;
+    try {
+      this.onProviderEvent(session, { type: "session/end", payload: { sessionId: session.serverSessionId ?? session.acpSessionId, reason: "cancelled" } });
+    } finally {
+      this.pendingByRun.delete(runId);
+      if (session.runId === runId) session.runId = undefined;
+      if (session.state === "cancelling") session.state = "ready";
+    }
   }
 
   protected disposeSync(sessionId: string): void {
@@ -643,7 +652,7 @@ export abstract class ACPAdapter {
         this.request(session.acpSessionId, "session/prompt", {
           sessionId: session.serverSessionId ?? session.acpSessionId,
           prompt: [{ type: "text", text: serializePrompt(item.message) }]
-        }, { prompt: true });
+        }, { prompt: true, timeoutMs: PROMPT_REQUEST_TIMEOUT_MS });
       } catch (err) {
         this.emitRaw(session, "stderr", `failed to flush queued prompt: ${err instanceof Error ? err.message : String(err)}`);
       }

@@ -45,6 +45,11 @@ export class RunQueue {
 
     for (const run of rows) {
       if (run.status === "waiting" && this.now() - run.updated_at > this.lockTimeoutMs) {
+        const acquired = this.tryAcquireAllLocks(run);
+        if (acquired.ok) {
+          await this.startAcquiredRun(run);
+          continue;
+        }
         this.options.lifecycle.fail(null, run.id, "lock_timeout", "transient");
         continue;
       }
@@ -79,6 +84,10 @@ export class RunQueue {
       return;
     }
 
+    await this.startAcquiredRun(run);
+  }
+
+  private async startAcquiredRun(run: RunRow): Promise<void> {
     try {
       this.options.lifecycle.markClaimed(null, run.id);
       this.options.lifecycle.markStarting(null, run.id, this.pid);
@@ -125,10 +134,10 @@ export class RunQueue {
 
 function desiredLocks(run: RunRow): readonly LockRow[] {
   const targetFiles = parseTargetFiles(run.target_files);
-  const locks: LockRow[] = [
-    { lockType: "agent", lockKey: run.agent_id, workspaceId: null, runId: run.id },
-    { lockType: "room", lockKey: run.room_id, workspaceId: null, runId: run.id }
-  ];
+  const locks: LockRow[] = [{ lockType: "agent", lockKey: run.agent_id, workspaceId: null, runId: run.id }];
+  if (isDelegatedIsolatedWorktreeRun(run)) return locks;
+
+  locks.push({ lockType: "room", lockKey: run.room_id, workspaceId: null, runId: run.id });
   if (targetFiles.length === 0) {
     locks.push({ lockType: "workspace", lockKey: run.workspace_id, workspaceId: run.workspace_id, runId: run.id });
   } else {
@@ -137,6 +146,10 @@ function desiredLocks(run: RunRow): readonly LockRow[] {
     }
   }
   return locks;
+}
+
+function isDelegatedIsolatedWorktreeRun(run: RunRow): boolean {
+  return run.workspace_mode === "isolated_worktree" && run.wake_reason === "delegated_task";
 }
 
 function parseTargetFiles(value: string): string[] {

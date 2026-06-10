@@ -17,6 +17,7 @@ import {
 import { useRoomCreationOptions, type AgentBindingSummary } from "../hooks/useRoomCreationOptions.ts";
 import type { AgentContactViewModel } from "../types.ts";
 import { normalizeAgentContacts } from "./rail/RailViews.tsx";
+import { capabilityDisplayName, contactRoleDisplayName } from "../lib/agentDisplay.ts";
 import { initials } from "../lib/format.ts";
 import { roleDisplayText } from "../lib/roles.ts";
 import { runtimeChipColor, runtimeDisplayName, runtimeInstanceLabel } from "../lib/runtimeDisplay.ts";
@@ -71,7 +72,6 @@ export type ContactFirstParticipantConfig = {
 export const ROOM_MODE_OPTIONS: ReadonlyArray<{ value: RoomMode; title: string; description: string }> = [
   { value: "solo", title: "单人", description: "仅包含一个主智能体。" },
   { value: "assisted", title: "协作", description: "主智能体可搭配可选协作者。" },
-  { value: "squad", title: "小队", description: "由负责人角色协调一个聚焦小组。" },
   { value: "team", title: "团队", description: "由负责人角色在活跃队友之间分派工作。" }
 ];
 
@@ -187,9 +187,10 @@ export function buildCreateRoomInput(input: {
 
 export function defaultRoomModeForSelectedContacts(selectedCount: number, currentMode: RoomMode): RoomMode {
   if (selectedCount === 1) return "solo";
-  if (selectedCount > 1 && (currentMode === "team" || currentMode === "squad")) return currentMode;
+  if (selectedCount > 1 && currentMode === "team") return currentMode;
+  if (selectedCount > 1 && currentMode === "squad") return "team";
   if (selectedCount > 1) return "assisted";
-  return currentMode;
+  return currentMode === "squad" ? "team" : currentMode;
 }
 
 export function buildContactFirstCreateRoomInput(input: {
@@ -468,7 +469,7 @@ export function ContactFirstPicker({
           {sorted.map((contact) => {
             const selected = selectedIds.has(contact.agentBindingId);
             const subtitle = [
-              contact.roleName ?? contact.roleId,
+              contactRoleDisplayName(contact.roleName, contact.roleId),
               contactRuntimeLabel(contact),
               contact.modelName
             ].filter(Boolean).join(" / ");
@@ -492,7 +493,7 @@ export function ContactFirstPicker({
                   {contact.capabilities.length > 0 ? (
                     <span className="mt-1.5 flex min-w-0 gap-1.5 overflow-hidden">
                       {contact.capabilities.slice(0, 3).map((capability) => (
-                        <Chip key={capability} size="sm" variant="soft" color="default">{capability}</Chip>
+                        <Chip key={capability} size="sm" variant="soft" color="default">{capabilityDisplayName(capability)}</Chip>
                       ))}
                       {contact.capabilities.length > 3 ? (
                         <span className="text-xs text-muted">+{contact.capabilities.length - 3}</span>

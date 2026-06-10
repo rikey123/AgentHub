@@ -8,16 +8,30 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const spawnMock = vi.hoisted(() => vi.fn());
 const existsSyncMock = vi.hoisted(() => vi.fn());
+const readFileSyncMock = vi.hoisted(() => vi.fn());
+const rmSyncMock = vi.hoisted(() => vi.fn());
 
-vi.mock("node:child_process", () => ({
-  spawn: spawnMock
-}));
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return {
+    ...actual,
+    spawn: spawnMock
+  };
+});
 
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
   return {
     ...actual,
-    existsSync: existsSyncMock
+    existsSync: existsSyncMock,
+    readFileSync: ((pathLike: string | URL, ...args: unknown[]) => {
+      if (String(pathLike).endsWith("daemon.pid")) return readFileSyncMock(pathLike, ...args);
+      return actual.readFileSync(pathLike, ...(args as [BufferEncoding?]));
+    }) as typeof actual.readFileSync,
+    rmSync: ((pathLike: string | URL, ...args: unknown[]) => {
+      if (String(pathLike).endsWith("daemon.pid")) return rmSyncMock(pathLike, ...args);
+      return actual.rmSync(pathLike, ...(args as [{ recursive?: boolean; force?: boolean }?]));
+    }) as typeof actual.rmSync
   };
 });
 
@@ -47,6 +61,9 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
   spawnMock.mockReset();
   existsSyncMock.mockReset();
+  readFileSyncMock.mockReset();
+  rmSyncMock.mockReset();
+  vi.restoreAllMocks();
   delete process.env.AGENTHUB_CALLER_CWD;
   delete process.env.AGENTHUB_WEB_ASSETS_ROOT;
 });
@@ -149,12 +166,17 @@ describe("agenthub web launcher", () => {
     }
   });
 
-  it("opens an already-running daemon-served built UI and exits without waiting for child processes", async () => {
+  it("opens an already-running daemon-served built UI when the daemon workspace matches the caller", async () => {
     const callerWorkspace = mkdtempSync(join(tmpdir(), "agenthub-caller-running-"));
     process.chdir(callerWorkspace);
     mockSourceTree({ hasBuiltWebAssets: true });
 
-    globalThis.fetch = vi.fn(async () => new Response("ok", { status: 200 })) as typeof fetch;
+    globalThis.fetch = vi.fn(async (url) => {
+      if (String(url) === "http://127.0.0.1:6677/workspaces/default-workspace") {
+        return jsonResponse({ workspace: { id: "default-workspace", root_path: callerWorkspace } });
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
     spawnMock.mockImplementation(() => {
       const child = new FakeChildProcess();
       queueMicrotask(() => child.emit("spawn"));
@@ -173,7 +195,71 @@ describe("agenthub web launcher", () => {
       rmSync(callerWorkspace, { recursive: true, force: true });
     }
   });
+
+  it("restarts an already-running daemon when it is attached to a different workspace", async () => {
+    const callerWorkspace = mkdtempSync(join(tmpdir(), "agenthub-caller-switch-"));
+    const previousWorkspace = mkdtempSync(join(tmpdir(), "agenthub-caller-previous-"));
+    process.chdir(callerWorkspace);
+    mockSourceTree({ hasBuiltWebAssets: true });
+    readFileSyncMock.mockReturnValue(JSON.stringify({ pid: 4242, host: "127.0.0.1", port: 6677, startedAt: 1 }));
+    let stopped = false;
+    let replacementStarted = false;
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(((pid: number, signal?: NodeJS.Signals | 0) => {
+      if (pid === 4242 && signal === "SIGTERM") {
+        stopped = true;
+        return true;
+      }
+      if (pid === 4242 && signal === 0) return !stopped;
+      return true;
+    }) as typeof process.kill);
+
+    globalThis.fetch = vi.fn(async (url) => {
+      const text = String(url);
+      if (text === "http://127.0.0.1:6677/workspaces/default-workspace") {
+        return jsonResponse({ workspace: { id: "default-workspace", root_path: previousWorkspace } });
+      }
+      if (text === "http://127.0.0.1:6677/healthz") {
+        return stopped && !replacementStarted
+          ? Promise.reject(new Error("daemon stopped"))
+          : jsonResponse({ ok: true });
+      }
+      return jsonResponse({ ok: true });
+    }) as typeof fetch;
+
+    spawnMock.mockImplementation(() => {
+      replacementStarted = true;
+      const child = new FakeChildProcess();
+      queueMicrotask(() => child.emit("spawn"));
+      setTimeout(() => {
+        if (child.exitCode === null && child.signalCode === null) {
+          child.exitCode = 0;
+          child.emit("exit", 0, null);
+        }
+      }, 20);
+      return child;
+    });
+
+    try {
+      await expect(runWebCommand(["web"])).resolves.toBe(0);
+
+      expect(killSpy).toHaveBeenCalledWith(4242, "SIGTERM");
+      expect(rmSyncMock).toHaveBeenCalled();
+      const managed = spawnMock.mock.calls.filter(([, , options]) => options?.stdio === "inherit");
+      expect(managed).toHaveLength(1);
+      const daemonArgs = managed[0]?.[1] as readonly string[];
+      expect(daemonArgs).toContain("--workspace-root");
+      expect(daemonArgs[daemonArgs.indexOf("--workspace-root") + 1]).toBe(callerWorkspace);
+    } finally {
+      process.chdir(originalCwd);
+      rmSync(callerWorkspace, { recursive: true, force: true });
+      rmSync(previousWorkspace, { recursive: true, force: true });
+    }
+  });
 });
+
+function jsonResponse(value: unknown): Response {
+  return new Response(JSON.stringify(value), { status: 200, headers: { "content-type": "application/json" } });
+}
 
 function mockSourceTree(input: { readonly hasBuiltWebAssets: boolean }): void {
   const root = toPosix(repoRoot);

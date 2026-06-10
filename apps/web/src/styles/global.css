@@ -162,6 +162,15 @@ body,
   will-change: transform, opacity;
 }
 
+.ah-chat-virtual-row {
+  box-sizing: border-box;
+  padding-block: 0.375rem;
+}
+
+.ah-chat-virtual-row > .ah-chat-message {
+  margin-block: 0;
+}
+
 .ah-chat-bubble {
   transform-origin: 50% 85%;
   transition:

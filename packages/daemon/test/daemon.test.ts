@@ -1021,9 +1021,9 @@ describe("daemon M1.4 composition", () => {
         seeded.sqlite.prepare("INSERT INTO roles (id, workspace_id, name, prompt, capabilities, is_builtin, created_at, updated_at) VALUES ('role_wake', 'ws_wake', 'Leader', '', '[]', 0, 1, 1)").run();
         seeded.sqlite.prepare("INSERT INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES ('agent_wake', 'ws_wake', 'Leader', 'mock', NULL, '', '[]', NULL, 0, NULL, 1, 1)").run();
         seeded.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES ('binding_wake', 'ws_wake', 'role_wake', 'runtime_1', NULL, NULL, 1, 1)").run();
-        seeded.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES ('room_wake', 'ws_wake', 'Wake Room', 'solo', 'conversation', 'agent_wake', NULL, 1, 1)").run();
-        seeded.sqlite.prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES ('room_wake', 'agent_wake', 'agent', 'primary', 'mock', NULL, 'binding_wake', 'active', 1)").run();
-        seeded.sqlite.prepare("INSERT INTO wake_outbox (id, room_id, agent_id, reason, payload, status, attempt_count, max_attempts, created_at, dispatch_after) VALUES ('wake_startup_1', 'room_wake', 'agent_wake', 'aggregate', ?, 'dispatching', 0, 3, 1, NULL)").run(JSON.stringify({ taskIds: ["task_1"] }));
+        seeded.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES ('room_wake', 'ws_wake', 'Wake Room', 'solo', 'conversation', 'binding_wake', NULL, 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES ('room_wake', 'binding_wake', 'agent', 'primary', 'mock', NULL, 'binding_wake', 'active', 1)").run();
+        seeded.sqlite.prepare("INSERT INTO wake_outbox (id, room_id, agent_id, reason, payload, status, attempt_count, max_attempts, created_at, dispatch_after) VALUES ('wake_startup_1', 'room_wake', 'binding_wake', 'aggregate', ?, 'dispatching', 0, 3, 1, NULL)").run(JSON.stringify({ taskIds: ["task_1"] }));
       })();
     } finally {
       seeded.sqlite.close();
@@ -1035,6 +1035,74 @@ describe("daemon M1.4 composition", () => {
     await eventually(() => expect(seededDaemon.database.sqlite.prepare("SELECT status FROM wake_outbox WHERE id = 'wake_startup_1'").get()).toMatchObject({ status: "dispatched" }));
     expect(seededDaemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM runs WHERE room_id = 'room_wake' AND wake_reason = 'task_review'").get()).toMatchObject({ count: 1 });
     expect(seededDaemon.database.sqlite.prepare("SELECT COUNT(*) AS count FROM events WHERE type = 'wake_outbox.dispatched' AND json_extract(payload, '$.outboxId') = 'wake_startup_1'").get()).toMatchObject({ count: 1 });
+
+    await seededDaemon.close();
+  });
+
+  it("instructs task_review wake leaders to delegate concrete follow-up instead of only promising handoff", async () => {
+    await daemon.close();
+    currentDaemon = undefined;
+    const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-task-review-wake-"));
+    const databasePath = join(dir, "agenthub.sqlite");
+    const seeded = createDatabase({ path: databasePath, applyMigrations: true });
+    try {
+      seeded.sqlite.transaction(() => {
+        seeded.sqlite.prepare("INSERT INTO workspaces (id, name, root_path, created_at, updated_at) VALUES ('ws_review_wake', 'Workspace', '.', 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO roles (id, workspace_id, name, prompt, capabilities, is_builtin, created_at, updated_at) VALUES ('role_review_wake', 'ws_review_wake', 'Project Manager', '', '[]', 0, 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES ('agent_review_wake', 'ws_review_wake', 'Project Manager', 'mock', NULL, '', '[]', NULL, 0, NULL, 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES ('binding_review_wake', 'ws_review_wake', 'role_review_wake', 'runtime_1', NULL, NULL, 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES ('room_review_wake', 'ws_review_wake', 'Review Wake Room', 'team', 'conversation', 'binding_review_wake', NULL, 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES ('room_review_wake', 'binding_review_wake', 'agent', 'primary', 'mock', NULL, 'binding_review_wake', 'active', 1)").run();
+        seeded.sqlite.prepare("INSERT INTO wake_outbox (id, room_id, agent_id, reason, payload, status, attempt_count, max_attempts, created_at, dispatch_after) VALUES ('wake_task_review_1', 'room_review_wake', 'binding_review_wake', 'task_review', ?, 'pending', 0, 3, 1, NULL)").run(JSON.stringify({ taskIds: ["task_1"], sourceRunId: "run_pm" }));
+      })();
+    } finally {
+      seeded.sqlite.close();
+    }
+
+    const seededDaemon = createDaemon({ databasePath, port: 0, modelTestFetch: modelTestFetchMock, now: () => 500 });
+    await seededDaemon.start();
+
+    await eventually(() => expect(seededDaemon.database.sqlite.prepare("SELECT status FROM wake_outbox WHERE id = 'wake_task_review_1'").get()).toMatchObject({ status: "dispatched" }));
+    const queued = seededDaemon.database.sqlite
+      .prepare("SELECT payload FROM events WHERE type = 'agent.run.queued' AND room_id = 'room_review_wake' ORDER BY seq DESC LIMIT 1")
+      .get() as { readonly payload: string };
+    const queuedPayload = JSON.parse(queued.payload) as { readonly promptDelta?: { readonly instructions?: string } };
+    expect(queuedPayload.promptDelta?.instructions).toContain("MUST call `room.delegate`");
+    expect(queuedPayload.promptDelta?.instructions).toContain("do not merely say that you will hand it off");
+
+    await seededDaemon.close();
+  });
+
+  it("dispatches delegated wake_outbox rows as isolated worktree runs", async () => {
+    await daemon.close();
+    currentDaemon = undefined;
+    const dir = mkdtempSync(join(tmpdir(), "agenthub-daemon-delegated-wake-"));
+    const databasePath = join(dir, "agenthub.sqlite");
+    const seeded = createDatabase({ path: databasePath, applyMigrations: true });
+    try {
+      seeded.sqlite.transaction(() => {
+        seeded.sqlite.prepare("INSERT INTO workspaces (id, name, root_path, created_at, updated_at) VALUES ('ws_delegated_wake', 'Workspace', '.', 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO runtimes (id, workspace_id, kind, name, manifest_json, created_at, updated_at) VALUES ('runtime_delegated_wake', 'ws_delegated_wake', 'mock', 'Mock', '{}', 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO roles (id, workspace_id, name, prompt, capabilities, is_builtin, created_at, updated_at) VALUES ('role_delegated_wake', 'ws_delegated_wake', 'Builder', '', '[]', 0, 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES ('binding_delegated_wake', 'ws_delegated_wake', 'role_delegated_wake', 'runtime_delegated_wake', NULL, NULL, 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES ('room_delegated_wake', 'ws_delegated_wake', 'Delegated Wake Room', 'solo', 'conversation', 'binding_delegated_wake', NULL, 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES ('room_delegated_wake', 'binding_delegated_wake', 'agent', 'primary', 'mock', NULL, 'binding_delegated_wake', 'active', 1)").run();
+        seeded.sqlite.prepare("INSERT INTO tasks (id, workspace_id, room_id, parent_task_id, title, description, status, assignee_agent_id, source_run_id, source_message_id, dependencies, priority, due_at, created_by, created_at, updated_at) VALUES ('task_delegated_wake', 'ws_delegated_wake', 'room_delegated_wake', NULL, 'Delegated wake task', NULL, 'pending', 'binding_delegated_wake', NULL, NULL, '[]', NULL, NULL, 'system', 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO wake_outbox (id, room_id, agent_id, reason, payload, status, attempt_count, max_attempts, created_at, dispatch_after) VALUES ('wake_delegated_1', 'room_delegated_wake', 'binding_delegated_wake', 'delegated_task', ?, 'pending', 0, 3, 1, NULL)").run(JSON.stringify({ taskId: "task_delegated_wake" }));
+      })();
+    } finally {
+      seeded.sqlite.close();
+    }
+
+    const seededDaemon = createDaemon({ databasePath, port: 0, modelTestFetch: modelTestFetchMock, now: () => 500 });
+    await seededDaemon.start();
+
+    await eventually(() => expect(seededDaemon.database.sqlite.prepare("SELECT status FROM wake_outbox WHERE id = 'wake_delegated_1'").get()).toMatchObject({ status: "dispatched" }));
+    expect(seededDaemon.database.sqlite.prepare("SELECT task_id, wake_reason, workspace_mode FROM runs WHERE room_id = 'room_delegated_wake'").get()).toMatchObject({
+      task_id: "task_delegated_wake",
+      wake_reason: "delegated_task",
+      workspace_mode: "isolated_worktree"
+    });
 
     await seededDaemon.close();
   });
@@ -1051,15 +1119,15 @@ describe("daemon M1.4 composition", () => {
         seeded.sqlite.prepare("INSERT INTO roles (id, workspace_id, name, prompt, capabilities, is_builtin, created_at, updated_at) VALUES ('role_restart', 'ws_restart', 'Builder', '', '[]', 0, 1, 1)").run();
         seeded.sqlite.prepare("INSERT INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES ('agent_restart', 'ws_restart', 'Builder', 'mock', NULL, '', '[]', NULL, 0, NULL, 1, 1)").run();
         seeded.sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES ('binding_restart', 'ws_restart', 'role_restart', 'runtime_1', NULL, NULL, 1, 1)").run();
-        seeded.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES ('room_restart', 'ws_restart', 'Restart Room', 'solo', 'conversation', 'agent_restart', NULL, 1, 1)").run();
-        seeded.sqlite.prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES ('room_restart', 'agent_restart', 'agent', 'primary', 'mock', 'session_restart', 'binding_restart', 'active', 1)").run();
+        seeded.sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES ('room_restart', 'ws_restart', 'Restart Room', 'solo', 'conversation', 'binding_restart', NULL, 1, 1)").run();
+        seeded.sqlite.prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES ('room_restart', 'binding_restart', 'agent', 'primary', 'mock', 'session_restart', 'binding_restart', 'active', 1)").run();
         seeded.sqlite.prepare(
           `INSERT INTO runs (
             id, workspace_id, task_id, room_id, agent_id, adapter_id, adapter_session_id, provider_conversation_id,
             parent_run_id, status, wake_reason, waiting_reason, workspace_path, work_dir, workspace_mode, context_version,
             target_files, mailbox_claim_count, pid_at_start, claimed_at, started_at, ended_at, input_tokens, output_tokens,
             cached_tokens, cost_usd, model_id, failure_class, error, created_at, updated_at
-          ) VALUES ('run_restart', 'ws_restart', NULL, 'room_restart', 'agent_restart', 'mock', 'session_restart', NULL,
+          ) VALUES ('run_restart', 'ws_restart', NULL, 'room_restart', 'binding_restart', 'mock', 'session_restart', NULL,
             NULL, 'running', 'primary_turn', NULL, NULL, NULL, 'shadow_buffer', NULL,
             '[]', 0, 1, 1, 2, NULL, NULL, NULL,
             NULL, NULL, NULL, NULL, NULL, 1, 2)`
@@ -1079,7 +1147,7 @@ describe("daemon M1.4 composition", () => {
     });
     expect(seededDaemon.database.sqlite.prepare("SELECT room_id, agent_id, reason, status, payload FROM wake_outbox WHERE reason = 'restart_recovery'").get()).toMatchObject({
       room_id: "room_restart",
-      agent_id: "agent_restart",
+      agent_id: "binding_restart",
       reason: "restart_recovery",
       status: "pending",
       payload: JSON.stringify({ runId: "run_restart" })
@@ -2803,8 +2871,11 @@ describe("daemon M1.4 composition", () => {
 
   it("marks stale pending tasks blocked once and wakes the leader idempotently", () => {
     activeDaemon().database.sqlite.prepare("INSERT OR IGNORE INTO workspaces (id, name, root_path, created_at, updated_at) VALUES ('ws_timeout', 'ws_timeout', '/tmp/ws_timeout', 1, 1)").run();
+    activeDaemon().database.sqlite.prepare("INSERT OR IGNORE INTO runtimes (id, workspace_id, kind, name, manifest_json, created_at, updated_at) VALUES ('runtime_timeout', 'ws_timeout', 'mock', 'Mock', '{}', 1, 1)").run();
+    activeDaemon().database.sqlite.prepare("INSERT OR IGNORE INTO roles (id, workspace_id, name, prompt, capabilities, is_builtin, created_at, updated_at) VALUES ('role_timeout', 'ws_timeout', 'Builder', '', '[]', 0, 1, 1)").run();
+    activeDaemon().database.sqlite.prepare("INSERT OR IGNORE INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES ('mock-builder', 'ws_timeout', 'role_timeout', 'runtime_timeout', NULL, NULL, 1, 1)").run();
     activeDaemon().database.sqlite.prepare("INSERT OR IGNORE INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES ('room_timeout', 'ws_timeout', 'Timeout room', 'solo', 'conversation', 'mock-builder', NULL, 1, 1)").run();
-    activeDaemon().database.sqlite.prepare("INSERT OR IGNORE INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, default_presence, joined_at) VALUES ('room_timeout', 'mock-builder', 'agent', 'primary', 'mock', NULL, 'active', 1)").run();
+    activeDaemon().database.sqlite.prepare("INSERT OR IGNORE INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES ('room_timeout', 'mock-builder', 'agent', 'primary', 'mock', NULL, 'mock-builder', 'active', 1)").run();
     activeDaemon().database.sqlite.prepare("INSERT OR IGNORE INTO tasks (id, workspace_id, room_id, parent_task_id, title, description, status, assignee_agent_id, source_run_id, source_message_id, dependencies, priority, due_at, created_by, created_at, updated_at) VALUES ('task_timeout_1', 'ws_timeout', 'room_timeout', NULL, 'Stale task', NULL, 'pending', 'mock-builder', NULL, NULL, '[]', NULL, NULL, 'local', ?, ?)").run(Date.now() - 31 * 60 * 1000, Date.now() - 31 * 60 * 1000);
 
     const first = checkTaskTimeouts(activeDaemon().database, activeDaemon().eventBus, Date.now());
@@ -3055,6 +3126,19 @@ describe("daemon M1.4 composition", () => {
     expect(payload.files.map((file) => file.path)).toEqual(["README.md", "scripts/run.sh"]);
     expect(payload.files.find((file) => file.path === "scripts/run.sh")?.content).toBe("echo imported");
     expect(daemon.database.sqlite.prepare("SELECT type FROM events WHERE type = 'skill.imported' AND json_extract(payload, '$.skillId') = ?").get(payload.skill.id)).toBeDefined();
+
+    await expect(fetch(`${baseUrl}/skills/${payload.skill.id}`, { method: "DELETE" })).resolves.toMatchObject({ status: 200 });
+
+    const rawImported = await fetch(`${baseUrl}/skills/import`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ url: "https://raw.githubusercontent.com/rikey123/skill-pack/main/review-helper/SKILL.md" })
+    });
+    const rawPayload = await rawImported.json() as { readonly skill: { readonly id: string; readonly name: string; readonly origin: string; readonly sourceUrl: string; readonly fileCount: number }; readonly files: readonly { readonly path: string; readonly content: string }[] };
+
+    expect(rawImported.status).toBe(201);
+    expect(rawPayload.skill).toMatchObject({ name: "review-helper", origin: "imported", sourceUrl: "https://raw.githubusercontent.com/rikey123/skill-pack/main/review-helper/SKILL.md", fileCount: 2 });
+    expect(rawPayload.files.map((file) => file.path)).toEqual(["README.md", "scripts/run.sh"]);
   });
 
   it("lists and imports local runtime skill packages with supporting files", async () => {
@@ -3371,7 +3455,22 @@ describe("daemon M1.4 composition", () => {
 
     expect(response.status).toBe(200);
     expect(payload).toEqual({ ok: true, roomId, cancelledRunIds: ["run_stop_discussion"] });
-    expect(daemon.database.sqlite.prepare("SELECT status FROM runs WHERE id = 'run_stop_discussion'").get()).toMatchObject({ status: "cancelling" });
+    expect(daemon.database.sqlite.prepare("SELECT status FROM runs WHERE id = 'run_stop_discussion'").get()).toMatchObject({ status: "cancelled" });
+  });
+
+  it("stops an assisted discussion that is already stuck in cancelling", async () => {
+    const roomId = "room_stop_discussion_stuck";
+    daemon.database.sqlite.prepare(
+      "INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES (?, 'default-workspace', 'Stop Stuck Discussion', 'assisted', 'conversation', 'mock-builder', NULL, ?, ?)"
+    ).run(roomId, Date.now(), Date.now());
+    seedBusyRun(roomId, "mock-builder", "run_stop_discussion_stuck", "cancelling");
+
+    const response = await fetch(`${baseUrl}/rooms/${roomId}/discussion/stop`, { method: "POST" });
+    const payload = await response.json() as { readonly ok?: boolean; readonly cancelledRunIds?: readonly string[] };
+
+    expect(response.status).toBe(200);
+    expect(payload).toEqual({ ok: true, roomId, cancelledRunIds: ["run_stop_discussion_stuck"] });
+    expect(daemon.database.sqlite.prepare("SELECT status FROM runs WHERE id = 'run_stop_discussion_stuck'").get()).toMatchObject({ status: "cancelled" });
   });
 });
 

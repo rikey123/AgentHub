@@ -95,7 +95,8 @@ describe("rail views", () => {
     expect(html).toContain("OpenCode");
     expect(html).toContain("gpt-5");
     expect(html).toContain("在线");
-    expect(html).toContain("code.edit");
+    expect(html).toContain("代码编辑");
+    expect(html).not.toContain("code.edit");
     expect(html).toContain("+1 更多");
     expect(html).toContain("Build useful interfaces.");
     expect(html).toContain("开始聊天");

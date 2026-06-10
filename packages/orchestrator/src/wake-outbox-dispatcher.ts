@@ -1,6 +1,7 @@
 import type { EventBus } from "@agenthub/bus";
 import type { AgentHubDatabase } from "@agenthub/db";
 import { randomUUID } from "node:crypto";
+import { resolveWakeCommandAgentId } from "./wake-outbox-ids.ts";
 
 export type WakeOutboxDispatchItem = {
   readonly id: string;
@@ -53,7 +54,7 @@ export function createWakeOutboxDispatcher(options: WakeOutboxDispatcherOptions)
   const dispatchPending = async (): Promise<readonly WakeOutboxDispatchItem[]> => {
     const claimed = claimNext(options.database, now());
     if (claimed === undefined) return [];
-    const item = rowToItem(claimed);
+    const item = rowToItem(options.database, claimed);
     try {
       const result = await options.dispatchWake?.(item);
       const runId = result?.runId ?? item.id;
@@ -128,11 +129,11 @@ function claimNext(database: AgentHubDatabase, now: number): WakeOutboxRow | und
   })();
 }
 
-function rowToItem(row: WakeOutboxRow): WakeOutboxDispatchItem {
+function rowToItem(database: AgentHubDatabase, row: WakeOutboxRow): WakeOutboxDispatchItem {
   return {
     id: row.id,
     roomId: row.room_id,
-    agentId: row.agent_id,
+    agentId: resolveWakeCommandAgentId(database, row.room_id, row.agent_id),
     reason: row.reason,
     ...(row.payload !== null ? { payload: row.payload } : {})
   };

@@ -387,6 +387,25 @@ describe("useProjector replay handling", () => {
     ]);
   });
 
+  it("preserves the run id from message events on projected messages", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "team" }));
+    projector.apply(makeAgentEvent("message.created", roomId, "agent-builder", {
+      messageId: "msg-run-link",
+      runId: "run-builder",
+      senderId: "agent-builder",
+      senderType: "agent",
+      role: "assistant",
+      text: "Working."
+    }, 110));
+
+    expect(emittedState.rooms.get(roomId)?.messages.find((item) => item.id === "msg-run-link")).toMatchObject({
+      id: "msg-run-link",
+      runId: "run-builder"
+    });
+  });
+
   it("hydrates message.created and message.completed payload parts during durable replay", () => {
     const roomId = `room-${randomUUID()}`;
     const projector = getProjector();
@@ -491,6 +510,19 @@ describe("useProjector replay handling", () => {
 
     const run = emittedState.rooms.get(roomId)?.runs.find((item) => item.id === "run-cancel-1");
     expect(run).toMatchObject({ id: "run-cancel-1", agentName: "Builder", status: "cancelling" });
+  });
+
+  it("projects waiting runs so queued indicators reflect lock waits", () => {
+    const roomId = `room-${randomUUID()}`;
+    const projector = getProjector();
+    projector.apply(makeEvent("room.created", roomId, { roomId, title: "Room", mode: "team" }));
+    projector.apply(makeAgentEvent("agent.joined", roomId, "agent-builder", { agentId: "agent-builder", agentName: "Builder", role: "teammate" }));
+    projector.apply(makeAgentEvent("agent.run.queued", roomId, "agent-builder", { runId: "run-waiting-1" }));
+
+    projector.apply(makeAgentEvent("agent.run.waiting", roomId, "agent-builder", { runId: "run-waiting-1", reason: "workspace_lock_held_by:run-busy" }));
+
+    const run = emittedState.rooms.get(roomId)?.runs.find((item) => item.id === "run-waiting-1");
+    expect(run).toMatchObject({ id: "run-waiting-1", agentName: "Builder", status: "waiting" });
   });
 
   it("stores worktree review state and conflicts for task cards", () => {

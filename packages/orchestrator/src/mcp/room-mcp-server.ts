@@ -1089,6 +1089,7 @@ export class RoomMcpServer {
             workspaceId: task.workspace_id,
             reason: "delegated_task",
             taskId,
+            workspaceMode: "isolated_worktree",
             promptDelta: { kind: "delta_only", instructions: reviewChangesInstructions(statusResult.data.task, reason) },
             idempotencyKey: `review-request-changes:${reviewRunId}:${taskId}:${randomUUID()}`
           },
@@ -1186,6 +1187,7 @@ export class RoomMcpServer {
             workspaceId: room.workspace_id,
             reason: "delegated_task",
             taskId: taskResult.data.taskId,
+            workspaceMode: "isolated_worktree",
             promptDelta: { kind: "delta_only", instructions: delegatedDescription !== undefined ? `${delegatedTitle}\n\n${delegatedDescription}` : delegatedTitle },
             idempotencyKey: `delegate:${runId}:${taskResult.data.taskId}:${randomUUID()}`
           },

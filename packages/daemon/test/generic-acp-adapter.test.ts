@@ -42,6 +42,34 @@ describe("GenericACPAdapter", () => {
       fixture.close();
     }
   });
+
+  it("finalizes managed cancellation without waiting for a provider session/end event", async () => {
+    const fixture = createFixture();
+    try {
+      const adapter = new GenericACPAdapter({
+        id: "codex",
+        runtimeKind: "codex",
+        name: "Codex",
+        command: "",
+        args: [],
+        services: { database: fixture.database, eventBus: fixture.eventBus },
+        lifecycle: fixture.lifecycle,
+        workspaceId: "ws_1"
+      });
+
+      await adapter.runManaged(fixture.lifecycle.read("run_1"));
+      fixture.lifecycle.markCancelling(null, "run_1");
+      await adapter.cancelManagedRun("run_1");
+
+      expect(fixture.database.sqlite.prepare("SELECT status, failure_class FROM runs WHERE id = 'run_1'").get()).toMatchObject({
+        status: "cancelled",
+        failure_class: "user_cancelled"
+      });
+      expect(fixture.database.sqlite.prepare("SELECT type FROM events WHERE type = 'agent.run.cancelled' AND run_id = 'run_1'").get()).toMatchObject({ type: "agent.run.cancelled" });
+    } finally {
+      fixture.close();
+    }
+  });
 });
 
 class CapturingGenericACPAdapter extends GenericACPAdapter {

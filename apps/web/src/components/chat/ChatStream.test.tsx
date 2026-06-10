@@ -92,6 +92,81 @@ describe("ChatStream task notification feed", () => {
     ]);
   });
 
+  it("wraps messages in measured virtual rows so dynamic bubble heights stay in layout", () => {
+    const html = renderToStaticMarkup(createElement(ChatStream, {
+      room: roomFixture({
+        messages: [
+          messageFixture({ id: "message-dynamic-height", text: "A long result can expand after it enters the feed." })
+        ]
+      }),
+      onSelectMessage: vi.fn(),
+      onOpenRun: vi.fn(),
+      onReply: vi.fn(),
+      onQuote: vi.fn(),
+      onPin: vi.fn(),
+      onRegenerate: vi.fn(),
+      onDelete: vi.fn(),
+      onOpenTask: vi.fn(),
+      onOpenTasks: vi.fn(),
+      onCancelPending: vi.fn(),
+      onEditPending: vi.fn(),
+      csrfFetch: vi.fn<typeof fetch>(),
+      connectionStatus: "connected"
+    }));
+
+    expect(html).toContain("data-chat-virtual-row=\"true\"");
+    expect(html).toContain("ah-chat-virtual-row");
+    expect(html).toContain("data-chat-feed-item-id=\"message-dynamic-height\"");
+  });
+
+  it("keeps system messages out of the main chat feed", () => {
+    const room = roomFixture({
+      messages: [
+        messageFixture({
+          id: "system-task",
+          senderType: "system",
+          senderId: "orchestrator",
+          senderName: "System",
+          role: "system",
+          status: "completed",
+          text: "已将任务分配给 Builder"
+        }),
+        messageFixture({
+          id: "user-visible",
+          senderType: "user",
+          senderId: "user",
+          senderName: "You",
+          role: "user",
+          status: "completed",
+          text: "开始处理"
+        })
+      ]
+    });
+
+    expect(buildChatFeedItems(room).map((item) => item.id)).toEqual(["user-visible"]);
+  });
+
+  it("keeps streaming agent messages hidden until the final answer is completed", () => {
+    const room = roomFixture({
+      messages: [
+        messageFixture({
+          id: "agent-streaming",
+          senderType: "agent",
+          status: "streaming",
+          text: "partial answer"
+        }),
+        messageFixture({
+          id: "agent-completed",
+          senderType: "agent",
+          status: "completed",
+          text: "final answer"
+        })
+      ]
+    });
+
+    expect(buildChatFeedItems(room).map((item) => item.id)).toEqual(["agent-completed"]);
+  });
+
   it("does not turn task activity rows into main timeline feed items", () => {
     const room = roomFixture({
       tasks: [
@@ -144,6 +219,47 @@ describe("ChatStream task notification feed", () => {
       status: "starting",
       mode: "assisted",
       turnIndex: 2
+    });
+  });
+
+  it("shows a starting run as working once the agent has produced output", () => {
+    const room = roomFixture({
+      runs: [
+        { id: "run-builder", agentId: "builder", agentName: "Builder", status: "starting" }
+      ],
+      messages: [
+        messageFixture({
+          id: "agent-progress",
+          senderType: "agent",
+          senderId: "builder",
+          senderName: "Builder",
+          status: "streaming",
+          runId: "run-builder",
+          text: "working on it"
+        })
+      ]
+    });
+
+    expect(activeRunIndicatorProps(room)).toEqual({
+      runId: "run-builder",
+      agentName: "Builder",
+      status: "working",
+      mode: "team"
+    });
+  });
+
+  it("keeps waiting runs visible in the active run indicator", () => {
+    const room = roomFixture({
+      runs: [
+        { id: "run-builder", agentId: "builder", agentName: "Builder", status: "waiting" }
+      ]
+    });
+
+    expect(activeRunIndicatorProps(room)).toEqual({
+      runId: "run-builder",
+      agentName: "Builder",
+      status: "waiting",
+      mode: "team"
     });
   });
 

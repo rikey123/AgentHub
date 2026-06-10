@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Button, ScrollShadow, Skeleton } from "@heroui/react";
 import type { RoomViewModel } from "../../types.ts";
@@ -45,7 +45,9 @@ const taskNotificationBriefKinds = new Set<RoomViewModel["briefs"][number]["kind
 
 export function buildChatFeedItems(room: RoomViewModel): FeedItem[] {
   return [
-    ...room.messages.map((m) => ({ kind: "message" as const, id: m.id, data: m })),
+    ...room.messages
+      .filter(isPublicChatMessage)
+      .map((m) => ({ kind: "message" as const, id: m.id, data: m })),
     ...room.pendingPermissions
       .filter((p) => p.status === "pending")
       .map((p) => ({ kind: "permission" as const, id: p.id, data: p })),
@@ -55,8 +57,14 @@ export function buildChatFeedItems(room: RoomViewModel): FeedItem[] {
   ];
 }
 
+function isPublicChatMessage(message: RoomViewModel["messages"][number]): boolean {
+  if (message.senderType === "system") return false;
+  if (message.senderType === "agent" && (message.status !== "completed" || !hasMeaningfulMessageContent(message))) return false;
+  return true;
+}
+
 export function activeRunIndicatorProps(room: RoomViewModel): { readonly runId: string; readonly agentName: string; readonly status: string; readonly mode?: string; readonly turnIndex?: number } | undefined {
-  const activeRun = room.runs.find((r) => r.status === "running" || r.status === "starting" || r.status === "queued" || r.status === "cancelling");
+  const activeRun = room.runs.find((r) => r.status === "running" || r.status === "starting" || r.status === "queued" || r.status === "waiting" || r.status === "cancelling");
   if (activeRun === undefined) return undefined;
   const sameMessageRuns = activeRun.messageId !== undefined
     ? room.runs.filter((run) => run.messageId === activeRun.messageId && run.wakeReason === activeRun.wakeReason)
@@ -64,13 +72,32 @@ export function activeRunIndicatorProps(room: RoomViewModel): { readonly runId: 
   const turnIndex = room.mode === "assisted" && sameMessageRuns.length > 0
     ? sameMessageRuns.findIndex((run) => run.id === activeRun.id) + 1
     : undefined;
+  const status = activeRun.status === "starting" && hasActiveRunOutput(room, activeRun)
+    ? "working"
+    : activeRun.status;
   return {
     runId: activeRun.id,
     agentName: activeRun.agentName,
-    status: activeRun.status,
+    status,
     mode: room.mode,
     ...(turnIndex !== undefined && turnIndex > 0 ? { turnIndex } : {})
   };
+}
+
+function hasActiveRunOutput(room: RoomViewModel, activeRun: RoomViewModel["runs"][number]): boolean {
+  return room.messages.some((message) => {
+    if (message.senderType !== "agent") return false;
+    const belongsToRun = message.runId === activeRun.id || (message.runId === undefined && message.senderId === activeRun.agentId && message.status === "streaming");
+    return belongsToRun && hasMeaningfulMessageContent(message);
+  });
+}
+
+function hasMeaningfulMessageContent(message: RoomViewModel["messages"][number]): boolean {
+  if (message.text.trim().length > 0) return true;
+  return message.parts.some((part) => {
+    if (part.type === "text") return part.text.trim().length > 0;
+    return true;
+  });
 }
 
 export function pinnedMessagesForDrawer(room: RoomViewModel): RoomViewModel["messages"] {
@@ -137,6 +164,52 @@ export function ChatStream(props: ChatStreamProps) {
     overscan: 12,
     measureElement: (el) => el.getBoundingClientRect().height
   });
+  const virtualizerRef = useRef(virtualizer);
+  virtualizerRef.current = virtualizer;
+  const observedRowElementsRef = useRef<Map<number, HTMLDivElement>>(new Map());
+  const resizeObserverRef = useRef<ResizeObserver | undefined>(undefined);
+  const pendingMeasureRowsRef = useRef<Set<HTMLElement>>(new Set());
+  const measureFrameRef = useRef<number | undefined>(undefined);
+
+  const flushVirtualRowMeasurements = useCallback(() => {
+    measureFrameRef.current = undefined;
+    const rows = [...pendingMeasureRowsRef.current];
+    pendingMeasureRowsRef.current.clear();
+    for (const row of rows) virtualizerRef.current.measureElement(row);
+  }, []);
+
+  const queueVirtualRowMeasurement = useCallback((row: HTMLElement) => {
+    pendingMeasureRowsRef.current.add(row);
+    if (measureFrameRef.current !== undefined) return;
+    if (typeof globalThis.requestAnimationFrame === "function") {
+      measureFrameRef.current = globalThis.requestAnimationFrame(flushVirtualRowMeasurements);
+      return;
+    }
+    flushVirtualRowMeasurements();
+  }, [flushVirtualRowMeasurements]);
+
+  const measureVirtualRow = useCallback((index: number, element: HTMLDivElement | null) => {
+    const previous = observedRowElementsRef.current.get(index);
+    if (previous !== undefined && previous !== element) {
+      resizeObserverRef.current?.unobserve(previous);
+      pendingMeasureRowsRef.current.delete(previous);
+      observedRowElementsRef.current.delete(index);
+    }
+    if (element === null) return;
+
+    observedRowElementsRef.current.set(index, element);
+    virtualizerRef.current.measureElement(element);
+    if (typeof globalThis.ResizeObserver !== "function") return;
+
+    if (resizeObserverRef.current === undefined) {
+      resizeObserverRef.current = new globalThis.ResizeObserver((entries) => {
+        for (const entry of entries) {
+          queueVirtualRowMeasurement(entry.target as HTMLElement);
+        }
+      });
+    }
+    resizeObserverRef.current.observe(element);
+  }, [queueVirtualRowMeasurement]);
 
   const pinnedToBottomRef = useRef(true);
 
@@ -156,6 +229,17 @@ export function ChatStream(props: ChatStreamProps) {
       virtualizer.scrollToIndex(items.length - 1, { align: "end" });
     }
   }, [items.length, virtualizer]);
+
+  useEffect(() => {
+    return () => {
+      resizeObserverRef.current?.disconnect();
+      if (measureFrameRef.current !== undefined && typeof globalThis.cancelAnimationFrame === "function") {
+        globalThis.cancelAnimationFrame(measureFrameRef.current);
+      }
+      pendingMeasureRowsRef.current.clear();
+      observedRowElementsRef.current.clear();
+    };
+  }, []);
 
   // Auto-scroll selected message into view (j/k navigation).
   useEffect(() => {
@@ -245,10 +329,12 @@ export function ChatStream(props: ChatStreamProps) {
                 return (
                   <div
                     key={item.id}
+                    className="ah-chat-virtual-row"
+                    data-chat-virtual-row="true"
                     data-chat-feed-item-id={item.id}
                     data-chat-feed-item-kind={item.kind}
                     data-index={vi.index}
-                    ref={virtualizer.measureElement}
+                    ref={(element) => measureVirtualRow(vi.index, element)}
                     style={{ position: "absolute", top: 0, left: 0, right: 0, transform: `translateY(${vi.start}px)` }}
                   >
                     {item.kind === "message" ? (

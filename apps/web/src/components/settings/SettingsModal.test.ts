@@ -431,6 +431,8 @@ describe("SettingsModal integration contract", () => {
     expect(html).toContain("allow");
     expect(html).toContain("删除规则");
     expect(html).toContain("新增规则会在你处理权限请求后自动记录。");
+    expect(html).not.toContain("permission-profile-name");
+    expect(html).not.toContain("permission-profile-description");
   });
 
   it("renders workspace metadata as read-only when the daemon only exposes GET /workspaces/:id", () => {

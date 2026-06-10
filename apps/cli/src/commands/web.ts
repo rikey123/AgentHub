@@ -1,10 +1,13 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
+import { daemonPidPath } from "@agenthub/daemon";
+
 type ChildExit = { readonly code: number | null; readonly signal: NodeJS.Signals | null };
+type PidFile = { readonly pid: number; readonly host: string; readonly port: number; readonly startedAt: number };
 
 export async function runWebCommand(argv: readonly string[]): Promise<number | undefined> {
   if (!isWebCommand(argv)) return undefined;
@@ -30,7 +33,7 @@ export async function runWebCommand(argv: readonly string[]): Promise<number | u
   handleSignal("SIGTERM", 143);
 
   try {
-    if (!(await probeHealth(daemonUrl))) {
+    if (await shouldStartDaemon(daemonUrl, callerWorkspaceRoot)) {
       const daemon = await spawnCli([
         "start",
         "--workspace-root",
@@ -124,10 +127,92 @@ async function spawnManaged(command: string, args: readonly string[], cwd: strin
 async function probeHealth(baseUrl: string): Promise<boolean> {
   try {
     const response = await fetch(`${baseUrl}/healthz`);
+    if (!response.ok) return false;
+    try {
+      const payload = await response.clone().json() as { readonly ok?: unknown; readonly status?: unknown };
+      if (payload.status === "shutting_down") return false;
+      if (payload.ok === false) return false;
+    } catch {
+      // Older tests and dev shims may answer healthz with plain text.
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function shouldStartDaemon(baseUrl: string, callerWorkspaceRoot: string): Promise<boolean> {
+  if (!(await probeHealth(baseUrl))) return true;
+  const currentWorkspaceRoot = await readDaemonWorkspaceRoot(baseUrl);
+  if (currentWorkspaceRoot === undefined || sameWorkspaceRoot(currentWorkspaceRoot, callerWorkspaceRoot)) return false;
+
+  process.stdout.write(`AgentHub daemon is using workspace ${currentWorkspaceRoot}; restarting for ${callerWorkspaceRoot}\n`);
+  await stopExistingDaemon(baseUrl);
+  return true;
+}
+
+async function readDaemonWorkspaceRoot(baseUrl: string): Promise<string | undefined> {
+  try {
+    const response = await fetch(`${baseUrl}/workspaces/default-workspace`, { headers: { accept: "application/json" } });
+    if (!response.ok) return undefined;
+    const payload = await response.json() as { readonly workspace?: { readonly root_path?: unknown; readonly rootPath?: unknown } };
+    const root = payload.workspace?.root_path ?? payload.workspace?.rootPath;
+    return typeof root === "string" && root.length > 0 ? root : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function stopExistingDaemon(baseUrl: string): Promise<void> {
+  const pid = readPidFile();
+  if (pid === undefined) {
+    throw new Error("AgentHub daemon is already running for another workspace, but its pid file is missing. Run `agenthub stop --force`, then retry.");
+  }
+  try {
+    process.kill(pid.pid, "SIGTERM");
+  } catch (error) {
+    deletePidFile();
+    throw new Error(`AgentHub daemon is already running for another workspace, but pid ${pid.pid} could not be stopped: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    if (!(await daemonEndpointReachable(baseUrl))) {
+      deletePidFile();
+      return;
+    }
+    await delay(250);
+  }
+  throw new Error("Timed out stopping the existing AgentHub daemon for workspace switch.");
+}
+
+async function daemonEndpointReachable(baseUrl: string): Promise<boolean> {
+  try {
+    const response = await fetch(`${baseUrl}/healthz`);
     return response.ok;
   } catch {
     return false;
   }
+}
+
+function readPidFile(): PidFile | undefined {
+  try {
+    return JSON.parse(readFileSync(daemonPidPath(), "utf8")) as PidFile;
+  } catch {
+    return undefined;
+  }
+}
+
+function deletePidFile(): void {
+  rmSync(daemonPidPath(), { force: true });
+}
+
+function sameWorkspaceRoot(left: string, right: string): boolean {
+  const resolvedLeft = resolve(left);
+  const resolvedRight = resolve(right);
+  return process.platform === "win32"
+    ? resolvedLeft.toLowerCase() === resolvedRight.toLowerCase()
+    : resolvedLeft === resolvedRight;
 }
 
 async function waitForHealth(url: string, child: ChildProcess, shouldStop: () => boolean, label: string): Promise<void> {

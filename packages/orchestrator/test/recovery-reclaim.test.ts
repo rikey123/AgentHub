@@ -103,8 +103,12 @@ function currentLifecycle(): RunLifecycleService {
 
 function seedRun(): void {
   currentDatabase().sqlite.prepare("INSERT INTO workspaces (id, name, root_path, created_at, updated_at) VALUES ('ws_1', 'Workspace', '.', 1, 1)").run();
+  currentDatabase().sqlite.prepare("INSERT INTO runtimes (id, workspace_id, kind, name, manifest_json, created_at, updated_at) VALUES ('runtime_1', 'ws_1', 'mock', 'Mock', '{}', 1, 1)").run();
+  currentDatabase().sqlite.prepare("INSERT INTO roles (id, workspace_id, name, prompt, capabilities, is_builtin, created_at, updated_at) VALUES ('role_1', 'ws_1', 'Agent', '', '[]', 0, 1, 1)").run();
   currentDatabase().sqlite.prepare("INSERT INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES ('agent_1', 'ws_1', 'Agent', 'mock', NULL, '', '[]', NULL, 0, NULL, 1, 1)").run();
+  currentDatabase().sqlite.prepare("INSERT INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES ('agent_1', 'ws_1', 'role_1', 'runtime_1', NULL, NULL, 1, 1)").run();
   currentDatabase().sqlite.prepare("INSERT INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, archived_at, created_at, updated_at) VALUES ('room_1', 'ws_1', 'Room', 'solo', 'conversation', 'agent_1', NULL, 1, 1)").run();
+  currentDatabase().sqlite.prepare("INSERT INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES ('room_1', 'agent_1', 'agent', 'primary', 'mock', NULL, 'agent_1', 'active', 1)").run();
   currentLifecycle().create(null, {
     runId: "run_stuck",
     workspaceId: "ws_1",

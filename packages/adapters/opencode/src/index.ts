@@ -200,7 +200,7 @@ export class OpenCodeACPAdapter extends ACPAdapter {
     if (event.type === "subagent.started") bridge.handle({ type: "subagent.started", subRunId: requiredString(payload, "subRunId"), profileRef: requiredString(payload, "profileRef") });
     if (event.type === "subagent.completed") bridge.handle({ type: "subagent.completed", subRunId: requiredString(payload, "subRunId") });
     if (event.type === "context.snapshot") bridge.handle({ type: "context.snapshot", snapshot: payload });
-    if (event.type === "session.ended") {
+    if (event.type === "session.ended" || event.type === "session/end") {
       // Persist the accumulated assistant message before finalizing the run.
       const messageId = `msg_${runId}`;
       const text = this.assistantTextByRun.get(runId) ?? "";

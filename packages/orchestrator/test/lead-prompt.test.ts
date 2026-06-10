@@ -14,6 +14,8 @@ describe("buildLeaderPrompt", () => {
     expect(prompt).toContain("room.delegate");
     expect(prompt).toContain("expectsReview");
     expect(prompt).toContain("Task");
+    expect(prompt).toContain("queues no work");
+    expect(prompt).toContain("Never only announce a future handoff");
     expect(prompt).not.toContain("Assign tasks and notify teammates via `room.send_message @slug ...`");
     expect(prompt).not.toContain("Break work into tasks with `room.create_task`");
   });

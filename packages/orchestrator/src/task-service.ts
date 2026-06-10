@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { Command, CommandErrorCode, CommandHandler, CommandMeta, CommandResult, EventBus, PublishInput } from "@agenthub/bus";
 import type { AgentHubDatabase } from "@agenthub/db";
 import type { TaskModeGroupChatPresenter } from "./task-mode-group-chat-presenter.ts";
+import { resolveWakeOutboxAgentId } from "./wake-outbox-ids.ts";
 
 export type TaskStatus = "pending" | "in_progress" | "blocked" | "review" | "completed" | "cancelled";
 
@@ -551,9 +552,12 @@ export class TaskService {
         unlockedBy: completedTaskId
       }, now));
       if (candidate.assignee_agent_id !== null) {
-        this.options.database.sqlite
-          .prepare("INSERT INTO wake_outbox (id, room_id, agent_id, reason, payload, status, attempt_count, max_attempts, created_at, dispatch_after) VALUES (?, ?, ?, 'delegated_task', ?, 'pending', 0, 3, ?, NULL)")
-          .run(randomUUID(), roomId, candidate.assignee_agent_id, JSON.stringify({ taskId: candidate.id, unlockedBy: completedTaskId }), now);
+        const wakeAgentId = resolveWakeOutboxAgentId(this.options.database, roomId, candidate.assignee_agent_id);
+        if (wakeAgentId !== undefined) {
+          this.options.database.sqlite
+            .prepare("INSERT INTO wake_outbox (id, room_id, agent_id, reason, payload, status, attempt_count, max_attempts, created_at, dispatch_after) VALUES (?, ?, ?, 'delegated_task', ?, 'pending', 0, 3, ?, NULL)")
+            .run(randomUUID(), roomId, wakeAgentId, JSON.stringify({ taskId: candidate.id, unlockedBy: completedTaskId }), now);
+        }
       }
     }
   }
@@ -563,14 +567,16 @@ export class TaskService {
   }
 
   private enqueueWakeOutboxInTransaction(roomId: string, agentId: string, reason: "task_review" | "task_blocked", payload: Record<string, unknown>, now: number): void {
+    const wakeAgentId = resolveWakeOutboxAgentId(this.options.database, roomId, agentId);
+    if (wakeAgentId === undefined) return;
     const payloadJson = JSON.stringify(payload);
     const existing = this.options.database.sqlite
       .prepare("SELECT id FROM wake_outbox WHERE room_id = ? AND agent_id = ? AND reason = ? AND payload = ? AND status IN ('pending', 'dispatching', 'dispatched') LIMIT 1")
-      .get(roomId, agentId, reason, payloadJson);
+      .get(roomId, wakeAgentId, reason, payloadJson);
     if (existing !== undefined) return;
     this.options.database.sqlite
       .prepare("INSERT INTO wake_outbox (id, room_id, agent_id, reason, payload, status, attempt_count, max_attempts, created_at, dispatch_after) VALUES (?, ?, ?, ?, ?, 'pending', 0, 3, ?, NULL)")
-      .run(randomUUID(), roomId, agentId, reason, payloadJson, now);
+      .run(randomUUID(), roomId, wakeAgentId, reason, payloadJson, now);
   }
 
   private allDependenciesCompleted(taskIds: readonly string[]): boolean {
@@ -773,14 +779,16 @@ function ensureTaskTimeoutMailbox(database: AgentHubDatabase, eventBus: EventBus
 }
 
 function enqueueTaskTimeoutWake(database: AgentHubDatabase, roomId: string, agentId: string, taskId: string, mailboxMessageId: string, now: number): void {
+  const wakeAgentId = resolveWakeOutboxAgentId(database, roomId, agentId);
+  if (wakeAgentId === undefined) return;
   const payload = JSON.stringify({ taskId, mailboxMessageId, reason: "timeout" });
   const existing = database.sqlite
     .prepare("SELECT id FROM wake_outbox WHERE room_id = ? AND agent_id = ? AND reason = 'task_blocked' AND payload = ? AND status IN ('pending', 'dispatching', 'dispatched') LIMIT 1")
-    .get(roomId, agentId, payload);
+    .get(roomId, wakeAgentId, payload);
   if (existing !== undefined) return;
   database.sqlite
     .prepare("INSERT INTO wake_outbox (id, room_id, agent_id, reason, payload, status, attempt_count, max_attempts, created_at, dispatch_after) VALUES (?, ?, ?, 'task_blocked', ?, 'pending', 0, 3, ?, NULL)")
-    .run(randomUUID(), roomId, agentId, payload, now);
+    .run(randomUUID(), roomId, wakeAgentId, payload, now);
 }
 
 export function normalizeTaskPriority(value: unknown): string | undefined {

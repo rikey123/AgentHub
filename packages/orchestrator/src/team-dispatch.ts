@@ -5,6 +5,7 @@ import type { AgentHubDatabase } from "@agenthub/db";
 
 import { TaskService, type TaskRow, type TeamDispatchScope } from "./task-service.ts";
 import type { TaskModeGroupChatPresenter } from "./task-mode-group-chat-presenter.ts";
+import { resolveWakeOutboxAgentId } from "./wake-outbox-ids.ts";
 
 type TeamDispatchRuntime = {
   readonly database: AgentHubDatabase;
@@ -39,6 +40,8 @@ export async function handleTeamDispatchReviewTerminal(runtime: TeamDispatchRunt
   const room = runtime.database.sqlite.prepare("SELECT workspace_id, primary_agent_id FROM rooms WHERE id = ?").get(roomId) as { readonly workspace_id: string; readonly primary_agent_id: string | null } | undefined;
   if (room === undefined || room.primary_agent_id === null) return;
   const leaderAgentId = room.primary_agent_id;
+  const leaderWakeAgentId = resolveWakeOutboxAgentId(runtime.database, roomId, leaderAgentId);
+  if (leaderWakeAgentId === undefined) return;
 
   const wakeReason = siblingState.blockedCount > 0 ? "task_blocked" : "task_review";
   const prompt = wakeReason === "task_blocked"
@@ -65,11 +68,11 @@ export async function handleTeamDispatchReviewTerminal(runtime: TeamDispatchRunt
     const payload = JSON.stringify({ taskIds: siblingState.taskIds, sourceRunId: scope.value });
     const existing = runtime.database.sqlite
       .prepare("SELECT id FROM wake_outbox WHERE room_id = ? AND agent_id = ? AND reason = ? AND payload = ? AND status IN ('pending', 'dispatching', 'dispatched') LIMIT 1")
-      .get(roomId, leaderAgentId, wakeReason, payload);
+      .get(roomId, leaderWakeAgentId, wakeReason, payload);
     if (existing === undefined) {
       runtime.database.sqlite
         .prepare("INSERT INTO wake_outbox (id, room_id, agent_id, reason, payload, status, attempt_count, max_attempts, created_at, dispatch_after) VALUES (?, ?, ?, ?, ?, 'pending', 0, 3, ?, NULL)")
-        .run(randomUUID(), roomId, leaderAgentId, wakeReason, payload, createdAt);
+        .run(randomUUID(), roomId, leaderWakeAgentId, wakeReason, payload, createdAt);
     }
     if (wakeReason === "task_blocked") {
       const blocked = blockedTask(runtime.database, roomId, scope) ?? (task.status === "blocked" ? task : undefined);
@@ -109,6 +112,8 @@ export function maybePublishTeamDispatchCompleted(runtime: Pick<TeamDispatchRunt
   const room = runtime.database.sqlite.prepare("SELECT workspace_id, primary_agent_id FROM rooms WHERE id = ?").get(roomId) as { readonly workspace_id: string; readonly primary_agent_id: string | null } | undefined;
   if (room === undefined || room.primary_agent_id === null) return;
   const leaderAgentId = room.primary_agent_id;
+  const leaderWakeAgentId = resolveWakeOutboxAgentId(runtime.database, roomId, leaderAgentId);
+  if (leaderWakeAgentId === undefined) return;
 
   const dispatchId = `team-dispatch:${scope.kind}:${scope.value}`;
   const createdAt = runtime.now?.() ?? Date.now();
@@ -128,11 +133,11 @@ export function maybePublishTeamDispatchCompleted(runtime: Pick<TeamDispatchRunt
     const payload = JSON.stringify({ completedTaskIds: terminalState.completedTaskIds, artifactIds: terminalState.artifactIds, blockedTaskIds: terminalState.blockedTaskIds, reviewTaskIds: terminalState.reviewTaskIds, sourceRunId: scope.value });
     const existing = runtime.database.sqlite
       .prepare("SELECT id FROM wake_outbox WHERE room_id = ? AND agent_id = ? AND reason = 'aggregate' AND payload = ? AND status IN ('pending', 'dispatching', 'dispatched') LIMIT 1")
-      .get(roomId, leaderAgentId, payload);
+      .get(roomId, leaderWakeAgentId, payload);
     if (existing === undefined) {
       runtime.database.sqlite
         .prepare("INSERT INTO wake_outbox (id, room_id, agent_id, reason, payload, status, attempt_count, max_attempts, created_at, dispatch_after) VALUES (?, ?, ?, 'aggregate', ?, 'pending', 0, 3, ?, NULL)")
-        .run(randomUUID(), roomId, leaderAgentId, payload, createdAt);
+        .run(randomUUID(), roomId, leaderWakeAgentId, payload, createdAt);
     }
   })();
   runtime.taskModeGroupChatPresenter?.publishTeamReviewCompleted({

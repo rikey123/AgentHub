@@ -451,7 +451,7 @@ const drizzleSmokeRows = {
   wakeOutbox: {
     id: "wake_drizzle",
     roomId: "room_drizzle",
-    agentId: "agent_drizzle",
+    agentId: "binding_drizzle",
     reason: "aggregate",
     status: "pending",
     attemptCount: 0,
@@ -542,7 +542,8 @@ function applyAllMigrations(): void {
     "0017_artifact_review_comments.sql",
     "0018_artifact_lifecycle.sql",
     "0019_v12.sql",
-    "0020_permission_settings.sql"
+    "0020_permission_settings.sql",
+    "0021_wake_outbox_agent_bindings.sql"
   ]);
 }
 
@@ -625,6 +626,15 @@ function seedV12ParentRows(sqlite: Database.Database, exportName: keyof typeof s
     sqlite
       .prepare("INSERT OR IGNORE INTO agent_profiles (id, name, adapter_id, role_prompt, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
       .run("agent_drizzle", "Builder", "mock", "Build", 1, 1);
+    sqlite
+      .prepare("INSERT OR IGNORE INTO roles (id, workspace_id, name, prompt, capabilities, is_builtin, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+      .run("role_drizzle", "ws_drizzle", "Builder", "Build", "[]", 0, 1, 1);
+    sqlite
+      .prepare("INSERT OR IGNORE INTO runtimes (id, workspace_id, kind, name, manifest_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run("runtime_drizzle", "ws_drizzle", "mock", "Mock", "{}", 1, 1);
+    sqlite
+      .prepare("INSERT OR IGNORE INTO agent_bindings (id, workspace_id, role_id, runtime_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)")
+      .run("binding_drizzle", "ws_drizzle", "role_drizzle", "runtime_drizzle", 1, 1);
   }
 }
 
@@ -656,7 +666,7 @@ describe("SQLite pragmas and migrations", () => {
 
   test("applies all migrations once and records them", () => {
     applyAllMigrations();
-    expect(countRows("__agenthub_migrations")).toBe(21);
+    expect(countRows("__agenthub_migrations")).toBe(22);
     expect(applyMigrations(currentDb())).toEqual([]);
 
     expect(tableNames()).toEqual([
@@ -719,6 +729,19 @@ describe("SQLite pragmas and migrations", () => {
       "wake_outbox",
       "workspaces"
     ]);
+  });
+
+  test("wake outbox stores v1.2 agent binding ids", () => {
+    applyAllMigrations();
+
+    const foreignKeys = currentDb().prepare("PRAGMA foreign_key_list(wake_outbox)").all() as Array<{ readonly table: string; readonly from: string; readonly to: string }>;
+    expect(foreignKeys).toEqual(expect.arrayContaining([
+      expect.objectContaining({ table: "rooms", from: "room_id", to: "id" }),
+      expect.objectContaining({ table: "agent_bindings", from: "agent_id", to: "id" })
+    ]));
+    expect(foreignKeys).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ table: "agent_profiles", from: "agent_id", to: "id" })
+    ]));
   });
 
   test("creates core and v1.0 indexes and columns exactly once", () => {

@@ -239,7 +239,7 @@ describe("WakeAgent and CancelRun handlers", () => {
     expect(nextTurnCount(first.data.runId)).toBe(1);
   });
 
-  test("CancelRun marks cancelling and synchronously calls adapter cancel", async () => {
+  test("CancelRun marks cancelling, calls adapter cancel, and finalizes resolved cancels", async () => {
     createRun("run_cancel");
     currentLifecycle().markClaimed(null, "run_cancel");
     currentLifecycle().markStarting(null, "run_cancel", 123);
@@ -250,11 +250,26 @@ describe("WakeAgent and CancelRun handlers", () => {
     const result = await commandBus.dispatch({ type: "CancelRun", runId: "run_cancel" }, { actor: { type: "user", id: "u_1" }, traceId: "trace", origin: "http" }) as CommandResult;
 
     expect(result).toMatchObject({ ok: true, data: { status: "cancelling" } });
-    expect(statusOf("run_cancel")).toBe("cancelling");
+    await settleMicrotasks();
+    expect(statusOf("run_cancel")).toBe("cancelled");
     expect(cancelRun).toHaveBeenCalledWith("run_cancel");
   });
 
-  test("CancelRun swallows adapter cancel rejection and run stays cancelling until adapter drives cancelFinalized", async () => {
+  test("CancelRun immediately finalizes waiting runs before they enter an adapter", async () => {
+    createRun("run_cancel_waiting");
+    currentLifecycle().markWaiting(null, "run_cancel_waiting", "workspace_lock_held_by:run_busy");
+    const cancelRun = vi.fn(async (): Promise<void> => undefined);
+    const commandBus = new CommandBus({ database: currentDatabase(), handlers: { CancelRun: createCancelRunHandler({ lifecycle: currentLifecycle(), adapterManager: { cancelRun } }) } });
+
+    const result = await commandBus.dispatch({ type: "CancelRun", runId: "run_cancel_waiting" }, { actor: { type: "user", id: "u_1" }, traceId: "trace_waiting", origin: "http" }) as CommandResult;
+
+    expect(result).toMatchObject({ ok: true, data: { status: "cancelled" } });
+    expect(statusOf("run_cancel_waiting")).toBe("cancelled");
+    expect(cancelRun).not.toHaveBeenCalled();
+    expect(runEvents("run_cancel_waiting")).toEqual(["agent.run.queued", "agent.run.waiting", "agent.run.cancelling", "agent.run.cancelled"]);
+  });
+
+  test("CancelRun swallows adapter cancel rejection and finalizes if the adapter cannot ack", async () => {
     createRun("run_cancel_reject");
     currentLifecycle().markClaimed(null, "run_cancel_reject");
     currentLifecycle().markStarting(null, "run_cancel_reject", 123);
@@ -265,13 +280,8 @@ describe("WakeAgent and CancelRun handlers", () => {
 
     const result = await commandBus.dispatch({ type: "CancelRun", runId: "run_cancel_reject" }, { actor: { type: "user", id: "u_1" }, traceId: "trace_reject", origin: "http" }) as CommandResult;
 
-    // Handler returns success synchronously; adapter cancel error is swallowed.
     expect(result).toMatchObject({ ok: true, data: { status: "cancelling" } });
-    expect(statusOf("run_cancel_reject")).toBe("cancelling");
-
-    // Run stays in cancelling until the adapter bridge drives cancelFinalized via session.ended(cancelled).
-    const bridge = bridgeFor("run_cancel_reject");
-    bridge.handle({ type: "session.ended", sessionId: "s_1", reason: "cancelled", cost: zeroCost() });
+    await settleMicrotasks();
     expect(statusOf("run_cancel_reject")).toBe("cancelled");
   });
 
@@ -286,8 +296,8 @@ describe("WakeAgent and CancelRun handlers", () => {
 
     const result = commandBus.dispatch({ type: "CancelRun", runId: "run_cancel_sync_throw" }, { actor: { type: "user", id: "u_1" }, traceId: "trace_sync_throw", origin: "http" }) as CommandResult;
 
-    expect(result).toMatchObject({ ok: true, data: { status: "cancelling" } });
-    expect(statusOf("run_cancel_sync_throw")).toBe("cancelling");
+    expect(result).toMatchObject({ ok: true, data: { status: "cancelled" } });
+    expect(statusOf("run_cancel_sync_throw")).toBe("cancelled");
   });
 
   test("ConsumePendingTurn rejects origin http", () => {
@@ -495,7 +505,7 @@ describe("TaskService and RoomMcpServer", () => {
       expects_review: 1,
       source_run_id: "run_delegate"
     });
-    expect(currentDatabase().sqlite.prepare("SELECT task_id, wake_reason FROM runs WHERE id = ?").get(result.data.runId)).toMatchObject({ task_id: result.data.taskId, wake_reason: "delegated_task" });
+    expect(currentDatabase().sqlite.prepare("SELECT task_id, wake_reason, workspace_mode FROM runs WHERE id = ?").get(result.data.runId)).toMatchObject({ task_id: result.data.taskId, wake_reason: "delegated_task", workspace_mode: "isolated_worktree" });
     expect(eventTypes()).toEqual(expect.arrayContaining(["task.created", "task.delegation.created", "agent.run.queued"]));
     expect(currentDatabase().sqlite.prepare("SELECT payload FROM events WHERE type = 'task.delegation.created' AND task_id = ?").get(result.data.taskId)).toMatchObject({
       payload: JSON.stringify({ taskId: result.data.taskId, delegationId: result.data.taskId, runId: result.data.runId, byRoleId: "role_leader", atRunId: "run_delegate", expectsReview: true })
@@ -518,7 +528,7 @@ describe("TaskService and RoomMcpServer", () => {
     if (!result.ok || !isRecord(result.data) || typeof result.data.runId !== "string") throw new Error("expected delegate success");
     expect(result.data).toMatchObject({ taskId: created.data.taskId });
     expect(currentDatabase().sqlite.prepare("SELECT COUNT(*) AS count FROM tasks WHERE room_id = 'room_delegate_existing'").get()).toMatchObject({ count: 1 });
-    expect(currentDatabase().sqlite.prepare("SELECT task_id, agent_id, wake_reason FROM runs WHERE id = ?").get(result.data.runId)).toMatchObject({ task_id: created.data.taskId, agent_id: "agent_builder", wake_reason: "delegated_task" });
+    expect(currentDatabase().sqlite.prepare("SELECT task_id, agent_id, wake_reason, workspace_mode FROM runs WHERE id = ?").get(result.data.runId)).toMatchObject({ task_id: created.data.taskId, agent_id: "agent_builder", wake_reason: "delegated_task", workspace_mode: "isolated_worktree" });
     expect(currentDatabase().sqlite.prepare("SELECT type FROM events WHERE type = 'task.delegation.created' AND task_id = ?").get(created.data.taskId)).toBeDefined();
   });
 
@@ -536,7 +546,7 @@ describe("TaskService and RoomMcpServer", () => {
     expect(result).toMatchObject({ ok: true, data: { task: expect.objectContaining({ status: "in_progress", assigneeAgentId: "agent_builder_review" }) } });
     if (!result.ok || !isRecord(result.data) || !isRecord(result.data.wake) || typeof result.data.wake.runId !== "string") throw new Error("expected review wake run");
     expect(currentDatabase().sqlite.prepare("SELECT status, blocker_reason FROM tasks WHERE id = ?").get(created.data.taskId)).toMatchObject({ status: "in_progress", blocker_reason: null });
-    expect(currentDatabase().sqlite.prepare("SELECT task_id, agent_id, wake_reason FROM runs WHERE id = ?").get(result.data.wake.runId)).toMatchObject({ task_id: created.data.taskId, agent_id: "agent_builder_review", wake_reason: "delegated_task" });
+    expect(currentDatabase().sqlite.prepare("SELECT task_id, agent_id, wake_reason, workspace_mode FROM runs WHERE id = ?").get(result.data.wake.runId)).toMatchObject({ task_id: created.data.taskId, agent_id: "agent_builder_review", wake_reason: "delegated_task", workspace_mode: "isolated_worktree" });
     const queued = eventPayload("agent.run.queued", result.data.wake.runId) as { readonly promptDelta?: { readonly instructions?: string } };
     expect(queued.promptDelta?.instructions).toContain("Please add tests and call room.complete_task.");
     expect(queued.promptDelta?.instructions).toContain("Fix attention example");
@@ -918,6 +928,7 @@ describe("TaskService and RoomMcpServer", () => {
     vi.setSystemTime(now);
     createRun("run_wait_fake_clock");
     currentLifecycle().markWaiting(null, "run_wait_fake_clock", "agent_lock_held_by:run_blocker");
+    currentDatabase().sqlite.prepare("INSERT INTO run_locks (lock_type, lock_key, workspace_id, run_id, acquired_at) VALUES ('agent', 'agent_1', NULL, 'run_blocker', ?)").run(now);
     const queue = new RunQueue({ database: currentDatabase(), lifecycle: currentLifecycle(), lockTimeoutMs: 30 * 60 * 1000, now: Date.now });
 
     await vi.advanceTimersByTimeAsync(30 * 60 * 1000 + 1);
@@ -1242,6 +1253,7 @@ describe("RunQueue", () => {
   test("waiting lock timeout fails run as transient", async () => {
     createRun("run_wait");
     currentLifecycle().markWaiting(null, "run_wait", "agent_lock_held_by:run_a");
+    currentDatabase().sqlite.prepare("INSERT INTO run_locks (lock_type, lock_key, workspace_id, run_id, acquired_at) VALUES ('agent', 'agent_1', NULL, 'run_a', ?)").run(now);
     now += 301_000;
     const queue = new RunQueue({ database: currentDatabase(), lifecycle: currentLifecycle(), lockTimeoutMs: 300_000, now: () => now });
 
@@ -1494,6 +1506,11 @@ function zeroCost() {
   return { inputTokens: 0, outputTokens: 0, cachedTokens: 0, costUsd: 0, modelId: "mock" };
 }
 
+async function settleMicrotasks(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 function insertTerminalRun(taskId: string, runId: string, status: "completed" | "failed"): void {
   currentDatabase().sqlite.prepare(
     "INSERT INTO runs (id, workspace_id, task_id, room_id, agent_id, adapter_id, adapter_session_id, provider_conversation_id, parent_run_id, status, wake_reason, waiting_reason, workspace_path, work_dir, workspace_mode, context_version, target_files, mailbox_claim_count, pid_at_start, claimed_at, started_at, ended_at, input_tokens, output_tokens, cached_tokens, cost_usd, model_id, failure_class, error, created_at, updated_at) VALUES (?, 'ws_1', ?, 'room_1', 'agent_1', NULL, NULL, NULL, NULL, ?, 'delegated_task', NULL, NULL, NULL, NULL, NULL, '[]', 0, NULL, NULL, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)"
@@ -1528,6 +1545,8 @@ function seedDelegatedRoom(roomId: string, leaderAgentId: string, leaderRoleId: 
   currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO roles (id, workspace_id, name, prompt, capabilities, is_builtin, created_at, updated_at) VALUES (?, 'ws_1', 'Builder', '', '[]', 0, ?, ?)").run(teammateRoleId, now, now);
   currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES (?, 'ws_1', ?, 'runtime_1', NULL, NULL, ?, ?)").run(leaderBindingId, leaderRoleId, now, now);
   currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES (?, 'ws_1', ?, 'runtime_1', NULL, NULL, ?, ?)").run(teammateBindingId, teammateRoleId, now, now);
+  currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES (?, 'ws_1', ?, 'runtime_1', NULL, NULL, ?, ?)").run(leaderAgentId, leaderRoleId, now, now);
+  currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES (?, 'ws_1', ?, 'runtime_1', NULL, NULL, ?, ?)").run(teammateAgentId, teammateRoleId, now, now);
   currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES (?, 'ws_1', 'Leader', 'mock', NULL, '', '{}', NULL, 0, NULL, ?, ?)").run(leaderAgentId, now, now);
   currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES (?, 'ws_1', 'Builder', 'mock', NULL, '', '{}', NULL, 0, NULL, ?, ?)").run(teammateAgentId, now, now);
   currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, leader_role_id, archived_at, created_at, updated_at) VALUES (?, 'ws_1', 'Delegated', 'squad', 'conversation', ?, ?, NULL, ?, ?)").run(roomId, leaderAgentId, leaderRoleId, now, now);
@@ -1541,6 +1560,7 @@ function seedSquadRoomWithTeammates(roomId: string, teammates: ReadonlyArray<{ r
   currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO workspaces (id, name, root_path, created_at, updated_at) VALUES ('ws_1', 'Workspace', '.', ?, ?)").run(now, now);
   currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO roles (id, workspace_id, name, prompt, capabilities, is_builtin, created_at, updated_at) VALUES ('role_leader', 'ws_1', 'Leader', '', '[]', 0, ?, ?)").run(now, now);
   currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES ('binding_leader', 'ws_1', 'role_leader', 'runtime_1', NULL, NULL, ?, ?)").run(now, now);
+  currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES ('agent_leader', 'ws_1', 'role_leader', 'runtime_1', NULL, NULL, ?, ?)").run(now, now);
   currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES ('agent_leader', 'ws_1', 'Leader', 'mock', NULL, '', '{}', NULL, 0, NULL, ?, ?)").run(now, now);
   currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO rooms (id, workspace_id, title, mode, default_context_scope, primary_agent_id, leader_role_id, archived_at, created_at, updated_at) VALUES (?, 'ws_1', 'Squad', 'squad', 'conversation', 'agent_leader', 'role_leader', NULL, ?, ?)").run(roomId, now, now);
   currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES (?, 'agent_leader', 'agent', 'primary', 'mock', NULL, 'binding_leader', 'active', ?)").run(roomId, now);
@@ -1549,6 +1569,7 @@ function seedSquadRoomWithTeammates(roomId: string, teammates: ReadonlyArray<{ r
   for (const teammate of teammates) {
     currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO roles (id, workspace_id, name, prompt, capabilities, is_builtin, created_at, updated_at) VALUES (?, 'ws_1', ?, '', '[]', 0, ?, ?)").run(teammate.roleId, teammate.roleId, now, now);
     currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES (?, 'ws_1', ?, 'runtime_1', NULL, NULL, ?, ?)").run(teammate.bindingId, teammate.roleId, now, now);
+    currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO agent_bindings (id, workspace_id, role_id, runtime_id, model_config_id, override_permission_profile_id, created_at, updated_at) VALUES (?, 'ws_1', ?, 'runtime_1', NULL, NULL, ?, ?)").run(teammate.agentId, teammate.roleId, now, now);
     currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO agent_profiles (id, workspace_id, name, adapter_id, model, role_prompt, capabilities, permission_profile_id, hidden, source_path, created_at, updated_at) VALUES (?, 'ws_1', ?, 'mock', NULL, '', '{}', NULL, 0, NULL, ?, ?)").run(teammate.agentId, teammate.agentId, now, now);
     currentDatabase().sqlite.prepare("INSERT OR IGNORE INTO room_participants (room_id, participant_id, participant_type, role, adapter_id, adapter_session_id, agent_binding_id, default_presence, joined_at) VALUES (?, ?, 'agent', 'teammate', 'mock', NULL, ?, 'active', ?)").run(roomId, teammate.agentId, teammate.bindingId, now);
     currentDatabase().sqlite.prepare("INSERT OR REPLACE INTO agent_presence (room_id, agent_id, state, reason, status_line, updated_at) VALUES (?, ?, 'active', NULL, NULL, ?)").run(roomId, teammate.agentId, now);

@@ -65,6 +65,54 @@ describe("ACPAdapter base", () => {
     expect(() => Effect.runSync(Stream.runDrain(adapter.runAgent({ runId: "run-1", sessionId: session.id, message: { role: "user", content: "second" } })))).toThrow(/prompt already in flight/iu);
   });
 
+  it("keeps long-running prompt requests pending past the generic request timeout", () => {
+    vi.useFakeTimers();
+    const adapter = new TestAcpAdapter();
+    const session = Effect.runSync(adapter.createSession({ runId: "run-long", roomId: "room", agentId: "agent" }));
+
+    void Stream.runDrain(adapter.runAgent({ runId: "run-long", sessionId: session.id, message: { role: "user", content: "long work" } }));
+    const requestId = adapter.debugSession(session.id)?.inflightPromptRequestId;
+    expect(requestId).toBeDefined();
+
+    vi.advanceTimersByTime(61_000);
+    expect(adapter.debugSession(session.id)?.pendingRequests.has(requestId as string)).toBe(true);
+
+    adapter.feedLine(session.id, JSON.stringify({ jsonrpc: "2.0", id: requestId, result: { stopReason: "completed", modelId: "test-model" } }));
+
+    expect(adapter.providerEvents).toContainEqual({
+      type: "session/end",
+      payload: { sessionId: session.id, reason: "completed" }
+    });
+  });
+
+  it("keeps queued prompt requests pending past the generic request timeout after handshake flush", () => {
+    vi.useFakeTimers();
+    const adapter = new TestAcpAdapter();
+    const session = Effect.runSync(adapter.createSession({ runId: "run-queued-long", roomId: "room", agentId: "agent" }));
+    const debug = adapter.debugSession(session.id);
+    expect(debug).toBeDefined();
+    if (debug === undefined) return;
+    debug.handshakeComplete = false;
+    delete debug.serverSessionId;
+
+    void Stream.runDrain(adapter.runAgent({ runId: "run-queued-long", sessionId: session.id, message: { role: "user", content: "queued long work" } }));
+    expect(debug.queuedPrompts).toHaveLength(1);
+
+    debug.handshakeComplete = true;
+    (adapter as unknown as { flushQueuedPrompts: (queuedSession: AcpAdapterSession) => void }).flushQueuedPrompts(debug);
+    const requestId = debug.inflightPromptRequestId;
+    expect(requestId).toBeDefined();
+
+    vi.advanceTimersByTime(61_000);
+    expect(debug.pendingRequests.has(requestId as string)).toBe(true);
+
+    adapter.feedLine(session.id, JSON.stringify({ jsonrpc: "2.0", id: requestId, result: { stopReason: "completed", modelId: "test-model" } }));
+    expect(adapter.providerEvents).toContainEqual({
+      type: "session/end",
+      payload: { sessionId: session.id, reason: "completed" }
+    });
+  });
+
   it("cancel rejects only the inflight prompt and preserves non-prompt pending requests", () => {
     const adapter = new TestAcpAdapter();
     const session = Effect.runSync(adapter.createSession({ runId: "run-2", roomId: "room", agentId: "agent" }));
@@ -75,9 +123,11 @@ describe("ACPAdapter base", () => {
     Effect.runSync(adapter.cancelRun("run-2"));
 
     const debug = adapter.debugSession(session.id);
-    expect(debug?.state).toBe("cancelling");
+    expect(debug?.state).toBe("ready");
+    expect(debug?.runId).toBeUndefined();
     expect(debug?.pendingRequests.has("req_fs1")).toBe(true);
     expect(fsRejected).toBe(false);
+    expect(adapter.providerEvents).toContainEqual({ type: "session/end", payload: { sessionId: session.id, reason: "cancelled" } });
   });
 
   it("stores and returns the MCP server supplied at createSession", () => {

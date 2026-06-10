@@ -513,9 +513,6 @@ export function PermissionsSettingsTab({
   onPermissionProfilesChange: (permissionProfiles: unknown) => void;
   onPermissionRulesChange: (permissionRules: unknown) => void;
 }) {
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [creating, setCreating] = useState(false);
   const [deletingRuleId, setDeletingRuleId] = useState<string | undefined>();
   const [allowAllSaving, setAllowAllSaving] = useState(false);
   const [formError, setFormError] = useState<string | undefined>(undefined);
@@ -523,39 +520,6 @@ export function PermissionsSettingsTab({
   const profiles = normalizePermissionProfiles(permissionProfiles);
   const settings = normalizePermissionSettings(permissionProfiles);
   const rules = normalizePermissionRules(permissionRules);
-
-  const createProfile = async () => {
-    if (name.trim().length === 0) return;
-    setCreating(true);
-    setFormError(undefined);
-    try {
-      const response = await fetchImpl("/permissions/profiles", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { accept: "application/json", "content-type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), payload: { description: description.trim() } })
-      });
-      if (!response.ok) throw new Error(`创建 profile 失败：${response.status}`);
-      const created = (await response.json()) as {
-        readonly profile?: unknown;
-        readonly profiles?: unknown[];
-      };
-      if (created.profile !== undefined) {
-        onPermissionProfilesChange({ profiles: [...profiles, created.profile], settings });
-      } else if (Array.isArray(created.profiles)) {
-        onPermissionProfilesChange({ profiles: created.profiles, settings });
-      } else {
-        const refreshed = await fetchJson(fetchImpl, "/permissions/profiles");
-        onPermissionProfilesChange(refreshed);
-      }
-      setName("");
-      setDescription("");
-    } catch (error) {
-      setFormError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setCreating(false);
-    }
-  };
 
   const deleteRule = async (ruleId: string) => {
     setDeletingRuleId(ruleId);
@@ -616,42 +580,11 @@ export function PermissionsSettingsTab({
         <Card.Content className="grid gap-2 text-xs text-warning-soft-foreground">
           <div>适合完全可信的本地开发工作区；不建议在不可信项目或远程暴露环境中开启。</div>
           <div className="ah-mono">当前默认权限策略：{settings.defaultProfileId}</div>
-        </Card.Content>
-      </Card>
-      <Card variant="transparent" className="border border-border">
-        <Card.Header>
-          <Card.Title className="text-sm">创建许可配置</Card.Title>
-          <Card.Description className="text-xs">为 agents 创建自定义许可配置。</Card.Description>
-        </Card.Header>
-        <Card.Content className="grid gap-3">
-          <TextField value={name} onChange={setName}>
-            <Label className="text-sm font-semibold">名称</Label>
-            <Input placeholder="例如：Builder Strict Clone" data-testid="permission-profile-name" />
-          </TextField>
-          <TextField value={description} onChange={setDescription}>
-            <Label className="text-sm font-semibold">描述</Label>
-            <TextArea
-              className="min-h-24"
-              placeholder="说明何时使用此许可配置"
-              data-testid="permission-profile-description"
-            />
-          </TextField>
           {formError ? (
             <p className="text-xs text-danger" role="alert">
               {formError}
             </p>
           ) : null}
-          <div>
-            <Button
-              size="sm"
-              variant="primary"
-              isPending={creating}
-              isDisabled={name.trim().length === 0}
-              onPress={() => void createProfile()}
-            >
-              创建配置
-            </Button>
-          </div>
         </Card.Content>
       </Card>
       <Card variant="transparent" className="border border-border">

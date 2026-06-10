@@ -316,7 +316,7 @@ export function SkillsTab({
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <Card.Title>技能</Card.Title>
-              <Card.Description>管理可供 rooms 和 agents 使用的标准 SKILL.md 包。</Card.Description>
+              <Card.Description>管理可供 rooms 和 agents 使用的标准技能包（SKILL.md + 支持文件）。</Card.Description>
             </div>
             <div className="flex flex-wrap justify-end gap-2">
               <Button
@@ -336,9 +336,12 @@ export function SkillsTab({
         </Card.Header>
         <Card.Content className="grid gap-4">
           <TextField value={importUrl} onChange={setImportUrl}>
-            <Label className="text-sm font-semibold">导入 URL</Label>
-            <Input placeholder="https://example.com/SKILL.md" data-testid="skills-import-url" />
+            <Label className="text-sm font-semibold">导入包 URL</Label>
+            <Input placeholder="https://github.com/org/repo/tree/main/skills/my-skill" data-testid="skills-import-url" />
           </TextField>
+          <p className="text-xs text-muted">
+            GitHub 目录链接会导入完整技能包；普通文件 URL 会按单个 SKILL.md 导入。
+          </p>
 
           {message ? (
             <p className="text-xs text-success" role="status">

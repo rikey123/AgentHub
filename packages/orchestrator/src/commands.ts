@@ -5,7 +5,7 @@ import type { Command, CommandErrorCode, CommandHandler, CommandMeta, CommandRes
 
 import { ActiveWakesRegistry } from "./active-wakes.ts";
 import { hasMeaningfulPromptDelta, MailboxService } from "./mailbox-service.ts";
-import { RunLifecycleError, RunLifecycleService, type AgentPromptDelta, type WakeReason } from "./run-lifecycle-service.ts";
+import { RunLifecycleError, RunLifecycleService, type AgentPromptDelta, type RunRow, type WakeReason } from "./run-lifecycle-service.ts";
 
 // ---------------------------------------------------------------------------
 // V1.1 command type stubs (contract week — implementations land in feature branches)
@@ -81,17 +81,63 @@ export function createCancelRunHandler(options: { readonly lifecycle: RunLifecyc
       return failed("validation_failed", "CancelRun requires runId");
     }
     const runId = command.runId;
+    let runBeforeCancel: RunRow;
     try {
+      runBeforeCancel = options.lifecycle.read(runId);
       options.lifecycle.markCancelling(null, runId);
     } catch (error) {
       return lifecycleFailure(error);
     }
+    if (shouldFinalizeWithoutAdapter(runBeforeCancel)) {
+      try {
+        options.lifecycle.cancelFinalized(null, runId);
+      } catch (error) {
+        return lifecycleFailure(error);
+      }
+      return { ok: true, data: { runId, status: "cancelled" }, emittedEvents: [] };
+    }
     // Fire-and-forget adapter cancel per spec: "不依赖 event 回环" (bus-runtime/spec.md §CancelRun).
-    // Both sync throws and async rejections are swallowed; lifecycle state is already driven by
-    // markCancelling and the run stays in cancelling until AdapterBridge drives cancelFinalized.
-    void Promise.resolve().then(() => options.adapterManager.cancelRun(runId)).catch(() => undefined);
-    return { ok: true, data: { runId, status: "cancelling" }, emittedEvents: [] };
+    // If the adapter has already lost its in-memory session, this fallback
+    // prevents the UI from staying in "stopping" forever.
+    try {
+      const cancelled = options.adapterManager.cancelRun(runId);
+      if (isPromiseLike(cancelled)) {
+        void Promise.resolve(cancelled).catch(() => undefined).finally(() => {
+          finalizeCancelIfStillCancelling(options.lifecycle, runId);
+        });
+      } else {
+        finalizeCancelIfStillCancelling(options.lifecycle, runId);
+      }
+    } catch {
+      finalizeCancelIfStillCancelling(options.lifecycle, runId);
+    }
+    return { ok: true, data: { runId, status: runStatusAfterCancel(options.lifecycle, runId) }, emittedEvents: [] };
   };
+}
+
+function shouldFinalizeWithoutAdapter(run: RunRow): boolean {
+  if (run.status === "queued" || run.status === "waiting" || run.status === "claimed") return true;
+  return run.status === "starting" && run.adapter_session_id === null;
+}
+
+function finalizeCancelIfStillCancelling(lifecycle: RunLifecycleService, runId: string): void {
+  try {
+    if (lifecycle.read(runId).status === "cancelling") lifecycle.cancelFinalized(null, runId);
+  } catch {
+    // If the run already reached another terminal state, there is nothing left to finalize.
+  }
+}
+
+function runStatusAfterCancel(lifecycle: RunLifecycleService, runId: string): "cancelling" | "cancelled" {
+  try {
+    return lifecycle.read(runId).status === "cancelled" ? "cancelled" : "cancelling";
+  } catch {
+    return "cancelling";
+  }
+}
+
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+  return typeof value === "object" && value !== null && "then" in value && typeof (value as { readonly then?: unknown }).then === "function";
 }
 
 export function createWakeAgentHandler(options: {

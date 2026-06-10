@@ -32,6 +32,20 @@ describe("TypingIndicator", () => {
     expect(html).toContain("第 4 轮");
   });
 
+  it("renders a generic stop action for non-assisted active runs", () => {
+    const html = renderToStaticMarkup(createElement(TypingIndicator, {
+      agentName: "Project Manager",
+      status: "waiting",
+      mode: "team",
+      runId: "run-waiting",
+      onStopDiscussion: () => undefined
+    }));
+
+    expect(html).toContain("Project Manager 正在处理");
+    expect(html).toContain("排队中");
+    expect(html).toContain("停止运行");
+  });
+
   it("renders cancelling feedback instead of another stop action", () => {
     const html = renderToStaticMarkup(createElement(TypingIndicator, {
       agentName: "Builder",
@@ -45,5 +59,17 @@ describe("TypingIndicator", () => {
     expect(html).toContain("Builder 正在停止");
     expect(html).toContain("正在停止讨论");
     expect(html).not.toContain("停止讨论</button>");
+  });
+
+  it("renders working feedback once an agent has started producing output", () => {
+    const html = renderToStaticMarkup(createElement(TypingIndicator, {
+      agentName: "Builder",
+      status: "working",
+      mode: "team"
+    }));
+
+    expect(html).toContain("Builder 工作中");
+    expect(html).toContain("工作中");
+    expect(html).not.toContain("启动中");
   });
 });

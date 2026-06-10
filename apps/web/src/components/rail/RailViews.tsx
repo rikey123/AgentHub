@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Avatar, Button, Card, Chip, Input, Label, ListBox, Modal, ScrollShadow, Select, Spinner, TextArea, TextField } from "@heroui/react";
+import { capabilityDisplayName, contactRoleDisplayName } from "../../lib/agentDisplay.ts";
 import { isInternalRuntimeRecord, isPreviewRuntimeKind, runtimeDisplayName, runtimeInstanceLabel } from "../../lib/runtimeDisplay.ts";
 import type { AgentContactViewModel } from "../../types.ts";
 import { ArtifactPreviewModal, normalizePreviewKind, type ArtifactChatReference } from "../artifacts/ArtifactPreviewModal.tsx";
@@ -222,7 +223,7 @@ export function ContactsRailView({ contacts, loading, error, onStartChat, onCrea
                     <h2 className="truncate text-sm font-semibold">{contact.displayName}</h2>
                     <Chip size="sm" variant="soft" color={contactStatusColor(contact.status)}>{contactStatusLabel(contact.status)}</Chip>
                   </div>
-                  <p className="mt-1 truncate text-xs text-muted">{contact.roleName ?? contact.roleId} / {contactRuntimeLabel(contact)}</p>
+                  <p className="mt-1 truncate text-xs text-muted">{contactRoleDisplayName(contact.roleName, contact.roleId)} / {contactRuntimeLabel(contact)}</p>
                   <RuntimeHealthMessage contact={contact} />
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     <Chip size="sm" variant="soft" color="accent">{contactRuntimeLabel(contact)}</Chip>
@@ -238,7 +239,7 @@ export function ContactsRailView({ contacts, loading, error, onStartChat, onCrea
                   {contact.capabilities.length > 0 ? (
                     <div className="mt-3 flex flex-wrap gap-1.5">
                       {contact.capabilities.slice(0, 3).map((capability) => (
-                        <Chip key={capability} size="sm" variant="soft" color="default">{capability}</Chip>
+                        <Chip key={capability} size="sm" variant="soft" color="default">{capabilityDisplayName(capability)}</Chip>
                       ))}
                       {contact.capabilities.length > 3 ? <Chip size="sm" variant="soft" color="default">+{contact.capabilities.length - 3} 更多</Chip> : null}
                     </div>
@@ -786,7 +787,7 @@ function InlineAgentEditorModal({ contact, fetchImpl, isOpen, onOpenChange, onSa
               <TextArea className="min-h-32 ah-mono" placeholder="Agent 行为和边界" />
             </TextField>
             <div className="grid gap-2 rounded-lg border border-border bg-surface-secondary p-3 text-xs text-muted">
-              <span>角色：{contact?.roleName ?? contact?.roleId ?? "角色"}</span>
+              <span>角色：{contact ? contactRoleDisplayName(contact.roleName, contact.roleId) : "角色"}</span>
               <span>运行时：{contact ? contactRuntimeLabel(contact) : "运行时"}</span>
               {contact?.modelName ? <span>模型：{contact.modelName}</span> : null}
               {contact?.runtimeId ? <span className="ah-mono">{contact.runtimeId}</span> : null}

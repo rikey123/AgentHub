@@ -13,11 +13,10 @@ import {
 } from "./NewRoomDialog.tsx";
 
 describe("NewRoomDialog create-room contract", () => {
-  it("offers all V1.0 room modes", () => {
+  it("offers product-ready room modes", () => {
     expect(ROOM_MODE_OPTIONS.map((option) => option.value)).toEqual([
       "solo",
       "assisted",
-      "squad",
       "team"
     ]);
   });
@@ -56,7 +55,9 @@ describe("NewRoomDialog create-room contract", () => {
     expect(html).toContain("联系人");
     expect(html).toContain("Frontend Builder");
     expect(html).toContain("OpenCode");
-    expect(html).toContain("code.edit");
+    expect(html).toContain("构建者");
+    expect(html).toContain("代码编辑");
+    expect(html).not.toContain("code.edit");
     expect(html).toContain("已选择 1 个");
     expect(html).toContain("Reviewer");
   });
@@ -405,7 +406,7 @@ describe("NewRoomDialog create-room contract", () => {
   it("rejects native runtime participants without a model config before submit", () => {
     expect(() => buildCreateRoomInput({
       title: "Bad native room",
-      mode: "squad",
+      mode: "team",
       primaryAgentId: "mock-builder",
       leaderRoleId: "role_lead",
       legacyAgentParticipants: [],

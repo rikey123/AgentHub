@@ -1,8 +1,15 @@
 import { describe, expect, it } from "vitest";
 
+import { daemonWorkspaceRoot } from "../src/commands/daemon.ts";
 import { runCli } from "../src/index.ts";
 
 describe("agenthub cli", () => {
+  it("resolves daemon start workspace from the caller cwd preserved by the global shim", () => {
+    expect(daemonWorkspaceRoot(["start"], { AGENTHUB_CALLER_CWD: "C:\\project\\test" }, "C:\\project\\AgentHub")).toBe("C:\\project\\test");
+    expect(daemonWorkspaceRoot(["start", "--workspace-root", "D:\\repo"], { AGENTHUB_CALLER_CWD: "C:\\project\\test" }, "C:\\project\\AgentHub")).toBe("D:\\repo");
+    expect(daemonWorkspaceRoot(["start"], {}, "C:\\project\\AgentHub")).toBe("C:\\project\\AgentHub");
+  });
+
   it("runs the Mock Solo smoke path", async () => {
     const originalWrite = process.stdout.write;
     process.stdout.write = (() => true) as typeof process.stdout.write;

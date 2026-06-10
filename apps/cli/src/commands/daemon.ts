@@ -20,7 +20,7 @@ export async function runDaemonCommand(argv: readonly string[]): Promise<number 
 async function start(argv: readonly string[]): Promise<number> {
   const configPath = valueArg(argv, "--config");
   const port = numericArg(argv, "--port");
-  const workspaceRoot = valueArg(argv, "--workspace-root") ?? process.cwd();
+  const workspaceRoot = daemonWorkspaceRoot(argv);
   const webAssetsRoot = valueArg(argv, "--web-assets-root");
   const config = loadAgentHubConfig({ ...(configPath !== undefined ? { configPath } : {}), ...(port !== undefined ? { port } : {}) });
   ensureAgentHubHome();
@@ -38,6 +38,10 @@ async function start(argv: readonly string[]): Promise<number> {
   process.once("SIGTERM", () => { void shutdown(); });
   await new Promise<void>(() => undefined);
   return 0;
+}
+
+export function daemonWorkspaceRoot(argv: readonly string[], env: NodeJS.ProcessEnv = process.env, cwd = process.cwd()): string {
+  return valueArg(argv, "--workspace-root") ?? env.AGENTHUB_CALLER_CWD ?? cwd;
 }
 
 async function stop(argv: readonly string[]): Promise<number> {

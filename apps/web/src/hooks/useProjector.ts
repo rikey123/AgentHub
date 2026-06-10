@@ -399,6 +399,7 @@ class Projector {
             parts: payloadParts(room, payload),
             quotedMessageId: typeof payload.quotedMessageId === "string" ? payload.quotedMessageId : undefined,
             pendingTurnId: typeof payload.pendingTurnId === "string" ? payload.pendingTurnId : undefined,
+            runId: typeof event.runId === "string" ? event.runId : typeof payload.runId === "string" ? payload.runId : undefined,
             createdAt: event.createdAt
           };
           room = advanceActivityAt({ ...room, messages: [...room.messages, message] }, event.createdAt);
@@ -585,6 +586,7 @@ class Projector {
         break;
       }
       case "agent.run.queued":
+      case "agent.run.waiting":
       case "agent.run.started":
       case "agent.run.waiting_permission":
       case "agent.run.completed":
@@ -595,6 +597,7 @@ class Projector {
           const runIndex = room.runs.findIndex((r) => r.id === payload.runId);
           const statusMap: Record<string, string> = {
             "agent.run.queued": "queued",
+            "agent.run.waiting": "waiting",
             "agent.run.started": "starting",
             "agent.run.waiting_permission": "waiting_permission",
             "agent.run.completed": "completed",
