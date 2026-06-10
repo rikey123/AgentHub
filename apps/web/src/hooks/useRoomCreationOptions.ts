@@ -3,6 +3,7 @@ import { ensureAuthSession } from "./useSdk.ts";
 import { normalizeModelConfigs, type ModelConfig } from "../components/settings/ModelsTab.tsx";
 import { normalizeRoles, type RoleConfig } from "../components/settings/RolesTab.tsx";
 import { normalizeRuntimeList, type RuntimeConfig } from "../components/settings/RuntimesTab.tsx";
+import { isInternalRuntimeKind } from "../lib/runtimeDisplay.ts";
 
 export interface AgentBindingSummary {
   id: string;
@@ -98,6 +99,7 @@ function normalizeAgentBindings(payload: unknown): AgentBindingSummary[] {
     const roleId = stringField(record.roleId ?? record.role_id);
     const runtimeId = stringField(record.runtimeId ?? record.runtime_id);
     if (!id || !roleId || !runtimeId) return [];
+    if (isInternalRuntimeKind(id) || isInternalRuntimeKind(runtimeId)) return [];
     const disabledAt = numberField(record.disabledAt ?? record.disabled_at);
     return [{
       id,

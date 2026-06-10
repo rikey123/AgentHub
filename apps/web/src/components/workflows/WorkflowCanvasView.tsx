@@ -19,6 +19,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { initials } from "../../lib/format.ts";
+import { runtimeDisplayName, runtimeInstanceLabel } from "../../lib/runtimeDisplay.ts";
 import { normalizeAgentContacts } from "../rail/RailViews.tsx";
 import { normalizeRuntimeList, type RuntimeConfig } from "../settings/RuntimesTab.tsx";
 import type {
@@ -823,7 +824,7 @@ function KernelSelect({
         {!hasCurrentOption && value.length > 0 ? <option value={value}>{currentLabel ?? value}</option> : null}
         {runtimeOptions.map((runtime) => (
           <option key={runtime.id} value={runtime.id}>
-            {runtime.name} - {runtime.kind}
+            {runtime.name} - {runtimeDisplayName(runtime.kind)}
           </option>
         ))}
       </select>
@@ -894,7 +895,7 @@ function ContactImportModal({
                 {sorted.map((contact) => {
                   const subtitle = [
                     contact.roleName ?? contact.roleId,
-                    contact.runtimeName ?? contact.runtimeKind,
+                    contactRuntimeLabel(contact),
                     contact.modelName
                   ].filter(Boolean).join(" / ");
                   return (
@@ -1257,6 +1258,7 @@ function dirtyNodeData(data: AgentWorkflowNodeData): DirtyAgentWorkflowNodeData 
 }
 
 function agentNodeDataFromContact(contact: AgentContactViewModel, base: Pick<AgentWorkflowNodeData, "downstreamCount" | "enabled" | "kind" | "locked" | "status" | "upstreamCount">): AgentWorkflowNodeData {
+  const runtimeLabel = contactRuntimeLabel(contact);
   const config = workflowNodeConfig({
     label: contact.displayName,
     roleLabel: contact.roleName ?? contact.roleId,
@@ -1265,9 +1267,9 @@ function agentNodeDataFromContact(contact: AgentContactViewModel, base: Pick<Age
     roleId: contact.roleId,
     runtimeId: contact.runtimeId,
     runtimeKind: contact.runtimeKind,
-    runtimeLabel: contact.runtimeName ?? contact.runtimeKind,
+    runtimeLabel,
     modelConfigId: contact.modelConfigId,
-    bindingLabel: contact.runtimeName ?? contact.runtimeKind,
+    bindingLabel: runtimeLabel,
     modelLabel: contact.modelName,
     contactStatus: contact.status,
     ...base,
@@ -1281,9 +1283,9 @@ function agentNodeDataFromContact(contact: AgentContactViewModel, base: Pick<Age
     roleId: contact.roleId,
     runtimeId: contact.runtimeId,
     runtimeKind: contact.runtimeKind,
-    runtimeLabel: contact.runtimeName ?? contact.runtimeKind,
+    runtimeLabel,
     modelConfigId: contact.modelConfigId,
-    bindingLabel: contact.runtimeName ?? contact.runtimeKind,
+    bindingLabel: runtimeLabel,
     modelLabel: contact.modelName,
     contactStatus: contact.status,
     ...base,
@@ -1303,11 +1305,12 @@ function hydrateContactNodeData(nodes: Array<Node<AgentWorkflowNodeData>>, conta
         ...node.data,
         roleId: node.data.roleId ?? contact.roleId,
         modelConfigId: node.data.modelConfigId ?? contact.modelConfigId,
-        bindingLabel: contact.runtimeName ?? contact.runtimeKind,
+        bindingLabel: contactRuntimeLabel(contact),
         modelLabel: contact.modelName ?? node.data.modelLabel,
         contactStatus: contact.status,
         runtimeId: node.data.runtimeId ?? contact.runtimeId,
         runtimeKind: node.data.runtimeKind ?? contact.runtimeKind,
+        runtimeLabel: node.data.runtimeLabel ?? contactRuntimeLabel(contact),
         roleLabel: node.data.roleLabel ?? contact.roleName ?? contact.roleId
       }
     };
@@ -1381,13 +1384,17 @@ function runtimeOptionFromRuntime(runtime: RuntimeConfig): WorkflowRuntimeOption
     id: runtime.id,
     name: runtime.name,
     kind: runtime.kind,
-    description: detected ?? runtime.command ?? runtime.kind,
+    description: detected ?? runtime.command ?? runtimeDisplayName(runtime.kind),
     status: runtime.status ?? undefined
   };
 }
 
 function runtimeLabel(runtimeId: string, runtime: WorkflowRuntimeOption | undefined): string {
   return runtime ? runtime.name : runtimeId;
+}
+
+function contactRuntimeLabel(contact: Pick<AgentContactViewModel, "runtimeKind" | "runtimeName">): string {
+  return runtimeInstanceLabel(contact.runtimeKind, contact.runtimeName);
 }
 
 function isAbortError(error: unknown): boolean {

@@ -55,7 +55,7 @@ describe("NewRoomDialog create-room contract", () => {
 
     expect(html).toContain("联系人");
     expect(html).toContain("Frontend Builder");
-    expect(html).toContain("opencode");
+    expect(html).toContain("OpenCode");
     expect(html).toContain("code.edit");
     expect(html).toContain("已选择 1 个");
     expect(html).toContain("Reviewer");

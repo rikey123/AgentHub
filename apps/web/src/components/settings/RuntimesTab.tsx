@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button, Card, Chip, Input, Label, Spinner, TextField } from "@heroui/react";
+import { isInternalRuntimeRecord, isPreviewRuntimeKind, runtimeChipColor, runtimeDisplayName } from "../../lib/runtimeDisplay.ts";
 import type { ChipColor } from "../../lib/status.ts";
 
 type RuntimeStatus = "connected" | "ready" | "error";
@@ -174,7 +175,8 @@ export function RuntimesTab({ data, fetchImpl = fetch, onChange }: RuntimesTabPr
               const draft = drafts[runtime.id] ?? draftFromRuntime(runtime);
               const editable = runtime.kind === "custom-acp";
               const expanded = expandedId === runtime.id;
-              const version = testResult?.version ?? runtime.detectedVersion ?? runtime.version ?? "unknown";
+              const version = testResult?.version ?? runtime.detectedVersion ?? runtime.version ?? undefined;
+              const kindLabel = runtimeDisplayName(runtime.kind);
               return (
                 <Card key={runtime.id} variant="default" className="border border-border" data-testid={`runtime-card-${runtime.id}`}>
                   <Card.Header>
@@ -187,22 +189,22 @@ export function RuntimesTab({ data, fetchImpl = fetch, onChange }: RuntimesTabPr
                       <div className="min-w-0 flex-1">
                         <div className="flex min-w-0 items-center gap-2">
                           <Card.Title className="truncate">{runtime.name}</Card.Title>
-                          <Chip size="sm" variant="soft" color="default">{runtime.kind}</Chip>
+                          <Chip size="sm" variant="soft" color={runtimeChipColor(runtime.kind)}>{kindLabel}</Chip>
                           {isExperimentalRuntime(runtime) ? (
-                            <Chip size="sm" variant="soft" color="warning" aria-label="运行时成熟度：实验性">
-                              实验性
+                            <Chip size="sm" variant="soft" color="warning" aria-label="运行时成熟度：预览版">
+                              预览版
                             </Chip>
                           ) : null}
                         </div>
                         <Card.Description>
-                          <span className="ah-mono">{runtime.detectedPath ?? "未检测到路径"}</span>
+                          <span className="ah-mono">{runtime.detectedPath ?? "由本地服务管理"}</span>
                         </Card.Description>
                       </div>
                       <div className="flex shrink-0 flex-col items-end gap-1">
                         <Chip size="sm" variant="soft" color={runtimeStatusColor(status)} aria-label={`运行时状态：${runtimeStatusLabel(status, version, testResult)}`}>
                           {runtimeStatusLabel(status, version, testResult)}
                         </Chip>
-                        <span className="ah-mono text-xs text-muted">v{version}</span>
+                        {version ? <span className="ah-mono text-xs text-muted">v{version}</span> : null}
                       </div>
                     </button>
                   </Card.Header>
@@ -236,7 +238,7 @@ export function RuntimesTab({ data, fetchImpl = fetch, onChange }: RuntimesTabPr
 
                       {testResult ? (
                         <div className={`rounded-2xl border p-3 text-xs ${testResult.ok ? "border-success/40 bg-success-soft text-success-soft-foreground" : "border-danger/40 bg-surface text-danger"}`} data-testid={`runtime-test-result-${runtime.id}`}>
-                          {testResult.ok ? `已连接${testResult.version ? ` (v${testResult.version})` : ""}` : runtimeErrorLabel(testResult.error) ?? "runtime 测试失败"}
+                          {testResult.ok ? `已连接${testResult.version ? ` (v${testResult.version})` : ""}` : runtimeErrorLabel(testResult.error) ?? "连接检查失败"}
                         </div>
                       ) : null}
                       {errors[runtime.id] ? <p className="text-xs text-danger" role="alert">{runtimeErrorLabel(errors[runtime.id])}</p> : null}
@@ -338,7 +340,7 @@ export async function pollRuntimeTestJob(fetchImpl: typeof fetch, jobId: string,
 
 export function normalizeRuntimeList(data: unknown): RuntimeConfig[] {
   const list = Array.isArray(data) ? data : data && typeof data === "object" && Array.isArray((data as { runtimes?: unknown }).runtimes) ? (data as { runtimes: unknown[] }).runtimes : [];
-  return list.map(normalizeRuntime);
+  return list.map(normalizeRuntime).filter((runtime) => !isInternalRuntimeRecord(runtime));
 }
 
 export function normalizeRuntime(value: unknown): RuntimeConfig {
@@ -375,10 +377,11 @@ function runtimeStatusColor(status: RuntimeStatus): ChipColor {
   }
 }
 
-function runtimeStatusLabel(status: RuntimeStatus, version: string, result: RuntimeTestResult | undefined): string {
-  if (status === "connected") return `已连接 (v${result?.version ?? version})`;
+function runtimeStatusLabel(status: RuntimeStatus, version: string | undefined, result: RuntimeTestResult | undefined): string {
+  const displayVersion = result?.version ?? version;
+  if (status === "connected") return displayVersion ? `已连接 (v${displayVersion})` : "已连接";
   if (status === "error") return runtimeErrorLabel(result?.error) ?? "检测失败";
-  return "待测试";
+  return "待连接";
 }
 
 function runtimeErrorLabel(error: string | undefined): string | undefined {
@@ -386,13 +389,13 @@ function runtimeErrorLabel(error: string | undefined): string | undefined {
   const normalized = error.trim().toLowerCase();
   if (normalized === "binary not found") return "未找到可执行文件";
   if (normalized === "detection failed") return "检测失败";
-  if (normalized === "runtime test failed") return "runtime 测试失败";
-  if (normalized === "运行时测试失败") return "运行时测试失败";
+  if (normalized === "runtime test failed") return "连接检查失败";
+  if (normalized === "运行时测试失败") return "连接检查失败";
   return error;
 }
 
 function isExperimentalRuntime(runtime: RuntimeConfig): boolean {
-  return runtime.kind === "codex";
+  return isPreviewRuntimeKind(runtime.kind);
 }
 
 function draftFromRuntime(runtime: RuntimeConfig): RuntimeDraft {

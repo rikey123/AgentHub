@@ -14,6 +14,11 @@ describe("RuntimesTab REST integration contract", () => {
   it("normalizes runtime cards with status, version, detected path, args, and env", () => {
     const runtimes = normalizeRuntimeList([
       {
+        id: "mock-runtime",
+        kind: "mock",
+        name: "Mock Runtime"
+      },
+      {
         id: "native-default",
         kind: "native",
         name: "AgentHub Native",
@@ -117,7 +122,7 @@ describe("RuntimesTab REST integration contract", () => {
     expect(fetchImpl).toHaveBeenCalledWith("/runtimes/custom-acp-bound", expect.objectContaining({ method: "DELETE" }));
   });
 
-  it("shows seeded runtimes as ready to test instead of missing before connection test fails", () => {
+  it("shows seeded runtimes as ready to connect instead of missing before connection test fails", () => {
     const html = renderToStaticMarkup(createElement(RuntimesTab, {
       data: [
         customRuntime({
@@ -131,11 +136,11 @@ describe("RuntimesTab REST integration contract", () => {
       fetchImpl: vi.fn<typeof fetch>()
     }));
 
-    expect(html).toContain("待测试");
+    expect(html).toContain("待连接");
     expect(html).not.toContain(">Missing<");
   });
 
-  it("marks Codex runtimes as experimental in the runtime directory", () => {
+  it("marks Codex runtimes as preview in the runtime directory", () => {
     const html = renderToStaticMarkup(createElement(RuntimesTab, {
       data: [
         customRuntime({
@@ -149,8 +154,8 @@ describe("RuntimesTab REST integration contract", () => {
     }));
 
     expect(html).toContain("Codex");
-    expect(html).toContain("codex");
-    expect(html).toContain('aria-label="运行时成熟度：实验性"');
+    expect(html).toContain("预览版");
+    expect(html).toContain('aria-label="运行时成熟度：预览版"');
   });
 });
 

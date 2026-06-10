@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { isInternalRuntimeKind } from "../lib/runtimeDisplay.ts";
 import { ensureAuthSession } from "./useSdk.ts";
 
 export type AgentSummary = {
@@ -45,11 +46,15 @@ function normalize(raw: RawAgent): AgentSummary {
     description: raw.description ?? undefined,
     avatar: raw.avatar ?? undefined,
     provider: raw.provider ?? "native",
-    adapterId: raw.adapter_id ?? raw.adapterId ?? "mock",
+    adapterId: raw.adapter_id ?? raw.adapterId ?? "native",
     defaultPresence: raw.default_presence ?? raw.defaultPresence ?? "observing",
     capabilities: caps,
     hidden: raw.hidden === true || raw.hidden === 1
   };
+}
+
+function isInternalAgent(agent: AgentSummary): boolean {
+  return isInternalRuntimeKind(agent.adapterId) || isInternalRuntimeKind(agent.id) || isInternalRuntimeKind(agent.name);
 }
 
 export function useAgents(): { agents: AgentSummary[]; loading: boolean; error: string | undefined; refresh: () => void } {
@@ -70,7 +75,7 @@ export function useAgents(): { agents: AgentSummary[]; loading: boolean; error: 
       })
       .then((data) => {
         if (cancelled) return;
-        const list = (data.agents ?? []).map(normalize).filter((a) => !a.hidden);
+        const list = (data.agents ?? []).map(normalize).filter((a) => !a.hidden && !isInternalAgent(a));
         setAgents(list);
       })
       .catch((err) => {

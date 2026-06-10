@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Button, Chip, TextArea } from "@heroui/react";
 import type { AgentContactViewModel, ParticipantViewModel } from "../../types.ts";
 import { formatBytes } from "../../lib/format.ts";
+import { isInternalRuntimeRecord, runtimeDisplayName, runtimeInstanceLabel } from "../../lib/runtimeDisplay.ts";
 
 const DRAFT_PREFIX = "agenthub.draft.";
 const MAX_ATTACH_BYTES = 50 * 1024 * 1024;
@@ -139,8 +140,8 @@ function participantMentionCandidate(participant: ParticipantViewModel): Mention
     label: participant.name,
     token: mentionTokenForLabel(participant.name),
     roleName: participant.roleId ?? participant.role,
-    runtimeName: participant.adapterId,
-    subtitle: `${participant.role} / ${participant.presence}`,
+    runtimeName: runtimeDisplayName(participant.adapterId),
+    subtitle: `${participantRoleLabel(participant.role)} / ${runtimeDisplayName(participant.adapterId)}`,
     source: "participant"
   };
 }
@@ -151,8 +152,8 @@ function contactMentionCandidate(contact: AgentContactViewModel): MentionCandida
     label: contact.displayName,
     token: mentionTokenForLabel(contact.displayName),
     roleName: contact.roleId,
-    runtimeName: contact.runtimeKind,
-    subtitle: `${contact.runtimeKind} / ${contact.status}`,
+    runtimeName: contactRuntimeLabel(contact),
+    subtitle: `${contactRuntimeLabel(contact)} / ${contactStatusLabel(contact.status)}`,
     source: "contact"
   };
 }
@@ -179,18 +180,42 @@ function normalizeAgentContactPayload(payload: unknown): AgentContactViewModel[]
     const agentBindingId = stringField(row.agentBindingId) ?? stringField(row.agent_binding_id) ?? stringField(row.id);
     const displayName = stringField(row.displayName) ?? stringField(row.display_name) ?? stringField(row.contactName) ?? stringField(row.contact_name) ?? agentBindingId;
     if (!agentBindingId || !displayName) return [];
+    const runtimeKind = stringField(row.runtimeKind) ?? stringField(row.runtime_kind) ?? stringField(row.runtimeName) ?? stringField(row.runtime_name) ?? "";
+    const runtimeName = stringField(row.runtimeName) ?? stringField(row.runtime_name);
+    if (isInternalRuntimeRecord({ id: agentBindingId, kind: runtimeKind, name: runtimeName ?? displayName })) return [];
     return [{
       agentBindingId,
       displayName,
       avatarUrl: stringField(row.avatarUrl) ?? stringField(row.avatar_url),
       roleId: stringField(row.roleId) ?? stringField(row.role_id) ?? "",
-      runtimeKind: stringField(row.runtimeKind) ?? stringField(row.runtime_kind) ?? stringField(row.runtimeName) ?? stringField(row.runtime_name) ?? "",
+      runtimeKind,
+      ...(runtimeName !== undefined ? { runtimeName } : {}),
       capabilities: Array.isArray(row.capabilities) ? row.capabilities.filter((item): item is string => typeof item === "string") : [],
       status: row.status === "busy" || row.status === "offline" ? row.status : "available",
       description: stringField(row.description),
       lastUsedAt: numberField(row.lastUsedAt) ?? numberField(row.last_used_at)
     }];
   });
+}
+
+function contactRuntimeLabel(contact: Pick<AgentContactViewModel, "runtimeKind" | "runtimeName">): string {
+  return runtimeInstanceLabel(contact.runtimeKind, contact.runtimeName);
+}
+
+function contactStatusLabel(status: AgentContactViewModel["status"]): string {
+  if (status === "busy") return "忙碌";
+  if (status === "offline") return "离线";
+  return "在线";
+}
+
+function participantRoleLabel(role: string): string {
+  if (role === "primary") return "主智能体";
+  if (role === "leader") return "负责人";
+  if (role === "teammate") return "协作者";
+  if (role === "observer") return "观察者";
+  if (role === "reviewer") return "评审";
+  if (role === "specialist") return "专家";
+  return role;
 }
 
 function referenceTokenId(ref: ComposerContextRef): string {

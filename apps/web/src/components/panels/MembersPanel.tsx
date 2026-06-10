@@ -13,6 +13,7 @@ import {
 import type { ParticipantViewModel, TaskViewModel } from "../../types.ts";
 import { initials } from "../../lib/format.ts";
 import { roleDisplayName } from "../../lib/roles.ts";
+import { isInternalRuntimeRecord, runtimeChipColor, runtimeDisplayName } from "../../lib/runtimeDisplay.ts";
 import { skillDisplayDescription, skillDisplayName } from "../../lib/skills.ts";
 import { presenceColor } from "../../lib/status.ts";
 
@@ -182,7 +183,7 @@ export function MembersPanel({
               <div className="grid gap-3">
                 <TextField value={query} onChange={setQuery}>
                   <Label className="text-sm font-semibold">搜索绑定</Label>
-                  <Input placeholder="角色、runtime 或模型" />
+                  <Input placeholder="角色、运行时或模型" />
                 </TextField>
                 {loadingBindings ? <p className="text-sm text-muted">正在加载绑定...</p> : null}
                 <ScrollShadow className="max-h-80 overflow-auto pr-1" orientation="vertical">
@@ -207,9 +208,9 @@ export function MembersPanel({
                             <Chip
                               size="sm"
                               variant="soft"
-                              color={binding.runtimeKind === "native" ? "success" : "default"}
+                              color={runtimeChipColor(binding.runtimeKind)}
                             >
-                              {binding.runtimeKind}
+                              {runtimeDisplayName(binding.runtimeKind)}
                             </Chip>
                           </span>
                           <span className="truncate text-xs text-muted">
@@ -394,7 +395,7 @@ function MemberRow({
             </Chip>
           </div>
           <p className="mt-1 truncate text-xs text-muted">
-            {member.role} / {member.adapterId}
+            {participantRoleLabel(member.role)} / {runtimeDisplayName(member.adapterId)}
           </p>
           {task ? (
             <div className="mt-2 rounded-lg border border-border bg-surface-secondary px-2 py-1.5">
@@ -740,13 +741,15 @@ function normalizeAgentBindings(payload: unknown): AgentBindingOption[] {
     const role = isRecord(row.role) ? row.role : {};
     const runtime = isRecord(row.runtime) ? row.runtime : {};
     const modelConfig = isRecord(row.modelConfig) ? row.modelConfig : undefined;
+    const runtimeName = stringValue(runtime.name) ?? stringValue(row.runtimeId ?? row.runtime_id) ?? "Runtime";
+    const runtimeKind = stringValue(runtime.kind) ?? "runtime";
+    if (isInternalRuntimeRecord({ id: row.runtimeId ?? row.runtime_id, kind: runtimeKind, name: runtimeName })) return [];
     return [
       {
         id,
         roleName: stringValue(role.name) ?? stringValue(row.roleId ?? row.role_id) ?? id,
-        runtimeName:
-          stringValue(runtime.name) ?? stringValue(row.runtimeId ?? row.runtime_id) ?? "Runtime",
-        runtimeKind: stringValue(runtime.kind) ?? "runtime",
+        runtimeName,
+        runtimeKind,
         modelName: modelConfig
           ? (stringValue(modelConfig.name) ?? stringValue(modelConfig.model))
           : undefined
@@ -816,6 +819,16 @@ function stringValue(value: unknown): string | undefined {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function participantRoleLabel(role: string): string {
+  if (role === "primary") return "主智能体";
+  if (role === "leader") return "负责人";
+  if (role === "teammate") return "协作者";
+  if (role === "observer") return "观察者";
+  if (role === "reviewer") return "评审";
+  if (role === "specialist") return "专家";
+  return role;
 }
 
 function EmptyState({ label }: { label: string }) {

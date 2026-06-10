@@ -19,6 +19,7 @@ import type { AgentContactViewModel } from "../types.ts";
 import { normalizeAgentContacts } from "./rail/RailViews.tsx";
 import { initials } from "../lib/format.ts";
 import { roleDisplayText } from "../lib/roles.ts";
+import { runtimeChipColor, runtimeDisplayName, runtimeInstanceLabel } from "../lib/runtimeDisplay.ts";
 import { skillDisplayDescription, skillDisplayName, skillOriginColor, skillOriginLabel } from "../lib/skills.ts";
 
 export type RoomMode = "solo" | "assisted" | "squad" | "team";
@@ -300,9 +301,9 @@ function runtimeOptions(runtimes: readonly { id: string; name: string; kind: str
   return runtimes.map((runtime) => ({
     id: runtime.id,
     title: runtime.name,
-    description: runtime.detectedVersion ?? runtime.version ?? runtime.kind,
-    badge: runtime.kind,
-    tone: runtime.kind === "native" ? "success" : runtime.kind === "claude-code" ? "accent" : runtime.kind === "opencode" ? "warning" : "default"
+    description: runtime.detectedVersion ?? runtime.version ?? runtimeDisplayName(runtime.kind),
+    badge: runtimeDisplayName(runtime.kind),
+    tone: runtimeChipColor(runtime.kind)
   }));
 }
 
@@ -468,7 +469,7 @@ export function ContactFirstPicker({
             const selected = selectedIds.has(contact.agentBindingId);
             const subtitle = [
               contact.roleName ?? contact.roleId,
-              contact.runtimeName ?? contact.runtimeKind,
+              contactRuntimeLabel(contact),
               contact.modelName
             ].filter(Boolean).join(" / ");
             return (
@@ -566,7 +567,7 @@ export function RoleBindingRow({
       {title ? (
         <div className="flex items-center justify-between gap-3">
           <h4 className="text-sm font-semibold">{title}</h4>
-          {runtime ? <Chip size="sm" variant="soft" color={runtime.kind === "native" ? "success" : "default"}>{runtime.kind}</Chip> : null}
+          {runtime ? <Chip size="sm" variant="soft" color={runtimeChipColor(runtime.kind)}>{runtimeDisplayName(runtime.kind)}</Chip> : null}
         </div>
       ) : null}
       <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(150px,1fr))]">
@@ -609,6 +610,10 @@ export function RoleBindingRow({
       </div>
     </div>
   );
+}
+
+function contactRuntimeLabel(contact: Pick<AgentContactViewModel, "runtimeKind" | "runtimeName">): string {
+  return runtimeInstanceLabel(contact.runtimeKind, contact.runtimeName);
 }
 
 type V1ParticipantDraft = {

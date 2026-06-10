@@ -18,6 +18,7 @@ import {
   skillOriginColor,
   skillOriginLabel
 } from "../../lib/skills.ts";
+import { runtimeDisplayName } from "../../lib/runtimeDisplay.ts";
 import { normalizeRuntimeList, type RuntimeConfig } from "./RuntimesTab.tsx";
 
 export type SkillOrigin = "builtin" | "workspace" | "imported" | string;
@@ -632,14 +633,14 @@ function RuntimeSelect({
               <div className="flex min-w-0 items-center gap-2 py-1">
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-semibold">{runtime.name}</div>
-                  <div className="truncate text-xs text-muted">{runtime.kind}</div>
+                  <div className="truncate text-xs text-muted">{runtimeDisplayName(runtime.kind)}</div>
                 </div>
                 <Chip
                   size="sm"
                   variant="soft"
                   color={runtime.status === "connected" ? "success" : "default"}
                 >
-                  {runtime.status ?? "ready"}
+                  {runtimeStatusLabel(runtime.status)}
                 </Chip>
                 <ListBox.ItemIndicator />
               </div>
@@ -652,7 +653,14 @@ function RuntimeSelect({
 }
 
 function runtimeLabel(runtime: RuntimeConfig): string {
-  return `${runtime.name} (${runtime.kind})`;
+  return `${runtime.name} (${runtimeDisplayName(runtime.kind)})`;
+}
+
+function runtimeStatusLabel(status: string | null): string {
+  if (status === "connected") return "已连接";
+  if (status === "error") return "异常";
+  if (status === "draft") return "待保存";
+  return "可用";
 }
 
 function selectValue(key: unknown): string {

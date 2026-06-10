@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Avatar, Button, Card, Chip, Input, Label, ListBox, Modal, ScrollShadow, Select, Spinner, TextArea, TextField } from "@heroui/react";
+import { isInternalRuntimeRecord, isPreviewRuntimeKind, runtimeDisplayName, runtimeInstanceLabel } from "../../lib/runtimeDisplay.ts";
 import type { AgentContactViewModel } from "../../types.ts";
 import { ArtifactPreviewModal, normalizePreviewKind, type ArtifactChatReference } from "../artifacts/ArtifactPreviewModal.tsx";
 
@@ -221,10 +222,10 @@ export function ContactsRailView({ contacts, loading, error, onStartChat, onCrea
                     <h2 className="truncate text-sm font-semibold">{contact.displayName}</h2>
                     <Chip size="sm" variant="soft" color={contactStatusColor(contact.status)}>{contactStatusLabel(contact.status)}</Chip>
                   </div>
-                  <p className="mt-1 truncate text-xs text-muted">{contact.roleName ?? contact.roleId} / {contact.runtimeName ?? contact.runtimeKind}</p>
+                  <p className="mt-1 truncate text-xs text-muted">{contact.roleName ?? contact.roleId} / {contactRuntimeLabel(contact)}</p>
                   <RuntimeHealthMessage contact={contact} />
                   <div className="mt-2 flex flex-wrap gap-1.5">
-                    <Chip size="sm" variant="soft" color="accent">{contact.runtimeName ?? contact.runtimeKind}</Chip>
+                    <Chip size="sm" variant="soft" color="accent">{contactRuntimeLabel(contact)}</Chip>
                     <RuntimeHealthBadge contact={contact} />
                     {contact.modelName ? <Chip size="sm" variant="soft" color="default">{contact.modelName}</Chip> : null}
                     {(contact.skills ?? []).slice(0, 2).map((skill) => (
@@ -401,6 +402,7 @@ export function normalizeAgentContacts(payload: unknown): AgentContactViewModel[
     const modelName = stringField(record.modelName ?? record.model_name);
     const status = contactStatus(record.status);
     if (!agentBindingId || !displayName || !roleId || !runtimeKind || !status) return [];
+    if (isInternalRuntimeRecord({ id: runtimeId ?? agentBindingId, kind: runtimeKind, name: runtimeName ?? displayName })) return [];
     const avatarUrl = stringField(record.avatarUrl ?? record.avatar_url);
     const description = stringField(record.description ?? record.contactDescription ?? record.contact_description);
     const systemPrompt = stringField(record.systemPrompt ?? record.system_prompt ?? record.prompt);
@@ -554,6 +556,7 @@ export function normalizeRuntimeOptions(payload: unknown): RuntimeOption[] {
     const kind = stringField(record.kind);
     const name = stringField(record.name);
     if (!id || !kind || !name) return [];
+    if (isInternalRuntimeRecord({ id, kind, name })) return [];
     const version = stringField(record.detectedVersion ?? record.detected_version ?? record.version);
     const status = stringField(record.status);
     return [{
@@ -577,14 +580,18 @@ function RuntimeHealthMessage({ contact }: { readonly contact: AgentContactViewM
   const health = runtimeHealthBadgeForContact(contact);
   if (health === undefined) return null;
   if (health.status === "success") return <p className="mt-2 text-xs text-success">连接可用{health.version ? ` (${health.version})` : ""}</p>;
-  if (health.status === "experimental") return <p className="mt-2 text-xs text-warning">实验性{health.version ? ` (${health.version})` : ""}</p>;
+  if (health.status === "experimental") return <p className="mt-2 text-xs text-warning">预览版{health.version ? ` (${health.version})` : ""}</p>;
   return <p className="mt-2 text-xs text-danger">连接失败{health.error ? `: ${health.error}` : ""}</p>;
 }
 
 function runtimeHealthLabel(health: ContactRuntimeHealth): string {
   if (health.status === "success") return health.version ? `可用 ${health.version}` : "可用";
-  if (health.status === "experimental") return health.version ? `实验性 ${health.version}` : "实验性";
+  if (health.status === "experimental") return health.version ? `预览版 ${health.version}` : "预览版";
   return "失败";
+}
+
+function contactRuntimeLabel(contact: Pick<AgentContactViewModel, "runtimeKind" | "runtimeName">): string {
+  return runtimeInstanceLabel(contact.runtimeKind, contact.runtimeName);
 }
 
 function NewAgentEditorModal({ fetchImpl, isOpen, onOpenChange, onSaved }: { readonly fetchImpl: typeof fetch; readonly isOpen: boolean; readonly onOpenChange: (open: boolean) => void; readonly onSaved: (contact: AgentContactViewModel) => void }) {
@@ -694,7 +701,7 @@ function NewAgentEditorModal({ fetchImpl, isOpen, onOpenChange, onSaved }: { rea
                       <div className="flex min-w-0 items-center justify-between gap-3 py-1">
                         <span className="min-w-0">
                           <span className="block truncate text-sm font-semibold">{runtime.name}</span>
-                          <span className="block truncate text-xs text-muted">{runtime.kind}{runtime.version ? ` / ${runtime.version}` : ""}</span>
+                          <span className="block truncate text-xs text-muted">{runtimeDisplayName(runtime.kind)}{runtime.version ? ` / ${runtime.version}` : ""}</span>
                         </span>
                         <ListBox.ItemIndicator />
                       </div>
@@ -780,7 +787,7 @@ function InlineAgentEditorModal({ contact, fetchImpl, isOpen, onOpenChange, onSa
             </TextField>
             <div className="grid gap-2 rounded-lg border border-border bg-surface-secondary p-3 text-xs text-muted">
               <span>角色：{contact?.roleName ?? contact?.roleId ?? "角色"}</span>
-              <span>运行时：{contact?.runtimeName ?? contact?.runtimeKind ?? "运行时"}</span>
+              <span>运行时：{contact ? contactRuntimeLabel(contact) : "运行时"}</span>
               {contact?.modelName ? <span>模型：{contact.modelName}</span> : null}
               {contact?.runtimeId ? <span className="ah-mono">{contact.runtimeId}</span> : null}
             </div>
@@ -939,7 +946,7 @@ function statusRank(status: AgentContactViewModel["status"]): number {
 }
 
 function isExperimentalRuntimeKind(value: unknown): boolean {
-  return typeof value === "string" && value.toLowerCase().includes("codex");
+  return isPreviewRuntimeKind(value);
 }
 
 function initials(value: string): string {

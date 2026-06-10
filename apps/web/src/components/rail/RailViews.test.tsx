@@ -20,6 +20,15 @@ describe("rail views", () => {
   it("normalizes contacts from the daemon contact directory shape", () => {
     expect(normalizeAgentContacts({
       contacts: [{
+        agentBindingId: "mock-builder",
+        displayName: "Mock Builder",
+        roleId: "role_mock",
+        runtimeId: "mock-runtime",
+        runtimeName: "Mock Runtime",
+        runtimeKind: "mock",
+        capabilities: ["chat"],
+        status: "available"
+      }, {
         agentBindingId: "binding_builder",
         displayName: "Frontend Builder",
         roleId: "role_builder",
@@ -98,6 +107,11 @@ describe("rail views", () => {
 
   it("normalizes runtime options for the new agent editor", () => {
     expect(normalizeRuntimeOptions([
+      {
+        id: "mock-runtime",
+        kind: "mock",
+        name: "Mock Runtime"
+      },
       {
         id: "runtime_claude",
         kind: "claude-code",
