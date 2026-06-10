@@ -116,7 +116,8 @@ function recentRoomHistory(database: AgentHubDatabase, roomId: string, anchorMes
 function renderThreadMessage(database: AgentHubDatabase, row: ThreadMessageRow): string | undefined {
   const parts = [
     truncateOptional(messageText(database, row.id), MAX_MESSAGE_SNIPPET_CHARS),
-    ...attachmentExcerptsForMessage(database, row.id).map((attachment) => `[File: ${attachment.path}]\n${truncateText(cleanSnippet(attachment.content), MAX_ATTACHMENT_EXCERPT_CHARS)}`)
+    ...attachmentExcerptsForMessage(database, row.id).map((attachment) => `[File: ${attachment.path}]\n${truncateText(cleanSnippet(attachment.content), MAX_ATTACHMENT_EXCERPT_CHARS)}`),
+    ...attachmentSummariesForMessage(database, row.id)
   ].filter((part): part is string => part !== undefined && part.trim().length > 0);
   if (parts.length === 0) return undefined;
   return `${speakerName(row)}: ${parts.join("\n").replace(/\n/g, "\n  ")}`;
@@ -125,7 +126,8 @@ function renderThreadMessage(database: AgentHubDatabase, row: ThreadMessageRow):
 function messageContent(database: AgentHubDatabase, messageId: string): string {
   return [
     messageText(database, messageId),
-    ...attachmentExcerptsForMessage(database, messageId).map((attachment) => `[File: ${attachment.path}]\n${attachment.content}`)
+    ...attachmentExcerptsForMessage(database, messageId).map((attachment) => `[File: ${attachment.path}]\n${attachment.content}`),
+    ...attachmentSummariesForMessage(database, messageId)
   ].filter((part) => part.trim().length > 0).join("\n");
 }
 
@@ -147,21 +149,38 @@ function attachmentExcerptsForMessage(database: AgentHubDatabase, messageId: str
   for (const row of rows) {
     const payload = parseAttachmentPayload(row.payload);
     if (payload === undefined || !isPreviewableAttachment(payload)) continue;
-    const content = artifactFileContent(database, payload.artifactId, payload.path);
+    const content = payload.artifactId !== undefined && payload.path !== undefined ? artifactFileContent(database, payload.artifactId, payload.path) : undefined;
     if (content === undefined || content.trim().length === 0) continue;
-    excerpts.push({ path: payload.path, content });
+    excerpts.push({ path: payload.path ?? payload.name ?? payload.fileId ?? "attachment", content });
   }
   return excerpts;
 }
 
-function parseAttachmentPayload(value: string): { readonly artifactId: string; readonly path: string; readonly mimeType?: string; readonly previewKind?: string } | undefined {
+function attachmentSummariesForMessage(database: AgentHubDatabase, messageId: string): string[] {
+  const rows = database.sqlite.prepare("SELECT payload FROM message_parts WHERE message_id = ? AND part_type = 'attachment' ORDER BY seq ASC LIMIT 3").all(messageId) as Array<{ readonly payload: string }>;
+  const summaries: string[] = [];
+  for (const row of rows) {
+    const payload = parseAttachmentPayload(row.payload);
+    if (payload?.fileId === undefined || payload.artifactId !== undefined) continue;
+    const name = payload.name ?? payload.path ?? payload.fileId;
+    const mime = payload.mimeType !== undefined && payload.mimeType.length > 0 ? ` (${payload.mimeType})` : "";
+    summaries.push(`[Attachment: ${name}${mime}]`);
+  }
+  return summaries;
+}
+
+function parseAttachmentPayload(value: string): { readonly fileId?: string; readonly artifactId?: string; readonly path?: string; readonly name?: string; readonly mimeType?: string; readonly previewKind?: string } | undefined {
   try {
-    const parsed = JSON.parse(value) as { readonly artifactId?: unknown; readonly path?: unknown; readonly mimeType?: unknown; readonly previewKind?: unknown };
-    if (typeof parsed.artifactId !== "string" || parsed.artifactId.length === 0) return undefined;
-    if (typeof parsed.path !== "string" || parsed.path.length === 0) return undefined;
+    const parsed = JSON.parse(value) as { readonly fileId?: unknown; readonly artifactId?: unknown; readonly path?: unknown; readonly name?: unknown; readonly mimeType?: unknown; readonly previewKind?: unknown };
+    const fileId = typeof parsed.fileId === "string" && parsed.fileId.length > 0 ? parsed.fileId : undefined;
+    const artifactId = typeof parsed.artifactId === "string" && parsed.artifactId.length > 0 ? parsed.artifactId : undefined;
+    const path = typeof parsed.path === "string" && parsed.path.length > 0 ? parsed.path : undefined;
+    if (fileId === undefined && (artifactId === undefined || path === undefined)) return undefined;
     return {
-      artifactId: parsed.artifactId,
-      path: parsed.path,
+      ...(fileId !== undefined ? { fileId } : {}),
+      ...(artifactId !== undefined ? { artifactId } : {}),
+      ...(path !== undefined ? { path } : {}),
+      ...(typeof parsed.name === "string" ? { name: parsed.name } : {}),
       ...(typeof parsed.mimeType === "string" ? { mimeType: parsed.mimeType } : {}),
       ...(typeof parsed.previewKind === "string" ? { previewKind: parsed.previewKind } : {})
     };
