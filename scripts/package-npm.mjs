@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const rootPackage = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
-const outRoot = join(repoRoot, "dist", "npm", "agenthub");
+const outRoot = join(repoRoot, "dist", "npm", "rikey123-agenthub");
 
 rmSync(outRoot, { recursive: true, force: true });
 mkdirSync(join(outRoot, "bin"), { recursive: true });
@@ -56,7 +56,7 @@ runCli().then((code) => {
 chmodSync(binPath, 0o755);
 
 writeFileSync(join(outRoot, "package.json"), `${JSON.stringify({
-  name: "agenthub",
+  name: "@rikey123/agenthub",
   version: rootPackage.version,
   description: "Local-first multi-agent workbench with a web UI and daemon runtime.",
   type: "module",
@@ -96,9 +96,11 @@ AgentHub is a local-first multi-agent workbench with a daemon runtime and bundle
 ## Install
 
 \`\`\`bash
-npm install -g agenthub
+npm install -g @rikey123/agenthub
 agenthub web
 \`\`\`
+
+The npm package is scoped as \`@rikey123/agenthub\`, but the installed command is still \`agenthub\`.
 
 ## Commands
 
